@@ -34,9 +34,6 @@ const BRICOLAGE_GROTESQUE: &[u8] = include_bytes!("../../ui/fonts/BricolageGrote
 const IBM_PLEX_SANS: &[u8] = include_bytes!("../../ui/fonts/IBMPlexSans.ttf");
 const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!("../../ui/fonts/IBMPlexMono-Regular.ttf");
 const IBM_PLEX_MONO_MEDIUM: &[u8] = include_bytes!("../../ui/fonts/IBMPlexMono-Medium.ttf");
-/// ZynZap, the AMM front, served from the same origin so it can call the
-/// API directly (hosted elsewhere it goes through the extension provider).
-const ZYNZAP: &str = include_str!("../../../apps/zynzap/index.html");
 
 fn env(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
@@ -196,9 +193,6 @@ fn handle(app: &Arc<App>, mut s: TcpStream, agent_only: bool, agent_secret: &str
             return respond(&mut s, "200 OK", content_type, "", body);
         }
     }
-    if req.method == "GET" && (req.path == "/zynzap" || req.path == "/zynzap/") {
-        return respond(&mut s, "200 OK", "text/html; charset=utf-8", "", ZYNZAP.as_bytes());
-    }
     if !req.path.starts_with("/api/") {
         return respond(&mut s, "404 Not Found", "text/plain", "", b"not here");
     }
@@ -217,7 +211,7 @@ fn handle(app: &Arc<App>, mut s: TcpStream, agent_only: bool, agent_secret: &str
 
 #[cfg(test)]
 mod agent_boundary_tests {
-    use super::{agent_route_allowed, static_asset, UI, ZYNZAP};
+    use super::{agent_route_allowed, static_asset, UI};
 
     #[test]
     fn the_agent_listener_has_no_wallet_or_mandate_creation_escape_hatch() {
@@ -243,9 +237,7 @@ mod agent_boundary_tests {
     fn the_wallet_ui_loads_fonts_only_from_its_own_origin() {
         assert!(!UI.contains("fonts.googleapis.com"));
         assert!(!UI.contains("fonts.gstatic.com"));
-        assert!(!ZYNZAP.contains("fonts.googleapis.com"));
-        assert!(!ZYNZAP.contains("fonts.gstatic.com"));
-        assert!(ZYNZAP.contains("/fonts/BricolageGrotesque.ttf"));
+        assert!(UI.contains("fonts/BricolageGrotesque.ttf"), "the wallet page must reference its own bundled font");
         for path in [
             "/fonts/BricolageGrotesque.ttf",
             "/fonts/IBMPlexSans.ttf",
