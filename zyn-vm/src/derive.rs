@@ -105,12 +105,36 @@ pub fn program_scope<V: crate::spec::MicrochainVm>() -> alloc::vec::Vec<u8> {
 /// hand — and so the rule that the version is *in* the preimage can be tested
 /// without standing up a whole VM, which is why the original bug survived.
 pub fn program_scope_of(name: &str, version: u16) -> alloc::vec::Vec<u8> {
+    try_program_scope_of(name, version).expect("VM name longer than 32 bytes")
+}
+
+/// The frozen scope for **persistent identities** (§66.10).
+///
+/// Assets, pools, collections and items must not move when `VM_VERSION` or
+/// `STATE_VERSION` advances — an execution change is not a re-identification of
+/// everything the chain holds. So persistent addresses derive under this
+/// constant rather than under the live VM version, and changing it is an
+/// explicit address-schema fork, not a side effect of shipping a new VM.
+///
+/// Its bytes are what `program_scope_of("zynzap", 2)` produced when the genesis
+/// address table was pinned, so freezing it moves nothing.
+pub const ADDRESS_SCOPE_V1: &[u8] = b"zynzap\x00\x02";
+
+/// Like [`program_scope_of`], but returns `None` for a name over 32 bytes.
+///
+/// Truncating was the original behaviour and is worse than refusing: two VMs
+/// whose names share a 32-byte prefix would silently derive each other's
+/// addresses, which is the collision the program scope exists to prevent
+/// (§66.10).
+pub fn try_program_scope_of(name: &str, version: u16) -> Option<alloc::vec::Vec<u8>> {
     let name = name.as_bytes();
-    let n = core::cmp::min(name.len(), 32);
-    let mut program = alloc::vec::Vec::with_capacity(n + 2);
-    program.extend_from_slice(&name[..n]);
+    if name.len() > 32 {
+        return None;
+    }
+    let mut program = alloc::vec::Vec::with_capacity(name.len() + 2);
+    program.extend_from_slice(name);
     program.extend_from_slice(&version.to_be_bytes());
-    program
+    Some(program)
 }
 
 /// A canonically ordered pair of addresses.
@@ -218,6 +242,32 @@ mod tests {
         o
     }
 
+    /// §66.10: a VM name over 32 bytes is refused, not truncated. Truncating
+    /// would let two VMs sharing a 32-byte prefix derive each other's
+    /// addresses — the exact collision the program scope exists to prevent.
+    #[test]
+    fn an_over_long_vm_name_is_refused_rather_than_truncated() {
+        let long = "z".repeat(33);
+        assert!(try_program_scope_of(&long, 2).is_none(), "33 bytes must be refused");
+        let at_limit = "z".repeat(32);
+        assert!(try_program_scope_of(&at_limit, 2).is_some(), "32 bytes is still valid");
+        // Two names that a truncating implementation would have conflated.
+        let a = "z".repeat(32) + "a";
+        let b = "z".repeat(32) + "b";
+        assert!(try_program_scope_of(&a, 2).is_none() && try_program_scope_of(&b, 2).is_none());
+    }
+
+    /// The frozen scope must equal what the genesis table was pinned under, or
+    /// freezing it would silently move every persistent address (§66.10).
+    #[test]
+    fn the_frozen_address_scope_is_the_scope_the_table_was_pinned_under() {
+        assert_eq!(ADDRESS_SCOPE_V1, &program_scope_of("zynzap", 2)[..]);
+        assert_eq!(
+            native_address(ADDRESS_SCOPE_V1, 26460, b"ZYN"),
+            native_address(&program_scope_of("zynzap", 2), 26460, b"ZYN"),
+        );
+    }
+
     /// The genesis address table, pinned.
     ///
     /// These are the addresses ZynZap v2 gives the first assets. They are
@@ -242,6 +292,10 @@ mod tests {
              "0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df"),
             ("BTC.zy", bridged_address(&p, b"bitcoin", b""),
              "0e7faa55f3bdb12e80781da88fb5ac4eb7e24d1935494b9aabd84c4565bbffca"),
+            ("BOLD.zy", bridged_address(&p, b"eip155:1", &[
+                0x64,0x40,0xf1,0x44,0xb7,0xe5,0x0d,0x6a,0x84,0x39,
+                0x33,0x65,0x10,0x31,0x2d,0x2f,0x54,0xbe,0xb0,0x1d,
+            ]), "ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f"),
         ] {
             assert_eq!(hex(&got), want, "{} moved", label);
         }
