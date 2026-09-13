@@ -3460,6 +3460,13 @@ when it applies it.
 
 ## 21. Items, and ownership nobody else can read
 
+**Historical privacy description — superseded by §70 (13 Sep 2026).** The
+current publisher includes replayable intent journals as well as hash-only
+snapshots. Transfers, mint recipients and Reblind values are readable in those
+journals. Signed reads and blinded leaves alone therefore do not establish
+privacy from journal readers. §70 selects operator-trusted public privacy as
+the next target; it is not a claim that the current deployment meets it.
+
 ### What was public, and why
 
 The data-availability payload published every account record in the clear
@@ -3905,7 +3912,15 @@ first choice for stocks, had retired its CSV endpoint by the time this was
 tested; Nasdaq's took its place the same hour, which is the kind of
 churn a fee input can absorb and a price oracle could not.
 
-## 30. ZYN: the launch, and why it is shaped like this
+## 30. ZYN: the original launch design — superseded by §68
+
+> **HISTORICAL — NOT THE CURRENT ZYN TOKENOMICS.** The design in this
+> section was implemented and tested, but its monetary policy was abandoned on
+> 13 Sep 2026. The bridge-fee genesis, contributor allocation, vesting,
+> per-block emissions, halvings, fee-funded burns, LP/bridge emissions and
+> mint-funded POL below must not be used for mainnet. The current decision is
+> §68: fixed supply created once, no ordinary mint or burn, no gas fee, and the
+> Phase-1 ZEC.zy fee split feeding ZYN:ZEC.zy protocol-owned liquidity.
 
 Decided 7 Sep 2026 after the comparison in the conversation (Bitcoin,
 Zcash, Ethereum, Uniswap, Osmosis, Arbitrum, Hyperliquid). Built in
@@ -3913,7 +3928,7 @@ Zcash, Ethereum, Uniswap, Osmosis, Arbitrum, Hyperliquid). Built in
 *pot*: an account nobody holds a key for, so conservation is the ordinary
 invariant.
 
-### The numbers
+### The old numbers (retained only as implementation history)
 
 | | |
 |---|---|
@@ -3927,7 +3942,7 @@ invariant.
 | after graduation | fees split 50% burned (bought on the genesis pool, destroyed) and 50% paired with pot ZYN into the pool; LP pot paid to LPs by the fees their pools earned that epoch; bridge pot rebated to that epoch's fee payers |
 | team | nothing from the mint; the operator earns from the fee rail (§5, §6d) |
 
-### Why this shape
+### Why the old design had this shape
 
 **Fair launch, priced by use.** The operator brings no ZEC. The pot is
 built by the bridge's own fees, and the opening price of ZYN is the pot
@@ -3979,14 +3994,22 @@ genesis pool is exempt from the bond, because the pot is the bond. Before
 graduation nothing is irreversible, so re-setting the numbers also undoes
 any such partial attempt; after graduation the numbers are history.
 
-### Testnet posture
+### Historical testnet posture
 
 `ZYN_LAUNCH=1` sets the launch; `ZYN_LAUNCH_THRESHOLD=0.01` lowers the
-graduation pot so it can be watched. Mainnet uses `Launch::v1` as is.
+graduation pot so it can be watched. The old plan said mainnet would use
+`Launch::v1` as-is; that is no longer a mainnet instruction.
 
 ## 31. A market for every bridged asset, opened by its own fees
 
-§30 gave ZYN a launch. The same machinery opens a market for every other
+> **PARTLY SUPERSEDED BY §68.** The generic bridged-asset market and fee-pot
+> discussion remains part of the design record. Every statement here that gives
+> ZYN a bridge-fee genesis, an unminted/emission reserve, or freshly minted
+> cashback is obsolete. Under §68, any ZYN used for distribution or liquidity
+> must come from the fixed, pre-minted supply.
+
+Historically, §30 gave ZYN a bridge-fee launch; §68 has since replaced that
+ZYN tokenomics. The same machinery opens a market for every other
 bridged asset, and it had to, because §5.7's divergence fee makes whatever
 price a bridged pool opens at permanent — a pool seeded by guesswork stays
 wrong, as testnet pool 1 proved on 7 Sep at a 54.6% fee.
@@ -4000,7 +4023,7 @@ protocol keeps the shares; every bridged market is protocol-owned and
 cannot be withdrawn. The reference goes onto the pool as it is created, so
 it opens defended by the divergence fee rather than acquiring one later.
 
-**The one difference from ZYN's launch, and it is the whole point.** ZYN's
+**Historical comparison to the superseded §30 launch.** Under that old design, ZYN's
 pot *discovers* a price, because ZYN has no market anywhere else. A bridged
 asset's pot only decides the *size*: its price comes from the feed. That is
 a third use of a reference, beyond "sets the fee, never the quote", and it
@@ -4010,7 +4033,8 @@ repeatable theft, and every trade afterwards is priced by the curve. It is
 guarded by freshness, and a market that cannot be priced simply waits:
 opening wrong is permanent, so waiting is always better.
 
-**The cashback is ZYN, minted at opening.** `bootstrap_bps` (50, half a
+**SUPERSEDED — the cashback may not mint ZYN at opening.** The old rule used
+`bootstrap_bps` (50, half a
 percent) of whatever ZYN is still unminted, shared by that asset's pot
 contributors pro rata to fees paid, vesting over the same 207,360 blocks as
 the ZYN genesis — a new pool is thinnest on its first day. Each grant
@@ -4027,7 +4051,7 @@ one and drain the market the pot just built. Bootstrappers also keep
 earning the ordinary bridge rebate meanwhile — they paid a fee like anyone
 else.
 
-**What limits the total is the threshold, not the rate.** An asset only
+**Historical limits for the superseded mint-funded cashback.** An asset only
 opens when its pot is worth `asset_threshold` in ZEC.zy, so a trivial asset
 never opens one and never costs a grant. Set it in ZEC-equivalent value,
 never in units of the asset. It and `bootstrap_bps` stay adjustable after
@@ -4830,6 +4854,15 @@ availability gates settlement.
 | 66.6 | **Item ids derive from `(collection, serial)`**, so every item's identity is computable before the collection mints — what a reveal schedule or an allowlist needs — and two nodes cannot disagree about which item is which. `item_leaf` already binds the collection, so an item proved against one cannot be replayed against another | ✅ |
 | 66.7 | A symbol is unique **per creator**, not globally: two creators may both issue `CAT`, one creator may not issue it twice | ✅ |
 | 66.8 | **None of this is live.** The VM still uses `AssetId = u32` (§4.4). This defines the standard and fixes it; adopting it is a fork, and the window is open only while mainnet has no assets | ⏳ |
+| 66.9 | **The derived 32-byte address is token identity; name, display fields and content are not.** A Cave launch derives its asset as `derive(P, "asset", [creator, canonical_symbol])`, its market from the ordered `(asset, ZEC.zy)` pair, and its LP/vault/lock identities from that pool. State, receipts and APIs carry those addresses and never allocate parallel numeric ids | 🔒 standard; ⏳ A25 adoption |
+| 66.10 | **Persistent identities freeze `ADDRESS_SCOPE_V1 = b"zynzap\x00\x02"`.** Execution `VM_VERSION` and `STATE_VERSION` may advance without moving assets. A new address scope requires an explicit incompatible address-schema fork. A25 must stop using generic VM-version scope for persistent identities, and `program_scope_of` must reject names above 32 bytes rather than truncate them | 🔒 scope; ⏳ A25 |
+| 66.11 | **User symbols are exact Unicode identity bytes:** 1–32 bytes of valid UTF-8, allowing CJK, emoji, mixed case and punctuation. Reject Unicode whitespace, NUL/C0/C1 controls, line separators and bidi override/isolate characters. Consensus does not normalize, case-fold, trim or truncate: visually identical byte sequences may be different assets, so clients show a short address wherever identity matters. The creator seed remains the owner/fee-recipient account, never a session key or relayer | 🔒 encoding; ⏳ A25 |
+| 66.12 | **One creator can never reuse the same exact symbol bytes; different creators can, including official tickers such as `ZYN`.** The second identical `(creator, symbol_bytes)` creation is rejected and the original address is never recycled. Name, content, fee, supply and creation time do not enter identity | 🔒 collision rule; ⏳ VM |
+| 66.13 | **Origin seeds are registered bytes, never displayed addresses.** Freeze `zcash`, `zcash-test`, `solana`, `solana-devnet`, `bitcoin`, `bitcoin-test`, `bitcoin-signet`, plus EVM `eip155:<canonical decimal chain-id>`. Native origin assets use empty bytes; Solana mints use decoded 32 bytes and EVM contracts raw 20 bytes. An unregistered family cannot bridge an asset | 🔒 bridge identity; ⏳ registry enforcement |
+| 66.14 | **A pool address names the pool record; `vault(pool)` is its real keyless reserve account.** Pool reserves move out of inline state balances during A25. Cave additionally uses separate derived accounts for curve inventory, graduation inventory, refundable reserve, pair seed, graduation fees, creator escrow, graduation LP lock and the global ZEC.zy future-ZYN-POL pot; balances with different movement rules never share an account | 🔒 custody; ⏳ A25/launch VM |
+| 66.15 | **Public addresses are typed, network-aware lowercase Bech32m.** Mainnet HRPs are `zyna/zynp/zync/zyni/zynv`; testnet prefixes them with `t`. Consensus retains raw 32 bytes. Lowercase hex remains a CLI/debug representation, not the primary wallet or URL format | 🔒 presentation; ⏳ clients |
+| 66.16 | **Official status is pinned by address, never claimed through a ticker or metadata.** Native, bridged and user assets already have separate namespaces, so a user-launched `ZYN` cannot occupy native ZYN's address. Cave and wallets badge only exact addresses from the protocol's shipped official-address set and show the short address beside duplicate or confusable labels. No symbol is reserved from permissionless launches | 🔒 authenticity; ⏳ clients/registry |
+| 66.17 | **The 333 Nap Mole and 4,444 Cave collections share the protocol treasury as creator, named `Treasury 26460`.** Its spendable threshold `AccountId` is the creator seed and receives their creator-fee share. The label and role are fixed; provision and pin the real 32-byte account before recomputing either official collection's addresses. The earlier `0xca7e…ca7e` vectors are placeholders and must not be minted | 🔒 identity; ⏳ treasury AccountId/vectors |
 
 ## 67. Where the bytes live, and how a wallet knows they are the right ones (12 Sep 2026)
 
@@ -4844,3 +4877,140 @@ availability gates settlement.
 | 67.7 | **Handing someone the file with the item is therefore the private path**, and needs no protocol support: bytes arrive once, by hand, are checked against the commitment, and are never requested again. Media does **not** travel inside an intent — that would put it in DA, on every mirror and every replica, forever | ✅ |
 | 67.8 | **A watermark is a courtesy, not a control.** A manifest may commit a public `Preview` beside the `Full` media, but the full bytes cannot be kept secret: the owner has them and may republish, and the first owner always can. Ownership is the chain record, never possession of bytes — the same position the content hash already takes, since it is a commitment and not a secret | ✅ |
 | 67.9 | Three implementations of the encoding now exist — Rust (normative), the collection builder in Python, the wallet in JavaScript. All three are pinned to the same vector: Nap Mole #001 is `14ecc291…`. A cross-check test fails if any one drifts | ✅ |
+
+## 68. BOLD.zy and the fixed-supply phase transition (13 Sep 2026)
+
+This supersedes §30's continuing mint-and-burn monetary policy. ZEC remains the
+launch reference in Phase 1, but it is not intended to remain ZYN's only
+numeraire. The transition away from it is stated before the first market can
+trade, rather than invented after holders have priced a permanent ZEC
+dependency into the token.
+
+**Precedence rule.** Any earlier passage in this file that describes a ZYN
+bridge-fee genesis, emissions, halvings, vesting, fee burn, mint-funded reward,
+unminted reserve, gas utility or freshly minted cashback is historical and
+superseded by this section. Earlier descriptions of bridge minting and burning
+for `.zy` assets are unaffected: those are one-for-one custody accounting, not
+ZYN monetary policy.
+
+| # | Decision | Status |
+|---|---|---|
+| 68.1 | **BOLD.zy is Zyn's first bridged USD stable asset.** Its origin is Ethereum mainnet (`eip155:1`) and the canonical Liquity V2 BOLD token `0x6440f144b7e50D6a8439336510312d2F54beB01D`. Under §66.13 its raw address is `ddf2b7ec…627f250f`. Zyn bridges that ERC-20 directly through its EVM vault; it does not accept a Solana or third-party wrapped copy as the same asset | 🔒 design/address; ⏳ bridge/vector test |
+| 68.2 | **BOLD.zy is the stable reference for Phase 2, not an assertion that BOLD is always worth one dollar.** The feed follows the traded BOLD/USD value and stops being usable when stale; a BOLD depeg must appear in Zyn's reference rather than being hidden behind a hard-coded `$1` | 🔒 |
+| 68.3 | BOLD was chosen for the failure mode that rules out USDC: Liquity's core is immutable, the deployed token has renounced ownership, and its transfer guard has no mutable holder blacklist. The remaining risks are Ethereum, collateral, oracle, liquidation and market-liquidity risks — not an issuer freezing Zyn's vault. Canonical references: `https://docs.liquity.org/v2-faq/bold-and-earn` and `https://github.com/liquity/bold/blob/main/contracts/src/BoldToken.sol` | 🔒 |
+| 68.4 | **ZYN has a fixed total supply, but its issuance and allocation are a later decision and do not block Cave.** Settled in §71: 21,000,000 minted once, 18,900,000 into keyless incentive pots. When issued, it is created once into auditable distribution and protocol-liquidity pots; ordinary operation neither mints nor burns ZYN. Until then, Cave routes the ZEC.zy share intended for future ZYN liquidity into a derived keyless pot without minting, promising or distributing ZYN. §30's per-Zcash-block mint, halvings and fee burn are withdrawn | 🔒 boundary; ⏳ later ZYN design |
+| 68.5 | **No gas token and no per-intent gas fee.** Cave launch, transfer, swap, curve sell, graduation and exit do not require ZYN or wait for ZYN issuance. If ZYN is issued later, its demand must come from its own market and protocol-owned liquidity, not from making users acquire it before they can use Zyn | 🔒 |
+| 68.6 | **Phase 1 accrues ZEC.zy for future ZYN-owned liquidity without depending on ZYN issuance.** Standard pools split every swap fee actually collected in ZEC.zy equally: half remains with the source pool and half enters the derived future-ZYN-POL pot. A graduated Cave pool instead uses §69's disclosed `45% pool / 45% future ZYN POL / 10% creator` split. Matching or deploying that ZEC.zy waits for the separate ZYN issuance decision; the launchpad may not spend it elsewhere meanwhile. These are splits of the existing fee, not additional trader charges, and fees collected in other assets are not silently converted | 🔒 accrual; ⏳ VM, later deployment |
+| 68.7 | **The Phase-2 price signal is `1 ZYN = 0.0002 ZEC`.** Reaching it means the ZEC-supported bootstrap has done its job and the system may move to the BOLD-referenced, market-priced phase | 🔒 threshold |
+| 68.8 | A single pool print cannot activate Phase 2. The threshold must be sustained under a manipulation-resistant observation rule with a minimum liquidity/volume floor. The exact averaging window and floor remain to be fixed before Phase 1 launches; until then `0.0002` is a graduation signal, not an automatic state transition | ⏳ parameter |
+| 68.9 | **Phase 2 is an announced transition to market pricing, not a redemption event.** ZYN gains a protocol-owned ZYN:BOLD.zy market, the special Phase-1 ZEC support rule winds down under precommitted rules, and neither ZEC nor BOLD is promised as redeemable backing for ZYN. Exact liquidity migration and wind-down steps remain to be specified | 🔒 boundary; ⏳ mechanism |
+
+## 69. Cave is the Phase-1 launchpad; curves graduate into ZynZap (13 Sep 2026)
+
+Phase 1 needs repeated ZEC.zy-denominated use more than it needs a catalogue of
+bridges. This changes the ordering in §6c and §14b without discarding their
+engineering: Solana and EVM bridge code stays tested, but neither production
+bridge is on the Phase-1 critical path. The ZEC bridge, Cave and ZynZap form the
+first complete economy.
+
+| # | Decision | Status |
+|---|---|---|
+| 69.1 | **Phase 1 ships one external value boundary: ZEC ↔ ZEC.zy.** Cave NFT secondary trading, Cave native-token launches and their graduated ZynZap markets are the activity loop. Production SOL.zy is deferred until user demand justifies it. The EVM bridge and BOLD.zy are deferred from Phase 1, but remain prerequisites that must be ready before the Phase-2 transition in §68 | 🔒 priority; ⏳ delivery |
+| 69.2 | **Cave owns the product; ZynZap's VM owns the conserved state.** Launch creation, discovery, policy presentation and the curve UI are Cave. Native token balances, curve inventory, ZEC.zy reserve, fee pots and the final AMM pool live in the same `swapvm` state from the token's first transaction. “Migration into ZynZap” is therefore a product-state change, not a cross-VM asset migration | 🔒 architecture |
+| 69.3 | This supersedes §6c's assumption that an on-Zyn launchpad must first be a separate application VM and therefore wait for cross-VM atomic bundles. A future permissionless launchpad VM may still use that boundary; Cave v1 does not put user balances on the far side of it | 🔒 |
+| 69.4 | **The lifecycle is `Draft → Curve → AMM`; launches do not expire.** Draft is off-chain and moves no value. Curve and AMM are VM state. An inactive launch may be hidden from the default gallery, but its curve continues to accept ordinary buys and sells. Graduation is attempted on scratch state and commits the pool and `AMM` phase together; there is no externally visible half-graduated phase and no trade is accepted against two pricing mechanisms at once | 🔒 design; ⏳ VM |
+| 69.5 | **Every Cave v1 fungible launch uses one linear protocol curve.** With fixed supply `S = 1,000,000,000`, starting price is `p0 = 0.009 / S = 0.000000000009 ZEC.zy` per token. Graduation price is `Pg = 100 / S = 0.0000001 ZEC.zy` per token, meaning fully diluted market cap `p(q) × S` reaches `100 ZEC.zy`. The curve sells `Qg = 660,000,000` tokens, so `s = (Pg − p0) / Qg ≈ 1.5150151515151515×10⁻¹⁶ ZEC.zy per token²` and `R(Qg) = 33.00297 ZEC.zy` before fees. There is no age or expiry gate. Exact rational/fixed-point constants and boundary vectors, not these rounded display decimals, are consensus | 🔒 template; ⏳ vectors/VM |
+| 69.6 | **Every Cave v1 token has exactly 1,000,000,000 display units, eight decimal places and no later mint authority.** Of the full `100,000,000,000,000,000` atomic units, `660,000,000` display tokens enter the keyless curve inventory and `340,000,000` enter the keyless graduation inventory. There is no free creator allocation: a developer can own tokens only through the paid dev buy in §69.26 or an ordinary trade. Graduation uses only the token amount required for exact price continuity; any unused graduation inventory becomes permanently unreachable. Symbols are unrestricted labels under §66.11–12; official status comes only from §66.16's address set | 🔒 allocation/identity; ⏳ VM |
+| 69.7 | **Purchase principal is not revenue.** ZEC.zy paid along the curve's integral goes into a keyless refundable curve reserve and is the only value quoted back to pre-graduation sellers. It is accounted separately from every fee pot; Cave, the creator and the operator cannot withdraw it | 🔒 |
+| 69.8 | **Every curve trade charges its fee on the ZEC.zy leg.** A buy charges ZEC.zy input; a sell charges ZEC.zy output. Of fee `F`, `50%` goes to the keyless future-ZYN-POL ZEC.zy pot, `40%` goes to that launch's graduation-liquidity pot, and `10%` accrues to the creator. The creator share is escrowed until graduation so an abandoned launch cannot be farmed for immediate creator revenue | 🔒 split; ⏳ VM |
+| 69.9 | **Cave NFT secondary fees use the same `50/40/10` vocabulary but a different middle destination:** `50%` to the keyless future-ZYN-POL ZEC.zy pot, `40%` to the traded collection's redemption floor, `10%` to its creator. Both the 333 Nap Mole and 4,444 Cave collections use `Treasury 26460` as creator and fee recipient (§66.17). This supersedes §39.7's implemented `50% floor / 50% creator` split | 🔒 design; ⏳ VM |
+| 69.10 | **Graduation occurs when the curve marginal price reaches `0.0000001 ZEC.zy`, so the fixed one-billion supply has a `100 ZEC.zy` fully diluted market cap.** Under §69.5 this occurs at `q = 660,000,000`; no minimum age, wallet count, NFT ownership or separate volume test applies. Gross trading fees do not advance `q` or the price. An optional dev buy can help reach the same public threshold only by paying the same curve price and fee | 🔒 trigger |
+| 69.11 | **Graduation is one atomic VM transition.** It stops the curve, combines its refundable reserve, 40% graduation pot and `0.009 ZEC.zy` pair seed into candidate ZEC, applies §69.28's cap and overflow rule, contributes the exact required graduation inventory, creates the canonical token:ZEC.zy AMM at `Pg`, and sends every LP share to a keyless lock. If price continuity, inventory sufficiency or any debit fails, nothing changes and curve trading resumes | 🔒 invariant; ⏳ VM |
+| 69.12 | At graduation, pool price continuity is exact: for pool ZEC `Zp` and `Pg = 0.0000001 ZEC.zy` per token, token deposit is `T = Zp / Pg` under the committed atomic rounding rule. `T` may not exceed the `340,000,000`-token graduation inventory. Any token remainder stays permanently keyless; it is not a creator, treasury or later mint reserve | 🔒 math; ⏳ vectors |
+| 69.13 | **There is no failed-launch or refund-only phase.** A launch remains on its reversible curve until it reaches graduation, however long that takes. Sellers always receive the curve principal quoted by `R(q) − R(q−Δ)` less the disclosed ZEC.zy-leg fee. The pair seed, graduation pot and creator escrow remain keyless and unavailable until graduation; inactivity never makes them withdrawable by Cave, treasury or creator | 🔒 persistence |
+| 69.14 | **Graduated ZynZap trading continues the ZEC-denominated fee rail and the creator share.** On ZEC.zy → token, the fee comes from ZEC input; on token → ZEC.zy, it comes from gross ZEC output. Of fee `F`, `45%` remains in the source pool, `45%` enters the keyless future-ZYN-POL ZEC.zy pot and `10%` goes to the token creator. Fees are not accumulated in arbitrary launched tokens and are not silently converted | 🔒 split; ⏳ AMM change |
+| 69.15 | More launches are not themselves success. Phase-1 health is repeat traders, net ZEC.zy reserve, graduated pools, retained liquidity, real ZEC.zy volume and fees routed under the committed split. Per-trade ZYN rewards are rejected: they would turn the fixed distribution reserve into finite fee mining and make wash activity look like adoption | 🔒 metrics |
+| 69.16 | **Token creation is permissionless from the first public alpha: every valid Zyn wallet may launch.** Each creator account may create at most two tokens in any rolling 60 chain epochs—the deterministic consensus form of “two per hour” under the 60-second seal target. The `0.01 ZEC.zy` fee is the Sybil cost. There is no global launch quota, active-curve cap, global reserve cap or single-buy cap; buys remain balance-limited and sells/exits are never throttled. Nap Mole ownership is not a whitelist, graduation condition, fee discount or priority rule | 🔒 access/rate boundary; ⏳ VM |
+| 69.17 | **Reuse ZynZap's pool engine, not its existing `CreateToken` launch policy.** Constant-product math, canonical pair identity, LP-share calculation, quote limits, epoch commitment and replica replay are the implementation base. The current `CreateToken` path is not Cave: it opens the AMM immediately, accepts creator-selected liquidity/fee inputs and returns removable LP shares. It must not be exposed as a shortcut around the curve, fixed template or permanent lock | 🔒 reuse boundary; ⏳ VM |
+| 69.18 | **A pre-graduation Cave asset may have no ZEC.zy pool only while a live launch record proves phase `Curve`.** Graduation atomically sets `genesis_pool` and phase `AMM`; every later pool and route uses that canonical id. This requires a committed state-invariant and codec change, not a Cave-only database flag. Complete the 32-byte identifier migration in A25 before adding launch records so the launchpad does not create a second avoidable state fork | 🔒 invariant; ⏳ migration |
+| 69.19 | **Graduated pools need an explicit per-pool ZEC-leg fee policy.** The existing global input-asset protocol cut is insufficient. `ZecLegSplit` charges the token's immutable fee once: on a buy, price against ZEC input after `F`; on a sell, price gross ZEC output and pay the trader `gross − F`. In both directions `45%` of `F` remains in the pool, `45%` enters future ZYN POL and `10%` goes to the creator. Compute creator and pool shares down, then give the atomic remainder to the future-POL pot so all units reconcile. Standard pools retain their current input-fee policy | 🔒 accounting; ⏳ AMM change |
+| 69.20 | **Graduated liquidity is permanent protocol liquidity.** Every LP share produced at graduation goes to a derived keyless lock and is ineligible for `RemoveLiquidity`; none is credited to the creator, operator or a general treasury key. The graduated native pool carries no external reference price or divergence fee: its ZEC.zy price is discovered on Zyn | 🔒 custody; ⏳ VM |
+| 69.21 | **Launch and pool prices use one public orientation: ZEC.zy per token.** Curve terminal price `P`, launch quotes, graduation receipts, ZynZap reads and chart candles name that orientation explicitly. Canonical reserve ordering remains internal; a generic `reserve1 / reserve0` or current spot helper must not silently invert a graduated market | 🔒 API invariant; ⏳ API |
+| 69.22 | **The curve and the AMM do not share a pricing engine.** Cave v1 curve trades are exact-in/min-out, have no partial fills, and execute sequentially in committed intent order against the versioned integral; their receipts become final with the containing epoch. Quotes are provisional until execution. After atomic graduation, the canonical pool uses ZynZap's existing swap and batch-clearing path. The UI must disclose the change in execution model at graduation | 🔒 clearing rule; ⏳ VM/UI |
+| 69.23 | **Charts are derived, not consensus state.** Accepted curve receipts and graduated-pool swap receipts are the source events for an OHLCV index keyed by launch and canonical pool id. Cave may cache and serve that index, but reserve, phase, fee-pot and locked-LP claims must still come from replica-verifiable state; a missing chart may never block settlement | 🔒 boundary; ⏳ indexer |
+| 69.24 | **Launchpad consensus does not inspect NFT ownership or maintain a public holder map.** A valid wallet, sufficient `0.01 ZEC.zy` launch fee and valid committed launch fields are the authorization for creation. Nap Mole's credit multiplier is evaluated by the separate credit system and cannot gate or alter launch, buy, curve sell or graduation | 🔒 privacy/access boundary |
+| 69.25 | **Creation costs exactly `0.01 ZEC.zy` (`1,000,000` zatoshi-equivalent units), separate from any dev buy.** `0.001 ZEC.zy` (`100,000` units) credits the protocol treasury immediately; `0.009 ZEC.zy` (`900,000` units) enters a keyless pair-seed pot for that launch and joins the ZEC side only at graduation. It is opening liquidity, not refundable curve principal and not a guaranteed price floor: AMM trading can move the price below its opening level. With no expiry, the seed remains committed to that launch until graduation | 🔒 fee and routing; ⏳ VM |
+| 69.26 | **The developer may make one optional atomic dev buy inside `CreateCurveToken`.** It executes after the launch fee debit, against the same initial curve, rounding and chosen trading fee as any other buyer, with explicit ZEC.zy input and minimum token output. It receives no discount or free allocation, is visible in the creation receipt, and may acquire at most `5%` of total supply (`50,000,000` tokens). Later creator purchases are ordinary trades | 🔒 fair launch rule; ⏳ VM/API |
+| 69.27 | **Curve-fee rounding is deterministic.** For total ZEC.zy fee `F`, creator escrow is `floor(F × 10 / 100)`, the graduation pot is `floor(F × 40 / 100)`, and the future-ZYN-POL pot receives the remainder. Thus the economic split is `50/40/10`, while every indivisible unit is conserved and any rounding dust favors future protocol-owned liquidity, not the creator | 🔒 rounding; ⏳ vectors |
+| 69.28 | **Graduation ZEC.zy is capped by the fixed token-side inventory, and overflow goes to future ZYN POL.** Candidate `Zc = refundable reserve + graduation pot + pair seed`; capacity `Zmax = Pg × 340,000,000 = 34 ZEC.zy`. Deposit `Zp = min(Zc, Zmax)` and `T = Zp/Pg` into the token pair, then route `Zc − Zp` to the derived keyless future-ZYN-POL pot in the same atomic graduation. This pot can accumulate before ZYN exists and grants no present ZYN claim. Unused token-side graduation inventory becomes unreachable | 🔒 overflow; ⏳ VM/vectors |
+| 69.29 | **The unresolved “metadata” item was token addressing, not a mutable registry.** Cave launches use §66's derived addresses and accept §66.11 Unicode symbols. Display name is required valid UTF-8 of 1–96 bytes; it may contain ordinary internal whitespace but no leading/trailing whitespace, NUL/C0/C1 controls, line separators or bidi override/isolate characters. `content` is the required 32-byte manifest hash. Symbol and display-name duplication—including official names—is allowed; only an exact address in §66.16's pinned set receives the official badge. Gallery reports may warn or de-index but never alter settlement, supply, curve trading, graduation or exits | 🔒 identity/presentation; ⏳ VM/UI |
+
+## 70. NFT ownership privacy from the public, while trusting operators (13 Sep 2026)
+
+**Chosen direction, not implemented or deployment-verified.** This supersedes
+earlier privacy assurances in §21 and any implication in §§47, 49 and 65 that
+signed reads alone hide ownership from all public data readers. It does not
+authorize restricting a live mirror, deleting history or weakening verification.
+
+| # | Decision | Status |
+|---|---|---|
+| 70.1 | **Near-term target: protect NFT ownership from public readers while trusting authorized operators and replay verifiers.** Those parties still see execution; transaction counterparties and event issuers learn the destinations they serve. No promise of operator privacy, anonymity, hidden activity timing or protection from an authorized reader leaking plaintext | 🔒 scope |
+| 70.2 | **Audit every disclosure, not just account RPCs.** The publisher includes raw epoch journals; Transfer names sender/recipient/asset, MintCollectionItem names its recipient, and Reblind carries the blind. Base states, mirrors, caches, proofs, offers, claims, diagnostics and media traffic are in scope. Check deployed exposure separately from source capability and use synthetic examples in public reports | 🔒 work; [#21](https://github.com/zyn-io/nap-wallet/issues/21) |
+| 70.3 | **Separate approved public commitments from confidential replay/state artifacts.** Full shared journals and base states need an authenticated, confidential distribution boundary for authorized readers; filtering only NFT opcodes is insufficient. Exact artifact format, encryption/access controls, key lifecycle and metadata disclosure budget remain design work | 🔒 direction; ❓ mechanism; [#22](https://github.com/zyn-io/nap-wallet/issues/22) |
+| 70.4 | **State the verification tradeoff.** Authorized independent verifiers must still replay and reject invalid state, preserving quorum and backing checks. Restricting their inputs reduces unrestricted public replay; hash-only roots and operator certificates are not equivalent to permissionless execution verification. Do not claim otherwise or silently bypass checks | 🔒 invariant; [#22](https://github.com/zyn-io/nap-wallet/issues/22) |
+| 70.5 | **Holder recovery is a release gate.** Specify authenticated delivery and durable holder export of anchored records and inclusion/exit witnesses; rehearse cold start, lost browser state, operator outage and forced exit. Document any dependency on previously retained witnesses. Do not switch publication modes until the documented recovery path is proven | 🔒 gate; [#22](https://github.com/zyn-io/nap-wallet/issues/22), [#25](https://github.com/zyn-io/nap-wallet/issues/25) |
+| 70.6 | **Fresh receiving accounts and blinds are supporting measures, not the privacy boundary.** Use recoverable versioned derivation, prove account discovery after restore, preserve legacy authority, and confirm Reblind execution before displaying a blinded status. A blind present in a public journal is not secret; initialize/rotate only under the reviewed confidential path | 🔒 design; [#23](https://github.com/zyn-io/nap-wallet/issues/23) |
+| 70.7 | **Do not reconstruct the holder map in another product surface.** Review public offers and listing opt-in, claim allocation records, explorer exports, support logs and per-item media fetches. Catalogs and deliberate public listings remain public with explicit disclosure. Reuse existing media/claim work, including #17 and #13, rather than creating a competing implementation | 🔒 design; [#24](https://github.com/zyn-io/nap-wallet/issues/24) |
+| 70.8 | **Privacy begins at a documented future chain/epoch cutoff, not retroactively.** Previous journal copies and external-chain links remain observable. Rehearse verifier-first rollout, credentials and rollback on disposable testnet; a rollback to plaintext publication must stop/warn privacy-sensitive writes rather than silently leak them. No event privacy promise until the integrated gate passes | 🔒 gate; [#25](https://github.com/zyn-io/nap-wallet/issues/25) |
+| 70.9 | **Aliases are deferred. Operator-private NFT notes, nullifiers and zero-knowledge transfers are a separate later scope.** They are not prerequisites for this selected operator-trusted tier, and no bespoke proof system is authorized by this decision | 🔒 scope |
+
+Implementation order and acceptance evidence are in BACKLOG P0–P4. A standalone
+public planning copy is `docs/NFT-PUBLIC-PRIVACY.md`; each linked GitHub issue is
+self-contained. Current production visibility has not been audited by this
+documentation change.
+
+## 71. ZYN supply: minted once, released by activity, never burned (13 Sep 2026)
+
+Completes §68.4, which fixed ZYN's supply as a constant but left issuance and
+allocation open. It keeps §30's two numbers — 21,000,000 and the 18,900,000
+remainder — and discards the mechanism that produced them: those 18.9M were a
+halving *emission* series, created block by block. Here they exist from genesis
+and are *released*, never minted.
+
+The distinction matters because an emission schedule makes total supply a
+function of time, so no one can state it without also stating a date.
+
+| # | Decision | Status |
+|---|---|---|
+| 71.1 | **The full 21,000,000 ZYN is minted once, at genesis, and no mint authority survives it.** Eighteen decimals. There is no later issuance path, no inflation parameter and no key that can create a unit | 🔒 |
+| 71.2 | **18,900,000 — ninety percent — goes into protocol-controlled keyless incentive pots at genesis.** Keyless in the §69.20 sense: derived addresses no key can spend from, releasing only under committed rules. Nobody can withdraw the reserve, including us | 🔒 |
+| 71.3 | **Three supply numbers are tracked and reported separately, and all three are derived from chain state rather than asserted.** `total` is always 21,000,000 and never moves. `unlocked` is what has left the keyless pots. `circulating` is `unlocked` minus ZYN held by protocol-controlled addresses — POL, treasury and buyback reserve. An explorer must be able to recompute all three without trusting us | 🔒 definitions; ⏳ read API |
+| 71.4 | **ZYN is never burned.** Burning makes total supply a moving target, invites a deflation story the mechanism does not support, and destroys the only thing the three numbers are good for. Supply is conserved; what changes is which pot holds it | 🔒 |
+| 71.5 | **Fee-funded buybacks return ZYN to the incentive or POL reserve for reuse.** A buyback is a transfer from the market into a keyless pot, not a destruction event. This keeps `total` constant while reducing `circulating`, which is the honest description of what a buyback does | 🔒 |
+| 71.6 | **Rewards unlock only when the product activity they pay for exists.** An unreleased pot is not a promise of future emission, and time alone never unlocks anything. This is what replaces per-block emission: the reserve is large, but it is inert until something real draws on it | 🔒 principle; ⏳ rules |
+| 71.7 | **The unlock rule may not be per-trade volume** (§69.15). Paying ZYN per trade turns a fixed reserve into finite fee mining and makes wash activity indistinguishable from adoption — the same reason per-trade ZYN rewards were already rejected for Cave. Each unlock rule must name an activity a participant cannot manufacture against themselves, and must be committed before its pot can release | 🔒 constraint; ⏳ rules |
+| 71.8 | **Phase-1 ZEC support is transitional by design.** ZEC-denominated fees accrue protocol-owned liquidity while ZYN has no market of its own; §68.9's Phase-2 transition winds that support down under precommitted rules as the ZYN:BOLD.zy market takes over price discovery. The hard ZEC reference is scaffolding for the bootstrap, not a permanent dependency, and separating from it is the goal rather than a failure mode | 🔒 |
+
+### Open, and load-bearing
+
+**The 2,100,000 remainder has no stated destination.** Ninety percent is
+accounted for; the other ten is not. §30's answer — half into the opening pool,
+half to contributors vesting over ~6 months — died with §68's supersede of
+vesting and contributor allocation. Until it is decided, `circulating` at launch
+is undefined, and so is the opening price of any ZYN market.
+
+**Who may release from a pot, and on what evidence.** §71.6 says activity
+unlocks rewards; it does not yet say who evaluates that. If a human decides,
+the pots are a treasury with extra steps and "keyless" is decoration. The rule
+has to be a committed predicate over chain state, evaluated by the VM, or the
+reserve is discretionary.
+
+**Buyback release authority** (§71.5). ZYN bought back and returned to a pot can
+be released again. A buyback whose proceeds can be re-released at someone's
+discretion is a treasury operation, not a buyback, and should not be described
+as one until the release rule is committed.
+
+**A ninety-percent reserve makes fully diluted value ten times circulating at
+launch**, which is the shape critics reach for first. §71.3's three numbers are
+the mitigation and only work if they are published from day one, together, with
+the reserve's release rules — not `circulating` alone.
