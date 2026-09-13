@@ -4902,7 +4902,7 @@ ZYN monetary policy.
 | 68.5 | **No gas token and no per-intent gas fee.** Cave launch, transfer, swap, curve sell, graduation and exit do not require ZYN or wait for ZYN issuance. If ZYN is issued later, its demand must come from its own market and protocol-owned liquidity, not from making users acquire it before they can use Zyn | 🔒 |
 | 68.6 | **Phase 1 accrues ZEC.zy for future ZYN-owned liquidity without depending on ZYN issuance.** Standard pools split every swap fee actually collected in ZEC.zy equally: half remains with the source pool and half enters the derived future-ZYN-POL pot. A graduated Cave pool instead uses §69's disclosed `45% pool / 45% future ZYN POL / 10% creator` split. Matching or deploying that ZEC.zy waits for the separate ZYN issuance decision; the launchpad may not spend it elsewhere meanwhile. These are splits of the existing fee, not additional trader charges, and fees collected in other assets are not silently converted | 🔒 accrual; ⏳ VM, later deployment |
 | 68.7 | **The Phase-2 price signal is `1 ZYN = 0.0002 ZEC`.** Reaching it means the ZEC-supported bootstrap has done its job and the system may move to the BOLD-referenced, market-priced phase | 🔒 threshold |
-| 68.8 | A single pool print cannot activate Phase 2. The threshold must be sustained under a manipulation-resistant observation rule with a minimum liquidity/volume floor. The exact averaging window and floor remain to be fixed before Phase 1 launches; until then `0.0002` is a graduation signal, not an automatic state transition | ⏳ parameter |
+| 68.8 | ~~A single pool print cannot activate Phase 2.~~ **Retired by §71.11** — with nothing distributed before Phase 2 there is no price to observe, so the trigger is the POL pot reaching 420 ZEC.zy, and an accrual counter needs no observation rule, averaging window or liquidity floor. Original text: a single pool print cannot activate Phase 2. The threshold must be sustained under a manipulation-resistant observation rule with a minimum liquidity/volume floor. The exact averaging window and floor remain to be fixed before Phase 1 launches; until then `0.0002` is a graduation signal, not an automatic state transition | ⏳ parameter |
 | 68.9 | **Phase 2 is an announced transition to market pricing, not a redemption event.** ZYN gains a protocol-owned ZYN:BOLD.zy market, the special Phase-1 ZEC support rule winds down under precommitted rules, and neither ZEC nor BOLD is promised as redeemable backing for ZYN. Exact liquidity migration and wind-down steps remain to be specified | 🔒 boundary; ⏳ mechanism |
 
 ## 69. Cave is the Phase-1 launchpad; curves graduate into ZynZap (13 Sep 2026)
@@ -4992,6 +4992,9 @@ function of time, so no one can state it without also stating a date.
 | 71.8 | **Phase-1 ZEC support is transitional by design.** ZEC-denominated fees accrue protocol-owned liquidity while ZYN has no market of its own; §68.9's Phase-2 transition winds that support down under precommitted rules as the ZYN:BOLD.zy market takes over price discovery. The hard ZEC reference is scaffolding for the bootstrap, not a permanent dependency, and separating from it is the goal rather than a failure mode | 🔒 |
 
 | 71.9 | **The 2,100,000 remainder is the ZYN side of the opening ZYN:ZEC.zy market.** It waits in its own pot until enough ZEC.zy has accrued to pair against it, and the pairing ratio sets the opening price. Nothing is distributed to contributors — §68 superseded that | 🔒 destination; ⏳ price |
+| 71.10 | **Nothing is distributed before Phase 2 opens.** At open the 2.1M sits *in* the pool, so `circulating` is zero and every holder bought at market. There is no free float to sell into the opening price — the distribution risk that usually accompanies a 90% reserve does not exist at launch. It begins at the first reserve release, not before | 🔒 |
+| 71.11 | **The Phase-2 trigger is accrual, not a price print.** With no market before Phase 2 there is no price to observe, so §68.7 cannot be read as watching for `0.0002`: the condition is the future-ZYN-POL pot reaching **420 ZEC.zy**, which is what lets the pot open at `0.0002` against 2.1M ZYN. Opening the market *is* Phase 2 beginning, not a consequence of it. This retires §68.8's observation rule, averaging window and liquidity floor: an accrual counter cannot be wash-traded, so none of that machinery is needed | 🔒 trigger; supersedes §68.8 |
+| 71.12 | **ZYN cashback is cancelled in every form, not only the minted one.** §68's precedence rule supersedes "freshly minted cashback", which leaves a reserve-funded cashback readable as still available. It is not. Cashback died with mint-and-burn and does not return under §71's reserve | 🔒 |
 
 ### Open, and load-bearing
 
@@ -5003,12 +5006,19 @@ open at 0.0002, or **4,200** at 0.002 — and opening at 0.002 would launch ZYN 
 times past the wind-down point. Two numbers are needed, with the threshold above
 the opening price.
 
-**Opening depth is thin enough to matter more than the price.** 2.1M ZYN against
-420 ZEC.zy is a constant-product pool where selling 100,000 ZYN (~$8,000) moves
-the price 8.9%, and 500,000 moves it 34.8%. Behind that float sit 18,900,000
-ZYN, nine times the circulating supply. The reserve's release rate must be slow
-relative to how fast the pool deepens, or each unlock walks the price down its
-own curve — a constraint on §71.6's rules as binding as the activity test.
+**Opening depth binds from the first reserve release, not at launch.** Under
+§71.10 nothing circulates at open, so there is no free float to sell. But the
+pool is thin — 2.1M ZYN against 420 ZEC.zy moves 8.9% on a 100,000-ZYN sell and
+34.8% on 500,000 — and 18,900,000 ZYN sit behind it. Recipients of a reserve
+release *did* get their ZYN free, so the release rate must stay slow relative to
+how fast the pool deepens, or each unlock walks the price down its own curve. A
+constraint on §71.6's rules as binding as the activity test.
+
+**ZYN has no named utility yet.** Not gas (§68.5), not redeemable (§68.9), not
+per-trade rewards (§69.15), not cashback (§71.12). Every *bad* utility has been
+removed deliberately and none has replaced them. This blocks §71.6 concretely:
+the release rules cannot say what activity unlocks the reserve until it is
+decided what the reserve pays for.
 
 **Reserve per token is a tenth of the quoted price.** 420 ZEC.zy behind
 21,000,000 ZYN is `0.00002` ZEC per ZYN against a `0.0002` price. The pairing
