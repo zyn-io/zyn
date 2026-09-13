@@ -4991,13 +4991,29 @@ function of time, so no one can state it without also stating a date.
 | 71.7 | **The unlock rule may not be per-trade volume** (§69.15). Paying ZYN per trade turns a fixed reserve into finite fee mining and makes wash activity indistinguishable from adoption — the same reason per-trade ZYN rewards were already rejected for Cave. Each unlock rule must name an activity a participant cannot manufacture against themselves, and must be committed before its pot can release | 🔒 constraint; ⏳ rules |
 | 71.8 | **Phase-1 ZEC support is transitional by design.** ZEC-denominated fees accrue protocol-owned liquidity while ZYN has no market of its own; §68.9's Phase-2 transition winds that support down under precommitted rules as the ZYN:BOLD.zy market takes over price discovery. The hard ZEC reference is scaffolding for the bootstrap, not a permanent dependency, and separating from it is the goal rather than a failure mode | 🔒 |
 
+| 71.9 | **The 2,100,000 remainder is the ZYN side of the opening ZYN:ZEC.zy market.** It waits in its own pot until enough ZEC.zy has accrued to pair against it, and the pairing ratio sets the opening price. Nothing is distributed to contributors — §68 superseded that | 🔒 destination; ⏳ price |
+
 ### Open, and load-bearing
 
-**The 2,100,000 remainder has no stated destination.** Ninety percent is
-accounted for; the other ten is not. §30's answer — half into the opening pool,
-half to contributors vesting over ~6 months — died with §68's supersede of
-vesting and contributor allocation. Until it is decided, `circulating` at launch
-is undefined, and so is the opening price of any ZYN market.
+**The opening price and the Phase-2 threshold are currently one number, and
+cannot be.** §68.7 makes `1 ZYN = 0.0002 ZEC` the signal that "the ZEC-supported
+bootstrap has done its job." If §71.9's pot *opens* at that price, the trigger
+fires at launch and Phase 1 never runs. Pairing 2.1M ZYN needs **420 ZEC.zy** to
+open at 0.0002, or **4,200** at 0.002 — and opening at 0.002 would launch ZYN ten
+times past the wind-down point. Two numbers are needed, with the threshold above
+the opening price.
+
+**Opening depth is thin enough to matter more than the price.** 2.1M ZYN against
+420 ZEC.zy is a constant-product pool where selling 100,000 ZYN (~$8,000) moves
+the price 8.9%, and 500,000 moves it 34.8%. Behind that float sit 18,900,000
+ZYN, nine times the circulating supply. The reserve's release rate must be slow
+relative to how fast the pool deepens, or each unlock walks the price down its
+own curve — a constraint on §71.6's rules as binding as the activity test.
+
+**Reserve per token is a tenth of the quoted price.** 420 ZEC.zy behind
+21,000,000 ZYN is `0.00002` ZEC per ZYN against a `0.0002` price. The pairing
+sets an opening price and some depth; it is not a reserve anyone can claim
+against, and "ZEC-backed" invites exactly that computation.
 
 **Who may release from a pot, and on what evidence.** §71.6 says activity
 unlocks rewards; it does not yet say who evaluates that. If a human decides,
