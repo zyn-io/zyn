@@ -5066,3 +5066,20 @@ the reserve's release rules — not `circulating` alone.
 | 73.4 | **Only chain state moved; the signing key did not.** signer3 still endorses as set slot 3 from its own key in its own env file. Copying state between replicas is safe precisely because identity lives outside the data directory | ✅ |
 | 73.5 | The cost, named plainly: signer3 now starts from a root **signer2 derived** rather than one it derived itself. That is the same class of trust as attesting a base root out of band — the designed mechanism — but it is a real reduction in independence and was taken as a deliberate decision, not a default | ✅ |
 | 73.6 | Why the base path failed at all is **unresolved** (A22): the binary reported a fixed attested root regardless of `ZYN_BASE_ROOT`, including an explicit override, contradicting the only such check in the source. Not blocking, because no replica now starts empty — but a genuinely fresh replica would hit it | ⏳ |
+
+## 74. The 333 Nap Moles are a gift, not a sale (14 Sep 2026)
+
+The 4,444 and the 333 are both collections under `Treasury 26460` (§66.17) and
+share the secondary fee split (§69.9), which makes it easy to assume they share
+a distribution path. They do not, and the difference is worth stating before
+someone builds the wrong one.
+
+| # | Decision | Status |
+|---|---|---|
+| 74.1 | **The 333 do not use `cave-sale`.** That crate allocates a *paid* sale: every ticket must carry a confirmed Zcash payment whose amount equals the entry price, and an entry with no `deposit_txid` is rejected. A gift has no payment and no txid, so it is not a degenerate case of a sale — it is a different thing | 🔒 |
+| 74.2 | **The chain already supports it.** `MintCollectionItem { creator, collection, serial, to, symbol, content }` moves no value and is authorised by the collection creator alone. Nothing new is needed in the VM: the gift is a creator-signed mint at a chosen serial, to a chosen account | ✅ VM |
+| 74.3 | **Serials stay bound the same way as a sale's.** Each item is `item_address(ADDRESS_SCOPE_V1, collection, serial)` (§64.13) against a manifest committed before any mint. Being a gift removes the *allocation* question, never the *identity* one — two people must not be able to receive the same mole, and a recipient must be able to check which one they got | 🔒 |
+| 74.4 | **No drand, no reveal, no allocation policy.** Those exist to prove a paid sale was fair. The operator chooses who receives which mole, and saying so plainly is more honest than staging randomness over a decision that was never random | 🔒 |
+| 74.5 | **A claim code is an operator promise, redeemable once — not a bearer asset.** The creator key can mint to any account regardless, so the claim service is trusted by construction. It must not be described as trustless, and a code must never be presented as something that holds value on its own: it authorises one mint of one serial, and is void once used | 🔒 honesty boundary |
+| 74.6 | **Claiming binds the recipient's own account, chosen by them.** The code carries the serial; the claimant supplies the account. Re-submitting the same code with the same account returns the same result rather than minting twice; with a *different* account it is refused, because the first binding is what the recipient already holds | 🔒 idempotency; ⏳ service |
+| 74.7 | **The media travels with the gift.** Handing over the file at the event and letting the wallet check it against `content` needs no gateway and leaks nothing (§67.7). For the 333 specifically this is the whole privacy story, and it is also the only one that works in a room with bad wifi | 🔒 |
