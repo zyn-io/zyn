@@ -93,6 +93,48 @@ pub fn account_of_group(public: &PublicKeyPackage<ZynAccount>) -> Result<[u8; 32
     ))
 }
 
+/// Threshold-sign `message` with the named holders' shares.
+///
+/// Returns the group verifying key and an ordinary 64-byte Ed25519 signature —
+/// everything a caller needs to build a submission frame, and nothing about
+/// FROST. Each signer commits a fresh nonce to *this* message, so a nonce
+/// committed to one message cannot be reused for another; that is what stops an
+/// untrusted coordinator swapping the payload between rounds.
+pub fn sign(
+    shares: &BTreeMap<IdentifierFor<ZynAccount>, ThresholdKeys<ZynAccount>>,
+    signers: &[IdentifierFor<ZynAccount>],
+    message: &[u8],
+) -> Result<([u8; 32], [u8; 64]), CeremonyError> {
+    let mut rng = rand::rngs::OsRng;
+    let mut nonces = BTreeMap::new();
+    let mut commitments = BTreeMap::new();
+    for id in signers {
+        let keys = shares.get(id).ok_or(CeremonyError::Crypto)?;
+        let (n, c) = frost_ed25519::round1::commit(keys.key_package.signing_share(), &mut rng);
+        nonces.insert(*id, n);
+        commitments.insert(*id, c);
+    }
+    let package = frost_ed25519::SigningPackage::new(commitments, message);
+
+    let mut sig_shares = BTreeMap::new();
+    for id in signers {
+        let keys = shares.get(id).ok_or(CeremonyError::Crypto)?;
+        let share = frost_ed25519::round2::sign(&package, &nonces[id], &keys.key_package)
+            .map_err(|_| CeremonyError::Crypto)?;
+        sig_shares.insert(*id, share);
+    }
+
+    let public = &shares.values().next().ok_or(CeremonyError::Crypto)?.public_package;
+    let sig = frost_ed25519::aggregate(&package, &sig_shares, public)
+        .map_err(|_| CeremonyError::Crypto)?;
+    let bytes: [u8; 64] = sig
+        .serialize()
+        .map_err(|_| CeremonyError::Crypto)?
+        .try_into()
+        .map_err(|_| CeremonyError::Crypto)?;
+    Ok((group_key_bytes(public)?, bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,4 +17,5 @@ pub mod replica;
 mod restore;
 pub mod rpc;
 pub mod settle;
+pub mod treasury;
 pub mod wallet;
