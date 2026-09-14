@@ -383,6 +383,11 @@ fn run() -> Result<(), String> {
                         outstanding.push((anchor_id, 0));
                     }
                 }
+                // What this replica has itself verified as anchored. Its own
+                // ledger is the only signal it can trust for "settled" — the
+                // sequencer's "clears" is a claim about memory it may lose.
+                let settled: std::collections::BTreeSet<[u8; 32]> =
+                    replica.ledger().anchors().iter().map(|a| a.id()).collect();
                 let mut still: Vec<([u8; 32], u32)> = Vec::new();
                 for (anchor_id, tries) in outstanding.drain(..) {
                     let hex = anchor_id
@@ -412,7 +417,22 @@ fn run() -> Result<(), String> {
                             } else if tries % 20 == 0 {
                                 eprintln!("zyn-replica: still re-offering endorsement for {} ({} pass(es)); the set has not reached threshold", hex, tries);
                             }
-                            if !clears {
+                            // Keep offering until the anchor is *settled*, not
+                            // until the sequencer first says the certificate
+                            // clears. "Clears" is a statement about this
+                            // instant: the sequencer holds the signatures in
+                            // memory for an in-flight anchor, so a restart
+                            // drops them, and a signer that stopped on the
+                            // first "clears" never offers again. That leaves
+                            // the remaining signers below threshold forever —
+                            // the same failure §63 was written to cure, one
+                            // level up (§81).
+                            //
+                            // Re-offering a settled anchor is idempotent and
+                            // costs one call, so the safe direction is to keep
+                            // going until this replica has seen it anchored in
+                            // its own verified ledger.
+                            if !settled.contains(&anchor_id) {
                                 still.push((anchor_id, tries + 1));
                             }
                         }
@@ -426,6 +446,14 @@ fn run() -> Result<(), String> {
                             still.push((anchor_id, tries + 1));
                         }
                     }
+                }
+                // An anchor this replica never sees settle would otherwise be
+                // offered forever. Keep the newest few — enough to cover a
+                // sequencer restart mid-flight, bounded so a permanently
+                // stranded anchor cannot grow the list without limit.
+                const MAX_OUTSTANDING: usize = 8;
+                if still.len() > MAX_OUTSTANDING {
+                    still.drain(..still.len() - MAX_OUTSTANDING);
                 }
                 outstanding = still;
             } else {

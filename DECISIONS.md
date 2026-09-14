@@ -5158,3 +5158,18 @@ order — rehearse on testnet, then mainnet — was the wrong way round here.
 | 80.11 | **The relay is ciphersuite-blind.** It keys round-one frames by reading the identifier straight off the frame instead of decoding the package, so one relay serves a Zcash ceremony and an Ed25519 one without knowing which it is looking at. It previously decoded as `Zcash`, which would have silently rejected a treasury ceremony | ✅ |
 | 80.12 | **Every participant prints the account and they must match.** A ceremony that did not agree produces different accounts, and the tool says so — the check is cheap, and the failure is otherwise invisible until a signature does not verify | ✅ |
 | 80.13 | **In-memory provisioning stays available for a treasury an operator holds alone**, but the distributed ceremony is the default for anything real. Generating three shares on one machine means that machine saw all three | 🔒 |
+
+## 81. Keep endorsing until it settles, not until you are told it cleared (14 Sep 2026)
+
+§63 made signers re-offer an endorsement instead of sending it once. It stopped
+re-offering the moment the sequencer answered `clears = true` — and that is a
+statement about the sequencer's memory *at that instant*, not about the chain.
+
+| # | Decision | Status |
+|---|---|---|
+| 81.1 | **A signer re-offers until it has seen the anchor settled in its own verified ledger.** The sequencer's "clears" is a claim about signatures it holds in memory for an in-flight anchor; §63.1 already established that a restart drops them. A signer that stopped on the first "clears" never offers again, leaving the rest of the set permanently below threshold | ✅ |
+| 81.2 | **This is §63's own failure one level up**, and it cost chain 11 an eight-hour stall before anyone noticed — the re-offer logging made the chain look busy while nothing settled. The fix hid its own gap: every signer was visibly working, on anchors that could never clear | ✅ |
+| 81.3 | **Diagnosis came from counting, not reasoning.** signer1 named the stalled anchor seven times and signer2 exactly once — the one time it endorsed and was told it cleared. That asymmetry is the whole bug, and it was visible in a `grep -c` | ✅ |
+| 81.4 | **The signer trusts only its own ledger for "settled."** Anything else is asking the party that may have lost the signatures whether it still has them | 🔒 |
+| 81.5 | **The backlog is bounded at eight.** Re-offering is idempotent and cheap, but an anchor that never settles would otherwise be offered forever; eight covers a restart mid-flight without letting one stranded anchor grow the list without limit | ✅ |
+| 81.6 | **A restart of any one signer is the field remedy**, because §63.3 re-seeds `outstanding` from the head anchor at startup. That is what recovered chain 11 here | ✅ |
