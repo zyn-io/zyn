@@ -312,7 +312,7 @@ impl VaultKeys {
         }
         let amount = Fixed(note.value().inner() as i128 * ZAT);
         if let Ok(payment) = memo::decode_cave_payment(&memo_bytes) {
-            out.cave_payments.push(CavePaymentSighting {
+            out.cave_payments.push(CavePaymentOutput {
                 txid,
                 height,
                 output_index,
@@ -580,11 +580,22 @@ pub struct ScannedAction {
 
 /// One purpose-bound Cave payment as seen in canonical transaction order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct CavePaymentSighting {
+pub struct CavePaymentOutput {
     pub txid: [u8; 32],
     pub height: u64,
     /// Orchard actions first, followed by Ironwood actions, each in serialized
     /// bundle order. This makes a stable output coordinate within the txid.
+    pub output_index: u32,
+    pub amount: Fixed,
+    pub payment: memo::CavePaymentMemo,
+}
+
+/// A Cave payment with its complete canonical position in a Zcash block.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CavePaymentSighting {
+    pub txid: [u8; 32],
+    pub height: u64,
+    pub tx_index: u32,
     pub output_index: u32,
     pub amount: Fixed,
     pub payment: memo::CavePaymentMemo,
@@ -616,7 +627,7 @@ pub struct Scanned {
     /// Forced intents this transaction carried.
     pub forced: Vec<ForcedSighting>,
     /// Valid Cave payments, excluded from `deposits` by construction.
-    pub cave_payments: Vec<CavePaymentSighting>,
+    pub cave_payments: Vec<CavePaymentOutput>,
 }
 
 /// Scanning a range of blocks for deposits to this vault.
@@ -896,7 +907,7 @@ impl Scanner {
             return Ok((to.min(end), found));
         }
         for height in start..=end {
-            for txid_hex in zebra.block_txids(height)? {
+            for (tx_index, txid_hex) in zebra.block_txids(height)?.into_iter().enumerate() {
                 let raw = zebra.raw_transaction_bytes(&txid_hex)?;
                 let Some(txid) = txid_bytes(&txid_hex) else {
                     continue;
@@ -904,7 +915,24 @@ impl Scanner {
                 let Ok(scanned) = self.keys.scan_actions_lenient(&raw, txid, height) else {
                     continue;
                 };
-                found.extend(scanned.cave_payments);
+                let tx_index = u32::try_from(tx_index).map_err(|_| {
+                    ScanRangeError::Rpc(crate::zebra::RpcError::Malformed(
+                        "too many transactions in one block",
+                    ))
+                })?;
+                found.extend(
+                    scanned
+                        .cave_payments
+                        .into_iter()
+                        .map(|output| CavePaymentSighting {
+                            txid: output.txid,
+                            height: output.height,
+                            tx_index,
+                            output_index: output.output_index,
+                            amount: output.amount,
+                            payment: output.payment,
+                        }),
+                );
             }
         }
         Ok((end, found))
