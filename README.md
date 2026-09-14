@@ -45,5 +45,8 @@ pass** in this tree standalone.
 crate here, at an older revision (its `derive.rs` predates the version fix in
 §66 and it has no `manifest.rs`). Two sources of truth for a chain's state
 encoding is how two builds of the same sequencer come to disagree about a root.
-Resolving it needs a visibility decision first: this repo is private, that one is
-public, so the protocol is already public either way.
+Settled on 14 Sep (§76): this repo stays private, so `nap-wallet` keeps its own
+copy rather than taking a git dependency — a public wallet that needs a private
+repo to build cannot be audited or reproduced by anyone outside the org. The
+copy must be kept current: a wallet built from a stale one cannot talk to the
+chain at all.

@@ -5083,3 +5083,26 @@ someone builds the wrong one.
 | 74.5 | **A claim code is an operator promise, redeemable once — not a bearer asset.** The creator key can mint to any account regardless, so the claim service is trusted by construction. It must not be described as trustless, and a code must never be presented as something that holds value on its own: it authorises one mint of one serial, and is void once used | 🔒 honesty boundary |
 | 74.6 | **Claiming binds the recipient's own account, chosen by them.** The code carries the serial; the claimant supplies the account. Re-submitting the same code with the same account returns the same result rather than minting twice; with a *different* account it is refused, because the first binding is what the recipient already holds | 🔒 idempotency; ⏳ service |
 | 74.7 | **The media travels with the gift.** Handing over the file at the event and letting the wallet check it against `content` needs no gateway and leaks nothing (§67.7). For the 333 specifically this is the whole privacy story, and it is also the only one that works in a room with bad wifi | 🔒 |
+
+## 75. Mainnet takes A25 first, because it was the chain with nothing on it (14 Sep 2026)
+
+`STATE_VERSION` 10 rejects every earlier version and there is no migration
+branch, so adopting A25 is a reset rather than a rolling upgrade. The obvious
+order — rehearse on testnet, then mainnet — was the wrong way round here.
+
+| # | Decision | Status |
+|---|---|---|
+| 75.1 | **Mainnet 26460 rolled first, because it had never credited a deposit.** Zero credit events, epoch 0, no backing obligation: resetting it destroyed nothing. Testnet chain 11 had 9,393 epochs and was healthy, so resetting *it* as the "safe" rehearsal would have been the more destructive choice. Check what a chain holds before deciding which one is disposable | ✅ |
+| 75.2 | **New genesis base root `29de5266179130872cfc14b4517f21b042acb7c6e850e423c813331a9b60f25d`.** Every mainnet replica and signer attests this root; the previous `da91df7d…` belongs to the pre-A25 chain and must not be reused | ✅ |
+| 75.3 | **The old chain is preserved, not deleted** — `/var/lib/zyn/mainnet.preA25`, `mainnet-da.preA25`, and a tarball. A reset with no way back is a bet, not a deployment | ✅ |
+| 75.4 | **Testnet chain 11 stays on the pre-A25 binaries** as a working reference while mainnet proves the new code. It is the only chain with history, so it is the one worth keeping intact | ✅ |
+| 75.5 | **Check `uname -m` before building for a host.** The fleet is mixed — Hetzner `aarch64`, Contabo and the WSL box `x86_64`, the Macs `arm64`. An x86_64 binary was installed on the aarch64 testnet sequencer and failed with `Exec format error`; it was restored from the copy kept beside it, which is the only reason this is a footnote rather than an outage | ✅ |
+
+## 76. Zyn's source stays private; the wallet keeps its own copy (14 Sep 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 76.1 | **`zyn-io/zyn` stays private.** The layering question is therefore settled the other way from §A22's suggestion: `nap-wallet` cannot consume it as a git dependency, because a public wallet that needs a private repo to build is a wallet nobody outside the org can audit or reproduce | ✅ |
+| 76.2 | **`nap-wallet` keeps a full copy of the protocol crates, and that is the arrangement rather than a temporary state.** PR #27's sync is not interim. What matters now is that the copy is *kept current*: two sources of truth for a state encoding is how two builds of one sequencer come to disagree about a root, and the only defence left is discipline | 🔒 |
+| 76.3 | **Every protocol change therefore lands in `zyn` and is synced to `nap-wallet` before release.** A wallet built from a stale copy cannot talk to the chain at all — that is not a degraded mode, it is a hard wire-format incompatibility, as A25 demonstrated | 🔒 process |
+| 76.4 | `zyn-io/cave` and `zyn-io/zynzap` continue to consume `zyn` as a **rev-pinned git dependency**. They are private too, so the auditability argument does not apply to them | ✅ |
