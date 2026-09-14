@@ -5188,3 +5188,13 @@ is worse than not doing it.
 | 82.3 | **`/api/topup` builds that memo rather than asking anyone to type it.** The memo is `"ZYN" ‖ version ‖ 32 zero bytes` — valid UTF-8 and therefore expressible as the string the send path takes, but not something a person can enter by hand. A funding step that depends on hand-crafting binary is a funding step that eventually halts the bridge | ✅ |
 | 82.4 | **`memo::TOPUP_ACCOUNT` and `memo::is_topup` name the intent** instead of leaving `[0u8; 32]` at call sites, where it reads like a placeholder rather than a decision | ✅ |
 | 82.5 | **Minimum useful top-up is `0.0002` ZEC** — one anchor's self-send plus its fee. Send more so later anchors need no second transfer; the surplus is held, not credited, and is recoverable only as fees | 🔒 |
+
+## 83. Treasury 26460 exists (14 Sep 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 83.1 | **`Treasury 26460` is `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99`**, a 2-of-3 threshold account, pinned as `swapvm::types::TREASURY_26460`. §66.17's placeholder is resolved and the `0xca7e…` vectors are dead | ✅ |
+| 83.2 | **Provisioned by the vault's own ceremony over Ed25519** (§80.10): one relay, three participants, three rounds. All three independently derived this account and printed it; a ceremony that did not agree would have produced three different ones | ✅ |
+| 83.3 | **One share per machine, verified after the fact** — Mac, Air and the Windows box hold identifiers `01`, `02`, `03` respectively, one `share-*.bin` each, and the relay held none. Counting the shares afterwards is part of the ceremony, not an optional check | ✅ |
+| 83.4 | **The pin is tested against the ceremony's output.** A transcribed 32-byte constant can be transcribed wrongly, and every official collection address derives from this one — so the test asserts the exact hex rather than trusting the paste | ✅ |
+| 83.5 | **Both official collections' addresses can now be computed**, which unblocks the 333 and the 4,444. What remains for them is naming, not cryptography | ✅ |

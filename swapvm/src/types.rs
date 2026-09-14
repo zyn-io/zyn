@@ -24,6 +24,25 @@ pub type AssetId = [u8; 32];
 /// persistent identity in one crate while the other kept the old bytes.
 pub use zyn_vm::derive::ADDRESS_SCOPE_V1;
 
+
+/// **Treasury 26460** — the protocol treasury, creator and fee recipient for
+/// both official collections (§66.17).
+///
+/// A 2-of-3 threshold account: no single holder can spend from it, and the
+/// three shares sit on three separate machines. Provisioned 14 Sep 2026 by the
+/// same ceremony and relay the vault uses, over Ed25519 rather than RedPallas
+/// (§80.10), with all three participants independently deriving this account.
+///
+/// It is an ordinary `Scheme::Ed25519` account — a FROST group signature
+/// verifies as a single signer's, which is why nothing in the VM knows it is
+/// threshold-controlled (§80.2).
+pub const TREASURY_26460: AccountId = [
+    0xb3, 0xe4, 0xc4, 0x93, 0xbb, 0x79, 0x34, 0x92,
+    0x70, 0x26, 0x0f, 0x7d, 0x2e, 0x28, 0x82, 0xb4,
+    0xf1, 0xa7, 0x36, 0x34, 0x89, 0x35, 0x49, 0x33,
+    0x31, 0xe1, 0x8c, 0x95, 0x09, 0x8c, 0xfe, 0x99,
+];
+
 /// xZEC — the 1:1 execution-layer representation of deposited ZEC.
 ///
 /// The naming rule from the project plan: internally `xZEC`, displayed to users
@@ -325,6 +344,18 @@ mod testnet_params_tests {
 #[cfg(test)]
 mod pinned_address_tests {
     use super::*;
+
+    /// The pinned treasury must be the account the ceremony actually produced.
+    /// A transcribed constant is a constant that can be transcribed wrongly,
+    /// and every official collection address derives from this one.
+    #[test]
+    fn the_pinned_treasury_is_the_account_the_ceremony_agreed_on() {
+        let hex: alloc::string::String =
+            TREASURY_26460.iter().map(|b| alloc::format!("{:02x}", b)).collect();
+        assert_eq!(hex, "b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99");
+        assert_ne!(TREASURY_26460, [0u8; 32], "the zero account is the unprovisioned sentinel");
+    }
+
 
     /// `XZEC` and `ZYN_POL` are pinned literals. They agree with their
     /// derivations today, and nothing was stopping them from drifting apart —
