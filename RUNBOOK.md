@@ -2238,6 +2238,37 @@ themselves and do not trust that column — so a wall of zeros is not evidence o
 an unsettled chain. Only the *sequencer's* own confirmation matters.
 
 
+
+### Withdrawals: what is slow, what is not, and the one race
+
+Anchor cadence does not affect how fast ZEC reaches a user. A payout is its own
+Zcash transaction; "final" in the exit path means *that* transaction confirming,
+not an anchor covering it. Anchoring less often trades anchor cost against how
+long a state root waits to be committed, and nothing else.
+
+Exits need no manual batching. `settle.rs` groups pending exits canonically,
+oldest-first, signs one transaction-sized group against the vault's durable
+nonce, and burns the units only once it is final — roughly twenty exits per
+finality window. The group is derived from state, so nobody chooses who is in
+it; introducing a manual or scheduled run would replace that property with an
+operator decision.
+
+**The race to watch.** `Exit::may_cancel` checks elapsed epochs and nothing
+else — it cannot see that a payout is already signed and broadcast. If
+settlement stalls past `exit_timeout_epochs`, a user may cancel, be credited
+back on Zyn, and *also* receive the ZEC when the in-flight transaction lands.
+The only defence is margin:
+
+```
+exit_timeout_epochs  >  worst-case settlement + confirmations + longest
+                        outage tolerated without intervention
+```
+
+So if settlement stops, that is not merely a liveness problem to fix at leisure.
+Past the deadline it becomes a correctness problem, and the response is to
+restore settlement or raise the timeout *before* the deadline passes — not
+after.
+
 ### What `rpc.cavebro.win` will serve
 
 Not a proxy: a **`zyn-replica`** (§40.2, §48.2), which verifies the chain from

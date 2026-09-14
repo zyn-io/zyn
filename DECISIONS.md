@@ -5106,3 +5106,26 @@ order — rehearse on testnet, then mainnet — was the wrong way round here.
 | 76.2 | **`nap-wallet` keeps a full copy of the protocol crates, and that is the arrangement rather than a temporary state.** PR #27's sync is not interim. What matters now is that the copy is *kept current*: two sources of truth for a state encoding is how two builds of one sequencer come to disagree about a root, and the only defence left is discipline | 🔒 |
 | 76.3 | **Every protocol change therefore lands in `zyn` and is synced to `nap-wallet` before release.** A wallet built from a stale copy cannot talk to the chain at all — that is not a degraded mode, it is a hard wire-format incompatibility, as A25 demonstrated | 🔒 process |
 | 76.4 | `zyn-io/cave` and `zyn-io/zynzap` continue to consume `zyn` as a **rev-pinned git dependency**. They are private too, so the auditability argument does not apply to them | ✅ |
+
+## 77. What settling to Zcash actually costs, and what it does not delay (14 Sep 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 77.1 | **Fees are ZIP-317: `5,000` zatoshi per logical action, floor of two** (`zyn_custody::payout::zip317_fee`). An anchor is the floor — `ANCHOR_ZATOSHI = 10_000`, `0.0001` ZEC — and comes back to the vault as a note, so only the fee leaves. A shielded payout is the same floor; a transparent one is `15,000` | ✅ |
+| 77.2 | **Redeeming an NFT costs nothing on Zcash.** `RedeemCollectionItem` burns the item and credits its share of the collection pool in ZEC.zy entirely on Zyn. Only *leaving* for ZEC touches L1 | ✅ |
+| 77.3 | **The anchor is amortised, never per-item.** One anchor covers everything in its window (§5.6), so a thousand redemptions inside one window still cost one anchor between them. Individual settlement does not multiply anchors | ✅ |
+| 77.4 | **Exits already batch, and the grouping is derived rather than chosen.** `settle.rs` groups pending exits canonically oldest-first, signs one transaction-sized group against the vault's durable nonce, and burns units only once that transaction is final. Signers attest to a list the state determined (§14e level 1). Throughput is one group per finality window — twenty-odd exits — which is the bottleneck nowhere | ✅ |
+| 77.5 | **Anchor cadence does not affect bridge speed.** A payout is its own Zcash transaction; "final" in the exit path means that transaction confirming, not an anchor covering it. Anchoring less often trades anchor cost against how long a state root waits to be committed, and touches withdrawal latency not at all | ✅ |
+| 77.6 | **Batching more than `settle.rs` already does would remove a property, not add one.** A manual or daily settlement run replaces a state-derived group with an operator-chosen one. The fee saving would be trivial in any case: settling 333 exits individually is `0.0333` ZEC against `0.0167` batched, a difference of about six dollars | 🔒 |
+| 77.7 | **`may_cancel` cannot see an in-flight payout.** It checks elapsed epochs and nothing else, so a user past the deadline may cancel and be credited on Zyn while the ZEC is already leaving the vault. The defence is margin, not logic: `exit_timeout_epochs` must exceed worst-case settlement plus confirmations plus the longest outage tolerated without intervention. The code says as much — a deadline "far beyond any honest settlement, not a user convenience" | 🔒 invariant; ⏳ mainnet value |
+| 77.8 | **Nobody has decided who absorbs the payout fee.** §69.9 routes NFT trading fees and §69.8 routes curve fees, but the `0.0001` ZEC a withdrawal costs the vault is unaccounted. At this magnitude the protocol absorbing it is the obvious answer; it should be written down rather than left implicit | ⏳ |
+
+## 78. The extension ships unlisted, not as an unpacked zip (14 Sep 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 78.1 | **Publish to the Chrome Web Store as *unlisted* rather than telling people to enable developer mode and load an unpacked pack.** Unlisted is reviewed but not searchable: a real install link, automatic updates, no security-warning theatre, and it can be made public whenever | 🔒 |
+| 78.2 | **"Enable developer mode and load this zip" is the instruction pattern malicious wallets use.** Teaching it to the earliest users of a privacy wallet trains exactly the habit they most need not to have, and unpacked extensions never auto-update, so a security fix reaches nobody | 🔒 rationale |
+| 78.3 | Self-hosting a `.crx` is not an escape: Chrome blocks non-store extensions on Windows and macOS unless installed by enterprise policy | ✅ fact |
+| 78.4 | **The manifest is already easy to approve** — MV3, `permissions` is only `storage`, host access is just `http://127.0.0.1:8977/*`, no remote code, and it holds no keys. What draws review time is `<all_urls>` at `document_start` plus `web_accessible_resources` on `<all_urls>`. In Phase 1 the only sites needing the provider are ours, so narrowing `matches` to them would make the first review trivial and can be widened later | ⏳ |
+| 78.5 | **The web app is the route for the 333 regardless.** The extension needs `127.0.0.1:8977` — it is a provider backed by the desktop app, not a standalone wallet — so at an event it costs two installs before anyone holds anything | 🔒 |
