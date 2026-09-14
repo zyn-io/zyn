@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use swapvm::state::SwapState;
 use swapvm::tx::Intent;
 use zyn_custody::ceremony::{IdentifierFor, ThresholdKeys};
-use zyn_custody::treasury::ZynAccount;
+use zyn_custody::treasury::{PublicKeyPackage, ZynAccount};
 use zyn_vm::auth::{signed_bytes_as, Authorization, Scheme, Signed};
 
 use swapvm::wire;
@@ -60,6 +60,43 @@ pub fn frame_submission_threshold(
     wire::encode_intent(&mut e, intent);
     Ok(e.finish().to_vec())
 }
+
+
+/// The same frame, signed by custodians that each hold one share.
+///
+/// [`frame_submission_threshold`] needs every share in one process. The
+/// mainnet treasury's shares are deliberately on three separate machines, so
+/// the sequencer builds the payload, asks each custodian to sign it, and
+/// assembles the frame — holding no share itself.
+///
+/// The frame this returns is byte-identical in shape to the in-process one:
+/// the network is a detail of how the signature was produced, not of what the
+/// chain accepts.
+pub fn frame_submission_across(
+    custodians: &[String],
+    public: &PublicKeyPackage<ZynAccount>,
+    threshold: usize,
+    chain: u32,
+    now_epoch: u64,
+    intent: &Intent,
+    request_id: u64,
+) -> Result<Vec<u8>, String> {
+    let (auth, payload_bytes) = payload(chain, now_epoch, intent);
+
+    let (group_key, sig_bytes) =
+        zyn_custody::treasury::sign_across(custodians, public, threshold, &payload_bytes, request_id)
+            .map_err(|e| format!("threshold signing across custodians failed: {:?}", e))?;
+
+    let mut e = Encoder::new();
+    e.bytes(&auth.vm_id)
+        .u64(auth.valid_until_epoch)
+        .u8(Scheme::Ed25519.tag())
+        .bytes(&group_key)
+        .bytes(&sig_bytes);
+    wire::encode_intent(&mut e, intent);
+    Ok(e.finish().to_vec())
+}
+
 
 #[cfg(test)]
 mod tests {

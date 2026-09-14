@@ -91,6 +91,9 @@ pub fn reject_name(code: u8) -> &'static str {
         12 => "invalid path",
         13 => "insufficient reserves",
         14 => "invalid fee",
+        15 => "the parameters do not make sense",
+        16 => "the id space is exhausted",
+        17 => "the arithmetic overflowed",
         18 => "indivisible",
         19 => "below the launch bond",
         20 => "degenerate offer",
@@ -105,9 +108,21 @@ pub fn reject_name(code: u8) -> &'static str {
         29 => "invalid finality",
         30 => "above what the vault holds",
         31 => "vault attested short",
+        32 => "the observation is stale",
         33 => "not the bound destination",
         34 => "rebinding too soon (a redirect must wait out its delay)",
         35 => "symbol already taken",
+        36 => "no such collection",
+        37 => "the collection is full",
+        38 => "not a collection item",
+        39 => "not the whole item",
+        40 => "the collection is in the wrong phase",
+        41 => "not the creator",
+        42 => "the item needs a price",
+        43 => "no such offer",
+        44 => "the offer has expired",
+        45 => "cannot take your own offer",
+        46 => "not the maker",
         47 => "invalid metadata",
         48 => "invalid developer buy",
         49 => "launch rate limited",
@@ -117,6 +132,7 @@ pub fn reject_name(code: u8) -> &'static str {
         _ => "rejected",
     }
 }
+
 
 #[derive(Clone, Debug, Default)]
 pub struct Health {
@@ -1618,5 +1634,26 @@ mod forced_frame_tests {
             amount: Fixed::ONE,
         };
         assert_eq!(hex(&frame_submission(&k, 11, 42, &intent)), "5cf4557b297390b6c6d08f752fc04a0ac8496349d6fbd0f68657328812d4e5ee000000000000008e01308ab8b209813f5912287682b50950d62782abc61507f0a80abafd0f7a33a7a653e89fba1119f7490c8b9c0e58f89db87d4b1e1402b1e9335d05a72b5440f4f4b492289fab01e5a1b05dd80879d1b80ecef529c4c3ff3d7e433a6a7b4305360602b85db260ec3a7c0a22c19c1f3380bfc75599c0ea4eeeeda69177ab12f9da56ea1111111111111111111111111111111111111111111111111111111111111111000000000000000000000000000000000000000000000000000000000000000700000000000000000de0b6b3a7640000");
+    }
+}
+
+#[cfg(test)]
+mod reject_name_tests {
+    /// Every code the VM can emit must have a sentence. A missing one reaches
+    /// the user as the bare word "rejected", which is what a wallet shows when
+    /// it cannot say why — and the collection codes were all missing once.
+    #[test]
+    fn every_wire_reject_code_has_a_name() {
+        let wire = include_str!("../../swapvm/src/wire.rs");
+        let mut missing = Vec::new();
+        for line in wire.lines() {
+            let Some(rest) = line.trim().strip_prefix("Reject::") else { continue };
+            let Some((variant, code)) = rest.split_once(" => ") else { continue };
+            let Ok(code) = code.trim_end_matches(',').trim().parse::<u8>() else { continue };
+            if super::reject_name(code) == super::reject_name(255) {
+                missing.push(format!("{} ({})", variant, code));
+            }
+        }
+        assert!(missing.is_empty(), "reject codes with no message: {:?}", missing);
     }
 }

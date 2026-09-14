@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 
-use frost_core::keys::PublicKeyPackage;
+pub use frost_core::keys::PublicKeyPackage;
 
 use crate::ceremony::{CeremonyError, IdentifierFor, ThresholdKeys};
 
@@ -135,9 +135,106 @@ pub fn sign(
     Ok((group_key_bytes(public)?, bytes))
 }
 
+
+/// Threshold-sign across custodians that each hold one share.
+///
+/// [`sign`] needs every share in one process, which is exactly what the
+/// ceremony spent effort avoiding. This drives the same two rounds over the
+/// network instead: each custodian commits a nonce to *this* payload, the
+/// coordinator builds the signing package, and each returns a signature share.
+///
+/// The coordinator never sees a key — only commitments and signature shares,
+/// and neither reconstructs one. That is what lets an untrusted process drive
+/// a threshold signature.
+pub fn sign_across(
+    custodians: &[String],
+    public: &PublicKeyPackage<ZynAccount>,
+    threshold: usize,
+    message: &[u8],
+    request_id: u64,
+) -> Result<([u8; 32], [u8; 64]), CeremonyError> {
+    use crate::custody_net as net;
+
+    let r1 = net::encode_treasury_round1(request_id, message);
+    let mut commitments = BTreeMap::new();
+    for addr in custodians {
+        let Ok(reply) = net::ask(addr, &r1) else { continue };
+        if let Some((id, c)) = net::read_sol_commitments(&reply) {
+            commitments.insert(id, c);
+        }
+        if commitments.len() == threshold {
+            break;
+        }
+    }
+    if commitments.len() < threshold {
+        return Err(CeremonyError::Crypto);
+    }
+
+    let package = frost_ed25519::SigningPackage::new(commitments.clone(), message);
+    let r2 = net::encode_treasury_round2(request_id, &package).map_err(|_| CeremonyError::Crypto)?;
+    let mut shares = BTreeMap::new();
+    for addr in custodians {
+        let Ok(reply) = net::ask(addr, &r2) else { continue };
+        if let Some((id, share)) = net::read_sol_share(&reply) {
+            if commitments.contains_key(&id) {
+                shares.insert(id, share);
+            }
+        }
+    }
+    if shares.len() < threshold {
+        return Err(CeremonyError::Crypto);
+    }
+
+    let sig = frost_ed25519::aggregate(&package, &shares, public).map_err(|_| CeremonyError::Crypto)?;
+    let bytes: [u8; 64] = sig
+        .serialize()
+        .map_err(|_| CeremonyError::Crypto)?
+        .try_into()
+        .map_err(|_| CeremonyError::Crypto)?;
+    Ok((group_key_bytes(public)?, bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The property the whole split exists for: two custodians on separate
+    /// sockets, each holding one share, produce a signature the chain accepts —
+    /// and the coordinator driving them never holds a key.
+    #[test]
+    fn two_custodians_on_sockets_sign_without_the_coordinator_holding_a_key() {
+        use crate::custody_net::{serve, Custodian};
+        let t = Treasury::provision(2, 3).expect("provision");
+        let public = t.shares.values().next().unwrap().public_package.clone();
+
+        // One custodian per share, each on its own port, each holding one.
+        let mut addrs = Vec::new();
+        for keys in t.shares.values() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            addrs.push(format!("127.0.0.1:{}", listener.local_addr().unwrap().port()));
+            let c = Custodian {
+                zcash: None,
+                solana: None,
+                treasury: Some(crate::custodian::solana::Participant::new(keys.clone())),
+            };
+            let shared = std::sync::Arc::new(std::sync::Mutex::new(c));
+            std::thread::spawn(move || serve(shared, listener, || 0));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let msg = b"an intent payload";
+        let (group, sig) = sign_across(&addrs, &public, 2, msg, 1).expect("sign across");
+
+        assert_eq!(group, t.group_key);
+        let vk = ed25519_dalek::VerifyingKey::from_bytes(&group).unwrap();
+        vk.verify_strict(msg, &ed25519_dalek::Signature::from_bytes(&sig))
+            .expect("an ordinary verification must accept the distributed signature");
+        assert_eq!(
+            zyn_vm::auth::account_of(zyn_vm::auth::Scheme::Ed25519, &group),
+            t.account,
+            "and it speaks for the treasury account"
+        );
+    }
 
     #[test]
     fn provisioning_yields_an_account_and_one_share_per_holder() {

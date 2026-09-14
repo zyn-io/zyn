@@ -3039,3 +3039,53 @@ Ordered by what blocks what.
    ed25519, a different FROST ciphersuite from RedPallas.
 8. **Monitoring.** Vault balance against issued supply, sequencer liveness,
    signer availability, and the age of the oldest unsettled exit.
+
+## Mainnet genesis — frozen 15 Sep 2026
+
+Chain 26460 holds its genesis objects and is **stopped**. The service is also
+`disable`d, so a reboot does not restart it.
+
+| | |
+|---|---|
+| Treasury | `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99` (FROST Ed25519, 2-of-3) |
+| NAPMOLE | `d3090c31228b5614ddd13e7ff29bb251e211cfbfe1057a279be2a67460619261` — cap 333, fee 100 bps, phase **Closed**, 333/333 minted |
+| CAVEZ | `024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e` — cap 4444, fee 100 bps, phase **Minting**, 0 minted |
+| Sealed | epoch 0, DA bundle published for endorsement (5 files) |
+| Backup | `/var/backups/zyn/mainnet-genesis-20260915-010516.tar.gz`, sha256 `98fc482b…8412`, copy on the Mac at `~/.zyn/backup/mainnet-genesis/` |
+
+Nothing is anchored to Zcash yet: the vault holds no ZEC, so the anchor pass
+fails with "waiting for a spendable Ironwood note". That is the expected state,
+not a fault — anchoring begins once the vault is funded.
+
+Treasury shares (one each, never two in one place):
+
+| Holder | Path | Identifier |
+|---|---|---|
+| Mac | `~/.zyn/treasury` | `01…` |
+| Air (`zhang@192.168.1.27`) | `~/.zyn/treasury` | `02…` |
+| Windows box | `/var/zyn/treasury` (WSL) | `03…` |
+
+### Re-running or extending genesis
+
+`zyn-genesis` resumes from what is already on chain, so a re-run is safe: it
+skips every intent already applied and submits only the remainder. `plan`
+contacts nothing and signs nothing.
+
+```sh
+# custodians first — two of the three, each on the box holding its share
+ZYN_CUSTODY_TREASURY_SHARE=$HOME/.zyn/treasury ZYN_CUSTODY_LISTEN=127.0.0.1:8211 zyn-custodian &
+ssh zhang@192.168.1.27 'ZYN_CUSTODY_TREASURY_SHARE=$HOME/.zyn/treasury ZYN_CUSTODY_LISTEN=0.0.0.0:8211 ~/zyn-custodian &'
+
+ssh -f -N -L 18100:127.0.0.1:8099 root@95.111.240.24   # the node RPC is not public
+
+export ZYN_GENESIS_CHAIN=26460 ZYN_GENESIS_NODE=127.0.0.1:18100        ZYN_GENESIS_CUSTODIANS=127.0.0.1:8211,192.168.1.27:8211 ZYN_GENESIS_THRESHOLD=2        ZYN_GENESIS_TREASURY=$HOME/.zyn/treasury        ZYN_GENESIS_MANIFEST=apps/nap/branding/nap-mole-collection-333/out/content.json
+zyn-genesis plan && zyn-genesis run
+cargo run --example verify_genesis    # address, binding and content, item by item
+```
+
+Stop the custodians afterwards. They hold shares and should not sit listening.
+
+**Serials are 0-based.** The VM requires `serial < cap`, so the 333 occupy
+serials 0..=332 while collectors count from one: `MOLE001` is serial 0, and
+`MOLE333` is serial 332. `zyn-genesis` binds the two in one place so the
+off-by-one cannot spread.
