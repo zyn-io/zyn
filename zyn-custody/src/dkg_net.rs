@@ -207,24 +207,40 @@ impl<C: Ciphersuite> DkgParticipant<C> {
 
 /// A distributed DKG for Zcash, driven in memory over the same steps a network
 /// coordinator relays — the test harness, and the reference for the tool.
+///
+/// Kept as the Zcash-shaped name every existing caller uses; the work is in
+/// [`run_in_memory_for`], which is the same ceremony over any ciphersuite.
 pub fn run_in_memory(
     threshold: u16,
     participants: u16,
 ) -> Result<BTreeMap<IdentifierFor<Zcash>, ThresholdKeys<Zcash>>, CeremonyError> {
+    run_in_memory_for::<Zcash>(threshold, participants)
+}
+
+/// The same ceremony, over any ciphersuite.
+///
+/// Every part of the DKG was already generic — `DkgParticipant<C>`,
+/// `Round1Broadcast<C>`, `ThresholdKeys<C>` — and only this driver named Zcash,
+/// which is why provisioning a threshold account for anything else looked like
+/// new work when it was a type parameter away.
+pub fn run_in_memory_for<C: Ciphersuite>(
+    threshold: u16,
+    participants: u16,
+) -> Result<BTreeMap<IdentifierFor<C>, ThresholdKeys<C>>, CeremonyError> {
     let mut rng = rand::rngs::OsRng;
-    let ids: Vec<IdentifierFor<Zcash>> = (1..=participants)
-        .map(|i| IdentifierFor::<Zcash>::try_from(i).map_err(|_| CeremonyError::Crypto))
+    let ids: Vec<IdentifierFor<C>> = (1..=participants)
+        .map(|i| IdentifierFor::<C>::try_from(i).map_err(|_| CeremonyError::Crypto))
         .collect::<Result<_, _>>()?;
     let mut parts = BTreeMap::new();
     let mut broadcasts = Vec::new();
     for id in &ids {
-        let (p, b) = DkgParticipant::<Zcash>::part1(*id, threshold, participants, &mut rng)?;
+        let (p, b) = DkgParticipant::<C>::part1(*id, threshold, participants, &mut rng)?;
         parts.insert(*id, p);
         broadcasts.push(b);
     }
     // Round two: each seals a package to every other; the relay collects them
     // by (from -> to -> ciphertext).
-    let mut relayed: BTreeMap<IdentifierFor<Zcash>, BTreeMap<IdentifierFor<Zcash>, Vec<u8>>> =
+    let mut relayed: BTreeMap<IdentifierFor<C>, BTreeMap<IdentifierFor<C>, Vec<u8>>> =
         BTreeMap::new();
     for id in &ids {
         let others: Vec<_> = broadcasts.iter().filter(|b| b.id != *id).cloned().collect();

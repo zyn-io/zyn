@@ -5140,3 +5140,14 @@ order — rehearse on testnet, then mainnet — was the wrong way round here.
 | 79.4 | **Both were pinned literals with nothing stopping them drifting from their derivations.** They agreed, but only by care — and a constant that no longer derives from anything is how the asset whose whole job is to be 1:1 with ZEC ends up identified by an orphan number. The same shape as `derive_for` silently dropping the VM version (§66.1). Tests now assert both | ✅ |
 | 79.5 | **Different purpose or different scope is a different account**, so a later raise cannot collide with an existing pot and needs no registry to avoid one. Asserted, not assumed | ✅ |
 | 79.6 | **Cave does not yet honour §66.14's separation.** It derives one `launch_vault(asset)` per launch, while §66.14 requires distinct accounts for curve inventory, graduation inventory, refundable reserve, pair seed, graduation fees, creator escrow and the LP lock — "balances with different movement rules never share an account". One account holding refundable principal *and* creator escrow cannot show an auditor which is which | ⏳ gap |
+
+## 80. A treasury is one call, not a project (14 Sep 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 80.1 | **`Treasury::provision(threshold, participants)` returns the account and one share per holder.** The same call serves the protocol treasury, a project's raise or a grant pool; only the numbers change. A future treasury is therefore not a new mechanism to review — it is this one, already tested | ✅ |
+| 80.2 | **The chain needs no threshold-aware path.** A FROST group over Ed25519 produces an ordinary Ed25519 signature against an ordinary verifying key, so a treasury is a normal `Scheme::Ed25519` account and every existing authorisation path works unchanged. Asserted, not assumed: a test proves the account equals what a single key with the same verifying key would give | ✅ |
+| 80.3 | **Only the driver was ever Zcash-specific.** `DkgParticipant<C>`, `Round1Broadcast<C>` and `ThresholdKeys<C>` were already generic; `run_in_memory` alone named Zcash, which is why provisioning for another curve looked like new cryptography when it was a type parameter. Now `run_in_memory_for::<C>`, with the old name kept for existing callers | ✅ |
+| 80.4 | **Refuses `1`-of-`n` and any threshold above the holder count.** A one-of-n "threshold" is a single key wearing a costume, and a threshold nobody can reach is an account nobody can ever spend from | ✅ |
+| 80.5 | **Shares must never be stored two-to-a-place.** Same rule as the vault's paper backups (§60.4) — the threshold is worth exactly as much as the separation of its shares | 🔒 |
+| 80.6 | **Provisioning is not the same as authority.** This yields an account and shares; making the treasury *act* — authoring `FundCollection` or `MintCollectionItem` — still needs the signing path §64.14 says `cave-sale` deliberately does not hold | ⏳ A57 |
