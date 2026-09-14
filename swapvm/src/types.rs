@@ -321,3 +321,45 @@ mod testnet_params_tests {
         assert!(Params::testnet().validate().is_ok());
     }
 }
+
+#[cfg(test)]
+mod pinned_address_tests {
+    use super::*;
+
+    /// `XZEC` and `ZYN_POL` are pinned literals. They agree with their
+    /// derivations today, and nothing was stopping them from drifting apart —
+    /// which is how the asset whose whole job is to be 1:1 with ZEC ends up
+    /// identified by a constant that derives from nothing. Same shape as the
+    /// bug where `derive_for` silently dropped the VM version (§66).
+    #[test]
+    fn xzec_is_the_derived_bridged_address_for_zcash() {
+        assert_eq!(
+            XZEC,
+            zyn_vm::bridged_address(ADDRESS_SCOPE_V1, b"zcash", b""),
+            "XZEC must stay the §66.13 derivation, not a number someone typed"
+        );
+    }
+
+    #[test]
+    fn the_zyn_pot_is_the_derived_pot_for_zec_zy() {
+        assert_eq!(
+            ZYN_POL,
+            zyn_vm::pot_address(ADDRESS_SCOPE_V1, b"zyn-pol", &[&XZEC]),
+            "the protocol-owned-liquidity pot must stay recomputable by anyone"
+        );
+    }
+
+    /// The property that makes the pot mechanism reusable: a different purpose
+    /// or a different scope is a different account, so a later raise needs no
+    /// new mechanism and cannot collide with an existing pot.
+    #[test]
+    fn pots_separate_by_purpose_and_by_scope() {
+        let other_asset = [9u8; 32];
+        let raise = zyn_vm::pot_address(ADDRESS_SCOPE_V1, b"raise", &[&XZEC]);
+        let escrow = zyn_vm::pot_address(ADDRESS_SCOPE_V1, b"escrow", &[&XZEC]);
+        let raise_other = zyn_vm::pot_address(ADDRESS_SCOPE_V1, b"raise", &[&other_asset]);
+        assert_ne!(raise, escrow, "different purposes, different accounts");
+        assert_ne!(raise, raise_other, "different scopes, different accounts");
+        assert_ne!(raise, ZYN_POL, "and none of them collide with an existing pot");
+    }
+}
