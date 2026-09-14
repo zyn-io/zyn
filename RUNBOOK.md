@@ -2434,9 +2434,10 @@ What still remains impossible until the A2 external adapters wrap the now-built
 engine and durable `zyn-io/cave:cave-sale` ledger:
 
 - publishing a launch and returning independently checkable timestamp evidence;
-- watching Zcash and turning canonical confirmed outputs into ledger tickets;
+- operating the continuous Zcash scanner and its restart/progress loop;
 - fetching public entropy and finalizing without an operator supplying evidence;
-- signing/submitting the resulting mint plans with Treasury 26460 authority;
+- signing/submitting entry credit, floor funding and mint plans with Treasury
+  26460 authority;
 - wiring those operations into the storefront.
 
 ### Randomness engine and backend handoff
@@ -2451,6 +2452,7 @@ full replay verification. Check it independently before service work:
 ```sh
 cargo test --manifest-path /path/to/zyn-io/cave/cave-randomness/Cargo.toml
 cargo test --manifest-path /path/to/zyn-io/cave/cave-sale/Cargo.toml
+cargo test --manifest-path /path/to/zyn-io/cave/cave-zcash/Cargo.toml
 ```
 
 The backend must consume that API through `zyn-io/cave:cave-sale`, not
@@ -2469,6 +2471,31 @@ prove the reveal block hash belongs to the committed height. Persist and publish
 the append-only ledger and engine receipts. The publish button can be enabled
 only after those service invariants have tests and the wallet approval names the
 exact digest being locked.
+
+### Cave entry payment and floor funding
+
+Generate the shielded payment memo with `cave-zcash::entry_memo`. It is a strict
+`ZYC/v1` instruction carrying the allocation-policy digest and Zyn recipient;
+never use the ordinary `ZYN/v1` account-deposit memo for a Cave sale payment.
+The shared vault scanner excludes `ZYC` before address attribution, so the same
+ZEC cannot become both the buyer's ZEC.zy and sale proceeds. A malformed `ZYC`
+stops classification for operator review rather than falling through.
+
+After the configured Zcash depth, feed the canonical sighting and future drand
+targets through `cave-zcash::accept_entry`. For each admitted ticket:
+
+1. Submit the ledger's `BridgeCreditPlan` as an operator `CreditDeposit` to
+   Treasury 26460 and record only a matching accepted VM receipt.
+2. Wait until a confirmed anchor covers the credited epoch.
+3. Submit the resulting `FloorFundingPlan` with Treasury authority: 90% goes to
+   `FundCollection`; the remaining 10% stays in Treasury.
+4. Record only the matching funding receipt. Mint plans for that ticket remain
+   unavailable until this succeeds.
+
+Both records are idempotent and are fully revalidated on ledger restart. The
+continuous scanner loop, Treasury threshold signer and later claim-payment
+settlement are still service work; do not label the standalone libraries as a
+live sale daemon.
 
 ## 5j. Cave fungible launchpad and atomic ZynZap graduation (implemented, staged; 14 Sep 2026)
 

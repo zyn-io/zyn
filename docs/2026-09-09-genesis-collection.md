@@ -150,13 +150,22 @@ passes the committed height, atomically persists the ledger, replays every
 reservation and allocation on restart, and emits idempotent mint plans bound to
 the receipt's serial, recipient and content hash.
 
+**Complete — entry-payment isolation and proceeds planning:** `ZYC/v1` binds an
+entry to the policy digest and Zyn recipient. The shared vault scanner surfaces
+it with canonical block/transaction/output position and excludes it from the
+ordinary buyer-credit path before address attribution. Cave admits it only at
+the configured confirmation depth, credits the exact amount to Treasury 26460,
+waits for that epoch's anchor, then plans 90% to `fund_collection` while 10%
+remains in Treasury. Matching VM receipts are required and item mint plans stay
+blocked until the ticket's floor funding is recorded.
+
 **Not built — external adapters and product paths:**
 
-1. Publish/timestamp the immutable policy and manifest; independently verify
-   canonical Zcash facts and fetch drand; expose the persisted ledger and
-   receipts publicly
-2. Automated claim, team reserve and open mint
-3. Sale-proceeds treasury split and the `fund_collection` calls that follow it
+1. Publish/timestamp the immutable policy and manifest; run the continuous
+   Zcash/drand adapters; expose the persisted ledger and receipts publicly
+2. Treasury 26460 threshold signing and submission of the already planned entry
+   credit/funding actions
+3. Claim-payment admission/settlement, automated claim, team reserve and open mint
 4. A public claim endpoint — `mint_collection_item` is creator-only, so every mint is
    signed by the collection creator on the buyer's behalf
 5. Storefront wiring. The core client and wallet API already expose place/take/
