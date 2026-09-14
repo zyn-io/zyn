@@ -4830,28 +4830,6 @@ availability gates settlement.
 | 65.5 | **A content hash is not hosted artwork.** Until a resolver can fetch bytes and verify them against the committed hash without leaking wallet activity, Nap renders a deterministic identicon and exposes the full commitment for checking. Rejected: loading arbitrary remote image URLs from NFT metadata in the wallet | ✅ |
 | 65.6 | The daemon creates the account QR in the existing overview response and the shared canonical page consumes it. No QR library, image host or font host is added to the browser; Tauri receives the same source through `apps/nap/build-ui.mjs` | ✅ |
 
-## 63. An endorsement must survive the sequencer that collected it (12 Sep 2026)
-
-| # | Decision | Status |
-|---|---|---|
-| 63.1 | **This was the actual cause of the 2810-pass chain-11 outage**, and it predates §61 and §62. The sequencer keeps signatures for an *in-flight* anchor in memory; only a **settled** anchor's certificate is persisted. It restarted at 09:25 UTC on 11 Sep, after signer1 had endorsed at 08:02 UTC, and silently discarded that signature | ✅ |
-| 63.2 | A signer endorsed each anchor **exactly once** — `take_newly_verified()` drains it and `seen` prevents re-verification — so a lost signature could never be replaced and the threshold became permanently unreachable. One restart at the wrong moment was enough to strand the chain forever | ✅ |
-| 63.3 | Signers now **re-offer** an endorsement every pass until the sequencer reports the certificate clears, and seed that list at startup with their head anchor — the one a restarted sequencer can still be awaiting. Endorsing is idempotent, so re-offering costs one call and heals the whole class | ✅ |
-| 63.4 | **Every layer reported success while the chain was dead.** signer1 said "counted, certificate now clears", the sequencer said "awaiting signatures", and neither was wrong about what it had seen. Liveness failures hide in the gaps between components that are each individually healthy | ✅ |
-| 63.5 | **Diagnostic order matters more than fix quality.** §61 and §62 are real bugs, tested and deployed, but neither was on the critical path; each masked the next. The cheap check that would have found this first — the sequencer's 23-hour uptime against signer1's 08:02 log write — was never run because the code looked guilty | ✅ |
-| 63.6 | Durable per-anchor certificates on the sequencer remain the stronger fix and stay open. Re-offering heals the symptom from the signer side and needs no sequencer state change, which is why it shipped first | ⏳ |
-
-## 64. A replica only consults its base when its data directory is empty (12 Sep 2026)
-
-| # | Decision | Status |
-|---|---|---|
-| 64.1 | signer3 was stranded because the §A17 re-base left its base root **off the lineage**: the chain went 5397 → 6692, and no anchor ever carried the root it was based on. It sat harmless for a day because its base epoch was *above* the live one — there was nothing to check until an anchor appeared above it, and then it broke instantly | ✅ |
-| 64.2 | It was rebuilt by **copying signer2's verified state directory**, not by attesting a base. `open_from` consults the base only when `store.load()` returns `None`, so a populated data directory bypasses that path entirely — which is exactly why signer1 and signer2 never met the fault | ✅ |
-| 64.3 | The copy was taken **hot**, with signer2 still running, so the set never dropped below threshold. A torn snapshot would have failed only signer3, leaving the chain untouched — the cheap risk was the right one to take first, and it paid | ✅ |
-| 64.4 | **Only chain state moved; the signing key did not.** signer3 still endorses as set slot 3 from its own key in its own env file. Copying state between replicas is safe precisely because identity lives outside the data directory | ✅ |
-| 64.5 | The cost, named plainly: signer3 now starts from a root **signer2 derived** rather than one it derived itself. That is the same class of trust as attesting a base root out of band — the designed mechanism — but it is a real reduction in independence and was taken as a deliberate decision, not a default | ✅ |
-| 64.6 | Why the base path failed at all is **unresolved** (A22): the binary reported a fixed attested root regardless of `ZYN_BASE_ROOT`, including an explicit override, contradicting the only such check in the source. Not blocking, because no replica now starts empty — but a genuinely fresh replica would hit it | ⏳ |
-
 ## 66. The address standard, and the bug that made it a no-op (12 Sep 2026)
 
 | # | Decision | Status |
@@ -4883,7 +4861,7 @@ availability gates settlement.
 | 67.3 | **Size never enters the chain.** 32 bytes are committed whether the media is a 40 KB PNG or a 4 GB film, so GIF and video need no protocol change — only a bigger CDN bill | ✅ |
 | 67.4 | **The manifest is itself a blob, addressed by the content hash.** From 32 bytes on chain a wallet finds and checks everything else with no registry and nothing to trust | ✅ |
 | 67.5 | **Verify before render, always.** `verify_media` in the VM and the same check in the wallet: bytes are compared to the commitment before they are decoded. That is what makes it safe to accept a file from a gateway, a peer, or a stranger's USB stick — the source is never trusted, only the hash | ✅ |
-| 67.6 | **Fetching is off until a gateway is configured** (`nap_media_sources`). Asking a server for the art of the item you own tells it your IP, which item you hold, and when — the disclosure that made us bundle the fonts (C18). Anything already in the local store renders with no network at all | ✅ |
+| 67.6 | **Fetching is off until a gateway is configured** (`nap_media_sources`). Asking a server for the art of the item you own tells it your IP, which item you hold, and when — the disclosure that made us bundle the fonts (C23). Anything already in the local store renders with no network at all | ✅ |
 | 67.7 | **Handing someone the file with the item is therefore the private path**, and needs no protocol support: bytes arrive once, by hand, are checked against the commitment, and are never requested again. Media does **not** travel inside an intent — that would put it in DA, on every mirror and every replica, forever | ✅ |
 | 67.8 | **A watermark is a courtesy, not a control.** A manifest may commit a public `Preview` beside the `Full` media, but the full bytes cannot be kept secret: the owner has them and may republish, and the first owner always can. Ownership is the chain record, never possession of bytes — the same position the content hash already takes, since it is a commitment and not a secret | ✅ |
 | 67.9 | Three implementations of the encoding now exist — Rust (normative), the collection builder in Python, the wallet in JavaScript. All three are pinned to the same vector: Nap Mole #001 is `14ecc291…`. A cross-check test fails if any one drifts | ✅ |
@@ -5060,3 +5038,31 @@ as one until the release rule is committed.
 launch**, which is the shape critics reach for first. §71.3's three numbers are
 the mitigation and only work if they are published from day one, together, with
 the reserve's release rules — not `circulating` alone.
+
+## 72. An endorsement must survive the sequencer that collected it (12 Sep 2026)
+
+> Renumbered 14 Sep from §63, which collided with "ZynZap is hosted without
+> making the Zyn RPC public". Both were written on 12 Sep in parallel trees.
+
+| # | Decision | Status |
+|---|---|---|
+| 72.1 | **This was the actual cause of the 2810-pass chain-11 outage**, and it predates §61 and §62. The sequencer keeps signatures for an *in-flight* anchor in memory; only a **settled** anchor's certificate is persisted. It restarted at 09:25 UTC on 11 Sep, after signer1 had endorsed at 08:02 UTC, and silently discarded that signature | ✅ |
+| 72.2 | A signer endorsed each anchor **exactly once** — `take_newly_verified()` drains it and `seen` prevents re-verification — so a lost signature could never be replaced and the threshold became permanently unreachable. One restart at the wrong moment was enough to strand the chain forever | ✅ |
+| 72.3 | Signers now **re-offer** an endorsement every pass until the sequencer reports the certificate clears, and seed that list at startup with their head anchor — the one a restarted sequencer can still be awaiting. Endorsing is idempotent, so re-offering costs one call and heals the whole class | ✅ |
+| 72.4 | **Every layer reported success while the chain was dead.** signer1 said "counted, certificate now clears", the sequencer said "awaiting signatures", and neither was wrong about what it had seen. Liveness failures hide in the gaps between components that are each individually healthy | ✅ |
+| 72.5 | **Diagnostic order matters more than fix quality.** §61 and §62 are real bugs, tested and deployed, but neither was on the critical path; each masked the next. The cheap check that would have found this first — the sequencer's 23-hour uptime against signer1's 08:02 log write — was never run because the code looked guilty | ✅ |
+| 72.6 | Durable per-anchor certificates on the sequencer remain the stronger fix and stay open. Re-offering heals the symptom from the signer side and needs no sequencer state change, which is why it shipped first | ⏳ |
+
+## 73. A replica only consults its base when its data directory is empty (12 Sep 2026)
+
+> Renumbered 14 Sep from §64, which collided with "Cave launches are configurable
+> promises, then immutable ones".
+
+| # | Decision | Status |
+|---|---|---|
+| 73.1 | signer3 was stranded because the §A17 re-base left its base root **off the lineage**: the chain went 5397 → 6692, and no anchor ever carried the root it was based on. It sat harmless for a day because its base epoch was *above* the live one — there was nothing to check until an anchor appeared above it, and then it broke instantly | ✅ |
+| 73.2 | It was rebuilt by **copying signer2's verified state directory**, not by attesting a base. `open_from` consults the base only when `store.load()` returns `None`, so a populated data directory bypasses that path entirely — which is exactly why signer1 and signer2 never met the fault | ✅ |
+| 73.3 | The copy was taken **hot**, with signer2 still running, so the set never dropped below threshold. A torn snapshot would have failed only signer3, leaving the chain untouched — the cheap risk was the right one to take first, and it paid | ✅ |
+| 73.4 | **Only chain state moved; the signing key did not.** signer3 still endorses as set slot 3 from its own key in its own env file. Copying state between replicas is safe precisely because identity lives outside the data directory | ✅ |
+| 73.5 | The cost, named plainly: signer3 now starts from a root **signer2 derived** rather than one it derived itself. That is the same class of trust as attesting a base root out of band — the designed mechanism — but it is a real reduction in independence and was taken as a deliberate decision, not a default | ✅ |
+| 73.6 | Why the base path failed at all is **unresolved** (A22): the binary reported a fixed attested root regardless of `ZYN_BASE_ROOT`, including an explicit override, contradicting the only such check in the source. Not blocking, because no replica now starts empty — but a genuinely fresh replica would hit it | ⏳ |

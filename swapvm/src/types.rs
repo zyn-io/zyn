@@ -17,7 +17,12 @@ pub type AssetId = [u8; 32];
 
 /// Frozen address-derivation scope. Changing these bytes would rename every
 /// asset, pool, vault, collection and item, so upgrades use a new scope.
-pub const ADDRESS_SCOPE_V1: &[u8] = b"zynzap\0\x02";
+///
+/// Re-exported rather than redeclared. Two independent literals of the same
+/// frozen value are two things that can drift, and §66.10 exists precisely so
+/// this one cannot — a second copy would let a careless edit rename every
+/// persistent identity in one crate while the other kept the old bytes.
+pub use zyn_vm::derive::ADDRESS_SCOPE_V1;
 
 /// xZEC — the 1:1 execution-layer representation of deposited ZEC.
 ///

@@ -649,7 +649,7 @@ let itemSendOpen = false;
 //
 // Fetching is OFF until a gateway is configured. Asking a server for the art of
 // the item you own tells that server your IP, which item you hold, and when —
-// the same disclosure that made us bundle the fonts (C18). Anything already in
+// the same disclosure that made us bundle the fonts (C23). Anything already in
 // the local store renders with no network at all, which is why handing someone
 // the file along with the item is the private path: it arrives once, by hand,
 // and is never requested again.
@@ -825,7 +825,7 @@ function renderItems(z) {
   $('it-phase').textContent = coll ? coll.phase_name : '—';
   $('it-supply').textContent = coll ? `${coll.minted} of ${coll.cap} minted · ${coll.outstanding} outstanding` : '—';
   $('it-pool').textContent = coll ? `${coll.pool} ZEC behind ${coll.outstanding}` : '—';
-  $('it-asset').textContent = String(it.asset);
+  setAddr('it-asset', it.asset || '');
   setAddr('it-content', it.content || '');
 
   const sendPanel = $('it-send-panel');
@@ -1017,9 +1017,20 @@ function entryHtml(e, s) {
 }
 document.addEventListener('click', (ev) => { const b = ev.target.closest('button[data-copy]'); if (b) navigator.clipboard.writeText(b.dataset.copy).then(() => toast('txid copied')).catch(() => {}); });
 
+// Identifiers are 32-byte derived addresses (§66.9), not small integers. The
+// previous version coerced with Number() and filtered on Number.isInteger, which
+// discards every hex id and left the field permanently invalid.
+const ID_RE = /^[0-9a-f]{64}$/;
+function assetId(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!ID_RE.test(v)) throw new Error('expected a 32-byte id as 64 hex characters');
+  return v;
+}
 function ids(value) {
-  const out = value.split(',').map(x => Number(x.trim())).filter(Number.isInteger);
-  if (!out.length || out.some(x => x < 0) || new Set(out).size !== out.length) throw new Error('enter unique numeric ids separated by commas');
+  const out = value.split(',').map(x => String(x).trim().toLowerCase()).filter(Boolean);
+  if (!out.length || out.some(x => !ID_RE.test(x)) || new Set(out).size !== out.length) {
+    throw new Error('enter unique 64-character hex ids separated by commas');
+  }
   return out;
 }
 function rawAmount(raw) {
@@ -1108,14 +1119,14 @@ $('zt-send').onclick = () => run($('zt-send'), 'Sending…', async () => {
   const ok = await confirmDialog('Send on Zyn', [['To account', to], ['Amount', `${amount} ${sym}`], ['Settles', 'this epoch, privately']]);
   if (!ok) return;
   const force = $('zt-force').checked;
-  const r = await api('/api/transfer', { to, asset: +$('zt-asset').value, amount, force }); logLine(force ? `forced via Zcash in tx ${r.txid.slice(0, 12)}… — the node has 20 blocks` : `sent on Zyn at seq ${r.seq}`); $('zt-amount').value = ''; $('zt-force').checked = false;
+  const r = await api('/api/transfer', { to, asset: assetId($('zt-asset').value), amount, force }); logLine(force ? `forced via Zcash in tx ${r.txid.slice(0, 12)}… — the node has 20 blocks` : `sent on Zyn at seq ${r.seq}`); $('zt-amount').value = ''; $('zt-force').checked = false;
 });
 $('save-settings').onclick = () => run($('save-settings'), 'Saving…', async () => { const net = document.querySelector('input[name=net]:checked').value; await api('/api/settings', { network: net, lightd_testnet: $('lightd-testnet').value, lightd_mainnet: $('lightd-mainnet').value, price: $('set-price').checked }); logLine('settings saved; now on ' + net); });
 $('agent-create').onclick = () => run($('agent-create'), 'Opening…', async () => {
   const allowed_assets = ids($('agent-assets').value), allowed_pools = ids($('agent-pools').value);
-  const asset = Number($('agent-input-asset').value), amount = $('agent-max').value.trim();
+  const asset = assetId($('agent-input-asset').value), amount = $('agent-max').value.trim();
   const max_slippage_bps = Math.round(Number($('agent-slip').value) * 100), valid_for_epochs = Number($('agent-epochs').value);
-  if (!Number.isInteger(asset) || asset < 0 || !amount || !Number.isInteger(valid_for_epochs)) throw new Error('input asset, maximum amount, and whole epochs are required');
+  if (!amount || !Number.isInteger(valid_for_epochs)) throw new Error('maximum amount and whole epochs are required');
   const ok = await confirmDialog('Open agent mandate', [['Can do', 'exact-input swaps only'], ['Assets', allowed_assets.join(', ')], ['Pools', allowed_pools.join(', ')], ['Maximum per swap', `${amount} of asset ${asset}`], ['Maximum slippage', `${max_slippage_bps / 100}%`], ['Expires', `after ${valid_for_epochs} epochs`], ['Cannot do', 'transfer, withdraw, add liquidity, bind, delegate, export keys, or change settings']]);
   if (!ok) return;
   await api('/api/agent/mandates', { allowed_assets, allowed_pools, max_per_action_raw: [{ asset, amount }], max_slippage_bps, valid_for_epochs });
