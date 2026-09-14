@@ -143,19 +143,24 @@ cross-crate test allocates two receipts and mints them in reverse order while
 proving both canonical item ids and recipients remain exact. `POST /api/mint`
 therefore requires `serial` and returns the derived asset id.
 
-**Not built — the stateful sale service and product paths:**
+**Complete — durable sale state:** `zyn-io/cave:cave-sale` locks an externally
+published policy/manifest commitment, admits each verified Zcash output once,
+reserves worst-case supply before acceptance, closes only after a verified tip
+passes the committed height, atomically persists the ledger, replays every
+reservation and allocation on restart, and emits idempotent mint plans bound to
+the receipt's serial, recipient and content hash.
 
-1. Publish/timestamp the immutable policy and manifest; verify deposit order and
-   canonical Zcash block facts; persist ticket reservations, allocation ledger
-   and receipts; expose them publicly
-2. Claim, team reserve and open mint
-3. Treasury split and the `fund_collection` calls that follow it
-4. A public claim path — `mint_collection_item` is creator-only, so every mint is
+**Not built — external adapters and product paths:**
+
+1. Publish/timestamp the immutable policy and manifest; independently verify
+   canonical Zcash facts and fetch drand; expose the persisted ledger and
+   receipts publicly
+2. Automated claim, team reserve and open mint
+3. Sale-proceeds treasury split and the `fund_collection` calls that follow it
+4. A public claim endpoint — `mint_collection_item` is creator-only, so every mint is
    signed by the collection creator on the buyer's behalf
-5. **The buy/sell path**: `AcceptOffer` exists in the VM but is exposed nowhere —
-   only a test at `zynzapd/src/rpc.rs:1247`. No client method, no endpoint. Nothing
-   can be traded from outside the VM today. *Blocks both the sale and the demo.*
-6. Storefront wiring
+5. Storefront wiring. The core client and wallet API already expose place/take/
+   cancel offer; Cave still has to connect its secondary-trading UI to them
 
 ## Open questions
 

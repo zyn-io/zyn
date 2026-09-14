@@ -2430,13 +2430,14 @@ What can be exercised now:
 5. Run the 10,000-entry browser preview. It uses `crypto.getRandomValues`, is
    labelled **not the draw**, and must never be copied into backend allocation.
 
-What still remains impossible until the A2 service wraps the now-built engine:
+What still remains impossible until the A2 external adapters wrap the now-built
+engine and durable `zyn-io/cave:cave-sale` ledger:
 
-- publishing or locking a launch;
-- taking a wallet signature or deposit;
-- claiming that a policy hash has been publicly committed;
-- assigning an NFT index;
-- treating expected capacity as available inventory.
+- publishing a launch and returning independently checkable timestamp evidence;
+- watching Zcash and turning canonical confirmed outputs into ledger tickets;
+- fetching public entropy and finalizing without an operator supplying evidence;
+- signing/submitting the resulting mint plans with Treasury 26460 authority;
+- wiring those operations into the storefront.
 
 ### Randomness engine and backend handoff
 
@@ -2448,19 +2449,21 @@ verified drand Quicknet evidence, unbiased sampling, allocation receipts and
 full replay verification. Check it independently before service work:
 
 ```sh
-cargo test -p cave-randomness
+cargo test --manifest-path /path/to/zyn-io/cave/cave-randomness/Cargo.toml
+cargo test --manifest-path /path/to/zyn-io/cave/cave-sale/Cargo.toml
 ```
 
-The backend must consume that API, not reconstruct policy from the form's DOM.
+The backend must consume that API through `zyn-io/cave:cave-sale`, not
+reconstruct policy from the form's DOM.
 Return the digest and public timestamp evidence to the UI only after the exact
 canonical bytes and manifest root have been durably published.
 
-The service must reserve **maximum possible output** per unresolved entry, use
-the engine's unbiased sampler for creator weights, and be idempotent by deposit
-transaction and ticket id. UI percentages may total 100 for authoring clarity,
-but engine weights are arbitrary positive relatives and must not be rescaled
-after commitment. Never fall back to local RNG if a beacon or canonical Zcash
-block is unavailable: pause allocation. Verify deposit confirmation/position,
+The ledger reserves the fixed amount, selected buyer amount, or **maximum
+possible output** for an unresolved weighted entry and is idempotent by exact
+deposit outpoint and ticket id. UI percentages may total 100 for authoring
+clarity, but engine weights are arbitrary positive relatives and must not be
+rescaled after commitment. Never fall back to local RNG if a beacon or canonical
+Zcash block is unavailable: pause allocation. Verify deposit confirmation/position,
 prove each future beacon target was committed before it became knowable, and
 prove the reveal block hash belongs to the committed height. Persist and publish
 the append-only ledger and engine receipts. The publish button can be enabled
