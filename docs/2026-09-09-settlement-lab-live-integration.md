@@ -81,7 +81,7 @@ something a viewer can check on a chain they already trust.
 
 ```
 POST /api/fund          { collection, amount }                  -> { funded, seq, epoch }
-POST /api/mint          { collection, to, content, symbol? }    -> { minted, seq, epoch }
+POST /api/mint          { collection, serial, to, content, symbol? } -> { minted, serial, asset, seq, epoch }
 POST /api/offer         { asset, price, amount?, expires_at_epoch? }
                                                                 -> { placed, seq, epoch }
 POST /api/take          { offer }                               -> { taken, seq, epoch }
@@ -97,7 +97,8 @@ Notes that will save an afternoon:
 - `/api/offer` takes `asset` (the item) and `price` (in ZEC.zy). `amount`
   defaults to one whole unit, which is what an item is. Omitting
   `expires_at_epoch` means the offer rests until cancelled.
-- `/api/mint` is **creator-only** and needs `content` (32-byte hex). It rejects
+- `/api/mint` is **creator-only** and needs `serial` (the allocation's canonical
+  collection index) plus `content` (32-byte hex). It rejects
   anything else with `NotTheCreator`.
 - `to` and `content` are 32-byte hex strings, no `0x`.
 - `/fund`, `/mint`, `/offer`, and `/take` return `seq` and `epoch`; `/redeem` and
@@ -111,7 +112,8 @@ There is no single "buy" endpoint, deliberately. A claim is:
 
 1. the buyer calls `POST /api/fund` — their money goes into the collection pool,
    signed by them
-2. the creator calls `POST /api/mint` with `to` = the buyer — the item is handed over
+2. the creator calls `POST /api/mint` with `serial` from the verified allocation
+   receipt and `to` = that receipt's buyer — the exact item is handed over
 
 `FundCollection` is authorised by whoever pays, so the buyer pays themselves and
 the creator never moves a buyer's money. Two daemons, two calls, in that order.
@@ -134,10 +136,12 @@ claim. The live UI calls this beat **forced return transfer** and says explicitl
 that there is no price leg. A future forced-offer/take route can restore the
 eight-beat sale-back choreography without changing that distinction.
 
-The floor rises after beat 3 from trade fees alone — each side pays `fee_bps`,
-half of every charge goes to the pool. Show `redeem_price` from `/api/overview`
-on screen and let it tick up; that is the most persuasive number in the demo
-and it needs no narration.
+The floor rises after beat 3 from its share of trade fees alone — each side pays
+`fee_bps`, of which `40%` now goes to the collection floor reserve, `50%` to ZYN
+POL and `10%` to the collection creator. This supersedes the demo's historical
+50/50 pool/creator wording. Show `redeem_price` from `/api/overview` on screen
+and let it tick up; that is the most persuasive number in the demo and it needs
+no narration.
 
 ## Anchors are scheduled — there is no manual trigger
 

@@ -524,6 +524,11 @@ rehearsal that skips the property being rehearsed is not a rehearsal.
 
 ## 4d. The EVM vault
 
+> **Phase-1 deployment deferred (DECISIONS §69).** Keep this implementation and
+> its test vectors healthy, but do not deploy or fund a production EVM vault as
+> part of the Phase-1 launch. Ethereum and BOLD.zy return to the critical path
+> before Phase 2; this section remains the rehearsal procedure for that work.
+
 Built and tested, not yet deployed. Full procedure in `contracts/README.md`;
 what matters operationally:
 
@@ -586,6 +591,11 @@ changes, regenerate both — a mismatch surfaces only as every signature failing
 on a chain that already holds funds.
 
 ## 4e. The Solana bridge
+
+> **Production deployment deferred (DECISIONS §69).** Devnet remains useful for
+> regression and custody testing, but SOL.zy is not a Phase-1 product dependency.
+> Do not let maintaining this path displace Cave secondary trading, the Cave
+> launchpad or ZynZap graduation work.
 
 Deposits and exits. The first asset that can leave — see `DECISIONS` §15.
 
@@ -899,14 +909,16 @@ as `8037fd69…d654`.
 ## 4j. Solana on devnet (SOL.zy)
 
 Deployed alongside the Zcash bridge on the same node. The daemon creates the
-asset itself on first start (`created SOL.zy as asset 2` — an operator-only
-`CreateBridgedAsset`, sequenced like anything else) and looks it up by origin
-afterwards, so `ZYN_SOLANA_ASSET` need not be set.
+asset itself on first start with the operator-only `CreateBridgedAsset`, using
+the exact public seeds `origin_network = "solana"` and empty `origin_asset`.
+The resulting id is the published
+`0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df`,
+not a runtime number, so `ZYN_SOLANA_ASSET` need not be set.
 
 | | |
 |---|---|
 | vault | `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` — 2-of-3 from `zyn-ceremony solana`, shares in `/var/zyn/solana-shares` |
-| asset | `SOL.zy`, id **2** |
+| asset | `SOL.zy`, id `0f61f434…95c9f6df` |
 | watcher | `ZYN_SOLANA_RPC_URL=https://api.devnet.solana.com`, `ZYN_SOLANA_CLUSTER=devnet`, `ZYN_SOLANA_FROM_SLOT=<slot at deploy>` |
 | nonce account | `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H` (authority: the vault); settler armed |
 | first deposit | `5WASwsyN…` 0.5 SOL with memo, slot 493,753,468 — credited with no human in the loop |
@@ -1037,15 +1049,13 @@ Dinari). Regenerate them from those sources when issuers add tokens. The testnet
 strays from the real SOL/ZEC price — which, on a testnet pool seeded at an
 arbitrary ratio, is most of the time.
 
-**ZYN launch.** `ZYN_LAUNCH=1` sets the launch (DECISIONS §30) on a chain
-that has none; `ZYN_LAUNCH_THRESHOLD` overrides the graduation pot
-(testnet: 0.01). With it set: 50 bps bridge fee on ZEC.zy deposits and
-exits into the genesis pot; graduation creates ZYN and the ZYN:ZEC.zy pool;
-then emission, LP rewards, rebates, burn and pairing at every seal. The
-node reports the Zcash tip (`ZcashHeight`) every 30 s as the clock; without
-a Zebra it will not advance. `OP_LAUNCH` (16) is the public view,
-`OP_LAUNCH_ME` (17) the signed personal one; the ZynZap Bridge tab shows
-both. Pots are accounts `0xF0..0xF4` (32 bytes of the same byte).
+**Retired ZYN launch switches.** `ZYN_LAUNCH` and `ZYN_LAUNCH_THRESHOLD`
+belong to §30's superseded bridge-fee/halving design. Current `zynzapd`
+refuses to start when either is present, rather than silently activating the
+old policy. Remove both variables. The old `OP_LAUNCH`/`OP_LAUNCH_ME`, codec
+and state types remain temporarily for audit and replay of historical state;
+the wallet overview and ZynZap Bridge tab no longer publish or render them.
+Cave `LaunchCurve` is the only wallet-authorized fungible launch route.
 
 **Batch clearing.** `ZYN_BATCH_CLEARING=1` in the env file queues single-hop swaps for the seal and clears each pool at one price (DECISIONS §28); the testnet node runs with it on. The auction window is the seal policy: `ZYN_SEAL_AFTER_SECS` (60) or `ZYN_SEAL_EVERY` intents, whichever first — the main loop seals by that policy, not on every tick.
 
@@ -1335,10 +1345,13 @@ const { account, address, network } = await window.zyn.request({ method: 'zyn_ac
 await window.zyn.request({ method: 'zyn_swap', params: { asset_in: 1, asset_out: 2, amount: '0.01' } });
 ```
 
-Reads (`zyn_account`, `zyn_balances`, `zyn_assets`, `zyn_pools`,
-`zyn_quote`) answer at once. Writes (`zyn_transfer`, `zyn_swap`,
-`zyn_deposit`, `zyn_withdraw`) open an approval window naming the site and
-the action; nothing is submitted until it is approved. The local app answers
+Reads (`zyn_account`, `zyn_balances`, `zyn_assets`, `zyn_pools`, `zyn_quote`,
+`zyn_curves`, `zyn_curve`, `zyn_curveQuote`) answer at once. Writes
+(`zyn_transfer`, `zyn_swap`, `zyn_deposit`, `zyn_withdraw`, `zyn_launchCurve`,
+`zyn_buyCurve`, `zyn_sellCurve`) open an approval window naming the site and
+the action; nothing is submitted until it is approved. Launch approval names
+the immutable fee, 0.01 ZEC.zy creation cost and optional dev-buy ceiling;
+curve trades name the exact token amount and maximum/minimum ZEC.zy. The local app answers
 CORS only for `chrome-extension://`, `moz-extension://` and
 `safari-web-extension://` origins, and still requires the `X-Zyn` header,
 so a web page cannot reach it directly.
@@ -1892,7 +1905,8 @@ or take one, so a storefront could not be built on them.
   and a `settlement` block so a status strip is one call.
 - **A paid claim is two intents, not one privileged one**: the buyer calls
   `/api/fund` (their money, their signature), then the creator calls
-  `/api/mint` with `to` set to the buyer. `FundCollection` is authorised by
+  `/api/mint` with `serial` from the verified allocation receipt and `to` set
+  to the receipt's bound buyer. `FundCollection` is authorised by
   whoever pays, so the creator never moves a buyer's money.
 
 ## 5c. Monitoring: alerts that arrive, and a bot to ask (10 Sep 2026)
@@ -2416,7 +2430,7 @@ What can be exercised now:
 5. Run the 10,000-entry browser preview. It uses `crypto.getRandomValues`, is
    labelled **not the draw**, and must never be copied into backend allocation.
 
-What must remain impossible until A2 / DECISIONS §64 is built:
+What still remains impossible until the A2 service wraps the now-built engine:
 
 - publishing or locking a launch;
 - taking a wallet signature or deposit;
@@ -2424,21 +2438,482 @@ What must remain impossible until A2 / DECISIONS §64 is built:
 - assigning an NFT index;
 - treating expected capacity as available inventory.
 
-### Backend handoff contract
+### Randomness engine and backend handoff
 
-Implement the backend against a canonical `cave-allocation/v1` policy, not the
-form's DOM. At minimum the committed bytes name collection/supply/pricing,
-quantity mode and parameters, identity mode, manifest root, algorithm version,
-beacon chain/round rules, close condition and serialization. Return the digest
-and public timestamp evidence to the UI only after publication succeeds.
+The pure Rust engine is `cave-randomness`. It implements canonical
+`cave-allocation/v1` policy bytes and digest, committed deposit-close height,
+manifest and ticket commitments,
+fixed/weighted/buyer-chosen quantities, concealed/instant/sequential identity,
+verified drand Quicknet evidence, unbiased sampling, allocation receipts and
+full replay verification. Check it independently before service work:
+
+```sh
+cargo test -p cave-randomness
+```
+
+The backend must consume that API, not reconstruct policy from the form's DOM.
+Return the digest and public timestamp evidence to the UI only after the exact
+canonical bytes and manifest root have been durably published.
 
 The service must reserve **maximum possible output** per unresolved entry, use
-unbiased sampling for creator weights, refuse a weighted policy whose total is
-not exactly 100%, and be idempotent by deposit transaction and ticket id. Never
-fall back to local RNG if a beacon is unavailable: pause allocation. Emit an
-append-only allocation ledger plus an independently replayable receipt for each
-entry. The publish button can be enabled only after those invariants have tests
-and the wallet approval names the exact digest being locked.
+the engine's unbiased sampler for creator weights, and be idempotent by deposit
+transaction and ticket id. UI percentages may total 100 for authoring clarity,
+but engine weights are arbitrary positive relatives and must not be rescaled
+after commitment. Never fall back to local RNG if a beacon or canonical Zcash
+block is unavailable: pause allocation. Verify deposit confirmation/position,
+prove each future beacon target was committed before it became knowable, and
+prove the reveal block hash belongs to the committed height. Persist and publish
+the append-only ledger and engine receipts. The publish button can be enabled
+only after those service invariants have tests and the wallet approval names the
+exact digest being locked.
+
+## 5j. Cave fungible launchpad and atomic ZynZap graduation (implemented, staged; 14 Sep 2026)
+
+The consensus core is executable: `LaunchCurve`, `BuyCurve` and `SellCurve`
+live in `swapvm`; reaching 660M sold graduates atomically without a separate
+advance transaction. `OP_CURVES`/`zyn_curves` expose committed launch state,
+`OP_CURVE_QUOTE`/`zyn_curveQuote` return exact chain quotes, and the Rust client
+submits all three signed intents. Cave is the product surface and `swapvm` is
+the single conserved ledger throughout Curve and AMM.
+
+This is **not permissionless-write-enabled yet**. The standalone Jade frontend,
+wallet provider writes and replica explorer evidence are built, and the static
+artifact is live at `https://cave-jade.pages.dev`. Receipt-derived OHLCV, the
+state upgrade rehearsal and a funded two-wallet testnet run remain release
+gates. `launch.cavebro.win` has been attached to the Pages project; the operator
+owns its final DNS/hostname activation.
+
+### Product boundary and checked-in surface
+
+Build the fungible product separately from Cave's pixel-art NFT application:
+
+```sh
+cd apps/cave-market
+npm test
+npm run build:launchpad
+# standalone output: apps/cave-market/dist
+```
+
+The production Pages surface is `https://cave-jade.pages.dev`; the target custom
+host is `launch.cavebro.win`.
+The root route is the Cave Jade coin gallery, `/launch` is the “Pick a Stone”
+workbench, and `/coin/<address>` is the per-asset chart/trade page. There is no
+marketing landing page. Dark jade with restrained metallic/mineral texture is
+the working brand; do not inherit the NFT app's pixel theme. Rough/window/reveal
+wordplay is provisional and may change without changing protocol state.
+
+The checked-in frontend mirrors the fixed 1B/eight-decimal supply, exact Unicode
+symbol, 0.5–3% fee and optional 5% dev buy. It reads committed launch rows and
+exact quotes only through Nap Wallet's injected provider; launch, buy, sell and
+graduated swaps open extension-owned approvals. The deterministic curve chart is
+state, not price history: historical OHLCV stays absent until A35 indexes real
+receipts. Treat a successful local build, a Pages deployment and custom-domain
+activation as three separate checks; only the first two are complete here.
+
+### Existing ZynZap baseline and reuse boundary
+
+The repository already has constant-product pool math, canonical pair creation,
+LP accounting, swap quotes, single-hop batch clearing, replica replay and public
+pool reads. It also has an internal `CreateToken` intent that creates a fixed
+supply token and ZEC.zy pool in one transition. That intent is **not** the Cave
+launchpad: it skips the reversible curve, accepts creator-selected launch
+inputs and returns LP shares that can be removed.
+
+Reuse the lower-level pool construction and LP-share math only. Do not route a
+Cave launch through `CreateToken`, expose it under a new HTTP name or let a
+creator call it to bypass the protocol template. Current migration status:
+
+1. **Done in code:** A25's 32-byte asset/pool/collection identifier migration uses the
+   frozen `ADDRESS_SCOPE_V1 = b"zynzap\x00\x02"`, independent of the execution
+   VM version.
+2. **Still required before deployment:** remove the superseded ZYN emission, halving, burn and bridge-fee launch state,
+   including the old tokenomics panel still rendered by the ZynZap web app.
+3. **Partially complete:** launch records, fee policy and derived vault addresses
+   are committed. Move pool reserves from inline fields to `vault(pool)` balances
+   and finish the reviewed `STATE_VERSION`/VM-version rollout. Upgrade replicas and signers before or alongside the
+   sequencer under §59.5.
+
+ZYN issuance is not a launchpad prerequisite. Cave can accrue into the keyless
+pot, but cannot mint ZYN, promise claims against it or decide how it is eventually
+matched. That later action belongs to the separate ZYN issuance design.
+
+Cave NFT secondary trading now uses `50% future-ZYN-POL / 40% collection floor /
+10% creator` for both negotiated and resting offers. The receipt names all three
+destinations and atomic remainder goes to future POL. Nap Mole and Cave's 4,444
+collection use Treasury 26460 as creator once its real threshold AccountId is
+provisioned; the name is fixed, the 32-byte account is not yet pinned.
+
+### State and accounting contract
+
+For a launch with curve quantity `q`, the working v1 curve family is:
+
+```text
+marginal price:       p(q) = p0 + s*q
+refundable reserve:  R(q) = p0*q + s*q^2/2
+buy Δ:               R(q + Δ) - R(q), rounded ZEC.zy up
+sell Δ:              R(q) - R(q - Δ), rounded ZEC.zy down
+```
+
+The v1 template fixes all economic curve values:
+
+```text
+fixed supply S:           1,000,000,000 tokens (8 decimals)
+curve inventory Qg:      660,000,000 tokens
+graduation inventory:    340,000,000 tokens
+starting price p0:       0.009 / S = 0.000000000009 ZEC.zy/token
+graduation price Pg:     100 / S = 0.0000001 ZEC.zy/token
+slope s:                 (Pg - p0) / Qg
+                         ≈ 1.5150151515151515e-16 ZEC.zy/token²
+reserve at graduation:   R(Qg) = 33.00297 ZEC.zy before fees
+```
+
+Encode `p0` and `Pg` as exact fixed-point constants and evaluate the interval
+integral in token atomic units with the division last; do not store the
+unrepresentable fixed-point slope. Round buy principal up and sell principal
+down at the ZEC.zy WAD boundary. The first atomic token therefore costs one raw
+ZEC.zy unit of principal rather than rounding to a free buy. The displayed
+decimals are explanatory. Graduation occurs at
+`q = Qg`, when `p(q) * S = 100 ZEC.zy`. There is no age, expiry, wallet-count or
+NFT gate. Any unsold graduation inventory left after exact pool seeding becomes
+permanently unreachable; it is not a later allocation.
+
+A buy credits tokens only after the full ZEC.zy principal and fee debit succeeds.
+A sell returns tokens to the keyless curve inventory only in the same transition
+that pays its ZEC.zy principal. Per-trade principal is the exact interval rounded
+toward the reserve, so repeated trades may leave atomic rounding surplus; fee
+pots are accounted separately and never count as graduation progress.
+
+The creator chooses a whole-basis-point trading fee from `50–300 bps`; omitted
+means `100 bps` (`1%`). Commit it at creation and carry it unchanged into the
+graduated pool. It cannot be edited after a buyer has seen the launch.
+
+For fungible curve fee `F`:
+
+```text
+50% F  → keyless future-ZYN-POL ZEC.zy pot
+40% F  → this launch's keyless graduation-liquidity pot
+10% F  → this launch's creator escrow, released only at graduation
+```
+
+The fee is always ZEC.zy: input on a buy, output on a sell. Cave NFT secondary
+trading uses the same percentages, but its 40% goes to the collection redemption
+floor and its 10% goes directly to the collection creator. Both the 333 Nap Mole
+and 4,444 Cave collections use the protocol account named `Treasury 26460` as
+creator and fee recipient. Pin its real threshold `AccountId` before deriving
+or minting either collection.
+
+For integer fee `F`, compute creator escrow as `floor(F*10/100)` and graduation
+pot as `floor(F*40/100)`; future ZYN POL receives the remainder. This makes rounding
+conservative and preserves every atomic ZEC.zy unit.
+
+### Permissionless creation fee and dev buy
+
+`LaunchCurve` is available to every valid wallet. NFT ownership is never
+read as an authorization condition. Debit the non-refundable launch fee before
+creating state:
+
+```text
+0.009 ZEC.zy  → launch's locked pair-seed balance
+0.001 ZEC.zy  → protocol treasury
+```
+
+The current VM holds the seed in the launch's shared derived vault and commits
+its purpose by rule. The separate `pair-seed` account is the A31 storage target.
+
+The pair seed is not curve principal and cannot pay a pre-graduation sell. On
+graduation it joins the pool's ZEC side; the opening token reserve still has to
+satisfy `T = Z/P`. Call it an opening-liquidity seed in APIs and approval text,
+not a floor guarantee. It remains committed to the launch for as long as the
+curve remains below graduation.
+
+The creation intent may include one exact `dev_buy_tokens` amount plus
+`dev_max_zec`. Execute it atomically after the launch fee at the same initial
+curve price, chosen fee and rounding as a public buy. Refuse a request above
+50,000,000 tokens (5% of supply). The receipt names paid principal, fee and
+tokens; no other creator allocation exists.
+
+The launch record committed to state must contain at least:
+
+- creator, native asset id/address, symbol, unit and content commitment;
+- fixed one-billion supply and the curve/graduation inventory allocation;
+- immutable trading fee in basis points and optional atomic dev-buy result;
+- curve-template version, `q`, refundable reserve and all three fee pots;
+- creation height/epoch and graduation price/quantity;
+- launch-fee treasury payment and pair-seed balance;
+- phase (`Curve`, `AMM`);
+- canonical ZEC.zy pool id once graduated.
+
+The native-token invariant must allow `genesis_pool = None` only when a matching
+committed launch record is in `Curve`. Entering `AMM` and setting
+the canonical pool id are one state transition; an unlaunched native token may
+not use this exception.
+
+### Implemented VM and API surface
+
+Keep the write surface small and intent-shaped:
+
+- `LaunchCurve`: commits identity, fixed allocations, template version,
+  immutable `fee_bps`; debits the `0.01 ZEC.zy` launch fee, creates
+  the token and current derived launch vault, optionally performs the capped dev buy,
+  and enters `Curve`;
+- `BuyCurve`: names exact token output and maximum ZEC.zy input;
+- `SellCurve`: names exact token input and minimum ZEC.zy output;
+
+There is no `AdvanceCurve`: the buy that reaches 660M performs graduation on
+the same scratch state, preventing a qualified curve from being stranded or a
+separate advancement call from racing the terminal buy.
+
+Receipts must expose launch id, phase, `q`, principal, fee and its three
+destinations, outputs and post-trade reserve. Graduation additionally exposes
+the pool id, terminal price, both deposited reserves and locked LP amount.
+Public reads list launches and return the same fields from replica state. Cave's
+HTTP routes should only translate those typed reads and signed intents; they do
+not maintain an authoritative launch database.
+
+**Current receipt/read status (14 Sep):** `CurveCreated`, `CurveBought`,
+`CurveSold` and `CurveGraduated` are typed, encoded and replayable. The public
+curve list exposes identity, fee, sold quantity, creator/graduation accruals,
+graduation reserves/overflow/locked LP, marginal price and pool status; the
+quote RPC exposes principal, total fee, settlement, post-trade quantity/price
+and whether the trade graduates. The buy/sell receipts do **not yet** name the
+three fee destinations, and the shared launch-vault layout means the public read
+cannot expose a separately held refundable-reserve balance. Add those fields
+with A31/A34 rather than deriving them from illustrative frontend data.
+
+Current reproducible evidence:
+
+- `cargo test -p swapvm --test cave_launch` — 10/10 dedicated curve and
+  graduated-pool fee tests pass.
+- `cargo test -p zynzapd cave_gallery_and_quote_are_public_and_exact` — the
+  public gallery/quote RPC test graduates a curve and verifies the sell quote's
+  ZEC.zy fee asset plus total, pool, protocol, creator and POL shares.
+- `cargo test -p swapvm collection_fee` and `cargo test -p zynzapd --test demo`
+  — the shared NFT fee path and both socket-demo flows pass under the current
+  50/40/10 floor math.
+- `cd apps/cave-market && npm test && npm run build:launchpad` — 9/9 frontend
+  tests pass and the standalone build emits only `jade.html`/CSS/JS equivalents
+  as the SPA artifact.
+- `cargo test --workspace` — the current v4 VM identity, receipt layout, swap/NFT
+  accounting, daemon, browser fixture, custody and settlement suites pass
+  together.
+
+The provider and HTTP surface must also expose typed, explicitly oriented
+`zec_per_token` quotes. Do not export an unnamed reserve ratio: canonical pool
+ordering commonly makes the existing spot helper return token per ZEC, the
+inverse of the curve and chart price.
+
+### Graduated-pool compatibility contract
+
+Add a committed per-pool fee policy rather than special-casing Cave in the web
+server. Existing pools keep their input-asset fee rule. A graduated native pool
+uses `ZecLegSplit`, including the token's immutable 10% creator share:
+
+```text
+ZEC.zy -> token:
+  gross ZEC input X; total fee F
+  invariant input = X - F
+  pool ZEC increase = X - F + pool_share(F)
+  future-ZYN-POL credit = pol_share(F)
+  creator credit = creator_share(F)
+
+token -> ZEC.zy:
+  full token input prices gross ZEC output G
+  user ZEC output = G - F
+  pool retains pool_share(F)
+  future-ZYN-POL credit = pol_share(F)
+  creator credit = creator_share(F)
+```
+
+Use `creator_share = floor(10% F)`, `pool_share = floor(45% F)` and
+`pol_share = F - creator_share - pool_share`; the odd atomic remainder therefore
+goes to the future-ZYN-POL pot. Quotes, hop results and receipts must name `fee_asset = ZEC.zy`,
+total fee and all three shares. Apply the same accounting inside the single-hop
+batch-clearing path; an immediate quote and a sealed order may not implement
+different fee policies.
+
+**Compatibility status (14 Sep):** A45 is resolved. The graduated-pool marker,
+two-way `45/45/10` routing and explicit ZEC.zy fee asset are implemented. A sell
+prices the full token input to gross ZEC.zy, deducts its fee from that output and
+pays the trader net ZEC.zy. Exact-in, exact-out and sealed-batch tests reconcile
+the pool retention, creator credit and POL credit and prove no launched-token
+fee reaches an external account. Hop receipts expose the fee asset, total and
+all three shares. V3 introduced this consensus/receipt change; current v4 also
+pins the derived future-ZYN-POL destination and capability-gates legacy
+`CreateToken`. The separately frozen address scope keeps existing asset and
+pool addresses stable.
+
+The graduated pool has `reference = None`, uses the canonical token:ZEC.zy pair,
+and sends every minted LP share to a derived keyless lock that cannot submit
+`RemoveLiquidity`. Token-to-token routing may later use two canonical hops through
+ZEC.zy, but launch v1 only requires its direct token:ZEC.zy market.
+
+Pre-graduation curve trades use the integral, not the AMM. Execute exact-in,
+minimum-output intents sequentially in committed intent order with no partial
+fills; the containing epoch makes the receipt final. A displayed quote is
+provisional until that execution. After graduation, use ZynZap's existing
+swap/order and batch-clearing path. Approval text and the market page must name
+this execution-model change.
+
+### Graduation transaction
+
+Graduation is one VM transition, in this order on scratch state:
+
+1. Re-check phase `Curve`, `q = 660,000,000` and marginal price
+   `Pg = 0.0000001 ZEC.zy`; do not inspect age, NFT ownership or holder count.
+2. Prepare the canonical graduation entirely on scratch state; the qualifying
+   buy still emits its terminal quote and graduation receipt, and the final
+   phase marker is written only after pool construction succeeds.
+3. Compute candidate `Zc` from refundable reserve, 40% graduation pot and the
+   `0.009 ZEC.zy` pair seed.
+4. Set `Zp = min(Zc, 34 ZEC.zy)`, compute `T = Zp/Pg` under the versioned atomic
+   rounding rule, and route overflow `Zc - Zp` to future ZYN POL. Refuse if `T`
+   exceeds the fixed 340,000,000-token graduation inventory.
+5. Create the canonical token:ZEC.zy pool, move `Zp` and `T`, make any unused
+   graduation tokens unreachable, and record every LP share in the pool's
+   permanent consensus lock. A31 moves that lock into its derived account.
+6. Release the escrowed 10% fee share to the creator, record the terminal curve
+   values, and set phase to `AMM`.
+7. Commit all of it or none of it. A failure leaves the curve at its previous
+   state and releases no creator fee.
+
+The AMM's opening spot must equal the terminal curve price within the exact
+fixed-point rule. “Close enough” is a failed graduation because the difference
+is an immediate arbitrage paid by launch participants.
+
+The public price is always `ZEC.zy per token`. Reserve ordering is internal. A
+graduation test must compute the terminal curve price and the opening pool price
+through independent code paths, orient both the same way, and compare their exact
+fixed-point values.
+
+### Persistent curve
+
+A curve that has not qualified for graduation remains in `Curve`. Buys and sells
+continue under the same formula and fee policy without a deadline. An inactive
+launch may leave the default gallery, but its asset page, quotes and transaction
+path remain reachable by asset address. The creator and operator can never debit
+the refundable reserve, pair seed, graduation pot or creator escrow directly.
+
+### Verification gate before an alpha launch
+
+Status as of 14 Sep 2026; `✅` means direct automated evidence exists, `🔨`
+means the behavior exists with incomplete adversarial/matrix coverage, and `⏳`
+means the release evidence is still absent.
+
+- 🔨 Exact interval math, monotonic endpoints, buy-up/sell-down rounding and a
+  1,000-step deterministic reversible sequence pass. Broader randomized/property
+  fuzzing remains. Reconcile the ideal integral plus curve-favouring atomic
+  rounding surplus; do not require literal `reserve == R(q)` after every trade.
+- ✅ `p0 = 0.009/1B`, `Pg = 100/1B`, `q = 660M`, `R(q) = 33.00297 ZEC.zy`,
+  340M graduation inventory and exact fixed-point boundary vectors are pinned.
+- ✅ Native-token supply conservation, live-curve inventory, state codec
+  roundtrip, canonical pool installation, exact opening price and all-LP locking
+  pass the VM invariants and dedicated integration suite.
+- ⏳ Force failure at every graduation debit and prove no partial pool, released
+  creator fee or phase change survives; scratch-state application provides the
+  atomic mechanism, but the failure matrix is not yet tested.
+- ⏳ Add explicit negative-authority tests proving creator/operator accounts
+  cannot debit refundable reserve, launch-retained balances or POL.
+- ✅ Curve fee routing and NFT `50/40/10` are implemented. Graduated ZEC.zy →
+  token and token → ZEC.zy both use the `45/45/10` ZEC-leg rule in immediate,
+  exact-output and sealed-batch execution; hop receipts reconcile every share.
+  Curve buy/sell receipts still omit the three individual fee destinations.
+- ⏳ Exercise corrected `ZecLegSplit` in both directions through immediate and
+  single-hop batch settlement; reconcile user output, pool reserve, creator and
+  POL for every atomic unit.
+- 🔨 Creation atomically routes `0.009/0.001 ZEC.zy` and executes a paid,
+  maximum-5% dev buy. Add focused rejection tests for unfunded creation, 5%+1,
+  and slippage even though the checks exist in code.
+- 🔨 The immutable `50–300 bps` bounds and persistence are enforced. Add direct
+  lower/upper/out-of-range and post-graduation tests.
+- 🔨 Codec restart after 1,000 curve trades passes and no expiry code exists.
+  Add a long epoch jump plus replica replay case to prove age is irrelevant.
+- 🔨 Graduation caps ZEC at 34, preserves exact opening price and routes cap or
+  token-rounding residual to POL. A normal valid v1 launch remains below 34 even
+  at 300 bps, so exercise the defensive above-cap branch with a controlled
+  synthetic state and assert the POL balance explicitly.
+- 🔨 A graduated curve rejects further curve quotes and the state invariant
+  requires a live curve for a pool-less native token. Add explicit pre-graduation
+  AMM and post-graduation sell rejection tests.
+- 🔨 No account receives graduation LP and `locked == lp_supply`; generic
+  `RemoveLiquidity` cannot present those shares. Add a direct graduated-pool
+  removal attempt and migrate the lock to its derived account under A31.
+- ✅ Public curve rows and Cave/zynscan name `ZEC.zy per token`; before
+  graduation this is the curve marginal price and afterward it is the live pool
+  ratio oriented by asset identity, independent of canonical pair ordering.
+- ✅ Cave and zynscan expose committed reserve, accumulated creator/graduation
+  fees, overflow, immutable opening liquidity and locked LP; Cave has no
+  illustrative fallback and all writes use extension-owned wallet approval.
+- ⏳ A31 still migrates the presently committed accounting fields/keyless pots
+  into separately derived physical accounts so an explorer can reconcile each
+  address directly rather than only the state fields and root.
+
+### Discovery and chart projection
+
+Coin galleries and chart pages need a projection service, not additional
+consensus balances. Index accepted curve receipts until graduation, then swap
+receipts for the recorded canonical pool id, into OHLCV candles. Key every event
+by launch id, asset id, phase and pool id so the boundary cannot double-count a
+graduation epoch. Rebuild the index from published receipts/journals and compare
+its last price with a replica quote during rehearsal. If the projection is down,
+show state and disable the chart; never disable exits or settlement.
+
+### Product rollout
+
+1. Internal two-wallet rehearsal with tiny testnet value.
+2. Public read-only Cave pages against rehearsed state, including independently
+   checkable curve, fee and graduation fields.
+3. Permissionless public alpha with at most two accepted launches per creator in
+   any rolling 60 chain epochs; no global quota, active-curve cap, value cap,
+   NFT gate or manual-review gate.
+4. Raise infrastructure capacity only after one long-lived inactive curve and
+   one atomic graduation have been exercised end to end, including restart and
+   replica replay. Do not introduce protocol buy/value/active-curve caps as a
+   rollout substitute.
+5. Open broader traffic only after reconciliation remains clean under concurrent
+   launches and both directions of graduated trading.
+
+Nap Mole ownership is outside every launchpad gate and fee calculation. Its only
+planned utility here is indirect: the separate credit system may multiply credits
+for an owner. Test that launchpad receipts and state roots do not depend on that
+multiplier.
+
+The A25 identifier prerequisite is now in the core: asset, pool and collection
+ids are derived 32-byte values under §66's frozen scope; state, wire, Merkle,
+receipts, RPC, wallet/client and bridge paths use them, with pinned native,
+bridged, pool, LP and vault vectors. A `LaunchCurve` intent names the owner/fee
+recipient as creator and derives the asset from its validated, unmodified UTF-8
+symbol. An existing derived asset is rejected rather than overwritten. Still
+move pool reserve quantities through `vault(pool)` balances and roll the state
+format verifier-first before deployment.
+
+The frozen storage target derives separate `curve-inventory`,
+`graduation-inventory`, `curve-reserve`, `pair-seed`, `graduation-fees` and
+`creator-escrow` accounts per Cave asset, plus `lp-lock` from the graduated pool
+and global `zyn-pol` from ZEC.zy. Current Cave, NFT and graduated-pool writes use
+the pinned global address `f40435d1…7e61`; historical §30 compatibility code
+still names legacy keyless `POT_POL = [0xF3;32]`. A31 must migrate any live
+legacy balance and split the remaining launch-vault balances alongside the
+pool-vault migration. Replicas and zynscan then reconcile each address against
+the corresponding launch fields.
+
+Public clients encode raw ids as §66 Bech32m addresses; lowercase hex is only a
+developer fallback. Accept 1–32-byte valid UTF-8 symbols and 1–96-byte valid
+UTF-8 display names under §66.11 and §69.29. Do not normalize them. Duplicate
+and visually confusable symbols, including `ZYN`, are legal; show the short asset
+address and grant the official badge only by exact membership in the pinned
+official-address set. Reports may warn or hide a launch from default discovery,
+but cannot freeze its curve, pool, sells or exits.
+
+Enforce the launch rate from committed state: for a creator, reject a third
+accepted `LaunchCurve` whose epoch lies within the previous 59 chain
+epochs. Do not cap a single buy, aggregate curve reserve, number of live curves,
+sells or exits. Property-test the boundary at epochs 59 and 60 and across restart
+and replica replay.
+
+Do not use token count as the rollout gate. Watch independently funded holders,
+repeat traders, net ZEC.zy reserve, completed curve sells, graduated locked liquidity
+and fee reconciliation. Those are the measurements that distinguish circulation
+from generated noise.
 
 ## 5. Still missing
 

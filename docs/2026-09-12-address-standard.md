@@ -1,15 +1,18 @@
 # The Zyn address standard
 
-12 September 2026 · defines `zyn_vm::derive` · status: **specified, not yet live**
+12 September 2026 · updated 14 September 2026 · defines `zyn_vm::derive` ·
+status: **implemented in the core; deployment/storage/presentation rollout open**
 
-The VM still uses `AssetId = PoolId = CollectionId = u32`. This document defines
-what replaces them. Adopting it changes the committed encoding, so it is a fork
-(DECISIONS §4.4, §66.8).
+`AssetId`, `PoolId` and `CollectionId` are now raw 32-byte derived identifiers
+through state, wire, Merkle commitments, receipts, RPC, clients and the browser
+wallet. This changed the committed encoding and therefore remains a coordinated
+state/VM rollout for deployed replicas and signers (DECISIONS §51.8, §66.8).
 
 ## Why derived addresses
 
-A monotonic `u32` depends on the order intents happened to be sequenced. Three
-things follow, and all three are true of the chain today:
+A monotonic `u32` depends on the order intents happened to be sequenced. The
+old implementation consequently had three properties which motivated the
+standard:
 
 1. **Nothing can be computed offline.** A client cannot name a pool before it
    exists, so a swap UI cannot build a route without a round trip.
@@ -19,7 +22,9 @@ things follow, and all three are true of the chain today:
    because a maintained index is a second thing that can disagree with the data
    it came from.
 
-A derivation cannot disagree with anything.
+The migration removes the first two and makes the canonical lookup key
+derivable. `SwapState::find_pool` still scans its small pool map today; replacing
+that internal lookup is an optimization rather than an identity decision.
 
 ## The derivation
 
@@ -42,10 +47,10 @@ the published vectors were derived. An ordinary execution `VM_VERSION` or
 `STATE_VERSION` bump must not move assets, pools or collections. A new address
 scope is allowed only for an explicitly incompatible address-schema fork.
 
-The current generic `derive_for<V>` still builds its scope from `VM_VERSION`.
-A25 must therefore introduce the frozen constant and use it for persistent
-identities before the next execution-version bump. `program_scope_of` must also
-reject names longer than 32 bytes instead of silently truncating them.
+Persistent ZynZap callers now use `ADDRESS_SCOPE_V1` rather than deriving from
+the changing execution `VM_VERSION`. `program_scope_of` rejects names longer
+than 32 bytes instead of silently truncating them. Deployment still has to move
+verifiers before the sequencer begins emitting the widened state format.
 
 There is **no bump seed**. Solana grinds one because its addresses are ed25519
 public keys and a program-owned address must be proved to have no private key.
@@ -54,9 +59,10 @@ nothing to be off (§4.2).
 
 All identifiers are 32 bytes, but their roles remain distinct. An asset address
 is an `AssetId`, a pool address is a `PoolId`, and a derived vault is an
-`AccountId`. A pool's two reserves live in `vault(pool)`; its pool record commits
-the invariant, fee policy, reserve assets, LP asset and vault address. No user
-key can authorize a derived vault.
+`AccountId`. Pool records now commit their derived vault address, fee policy,
+reserve assets and LP asset. Actual reserve quantities are still inline in the
+pool record; moving those quantities into `vault(pool)` balances is the
+remaining A25 storage migration. No user key can authorize a derived vault.
 
 ## Namespaces
 
@@ -79,10 +85,14 @@ key can authorize a derived vault.
 | graduation LP lock | `derive(P, "lp-lock", [pool])` |
 | future ZYN POL pot | `derive(P, "zyn-pol", [ZEC.zy])` |
 
-The namespace is what keeps `["pool", x]` and `["vault", x]` unrelated. Cave
-uses separate keyless accounts for amounts with different movement rules; the
-refundable reserve, pair seed, graduation fees and creator escrow never share a
-balance even though they all eventually participate in one graduation.
+The namespace is what keeps `["pool", x]` and `["vault", x]` unrelated. These
+Cave account derivations are the frozen target. The current core uses one
+derived launch vault for inventory, principal, pair seed and retained fee value,
+with creator/graduation amounts separately committed in the launch record. The
+global future-ZYN-POL balance is separate but still lives at the legacy keyless
+constant `POT_POL = [0xF3; 32]`, not yet at the table's derived `zyn-pol`
+address. A31 moves each category, the LP lock and POL to their final derived
+balances together with A25's pool-vault storage migration.
 
 ### Canonical seed bytes
 
@@ -117,6 +127,11 @@ are invalid: `eth`, `ethereum`, and `eip155:01` must not name Ethereum mainnet.
 contract address. Display strings, Base58 text, `0x`, checksum capitalization and
 ABI padding never enter the seed. Other origin families require an address-byte
 rule in this registry before their first asset is accepted.
+
+`CreateBridgedAsset` carries `origin_network` and the raw `origin_asset` bytes
+explicitly and derives the asset id from those public fields. Its numeric
+`origin` value is used only for custody routing and does not participate in the
+address derivation.
 
 **A chain's own token carries the Zyn chain id; a bridged asset does not.**
 Without it, mainnet ZYN and testnet ZYN are the same 32 bytes and an address
@@ -212,16 +227,19 @@ HRPs are `zyna` / `zynp` / `zync` / `zyni` / `zynv`; testnet prefixes each with
 `t`. Consensus retains the raw 32 bytes; the lowercase hex used throughout this
 document is a CLI and debugging form, not the wallet or URL format.
 
-## What this does not settle
+## What remains
 
-- **Adoption.** `AssetId` is still `u32` and `zyn_vm::derive` still has no
-  callers in `swapvm`. §4.4 remains open. A25 must replace ids and counters,
-  move pool reserves to their derived vaults, add Cave's keyless accounts, and
-  update state, wire, Merkle, receipts, RPC, wallet, bridge, explorer and replay.
-- **Ordering against compressed collections.** If `zyn_vm::collection` lands
-  first, items leave the token map entirely and the address migration has 4,444
-  fewer entries to widen. Compression first, then addressing — or decide both
-  together.
+- **Deployment.** The 32-byte migration is in the core and has callers across
+  `swapvm`, state, wire, RPC and wallets. Replicas/signers must accept the new
+  state before the sequencer emits it; no live deployment is implied here.
+- **Storage separation.** Move inline pool reserves into their derived vault
+  balances, split Cave's launch vault into the frozen per-purpose accounts, and
+  replace legacy `[0xF3;32]` POL custody with the derived `zyn-pol` account.
+- **Presentation.** Add the typed Bech32m renderers to wallets, public APIs and
+  URLs; current RPC/client surfaces still use raw bytes or lowercase hex.
+- **Compressed collections.** A later compressed representation may move item
+  storage out of the token map, but collection/item identities remain the same
+  derived 32 bytes and do not reopen this address decision.
 - **Metadata.** Settled separately — see `zyn_vm::manifest` and DECISIONS §67.
   `content` is `H(manifest)`; the manifest names media by hash with no URL, the
   location is a hint outside consensus, and the wallet verifies bytes before it

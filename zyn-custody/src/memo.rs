@@ -99,7 +99,9 @@ pub fn forced_account(frame: &[u8]) -> Option<AccountId> {
     }
     let scheme = Scheme::from_tag(frame[40])?;
     match scheme {
-        Scheme::Ed25519 | Scheme::Ed25519Solana => Some(zyn_vm::auth::account_of(scheme, &frame[41..73])),
+        Scheme::Ed25519 | Scheme::Ed25519Solana => {
+            Some(zyn_vm::auth::account_of(scheme, &frame[41..73]))
+        }
         _ => None,
     }
 }
@@ -165,7 +167,9 @@ pub fn decode(memo: &[u8]) -> Result<AccountId, MemoError> {
     if memo[MEMO_LEN..].iter().any(|b| *b != 0) {
         return Err(MemoError::TrailingBytes);
     }
-    let account: AccountId = memo[4..MEMO_LEN].try_into().map_err(|_| MemoError::Malformed)?;
+    let account: AccountId = memo[4..MEMO_LEN]
+        .try_into()
+        .map_err(|_| MemoError::Malformed)?;
     Ok(account)
 }
 
@@ -251,7 +255,12 @@ mod tests {
             // Thirty-two bytes of something that is not an instruction.
             &[0xABu8; 32][..],
         ] {
-            assert_eq!(decode(memo), Err(MemoError::NotADeposit), "memo {:?} was read", memo);
+            assert_eq!(
+                decode(memo),
+                Err(MemoError::NotADeposit),
+                "memo {:?} was read",
+                memo
+            );
         }
     }
 
@@ -294,8 +303,10 @@ mod tests {
         }
         assert_eq!(encode_text(&acct(0)), format!("ZYN1:{}", "00".repeat(32)));
         // Whitespace and case survive a wallet's input box; nothing else does.
-        assert_eq!(decode_text("  ZYN1:AB{}  ".replace("{}", &"ab".repeat(31)).as_str()), 
-                   decode_text(&format!("ZYN1:ab{}", "ab".repeat(31))));
+        assert_eq!(
+            decode_text("  ZYN1:AB{}  ".replace("{}", &"ab".repeat(31)).as_str()),
+            decode_text(&format!("ZYN1:ab{}", "ab".repeat(31)))
+        );
     }
 
     /// On Solana the memo is public and typed by whoever sends it, so the
@@ -307,10 +318,16 @@ mod tests {
         assert_eq!(decode_text("gm"), Err(MemoError::NotADeposit));
         assert_eq!(decode_text("ZYN"), Err(MemoError::NotADeposit));
         assert_eq!(decode_text("ZYNX:00"), Err(MemoError::NotADeposit));
-        assert_eq!(decode_text(&ok.replace("ZYN1", "ZYN2")), Err(MemoError::UnknownVersion(2)));
+        assert_eq!(
+            decode_text(&ok.replace("ZYN1", "ZYN2")),
+            Err(MemoError::UnknownVersion(2))
+        );
         assert_eq!(decode_text(&ok[..ok.len() - 1]), Err(MemoError::Malformed));
         assert_eq!(decode_text(&format!("{}0", ok)), Err(MemoError::Malformed));
-        assert_eq!(decode_text(&ok.replace(':', ";")), Err(MemoError::Malformed));
+        assert_eq!(
+            decode_text(&ok.replace(':', ";")),
+            Err(MemoError::Malformed)
+        );
         // A non-hex character in the right place must not decode as something.
         assert_eq!(
             decode_text(&format!("ZYN1:zz{}", "ab".repeat(31))),
@@ -326,7 +343,11 @@ mod tests {
         let mut field = [0u8; MEMO_FIELD];
         field[..text.len()].copy_from_slice(text.as_bytes());
         assert_eq!(decode(&field), Ok(acct(9)));
-        assert_eq!(decode(text.as_bytes()), Ok(acct(9)), "unpadded, as some wallets send");
+        assert_eq!(
+            decode(text.as_bytes()),
+            Ok(acct(9)),
+            "unpadded, as some wallets send"
+        );
         // Text after the instruction is not padding.
         let mut noisy = field;
         noisy[text.len()] = b' ';
@@ -347,7 +368,10 @@ mod tests {
         assert_eq!(decode(&deposit), Ok([9u8; 32]));
         let mut trailing = anchor;
         trailing[ANCHOR_LEN] = 1;
-        assert!(!is_anchor(&trailing), "an anchor with trailing bytes is not an anchor");
+        assert!(
+            !is_anchor(&trailing),
+            "an anchor with trailing bytes is not an anchor"
+        );
     }
 
     #[test]
@@ -359,7 +383,13 @@ mod tests {
         assert_eq!(forced_frame(&memo), Some(frame.as_slice()));
         assert_eq!(decode(&memo), Err(MemoError::NotADeposit));
         assert!(!is_anchor(&memo));
-        assert_eq!(forced_account(&frame), Some(zyn_vm::auth::account_of(zyn_vm::auth::Scheme::Ed25519, &[0x33u8; 32])));
+        assert_eq!(
+            forced_account(&frame),
+            Some(zyn_vm::auth::account_of(
+                zyn_vm::auth::Scheme::Ed25519,
+                &[0x33u8; 32]
+            ))
+        );
         assert!(forced_frame(&encode(&[1u8; 32])).is_none());
         let mut bad = memo;
         bad[MEMO_FIELD - 1] = 1;

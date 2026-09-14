@@ -187,8 +187,14 @@ mod tests {
             description: "A sleeping Mole.".to_string(),
             media: vec![media(MediaRole::Full, 1, 40075)],
             attributes: vec![
-                Attribute { trait_type: "Species".to_string(), value: "Mole".to_string() },
-                Attribute { trait_type: "Pose".to_string(), value: "Sleeping".to_string() },
+                Attribute {
+                    trait_type: "Species".to_string(),
+                    value: "Mole".to_string(),
+                },
+                Attribute {
+                    trait_type: "Pose".to_string(),
+                    value: "Sleeping".to_string(),
+                },
             ],
         }
     }
@@ -280,7 +286,10 @@ mod tests {
         assert!(verify_manifest(&m, &content));
         let mut other = m.clone();
         other.description = "Something else.".to_string();
-        assert!(!verify_manifest(&other, &content), "a substituted manifest is caught");
+        assert!(
+            !verify_manifest(&other, &content),
+            "a substituted manifest is caught"
+        );
     }
 
     /// Cross-check against the collection builder.
@@ -319,11 +328,21 @@ mod tests {
                 ("Sleep Glyphs", "z z Z"),
             ]
             .iter()
-            .map(|(t, v)| Attribute { trait_type: t.to_string(), value: v.to_string() })
+            .map(|(t, v)| Attribute {
+                trait_type: t.to_string(),
+                value: v.to_string(),
+            })
             .collect(),
         };
-        let hex: alloc::string::String = m.content().iter().map(|b| alloc::format!("{:02x}", b)).collect();
-        assert_eq!(hex, "14ecc2918d1e4a6d0ebc129c2acfcd4b3c8fd0018c5babf838565b7fdd7080c6");
+        let hex: alloc::string::String = m
+            .content()
+            .iter()
+            .map(|b| alloc::format!("{:02x}", b))
+            .collect();
+        assert_eq!(
+            hex,
+            "14ecc2918d1e4a6d0ebc129c2acfcd4b3c8fd0018c5babf838565b7fdd7080c6"
+        );
     }
 
     /// A 4 GB film and a 40 KB thumbnail commit to the same 32 bytes of state.

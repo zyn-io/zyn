@@ -94,10 +94,11 @@ Both legs land together: `POT_OFFERS` → taker for the offered asset, taker →
 maker for the wanted one. The offer is removed. → `Receipt::OfferTaken`
 
 The collection fee is the same charge `AcceptOffer` takes — each side pays
-`fee_bps`, half to the pool and half to the creator, and a collection item priced
-in anything but xZEC is refused with `ItemNeedsAPrice`. The computation is
-extracted from `accept_offer` into one function used by both, so the two paths
-cannot drift.
+`fee_bps`, and a collection item priced in anything but xZEC is refused with
+`ItemNeedsAPrice`. This design originally specified a 50/50 pool/creator split;
+§69.9 supersedes it with `50%` to ZYN POL, `40%` to the collection floor reserve
+and `10%` to the collection creator (Treasury 26460 for Cave/Nap). The
+computation is shared by both offer paths so they cannot drift.
 
 ### CancelOffer
 

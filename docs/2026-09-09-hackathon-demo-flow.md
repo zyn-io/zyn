@@ -104,8 +104,9 @@ Verified in the tree on 9 September 2026.
 - `redeem_price() = pool / outstanding`, zero unless `Live`
 - `create_collection`, `mint_collection_item`, `fund_collection`,
   `redeem_collection_item`, `advance_collection`
-- Trade fee in `accept_offer`: each side pays `fee_bps`; half enters the reserve
-  and half goes to the creator; one leg must be xZEC or
+- Trade fee in `accept_offer`: each side pays `fee_bps`; the current split is
+  `50%` to ZYN POL, `40%` to the collection floor reserve and `10%` to the
+  collection creator (protocol Treasury 26460 for Cave/Nap); one leg must be xZEC or
   `Reject::ItemNeedsAPrice`
 - Authorities: redeem → holder, fund → source account, remaining collection
   operations → creator

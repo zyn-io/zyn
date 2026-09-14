@@ -248,9 +248,15 @@ mod tests {
     #[test]
     fn an_over_long_vm_name_is_refused_rather_than_truncated() {
         let long = "z".repeat(33);
-        assert!(try_program_scope_of(&long, 2).is_none(), "33 bytes must be refused");
+        assert!(
+            try_program_scope_of(&long, 2).is_none(),
+            "33 bytes must be refused"
+        );
         let at_limit = "z".repeat(32);
-        assert!(try_program_scope_of(&at_limit, 2).is_some(), "32 bytes is still valid");
+        assert!(
+            try_program_scope_of(&at_limit, 2).is_some(),
+            "32 bytes is still valid"
+        );
         // Two names that a truncating implementation would have conflated.
         let a = "z".repeat(32) + "a";
         let b = "z".repeat(32) + "b";
@@ -280,22 +286,48 @@ mod tests {
     fn the_genesis_addresses_are_what_was_published() {
         let p = program_scope_of("zynzap", 2);
         for (label, got, want) in [
-            ("ZYN mainnet", native_address(&p, 26460, b"ZYN"),
-             "49eb9241e2a0b1163a1eed09bb91a575c93bbc6e76cd7afeb65263640fd169d5"),
-            ("ZYN testnet", native_address(&p, 11, b"ZYN"),
-             "893e745e33b40310003011a14651dc3cf173f71b92ee6e77ef62b7ba5a84e56e"),
-            ("ZEC.zy", bridged_address(&p, b"zcash", b""),
-             "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201"),
-            ("TAZ.zy", bridged_address(&p, b"zcash-test", b""),
-             "bf244a27ad73fea5128fead691c647fe1c5a5cddde0a847b24ca20041250da48"),
-            ("SOL.zy", bridged_address(&p, b"solana", b""),
-             "0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df"),
-            ("BTC.zy", bridged_address(&p, b"bitcoin", b""),
-             "0e7faa55f3bdb12e80781da88fb5ac4eb7e24d1935494b9aabd84c4565bbffca"),
-            ("BOLD.zy", bridged_address(&p, b"eip155:1", &[
-                0x64,0x40,0xf1,0x44,0xb7,0xe5,0x0d,0x6a,0x84,0x39,
-                0x33,0x65,0x10,0x31,0x2d,0x2f,0x54,0xbe,0xb0,0x1d,
-            ]), "ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f"),
+            (
+                "ZYN mainnet",
+                native_address(&p, 26460, b"ZYN"),
+                "49eb9241e2a0b1163a1eed09bb91a575c93bbc6e76cd7afeb65263640fd169d5",
+            ),
+            (
+                "ZYN testnet",
+                native_address(&p, 11, b"ZYN"),
+                "893e745e33b40310003011a14651dc3cf173f71b92ee6e77ef62b7ba5a84e56e",
+            ),
+            (
+                "ZEC.zy",
+                bridged_address(&p, b"zcash", b""),
+                "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
+            ),
+            (
+                "TAZ.zy",
+                bridged_address(&p, b"zcash-test", b""),
+                "bf244a27ad73fea5128fead691c647fe1c5a5cddde0a847b24ca20041250da48",
+            ),
+            (
+                "SOL.zy",
+                bridged_address(&p, b"solana", b""),
+                "0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df",
+            ),
+            (
+                "BTC.zy",
+                bridged_address(&p, b"bitcoin", b""),
+                "0e7faa55f3bdb12e80781da88fb5ac4eb7e24d1935494b9aabd84c4565bbffca",
+            ),
+            (
+                "BOLD.zy",
+                bridged_address(
+                    &p,
+                    b"eip155:1",
+                    &[
+                        0x64, 0x40, 0xf1, 0x44, 0xb7, 0xe5, 0x0d, 0x6a, 0x84, 0x39, 0x33, 0x65,
+                        0x10, 0x31, 0x2d, 0x2f, 0x54, 0xbe, 0xb0, 0x1d,
+                    ],
+                ),
+                "ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f",
+            ),
         ] {
             assert_eq!(hex(&got), want, "{} moved", label);
         }
@@ -305,12 +337,18 @@ mod tests {
         let zec = bridged_address(&p, b"zcash", b"");
         let sol = bridged_address(&p, b"solana", b"");
         let btc = bridged_address(&p, b"bitcoin", b"");
-        assert_eq!(hex(&pool_address(&p, &zec, &zyn)),
-                   "4d9b08dbee9c82781b59dfa144730399c2b23ad320a2610601702ff305ddd999");
-        assert_eq!(hex(&pool_address(&p, &sol, &zec)),
-                   "142639c35adc1be4183c2268146f069d3b188988cb143b89be7ba1a67b2b68d7");
-        assert_eq!(hex(&pool_address(&p, &btc, &zec)),
-                   "ed3fef337e34a8c7b3343fc832f9ae4c289226cb51cebd5813b53746df18cab8");
+        assert_eq!(
+            hex(&pool_address(&p, &zec, &zyn)),
+            "4d9b08dbee9c82781b59dfa144730399c2b23ad320a2610601702ff305ddd999"
+        );
+        assert_eq!(
+            hex(&pool_address(&p, &sol, &zec)),
+            "142639c35adc1be4183c2268146f069d3b188988cb143b89be7ba1a67b2b68d7"
+        );
+        assert_eq!(
+            hex(&pool_address(&p, &btc, &zec)),
+            "ed3fef337e34a8c7b3343fc832f9ae4c289226cb51cebd5813b53746df18cab8"
+        );
     }
 
     /// The version used to land outside the hashed slice, so every version of a
@@ -321,7 +359,10 @@ mod tests {
     fn two_vm_versions_do_not_share_addresses() {
         let v1 = program_scope_of("zynzap", 1);
         let v2 = program_scope_of("zynzap", 2);
-        assert_ne!(v1, v2, "the version must be inside the scope, not beside it");
+        assert_ne!(
+            v1, v2,
+            "the version must be inside the scope, not beside it"
+        );
         assert_eq!(v2, b"zynzap\x00\x02", "name then version, big-endian");
         assert_ne!(
             derive(&v1, b"native", &[b"ZYN"]),
@@ -348,8 +389,14 @@ mod tests {
         let p = b"zynzap\x00\x02";
         let mint_a = [7u8; 32];
         let mint_b = [8u8; 32];
-        assert_ne!(bridged_address(p, b"solana", b""), bridged_address(p, b"solana", &mint_a));
-        assert_ne!(bridged_address(p, b"solana", &mint_a), bridged_address(p, b"solana", &mint_b));
+        assert_ne!(
+            bridged_address(p, b"solana", b""),
+            bridged_address(p, b"solana", &mint_a)
+        );
+        assert_ne!(
+            bridged_address(p, b"solana", &mint_a),
+            bridged_address(p, b"solana", &mint_b)
+        );
     }
 
     /// Without the chain id, mainnet ZYN and testnet ZYN are one address and a
@@ -357,15 +404,24 @@ mod tests {
     #[test]
     fn a_chains_own_token_is_scoped_to_that_chain() {
         let p = b"zynzap\x00\x02";
-        assert_ne!(native_address(p, 26460, b"ZYN"), native_address(p, 11, b"ZYN"));
+        assert_ne!(
+            native_address(p, 26460, b"ZYN"),
+            native_address(p, 11, b"ZYN")
+        );
     }
 
     /// Two creators may both issue `CAT`; one creator may not issue it twice.
     #[test]
     fn a_symbol_is_unique_per_creator_not_globally() {
         let p = b"zynzap\x00\x02";
-        assert_ne!(asset_address(p, &addr(1), b"CAT"), asset_address(p, &addr(2), b"CAT"));
-        assert_eq!(asset_address(p, &addr(1), b"CAT"), asset_address(p, &addr(1), b"CAT"));
+        assert_ne!(
+            asset_address(p, &addr(1), b"CAT"),
+            asset_address(p, &addr(2), b"CAT")
+        );
+        assert_eq!(
+            asset_address(p, &addr(1), b"CAT"),
+            asset_address(p, &addr(1), b"CAT")
+        );
     }
 
     /// Every kind of address stays in its own namespace, including the ones
@@ -373,7 +429,10 @@ mod tests {
     #[test]
     fn a_collection_and_a_token_from_one_creator_and_symbol_differ() {
         let p = b"zynzap\x00\x02";
-        assert_ne!(asset_address(p, &addr(3), b"CAVE"), collection_address(p, &addr(3), b"CAVE"));
+        assert_ne!(
+            asset_address(p, &addr(3), b"CAVE"),
+            collection_address(p, &addr(3), b"CAVE")
+        );
     }
 
     /// Item ids are computable before a collection mints, and distinct.
@@ -385,8 +444,16 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), ids.len(), "4,444 serials must give 4,444 distinct ids");
-        assert_eq!(item_address(p, &c, 0), ids[0], "and recomputing one offline agrees");
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "4,444 serials must give 4,444 distinct ids"
+        );
+        assert_eq!(
+            item_address(p, &c, 0),
+            ids[0],
+            "and recomputing one offline agrees"
+        );
     }
 
     #[test]
@@ -422,8 +489,14 @@ mod tests {
         assert_ne!(x, z);
 
         // Including the empty-seed cases, where a naive concatenation is worst.
-        assert_ne!(derive(b"p", b"n", &[b"", b"a"]), derive(b"p", b"n", &[b"a", b""]));
-        assert_ne!(derive(b"p", b"n", &[b"a"]), derive(b"p", b"n", &[b"a", b""]));
+        assert_ne!(
+            derive(b"p", b"n", &[b"", b"a"]),
+            derive(b"p", b"n", &[b"a", b""])
+        );
+        assert_ne!(
+            derive(b"p", b"n", &[b"a"]),
+            derive(b"p", b"n", &[b"a", b""])
+        );
     }
 
     #[test]
@@ -435,8 +508,14 @@ mod tests {
     #[test]
     fn namespaces_separate_kinds() {
         let pool = addr(7);
-        assert_ne!(lp_address(b"zynzap", &pool), vault_address(b"zynzap", &pool));
-        assert_ne!(lp_address(b"zynzap", &pool), derive(b"zynzap", b"pool", &[&pool]));
+        assert_ne!(
+            lp_address(b"zynzap", &pool),
+            vault_address(b"zynzap", &pool)
+        );
+        assert_ne!(
+            lp_address(b"zynzap", &pool),
+            derive(b"zynzap", b"pool", &[&pool])
+        );
     }
 
     #[test]
@@ -453,7 +532,10 @@ mod tests {
         // Domain separation against the rest of the crate's hashing, so a
         // derived address can never be mistaken for a tree node.
         assert_ne!(derive(b"", b"", &[]), crate::commit::hash_leaf(b""));
-        assert_ne!(derive(b"", b"", &[]), crate::commit::hash_node(&[0u8; 32], &[0u8; 32]));
+        assert_ne!(
+            derive(b"", b"", &[]),
+            crate::commit::hash_node(&[0u8; 32], &[0u8; 32])
+        );
     }
 
     /// Grinding resistance is the reason addresses are full width. A truncated
@@ -472,7 +554,11 @@ mod tests {
         let before = seen.len();
         seen.sort_unstable();
         seen.dedup();
-        assert_eq!(seen.len(), before, "two distinct pairs derived the same address");
+        assert_eq!(
+            seen.len(),
+            before,
+            "two distinct pairs derived the same address"
+        );
     }
 }
 
@@ -521,8 +607,14 @@ mod client_tests {
         let (a, b, c) = (asset("CAT"), asset("DOG"), asset("ZEC.zy"));
         // One chain created CAT/ZEC.zy first, another created DOG/ZEC.zy first.
         // Under monotonic ids they would disagree; under derivation they cannot.
-        let chain_1 = [pool_address(b"zynzap", &a, &c), pool_address(b"zynzap", &b, &c)];
-        let chain_2 = [pool_address(b"zynzap", &b, &c), pool_address(b"zynzap", &a, &c)];
+        let chain_1 = [
+            pool_address(b"zynzap", &a, &c),
+            pool_address(b"zynzap", &b, &c),
+        ];
+        let chain_2 = [
+            pool_address(b"zynzap", &b, &c),
+            pool_address(b"zynzap", &a, &c),
+        ];
         assert_eq!(chain_1[0], chain_2[1]);
         assert_eq!(chain_1[1], chain_2[0]);
     }

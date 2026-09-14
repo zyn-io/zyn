@@ -52,14 +52,23 @@ pub struct Sighting {
 /// a chain that is whole. `previous_root` is still checked at every step, so
 /// this decides what is *offered*, never what is *accepted*.
 fn in_lineage_order(sightings: &[Sighting], chain_id: u32) -> Vec<&Sighting> {
-    let mut v: Vec<&Sighting> = sightings.iter().filter(|s| s.chain_id == chain_id).collect();
+    let mut v: Vec<&Sighting> = sightings
+        .iter()
+        .filter(|s| s.chain_id == chain_id)
+        .collect();
     v.sort_by_key(|s| (s.epoch, s.height));
     v
 }
 
 pub fn sighting_from(s: &AnchorSighting) -> Option<Sighting> {
     let (chain_id, epoch, id) = Anchor::parse_memo(&s.memo)?;
-    Some(Sighting { height: s.height, txid: s.txid, chain_id, epoch, id })
+    Some(Sighting {
+        height: s.height,
+        txid: s.txid,
+        chain_id,
+        epoch,
+        id,
+    })
 }
 
 /// Where bundle files come from. A directory for tests and for a replica's own
@@ -86,8 +95,13 @@ pub struct Http {
 impl Http {
     pub fn new(mirrors: Vec<String>) -> Http {
         Http {
-            mirrors: mirrors.into_iter().map(|m| m.trim_end_matches('/').to_string()).collect(),
-            agent: ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build(),
+            mirrors: mirrors
+                .into_iter()
+                .map(|m| m.trim_end_matches('/').to_string())
+                .collect(),
+            agent: ureq::AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(20))
+                .build(),
         }
     }
 }
@@ -117,7 +131,11 @@ impl Fetch for Http {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Halt {
     /// Two anchors for one epoch with different ids on the chain.
-    Fork { epoch: u64, seen: AnchorId, other: AnchorId },
+    Fork {
+        epoch: u64,
+        seen: AnchorId,
+        other: AnchorId,
+    },
     /// The anchor does not continue the verified lineage.
     Lineage { epoch: u64, error: LineageError },
     /// A bundle file is not what the anchor says it is.
@@ -130,7 +148,11 @@ pub enum Halt {
     /// No mirror would hand over a file.
     Fetch { epoch: u64, error: String },
     /// The certificate does not clear the set this replica requires.
-    Unendorsed { epoch: u64, have: usize, need: usize },
+    Unendorsed {
+        epoch: u64,
+        have: usize,
+        need: usize,
+    },
 }
 
 impl std::fmt::Display for Halt {
@@ -234,21 +256,38 @@ impl Replica {
     /// announced. Everything after the base is replayed; the base itself is
     /// the one thing taken on the operator's word, and its root is what a
     /// replica's operator has to have checked out of band.
-    pub fn open_from(dir: &Path, chain_id: u32, params: Params, base: Option<(&[u8], [u8; 32])>) -> Result<Replica, String> {
+    pub fn open_from(
+        dir: &Path,
+        chain_id: u32,
+        params: Params,
+        base: Option<(&[u8], [u8; 32])>,
+    ) -> Result<Replica, String> {
         let store = FileStore::new(dir).map_err(|e| format!("{:?}", e))?;
-        let ledger = store.load_ledger(chain_id).map_err(|e| format!("verified ledger unreadable: {:?}", e))?.unwrap_or_else(|| Ledger::new(chain_id));
+        let ledger = store
+            .load_ledger(chain_id)
+            .map_err(|e| format!("verified ledger unreadable: {:?}", e))?
+            .unwrap_or_else(|| Ledger::new(chain_id));
         let state: SwapState = match store.load(chain_id).map_err(|e| format!("{:?}", e))? {
-            Some(saved) => saved.restore().map_err(|e| format!("verified state does not match its root: {:?}", e))?,
+            Some(saved) => saved
+                .restore()
+                .map_err(|e| format!("verified state does not match its root: {:?}", e))?,
             None => match base {
                 Some((bytes, root)) => {
-                    let saved = Saved::decode(bytes).map_err(|e| format!("base state does not decode: {:?}", e))?;
+                    let saved = Saved::decode(bytes)
+                        .map_err(|e| format!("base state does not decode: {:?}", e))?;
                     if saved.chain_id != chain_id {
                         return Err("base state is for another chain".into());
                     }
                     if saved.root != root {
-                        return Err(format!("base state root {} is not the attested root {}", hex(&saved.root), hex(&root)));
+                        return Err(format!(
+                            "base state root {} is not the attested root {}",
+                            hex(&saved.root),
+                            hex(&root)
+                        ));
                     }
-                    let s: SwapState = saved.restore().map_err(|e| format!("base state does not match its root: {:?}", e))?;
+                    let s: SwapState = saved
+                        .restore()
+                        .map_err(|e| format!("base state does not match its root: {:?}", e))?;
                     store.save(&saved).map_err(|e| format!("{:?}", e))?;
                     s
                 }
@@ -260,15 +299,46 @@ impl Replica {
                 return Err("the verified state on disk is older than the verified ledger".into());
             }
         }
-        let seen = ledger.anchors().iter().map(|a| (a.checkpoint.epoch, a.id())).collect();
+        let seen = ledger
+            .anchors()
+            .iter()
+            .map(|a| (a.checkpoint.epoch, a.id()))
+            .collect();
         let verified_epoch = ledger.last().map(|a| a.checkpoint.epoch);
-        let verified_height = fs::read_to_string(dir.join(format!("verified-{}.height", chain_id))).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let verified_height = fs::read_to_string(dir.join(format!("verified-{}.height", chain_id)))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
         let published = verified_epoch.and_then(|e| {
-            let b = fs::read(dir.join("da").join(publish::rel_dir(chain_id, e)).join("snapshot.bin")).ok()?;
+            let b = fs::read(
+                dir.join("da")
+                    .join(publish::rel_dir(chain_id, e))
+                    .join("snapshot.bin"),
+            )
+            .ok()?;
             Snapshot::<SwapState>::decode(&b)
         });
         let (pending_forced, censored, noted) = load_forced(dir, chain_id);
-        Ok(Replica { chain_id, dir: dir.to_path_buf(), store, ledger, state, published, verified_epoch, verified_height, halted: None, seen, pending_forced, censored, applied: BTreeSet::new(), noted, newly_verified: Vec::new(), deferred: Vec::new(), require_set: None, backing: None })
+        Ok(Replica {
+            chain_id,
+            dir: dir.to_path_buf(),
+            store,
+            ledger,
+            state,
+            published,
+            verified_epoch,
+            verified_height,
+            halted: None,
+            seen,
+            pending_forced,
+            censored,
+            applied: BTreeSet::new(),
+            noted,
+            newly_verified: Vec::new(),
+            deferred: Vec::new(),
+            require_set: None,
+            backing: None,
+        })
     }
 
     /// Refuse to advance past an anchor whose certificate does not clear this
@@ -326,12 +396,23 @@ impl Replica {
             ) else {
                 continue;
             };
-            let intent_hash = intent_hash(&zyn::verify::encode_authorized::<SwapState>(&authorized));
-            self.pending_forced.push(ForcedPending { height: s.height, txid: s.txid, intent_hash });
+            let intent_hash =
+                intent_hash(&zyn::verify::encode_authorized::<SwapState>(&authorized));
+            self.pending_forced.push(ForcedPending {
+                height: s.height,
+                txid: s.txid,
+                intent_hash,
+            });
             added += 1;
         }
         if added > 0 {
-            let _ = save_forced(&self.dir, self.chain_id, &self.pending_forced, &self.censored, &self.noted);
+            let _ = save_forced(
+                &self.dir,
+                self.chain_id,
+                &self.pending_forced,
+                &self.censored,
+                &self.noted,
+            );
         }
         added
     }
@@ -345,7 +426,11 @@ impl Replica {
             if self.applied.contains(&p.intent_hash) {
                 eprintln!("zyn-replica: forced intent from Zcash {} was applied by the sequencer — satisfied", hex(&p.txid));
             } else if p.height.saturating_add(FORCED_GRACE) <= anchor_height {
-                let c = Censored { height: p.height, txid: p.txid, due_at: anchor_height };
+                let c = Censored {
+                    height: p.height,
+                    txid: p.txid,
+                    due_at: anchor_height,
+                };
                 self.censored.push(c.clone());
                 newly.push(c);
             } else {
@@ -356,7 +441,13 @@ impl Replica {
         if self.pending_forced.is_empty() {
             self.applied.clear();
         }
-        let _ = save_forced(&self.dir, self.chain_id, &self.pending_forced, &self.censored, &self.noted);
+        let _ = save_forced(
+            &self.dir,
+            self.chain_id,
+            &self.pending_forced,
+            &self.censored,
+            &self.noted,
+        );
         newly
     }
 
@@ -392,7 +483,11 @@ impl Replica {
     /// *offered*, never what is *accepted* (§50.14).
     /// Apply what has been sighted, treating the sightings as a complete view
     /// of the chain. Equivalent to `apply_sightings_scanned(.., true)`.
-    pub fn apply_sightings(&mut self, sightings: &[Sighting], fetch: &dyn Fetch) -> Result<Progress, Halt> {
+    pub fn apply_sightings(
+        &mut self,
+        sightings: &[Sighting],
+        fetch: &dyn Fetch,
+    ) -> Result<Progress, Halt> {
         self.apply_sightings_scanned(sightings, fetch, true)
     }
 
@@ -416,7 +511,12 @@ impl Replica {
     ///
     /// `previous_root` is still checked at every step, so deferring changes
     /// only *when* a decision is made, never *what* is accepted.
-    pub fn apply_sightings_scanned(&mut self, sightings: &[Sighting], fetch: &dyn Fetch, scan_complete: bool) -> Result<Progress, Halt> {
+    pub fn apply_sightings_scanned(
+        &mut self,
+        sightings: &[Sighting],
+        fetch: &dyn Fetch,
+        scan_complete: bool,
+    ) -> Result<Progress, Halt> {
         if let Some(h) = &self.halted {
             return Err(h.clone());
         }
@@ -428,7 +528,10 @@ impl Replica {
                 all.push(*s);
             }
         }
-        let ordered: Vec<Sighting> = in_lineage_order(&all, self.chain_id).into_iter().copied().collect();
+        let ordered: Vec<Sighting> = in_lineage_order(&all, self.chain_id)
+            .into_iter()
+            .copied()
+            .collect();
         let mut progress = Progress::default();
         for (i, s) in ordered.iter().enumerate() {
             match self.seen.get(&s.epoch) {
@@ -437,7 +540,11 @@ impl Replica {
                     continue;
                 }
                 Some(id) => {
-                    let h = Halt::Fork { epoch: s.epoch, seen: *id, other: s.id };
+                    let h = Halt::Fork {
+                        epoch: s.epoch,
+                        seen: *id,
+                        other: s.id,
+                    };
                     self.halted = Some(h.clone());
                     return Err(h);
                 }
@@ -469,12 +576,20 @@ impl Replica {
     fn verify_one(&mut self, s: &Sighting, fetch: &dyn Fetch) -> Result<(), Halt> {
         let epoch = s.epoch;
         let rel = publish::rel_dir(self.chain_id, epoch);
-        let get = |name: &str| fetch.get(&format!("{}/{}", rel, name)).map_err(|error| Halt::Fetch { epoch, error });
-        let bad = |what: &str| Halt::BadBundle { epoch, what: what.to_string() };
+        let get = |name: &str| {
+            fetch
+                .get(&format!("{}/{}", rel, name))
+                .map_err(|error| Halt::Fetch { epoch, error })
+        };
+        let bad = |what: &str| Halt::BadBundle {
+            epoch,
+            what: what.to_string(),
+        };
 
         // 1. The anchor is the one the chain committed to.
         let anchor_bytes = get("anchor.bin")?;
-        let anchor = Anchor::decode(&anchor_bytes).ok_or_else(|| bad("anchor.bin does not decode"))?;
+        let anchor =
+            Anchor::decode(&anchor_bytes).ok_or_else(|| bad("anchor.bin does not decode"))?;
         if anchor.id() != s.id {
             return Err(bad("anchor.bin does not hash to the id in the memo"));
         }
@@ -482,8 +597,11 @@ impl Replica {
             return Err(bad("anchor.bin is for another epoch or chain"));
         }
         // 2. It continues what was verified before.
-        self.ledger.check(&anchor).map_err(|error| Halt::Lineage { epoch, error })?;
-        let certificate = Certificate::decode(&get("certificate.bin")?).ok_or_else(|| bad("certificate.bin does not decode"))?;
+        self.ledger
+            .check(&anchor)
+            .map_err(|error| Halt::Lineage { epoch, error })?;
+        let certificate = Certificate::decode(&get("certificate.bin")?)
+            .ok_or_else(|| bad("certificate.bin does not decode"))?;
         if certificate.anchor != anchor.id() {
             return Err(bad("certificate.bin is for another anchor"));
         }
@@ -491,7 +609,11 @@ impl Replica {
         // clears its set before it will advance past the anchor.
         if let Some(set) = &self.require_set {
             if certificate.verify(&anchor, set).is_err() {
-                return Err(Halt::Unendorsed { epoch, have: certificate.weight(set), need: set.threshold() });
+                return Err(Halt::Unendorsed {
+                    epoch,
+                    have: certificate.weight(set),
+                    need: set.threshold(),
+                });
             }
         }
         // 3. Its own inputs produce it.
@@ -500,7 +622,8 @@ impl Replica {
         let mut files: Vec<EpochFile> = Vec::new();
         for e in first..=last {
             let raw = get(&format!("intents/epoch-{}.intents", e))?;
-            let f = journal::read_epoch(&raw).map_err(|e| bad(&format!("intents file is malformed: {:?}", e)))?;
+            let f = journal::read_epoch(&raw)
+                .map_err(|e| bad(&format!("intents file is malformed: {:?}", e)))?;
             if f.chain_id != self.chain_id || f.epoch != e {
                 return Err(bad("intents file names the wrong chain or epoch"));
             }
@@ -515,11 +638,19 @@ impl Replica {
         }
         let replayed = match journal::replay(self.state.clone(), &files) {
             Ok(r) => r,
-            Err(ReplayError::Undecodable { epoch, seq }) => return Err(Halt::BadBundle { epoch, what: format!("intent at seq {} does not decode", seq) }),
+            Err(ReplayError::Undecodable { epoch, seq }) => {
+                return Err(Halt::BadBundle {
+                    epoch,
+                    what: format!("intent at seq {} does not decode", seq),
+                })
+            }
             Err(e) => return Err(bad(&format!("replay refused: {:?}", e))),
         };
         if replayed.checkpoints.last() != Some(&anchor.checkpoint) {
-            return Err(Halt::Diverged { epoch, seq: replayed.state.seq() });
+            return Err(Halt::Diverged {
+                epoch,
+                seq: replayed.state.seq(),
+            });
         }
         // 3b. The credits in it are backed by money this verifier can see for
         //     itself. Reproducing the root only proves the sequencer did its
@@ -527,30 +658,52 @@ impl Replica {
         //     reproduces just as faithfully. This is the step that asks
         //     whether the inputs were true.
         if let Some(backing) = &self.backing {
-            backing.check(&credits_in(&files)).map_err(|what| Halt::Unbacked { epoch, what })?;
+            backing
+                .check(&credits_in(&files))
+                .map_err(|what| Halt::Unbacked { epoch, what })?;
         }
         // 4. The published leaves open that root, and are the leaves of the
         //    state just reproduced — the two must be one tree.
-        let published = Published::decode(&get("published.bin")?).ok_or_else(|| bad("published.bin does not decode"))?;
-        published.verify().map_err(|e| bad(&format!("published.bin does not open its own root: {:?}", e)))?;
+        let published = Published::decode(&get("published.bin")?)
+            .ok_or_else(|| bad("published.bin does not decode"))?;
+        published.verify().map_err(|e| {
+            bad(&format!(
+                "published.bin does not open its own root: {:?}",
+                e
+            ))
+        })?;
         if published.root != anchor.checkpoint.state_root {
             return Err(bad("published.bin opens a different root than the anchor"));
         }
-        let snapshot = Snapshot::at_checkpoint(&replayed.state, &anchor.checkpoint).ok_or_else(|| bad("the replayed state cannot be viewed at the seal"))?;
+        let snapshot = Snapshot::at_checkpoint(&replayed.state, &anchor.checkpoint)
+            .ok_or_else(|| bad("the replayed state cannot be viewed at the seal"))?;
         let ours = snapshot.published().map_err(|e| bad(&format!("{:?}", e)))?;
         if ours != published {
             return Err(bad("published.bin is not the tree the intents produce"));
         }
         // 5. Commit: this root is now something this process has proven.
-        self.ledger.accept_trusted_operator(anchor).map_err(|error| Halt::Lineage { epoch, error })?;
+        self.ledger
+            .accept_trusted_operator(anchor)
+            .map_err(|error| Halt::Lineage { epoch, error })?;
         self.state = replayed.state;
         self.seen.insert(epoch, anchor.id());
         self.verified_epoch = Some(epoch);
         self.verified_height = s.height;
         self.published = Some(snapshot.clone());
-        self.newly_verified.push((anchor.id(), anchor.checkpoint.state_root));
-        self.persist(&Bundle { anchor, certificate, published, intents: files.iter().map(|f| (f.epoch, encode_epoch(f))).collect(), txid: hex(&s.txid), height: s.height }, &snapshot)
-            .map_err(|what| Halt::BadBundle { epoch, what })?;
+        self.newly_verified
+            .push((anchor.id(), anchor.checkpoint.state_root));
+        self.persist(
+            &Bundle {
+                anchor,
+                certificate,
+                published,
+                intents: files.iter().map(|f| (f.epoch, encode_epoch(f))).collect(),
+                txid: hex(&s.txid),
+                height: s.height,
+            },
+            &snapshot,
+        )
+        .map_err(|what| Halt::BadBundle { epoch, what })?;
         for c in self.resolve_forced(s.height) {
             eprintln!(
                 "zyn-replica: CENSORSHIP — forced intent from Zcash {} (height {}) was not applied by the anchor at height {}; the sequencer is refusing service",
@@ -561,13 +714,26 @@ impl Replica {
     }
 
     fn persist(&self, bundle: &Bundle, snapshot: &Snapshot<SwapState>) -> Result<(), String> {
-        self.store.save(&Saved::of(&self.state)).map_err(|e| format!("cannot save verified state: {:?}", e))?;
-        self.store.save_ledger(&self.ledger).map_err(|e| format!("cannot save verified ledger: {:?}", e))?;
+        self.store
+            .save(&Saved::of(&self.state))
+            .map_err(|e| format!("cannot save verified state: {:?}", e))?;
+        self.store
+            .save_ledger(&self.ledger)
+            .map_err(|e| format!("cannot save verified ledger: {:?}", e))?;
         let da = self.da_dir();
         publish::write_local(&da, self.chain_id, bundle)?;
-        let snap_path = da.join(publish::rel_dir(self.chain_id, bundle.anchor.checkpoint.epoch)).join("snapshot.bin");
+        let snap_path = da
+            .join(publish::rel_dir(
+                self.chain_id,
+                bundle.anchor.checkpoint.epoch,
+            ))
+            .join("snapshot.bin");
         fs::write(&snap_path, snapshot.encode()).map_err(|e| e.to_string())?;
-        fs::write(self.dir.join(format!("verified-{}.height", self.chain_id)), self.verified_height.to_string()).map_err(|e| e.to_string())?;
+        fs::write(
+            self.dir.join(format!("verified-{}.height", self.chain_id)),
+            self.verified_height.to_string(),
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -613,13 +779,29 @@ fn forced_path(dir: &Path, chain_id: u32) -> PathBuf {
 }
 
 /// `pending <height> <txid> <intent_hash>` / `censored <height> <txid> <due_at>` / `noted <txid>` lines.
-fn save_forced(dir: &Path, chain_id: u32, pending: &[ForcedPending], censored: &[Censored], noted: &BTreeSet<[u8; 32]>) -> Result<(), String> {
+fn save_forced(
+    dir: &Path,
+    chain_id: u32,
+    pending: &[ForcedPending],
+    censored: &[Censored],
+    noted: &BTreeSet<[u8; 32]>,
+) -> Result<(), String> {
     let mut s = String::new();
     for p in pending {
-        s.push_str(&format!("pending {} {} {}\n", p.height, rawhex(&p.txid), rawhex(&p.intent_hash)));
+        s.push_str(&format!(
+            "pending {} {} {}\n",
+            p.height,
+            rawhex(&p.txid),
+            rawhex(&p.intent_hash)
+        ));
     }
     for c in censored {
-        s.push_str(&format!("censored {} {} {}\n", c.height, rawhex(&c.txid), c.due_at));
+        s.push_str(&format!(
+            "censored {} {} {}\n",
+            c.height,
+            rawhex(&c.txid),
+            c.due_at
+        ));
     }
     for t in noted {
         s.push_str(&format!("noted {}\n", rawhex(t)));
@@ -629,22 +811,35 @@ fn save_forced(dir: &Path, chain_id: u32, pending: &[ForcedPending], censored: &
     fs::rename(&tmp, forced_path(dir, chain_id)).map_err(|e| e.to_string())
 }
 
-fn load_forced(dir: &Path, chain_id: u32) -> (Vec<ForcedPending>, Vec<Censored>, BTreeSet<[u8; 32]>) {
+fn load_forced(
+    dir: &Path,
+    chain_id: u32,
+) -> (Vec<ForcedPending>, Vec<Censored>, BTreeSet<[u8; 32]>) {
     let mut pending = Vec::new();
     let mut censored = Vec::new();
     let mut noted = BTreeSet::new();
-    let Ok(s) = fs::read_to_string(forced_path(dir, chain_id)) else { return (pending, censored, noted) };
+    let Ok(s) = fs::read_to_string(forced_path(dir, chain_id)) else {
+        return (pending, censored, noted);
+    };
     for l in s.lines() {
         let f: Vec<&str> = l.split_whitespace().collect();
         match f.as_slice() {
             ["pending", h, t, ih] => {
                 if let (Ok(h), Some(t), Some(ih)) = (h.parse(), unhex32(t), unhex32(ih)) {
-                    pending.push(ForcedPending { height: h, txid: t, intent_hash: ih });
+                    pending.push(ForcedPending {
+                        height: h,
+                        txid: t,
+                        intent_hash: ih,
+                    });
                 }
             }
             ["censored", h, t, d] => {
                 if let (Ok(h), Some(t), Ok(d)) = (h.parse(), unhex32(t), d.parse()) {
-                    censored.push(Censored { height: h, txid: t, due_at: d });
+                    censored.push(Censored {
+                        height: h,
+                        txid: t,
+                        due_at: d,
+                    });
                 }
             }
             ["noted", t] => {
@@ -691,8 +886,21 @@ fn credits_in(files: &[EpochFile]) -> Vec<crate::backing::SeenCredit> {
                 };
                 intent
             };
-            if let swapvm::tx::Intent::CreditDeposit { account, asset, amount, index, external_ref } = intent {
-                out.push(crate::backing::SeenCredit { account, asset, amount, index, external_ref });
+            if let swapvm::tx::Intent::CreditDeposit {
+                account,
+                asset,
+                amount,
+                index,
+                external_ref,
+            } = intent
+            {
+                out.push(crate::backing::SeenCredit {
+                    account,
+                    asset,
+                    amount,
+                    index,
+                    external_ref,
+                });
             }
         }
     }
@@ -704,7 +912,13 @@ mod tests {
     use super::*;
 
     fn sighting(epoch: u64, height: u64, chain_id: u32) -> Sighting {
-        Sighting { height, txid: [0u8; 32], chain_id, epoch, id: [epoch as u8; 32] }
+        Sighting {
+            height,
+            txid: [0u8; 32],
+            chain_id,
+            epoch,
+            id: [epoch as u8; 32],
+        }
     }
 
     /// Epoch 4330 was reorged off Zcash and re-anchored the next day, so it
@@ -719,14 +933,28 @@ mod tests {
             sighting(4474, 4337911, 11),
             sighting(4330, 4338929, 11), // repaired: newest block, oldest epoch
         ];
-        let order: Vec<u64> = in_lineage_order(&seen, 11).iter().map(|s| s.epoch).collect();
-        assert_eq!(order, vec![4321, 4330, 4336, 4474], "the chain must be offered as it chains");
+        let order: Vec<u64> = in_lineage_order(&seen, 11)
+            .iter()
+            .map(|s| s.epoch)
+            .collect();
+        assert_eq!(
+            order,
+            vec![4321, 4330, 4336, 4474],
+            "the chain must be offered as it chains"
+        );
     }
 
     #[test]
     fn other_chains_are_not_offered_at_all() {
-        let seen = vec![sighting(1, 100, 11), sighting(2, 101, 26460), sighting(3, 102, 11)];
-        let order: Vec<u64> = in_lineage_order(&seen, 11).iter().map(|s| s.epoch).collect();
+        let seen = vec![
+            sighting(1, 100, 11),
+            sighting(2, 101, 26460),
+            sighting(3, 102, 11),
+        ];
+        let order: Vec<u64> = in_lineage_order(&seen, 11)
+            .iter()
+            .map(|s| s.epoch)
+            .collect();
         assert_eq!(order, vec![1, 3]);
     }
 
@@ -735,7 +963,14 @@ mod tests {
     #[test]
     fn a_contested_epoch_still_orders_deterministically() {
         let seen = vec![sighting(9, 200, 11), sighting(9, 100, 11)];
-        let heights: Vec<u64> = in_lineage_order(&seen, 11).iter().map(|s| s.height).collect();
-        assert_eq!(heights, vec![100, 200], "lower height first, always the same way round");
+        let heights: Vec<u64> = in_lineage_order(&seen, 11)
+            .iter()
+            .map(|s| s.height)
+            .collect();
+        assert_eq!(
+            heights,
+            vec![100, 200],
+            "lower height first, always the same way round"
+        );
     }
 }

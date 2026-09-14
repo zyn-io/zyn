@@ -6,6 +6,14 @@ a redeemable floor without being asked to care about any of them.
 
 Front-end home: **cavebro.win**, kept separate from the Zyn/ZynZap brand.
 
+> **Current identity and fee note (13 Sep 2026).** The collection creator and
+> creator-fee recipient is the threshold protocol account named **Treasury
+> 26460**, shared with the 333 Nap Mole collection. The secondary fee described
+> below is historical: DECISIONS §69.9 supersedes it with 50% to future ZYN POL,
+> 40% to the collection floor and 10% to Treasury 26460. Pin the treasury's real
+> 32-byte AccountId and recompute the official collection/item addresses before
+> minting.
+
 ## The collection
 
 | | |
@@ -30,7 +38,7 @@ owl-collection-1333, moth-collection-889}`, with `COLLECTION-SPEC.md`,
 | Claim (mint) | **0.005 ZEC** | second mainnet deposit; the moment the piece is handed over |
 | Open mint | **0.0133 ZEC** | whatever the sale did not allocate |
 | Treasury | **10%** of all deposits and mints | taken before the pool is funded |
-| Trade fee | **1% per side** | half to the pool, half to the creator |
+| Trade fee | **1% per side** | historical `50/50`; superseded by §69.9's `50/40/10` |
 | Floor | `pool / outstanding` | rises with every trade and every redemption leaves it unchanged |
 
 **Both payments are mainnet deposits** (decided 9 Sep 2026). The claim is its own
@@ -91,38 +99,63 @@ Two consequences that were asked for and are enforced for free:
 The lottery is off-chain by design; Zyn holds the collection, the pool and the
 items, not the draw.
 
-- **Allocation happens at deposit, not at claim.** A confirmed deposit assigns the
-  pieces immediately; the claim is only when they are handed over. Without claiming,
-  the deposit cannot be recovered — the pool is what backs the floor.
-- **Stop deposits when fewer than 3 items remain**, since a ticket can win 3. The
-  final 1 or 2 are reserved for the team.
+- **A deposit commits a ticket; future public evidence resolves it.** Fixed and
+  buyer-chosen quantities are known immediately. A weighted quantity resolves
+  only after its precommitted future drand round. Concealed item identities resolve
+  after deposits close from the precommitted drand round and a Zcash block height
+  strictly after the policy's committed deposit-close height.
+  Claim still only hands over the already resolved pieces.
+- **Reserve the maximum possible receipt for every unresolved ticket.** Collection
+  Z's proposed weighted policy therefore reserves three items until its quantity
+  draw resolves. Stop accepting tickets before those reservations can exceed
+  supply; do not strand an accidental remainder and call it a team reserve.
 - **Unclaimed at the end of the deposit period rolls into open mint** at 0.0133.
 - **Treasury takes 10%** before the remainder is moved into the pool with
   `fund_collection`.
 
 ## What exists in code
 
-Verified 9 Sep 2026.
+Verified 14 Sep 2026.
 
 **Complete** — the collection primitive is done and tested:
 `create_collection`, `mint_collection_item`, `fund_collection`,
 `redeem_collection_item`, `advance_collection`; the fee split in `accept_offer`
-(each side pays `fee_bps`, half to pool, half to creator, `ItemNeedsAPrice` if not
-priced in xZEC); `redeem_price()`; intent authorities; `OP_COLLECTIONS`,
+(each side pays `fee_bps`; current policy is `50%` ZYN POL / `40%` floor reserve /
+`10%` creator, with protocol Treasury 26460 as creator of Cave/Nap;
+`ItemNeedsAPrice` if not priced in xZEC); `redeem_price()`; intent authorities; `OP_COLLECTIONS`,
 `OP_DEPOSIT_ADDRESS`; the five client methods; `/api/redeem`,
 `/api/deposit-address`; per-account deposit addresses.
 
-**Not built — the sale backend, in full:**
+**Complete — the pure allocation engine:** `cave-randomness` canonicalizes and
+hashes `cave-allocation/v1`, verifies pinned drand Quicknet BLS beacons, combines
+the collection reveal with a predeclared Zcash block hash, samples arbitrary
+positive weights without modulo bias, assigns concealed/instant/sequential
+identities without replacement, emits Merkle-backed receipts and independently
+replays a complete batch. Each ticket is deterministically bound to its policy,
+exact Zcash output and amount, and Zyn recipient. Manifest item ids must equal the
+canonical Zyn address derived from collection plus serial. Its scale test assigns
+all 4,444 indices exactly once.
 
-1. Draw, allocation ledger, claim, team reserve, open mint
-2. Treasury split and the `fund_collection` calls that follow it
-3. A public claim path — `mint_collection_item` is creator-only, so every mint is
+**Complete — allocation-to-mint identity:** `MintCollectionItem` carries the
+allocated serial, rejects a serial outside the immutable cap or one already
+minted, and derives the asset id from that serial rather than claim order. The
+cross-crate test allocates two receipts and mints them in reverse order while
+proving both canonical item ids and recipients remain exact. `POST /api/mint`
+therefore requires `serial` and returns the derived asset id.
+
+**Not built — the stateful sale service and product paths:**
+
+1. Publish/timestamp the immutable policy and manifest; verify deposit order and
+   canonical Zcash block facts; persist ticket reservations, allocation ledger
+   and receipts; expose them publicly
+2. Claim, team reserve and open mint
+3. Treasury split and the `fund_collection` calls that follow it
+4. A public claim path — `mint_collection_item` is creator-only, so every mint is
    signed by the collection creator on the buyer's behalf
-4. **The buy/sell path**: `AcceptOffer` exists in the VM but is exposed nowhere —
+5. **The buy/sell path**: `AcceptOffer` exists in the VM but is exposed nowhere —
    only a test at `zynzapd/src/rpc.rs:1247`. No client method, no endpoint. Nothing
    can be traded from outside the VM today. *Blocks both the sale and the demo.*
-5. Storefront UI
-6. No `DECISIONS.md` section — the record stops at §38
+6. Storefront wiring
 
 ## Open questions
 
@@ -132,12 +165,12 @@ sits off-chain with integrity by hash. Candidates: served by the storefront, IPF
 or the existing DA mirror. Undecided — and not on the hackathon's critical path,
 since the video needs ~30 pieces.
 
-**Whether the draw should be verifiable.** The deposits are on mainnet and anyone
-can audit them; the lottery result is backend-only, so buyers trust us on the one
-step where trust is doing real work. A commit-reveal — publish a seed commitment
-before the sale, reveal at the close, derive the draw from it — would close that,
-and it is the kind of thing this audience checks for. Worth deciding before launch,
-not after.
+**Verifiable draw is decided; publication is not yet wired.** The exact policy and
+manifest root are committed before deposits. Ticket quantities use predeclared
+future drand rounds. Concealed identity combines a predeclared drand round and
+Zcash block height/hash with the final ticket-ledger root. The engine verifies
+drand in-process and replays every receipt; the service must independently verify
+and publish the Zcash chain evidence rather than asking buyers to trust its seed.
 
 **Whether the team reserve is 1–2 pieces or a stated number.** "Whatever is left
 under 3" is a consequence of the stop rule rather than a policy; stating a fixed
