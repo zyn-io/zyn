@@ -5173,3 +5173,18 @@ statement about the sequencer's memory *at that instant*, not about the chain.
 | 81.4 | **The signer trusts only its own ledger for "settled."** Anything else is asking the party that may have lost the signatures whether it still has them | 🔒 |
 | 81.5 | **The backlog is bounded at eight.** Re-offering is idempotent and cheap, but an anchor that never settles would otherwise be offered forever; eight covers a restart mid-flight without letting one stranded anchor grow the list without limit | ✅ |
 | 81.6 | **A restart of any one signer is the field remedy**, because §63.3 re-seeds `outstanding` from the head anchor at startup. That is what recovered chain 11 here | ✅ |
+
+## 82. Funding the vault is not a deposit (14 Sep 2026)
+
+A chain that has never taken a deposit cannot anchor: an anchor is a vault
+self-send and costs a ZIP-317 fee, and the vault holds no note to spend. So
+mainnet's first act has to be putting ZEC behind fees — and doing that wrongly
+is worse than not doing it.
+
+| # | Decision | Status |
+|---|---|---|
+| 82.1 | **Shielded funds arriving with no Zyn memo are fatal to the deposit pass**, by design: crediting the rest "would attest backing that includes money nobody can claim". So a plain send to the vault address does not fund the chain — it stops the bridge and waits for a human to decide who the money belongs to | ✅ existing |
+| 82.2 | **The operator top-up is a `ZYN` memo naming the all-zero account.** Classified as held for fees and never credited, so `supply` and `xzec_backing` stay equal and nobody is diluted by the fee reserve | ✅ |
+| 82.3 | **`/api/topup` builds that memo rather than asking anyone to type it.** The memo is `"ZYN" ‖ version ‖ 32 zero bytes` — valid UTF-8 and therefore expressible as the string the send path takes, but not something a person can enter by hand. A funding step that depends on hand-crafting binary is a funding step that eventually halts the bridge | ✅ |
+| 82.4 | **`memo::TOPUP_ACCOUNT` and `memo::is_topup` name the intent** instead of leaving `[0u8; 32]` at call sites, where it reads like a placeholder rather than a decision | ✅ |
+| 82.5 | **Minimum useful top-up is `0.0002` ZEC** — one anchor's self-send plus its fee. Send more so later anchors need no second transfer; the surplus is held, not credited, and is recoverable only as fees | 🔒 |

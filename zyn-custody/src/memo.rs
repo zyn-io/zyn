@@ -332,8 +332,37 @@ pub fn decode_text(memo: &str) -> Result<AccountId, MemoError> {
     Ok(out)
 }
 
+/// The operator top-up memo: a `ZYN` memo naming the all-zero account.
+///
+/// Classified as "a top-up of the vault by the operator (to cover fees), held,
+/// never credited" — the only way to put ZEC behind anchor fees without
+/// minting ZEC.zy against it. Named rather than left as `encode(&[0u8; 32])`
+/// so the intent is legible at the call site and cannot be mistaken for a
+/// deposit to a real account.
+pub const TOPUP_ACCOUNT: AccountId = [0u8; 32];
+
+/// Whether this memo is an operator top-up rather than a deposit.
+pub fn is_topup(memo: &[u8]) -> bool {
+    decode(memo).map(|a| a == TOPUP_ACCOUNT).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
+    /// The top-up memo must be recognisable and must not look like a deposit to
+    /// a real account — the difference decides whether ZEC.zy is minted.
+    #[test]
+    fn a_topup_memo_names_nobody_and_is_told_apart_from_a_deposit() {
+        let topup = encode(&TOPUP_ACCOUNT);
+        assert!(is_topup(&topup));
+        assert_eq!(decode(&topup).unwrap(), [0u8; 32]);
+
+        let real = encode(&[9u8; 32]);
+        assert!(!is_topup(&real), "a deposit to a real account is not a top-up");
+
+        // The text form the wallet sends must round-trip to the same thing.
+        assert!(is_topup(encode_text(&TOPUP_ACCOUNT).as_bytes()));
+    }
+
     use super::*;
 
     fn acct(n: u8) -> AccountId {

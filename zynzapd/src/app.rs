@@ -1446,6 +1446,30 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 Ok(format!("deposited {:.8} to the Zyn vault: {}", zec(zat), txid))
             })
         }
+        // Fund the vault's own fee reserve without crediting anyone.
+        //
+        // An anchor is a vault self-send and costs a ZIP-317 fee, so a chain
+        // that has never taken a deposit cannot anchor at all — it holds no
+        // note to spend. A plain send would not do: shielded funds arriving
+        // with no Zyn memo are *fatal to the deposit pass*, because crediting
+        // the rest "would attest backing that includes money nobody can claim".
+        //
+        // The all-zero account is the operator top-up: held for fees, never
+        // credited, so supply and backing stay equal and nobody is diluted.
+        ("POST", "/api/topup") => {
+            zyn_only(app)?;
+            let zat = zatoshi_of(input, "amount")?;
+            let to = app.vault.clone();
+            let memo = zyn_custody::memo::encode_text(&[0u8; 32]);
+            App::start_job(app, "topup", move |a| {
+                let txid = send(a, &to, zat, Some(&memo), "topup")?;
+                Ok(format!(
+                    "topped up the vault fee reserve with {:.8} ZEC (credited to nobody): {}",
+                    zec(zat),
+                    txid
+                ))
+            })
+        }
         ("POST", "/api/import") => {
             if app.job().is_some() { return Err("wait for the current wallet job before restoring".into()); }
             let mut w = app.wallet.try_lock().map_err(|_| "wallet busy")?;
