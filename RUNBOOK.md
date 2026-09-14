@@ -2497,6 +2497,24 @@ continuous scanner loop, Treasury threshold signer and later claim-payment
 settlement are still service work; do not label the standalone libraries as a
 live sale daemon.
 
+Before production, replace the entry memo's current bare allocation-policy
+reference with the canonical `cave-sale-terms/v1` digest from DECISIONS §64.16.
+Those bytes must bind the policy and manifest root, collection, real Treasury 26460
+AccountId, Zcash network/asset, `0.01 / 0.005 / 0.0133 ZEC` entry/claim/open-mint
+prices, minimum confirmation rule, explicit deposit and claim close heights,
+and the 90/10 floor/Treasury split. Ticket ids must bind that digest. A claim
+memo continues to reference its ticket id, which then transitively commits the
+same terms and recipient. Refuse startup if configured values disagree with the
+published bytes; never substitute a service default or a wall-clock timeout.
+
+`cave-zcash::claim_memo` is a codec, not a completed claim rail. A complete claim
+service must admit one sufficiently confirmed claim payment per eligible ticket,
+reject wrong amount/purpose/reference/recipient and duplicate outpoints, credit
+the exact ZEC.zy to Treasury once, wait for the credited epoch to be anchor-final,
+fund 90% through `FundCollection`, retain 10% in Treasury, then submit the
+receipt-bound serial mint. Persist and replay-check every observed VM receipt in
+the same way as entry settlement.
+
 ## 5j. Cave fungible launchpad and atomic ZynZap graduation (implemented, staged; 14 Sep 2026)
 
 The consensus core is executable: `LaunchCurve`, `BuyCurve` and `SellCurve`
@@ -2556,8 +2574,9 @@ creator call it to bypass the protocol template. Current migration status:
 1. **Done in code:** A25's 32-byte asset/pool/collection identifier migration uses the
    frozen `ADDRESS_SCOPE_V1 = b"zynzap\x00\x02"`, independent of the execution
    VM version.
-2. **Still required before deployment:** remove the superseded ZYN emission, halving, burn and bridge-fee launch state,
-   including the old tokenomics panel still rendered by the ZynZap web app.
+2. **Done in current code:** the superseded ZYN emission, halving, burn and
+   bridge-fee launch controls are disabled/removed from the current product
+   path; historical state and wire reads remain only for audit and migration.
 3. **Partially complete:** launch records, fee policy and derived vault addresses
    are committed. Move pool reserves from inline fields to `vault(pool)` balances
    and finish the reviewed `STATE_VERSION`/VM-version rollout. Upgrade replicas and signers before or alongside the

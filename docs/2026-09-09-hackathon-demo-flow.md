@@ -39,7 +39,7 @@ balances, the current owner, the reserve floor and the latest state transition.
 
 | # | Beat | Layer | What the viewer sees |
 |---|------|-------|----------------------|
-| 1 | Wallet A sends 0.01 ZEC to its vault deposit address | **mainnet** | ZIP-321 request, explorer txid, then the ZEC.zy balance increases |
+| 1 | Wallet A sends the 0.01 ZEC entry with a `ZYC Entry` memo | **mainnet** | ZIP-321 request, explorer txid, accepted Cave ticket and its 90/10 settlement evidence; Wallet A does **not** also receive ordinary ZEC.zy credit |
 | 2 | Wallet A pays 0.005 ZEC to claim one piece | **mainnet** | Second explorer txid, then the selected piece moves into Wallet A |
 | 3 | Wallet A sells the piece to Wallet B | Zyn | Owner and balances change immediately; the fee enters the reserve and the floor rises |
 | 4 | Wallet B tries to sell it back; the sequencer refuses; Wallet B forces the same sale through an encrypted `ZYF` memo | **mainnet + Zyn** | Visible rejection, memo txid, replica acceptance, then ownership returns to Wallet A |
@@ -58,15 +58,22 @@ has a distinct purpose: fund, claim, force, anchor and exit.
 
 ## Why the mint has two deposits
 
-`mint_collection_item` in `swapvm/src/vm.rs:1000` charges nothing. It is
-creator-only and debits no buyer balance. The 0.005 price does not exist in the
-VM; it is a sale-backend concept.
+`mint_collection_item` charges nothing. It is creator-only and debits no buyer
+balance. The VM deliberately does not invent a primary-sale price; the fixed
+0.005 ZEC claim price and 90/10 routing belong to Cave's published
+`cave-sale-terms/v1` commitment and settlement state machine.
 
 For the hackathon flow, the claim payment is a second mainnet deposit. This keeps
 primary-sale proceeds in the vault as auditable ZEC and gives the sale backend a
 confirmed payment to bind to the claim. Do not justify the second deposit as a
 way to satisfy the hackathon requirement; forced inclusion and anchoring already
 demonstrate meaningful mainnet use.
+
+Current implementation boundary: the strict `ZYC Claim` memo codec exists, but
+durable claim admission, Treasury credit/funding, anchor-finality gating and
+receipt-bound mint submission do not. Until those steps and the complete sale
+terms commitment are built, beat 2 is a target flow rather than an end-to-end
+demo claim.
 
 The pitch therefore does not claim “one mainnet transaction total.” It claims
 that funded users can perform several trades on Zyn and verify their combined
@@ -95,7 +102,7 @@ hide where the value came from.
 
 ## What exists, and what has to be built
 
-Verified in the tree on 9 September 2026.
+Verified against the split repositories on 14 September 2026.
 
 **Built — VM** (`swapvm/src/vm.rs`, `state.rs`, `microchain.rs`)
 
@@ -122,6 +129,17 @@ Verified in the tree on 9 September 2026.
   `"zyn.deposit.index.v1" ‖ account`, 11 bytes, never the vault’s own index
 - Anchors: `ZYN_ANCHOR_EVERY` = 30 epochs, `ZYN_ANCHOR_AFTER_SECS` = 1800
 
+**Built — Cave libraries** (`zyn-io/cave`)
+
+- independently replayable allocation with verified drand evidence and exact
+  collection-serial identity
+- atomically persisted reservations, batches, entry credit/funding records and
+  receipt-bound mint plans
+- strict `ZYC Entry`/`ZYC Claim` memo codecs and a canonical scanner handoff
+  which excludes Cave payments from ordinary buyer bridge credit
+- entry settlement plans: exact Treasury credit, anchor-finality gate, 90%
+  collection funding, 10% Treasury retention and mint gating
+
 **Built — art** (`examples/zyn-pfp-concepts`)
 
 - 4,444 images, 192×192 PNG, approximately 35 KB each and 154 MB total
@@ -131,21 +149,27 @@ Verified in the tree on 9 September 2026.
 
 **Missing — build in this order**
 
-1. **Reachable buy/sell path.** `AcceptOffer` appears only in a test at
-   `zynzapd/src/rpc.rs:1247`. Add the client method, HTTP endpoint, validation and
-   an end-to-end test. Beats 3 and 4 depend on it.
+1. **Complete sale-terms commitment.** Publish canonical
+   `cave-sale-terms/v1`, migrate entry and ticket identity from the narrower
+   allocation-policy digest, and bind every price, recipient, split,
+   confirmation and chain-height close rule.
 2. **Paid public claim path.** `mint_collection_item` rejects anyone except the
-   creator. The sale backend must bind a confirmed claim deposit to one buyer and
-   one unminted item, then invoke the creator-authorized mint exactly once.
-3. **Deterministic demo reset and seed.** One command should create the
+   creator. The strict claim memo codec exists, but the sale backend must still
+   bind one confirmed 0.005 ZEC claim payment to one eligible ticket, settle its
+   90/10 proceeds after anchor finality and invoke each receipt-authorized serial
+   mint exactly once.
+3. **Continuous services and authority.** Run restart-safe Zcash/drand watchers,
+   publication and public receipt endpoints, and the Treasury 26460 threshold
+   signer which submits the existing settlement plans.
+4. **Deterministic demo reset and seed.** One command should create the
    collection, fund the reserve, assign Wallet A and Wallet B, select stable item
    IDs and return the system to the opening state after every rehearsal.
-4. **Forced-inclusion observability.** Surface the rejected operation, `ZYF`
+5. **Forced-inclusion observability.** Surface the rejected operation, `ZYF`
    transaction, replica acceptance and resulting state transition in one event
    trail.
-5. **Anchor control and evidence.** Add a guarded demo command to anchor now, and
+6. **Anchor control and evidence.** Add a guarded demo command to anchor now, and
    expose the included epoch/state root and `ZYA` txid through the overview data.
-6. **Demo cockpit UI.** Build the focused filming surface described below.
+7. **Demo cockpit UI.** Build the focused filming surface described below.
 7. **Decision record.** Add the collection and demo decisions after §38 in
    `DECISIONS.md`.
 

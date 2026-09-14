@@ -46,6 +46,15 @@ Zcash transaction rather than a Zyn-side transfer of already-bridged value, so
 every zatoshi of sale proceeds arrives in the vault as an auditable mainnet
 deposit, and the buyer never needs ZEC.zy before they own anything.
 
+These are not safe as service configuration alone. Before the sale opens, one
+canonical `cave-sale-terms/v1` document must commit the allocation policy and
+manifest root, collection id, Treasury 26460 AccountId, Zcash network/asset, all
+three prices, minimum confirmation rule, explicit deposit and claim close
+heights, and the 90/10 routing. Its digest is the buyer-visible sale identity.
+The current entry implementation still references only the allocation-policy
+digest; migrating entries and ticket ids to the complete sale-terms digest is a
+known prerequisite, not completed work.
+
 ### Worked example, full allocation
 
 Expected items per ticket: `1(0.80) + 2(0.19) + 3(0.01)` = **1.21**
@@ -159,13 +168,22 @@ waits for that epoch's anchor, then plans 90% to `fund_collection` while 10%
 remains in Treasury. Matching VM receipts are required and item mint plans stay
 blocked until the ticket's floor funding is recorded.
 
+**Partial — claim payment namespace only:** `cave-zcash::claim_memo` encodes a
+strict `ZYC/v1` claim reference to a ticket and its already-bound recipient. No
+durable claim admission/settlement state machine consumes that memo yet. It must
+enforce one claim per eligible ticket, exact 0.005 ZEC, canonical confirmation,
+90% floor funding and 10% Treasury retention before emitting receipt-bound mint
+intents. A codec is not evidence that claiming works end to end.
+
 **Not built — external adapters and product paths:**
 
-1. Publish/timestamp the immutable policy and manifest; run the continuous
+1. Implement and publish canonical `cave-sale-terms/v1`, migrate entry/ticket
+   references to its digest, and timestamp the immutable terms and manifest; run the continuous
    Zcash/drand adapters; expose the persisted ledger and receipts publicly
 2. Treasury 26460 threshold signing and submission of the already planned entry
    credit/funding actions
-3. Claim-payment admission/settlement, automated claim, team reserve and open mint
+3. Claim-payment admission/settlement, automated claim, open-mint settlement,
+   and explicit team-reserve/deposit-close/claim-close parameters
 4. A public claim endpoint — `mint_collection_item` is creator-only, so every mint is
    signed by the collection creator on the buyer's behalf
 5. Storefront wiring. The core client and wallet API already expose place/take/
@@ -189,3 +207,9 @@ and publish the Zcash chain evidence rather than asking buyers to trust its seed
 **Whether the team reserve is 1–2 pieces or a stated number.** "Whatever is left
 under 3" is a consequence of the stop rule rather than a policy; stating a fixed
 number up front reads better.
+
+**Exact chain-height parameters still need to be selected before publication.**
+The format and rule are decided: deposit and claim close at explicit Zcash
+heights committed in the sale terms. Their numeric heights depend on the actual
+launch window and must not be invented in code, inferred from wall-clock time or
+filled by a hidden 30-day default.
