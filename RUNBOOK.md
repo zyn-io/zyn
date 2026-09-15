@@ -3040,14 +3040,31 @@ Ordered by what blocks what.
 8. **Monitoring.** Vault balance against issued supply, sequencer liveness,
    signer availability, and the age of the oldest unsettled exit.
 
-## Mainnet genesis — pending re-run at STATE_VERSION 11
+## Mainnet genesis — frozen at STATE_VERSION 11, 15 Sep 2026
 
-> The 15 Sep freeze below was at `STATE_VERSION` 10. Adding the supply policy
-> (§71.17) changed state, so the version is now **11** and `codec.rs` hard
-> rejects a v10 file. Mainnet must therefore be **reset and re-run**, not
-> migrated. The v10 state is backed up in two places and the old binary kept as
-> `/usr/local/bin/zynzapd.v10`; nothing was ever anchored to Zcash, so the reset
-> costs only the time to re-run.
+Chain 26460 is re-run at v11 and **stopped**, service `disable`d.
+
+| | |
+|---|---|
+| ZYN | `49eb9241e2a0b1163a1eed09bb91a575c93bbc6e76cd7afeb65263640fd169d5` — 21,000,000, **fixed**, no mint authority |
+| ZYN POL pot | `51aece7b…6ba6` holds 2,100,000 |
+| ZYN reserve | `c13c1826…39b0` holds 18,900,000 |
+| Treasury | `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99` |
+| NAPMOLE | `d3090c31…9261` — cap 333, 100 bps, **Closed**, 333/333 |
+| CAVEZ | `024277b6…5f1e` — cap 4444, 100 bps, **Minting**, 0 |
+| Base root | `29de5266179130872cfc14b4517f21b042acb7c6e850e423c813331a9b60f25d` |
+| Data | `/var/lib/zyn/mainnet-v11`, DA in `/var/lib/zyn/mainnet-v11-da` |
+| Backup | `/var/backups/zyn/mainnet-v11-genesis-20260915-113908.tar.gz`, sha256 `6b479771…0b83e`, copy on the Mac |
+
+The v10 state is **untouched** at `/var/lib/zyn/mainnet{,-da}` — the env file was
+repointed rather than the directories cleared, so a rollback is a one-line edit
+plus `/usr/local/bin/zynzapd.v10`. `/etc/zyn/zynzapd-mainnet.env.v10` holds the
+old paths.
+
+Still no Zcash anchor: the vault has never been paid, so the anchor pass fails
+with "waiting for a spendable Ironwood note". Expected, not a fault.
+
+### How this was re-run (the v10 → v11 reset)
 
 ### Resetting mainnet to v11
 
