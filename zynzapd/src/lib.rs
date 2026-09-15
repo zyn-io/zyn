@@ -7,6 +7,7 @@ pub mod app;
 pub mod backing;
 pub mod boot;
 pub mod bridge;
+pub mod claim;
 pub mod client;
 pub mod config;
 pub mod deposits;
