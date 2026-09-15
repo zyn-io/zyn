@@ -1,0 +1,8 @@
+# cavebro.win. The static site needs no configuration; this exists for the
+# whitelist function's storage binding.
+name = "cave-collection-z"
+pages_build_output_dir = "dist"
+
+[[kv_namespaces]]
+binding = "CAVE_WHITELIST"
+id = "8181407749be40ff89d7691132723ae7"

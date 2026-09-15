@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#070807" />
+<meta name="description" content="Apply for a Cave Collection Z whitelist place. 4,444 underground creatures, settling on ZEC." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://cavebro.win/whitelist" />
+<meta property="og:title" content="Cave Collection Z — whitelist" />
+<meta property="og:description" content="Apply for a place. Reviewed by hand." />
+<title>Cave Collection Z — whitelist</title>
+<link rel="stylesheet" href="./styles.css?v=20260909-landing3" />
+<style>
+  /* The landing page owns the atmosphere; this page borrows its palette and
+     stays out of the way. A form is read and filled, not admired. */
+  .wl {
+    max-width: 34rem;
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 4rem) 1.25rem 4rem;
+  }
+  .wl-eyebrow {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--acid);
+  }
+  .wl h1 {
+    font-family: var(--serif);
+    font-size: clamp(1.9rem, 6vw, 2.9rem);
+    line-height: 1.05;
+    margin: 0.6rem 0 0;
+    text-wrap: balance;
+  }
+  .wl-lede { color: var(--muted); margin: 0.9rem 0 0; }
+  .wl-steps {
+    list-style: none;
+    margin: 2rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.85rem;
+  }
+  /* Numbered because these really are a sequence — do this, then this, then
+     apply. The order is the instruction. */
+  .wl-steps li {
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.75rem;
+    align-items: start;
+  }
+  .wl-steps b {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--acid);
+    padding-top: 0.2em;
+  }
+  .wl-form { margin: 2.2rem 0 0; display: grid; gap: 1.1rem; }
+  .wl-field { display: grid; gap: 0.4rem; }
+  .wl-field label { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .wl-field .hint { color: var(--muted); font-size: 0.82rem; }
+  .wl-field input, .wl-field textarea {
+    font: inherit;
+    color: var(--ink);
+    background: var(--deep);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    padding: 0.7rem 0.8rem;
+    width: 100%;
+  }
+  .wl-field textarea { min-height: 5.5rem; resize: vertical; }
+  .wl-field input:focus-visible, .wl-field textarea:focus-visible {
+    outline: 2px solid var(--acid);
+    outline-offset: 1px;
+  }
+  .wl-submit {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: var(--acid);
+    color: var(--black);
+    border: 0;
+    border-radius: 2px;
+    padding: 0.85rem 1.4rem;
+    cursor: pointer;
+    justify-self: start;
+  }
+  .wl-submit[disabled] { opacity: 0.55; cursor: default; }
+  .wl-note { color: var(--muted); font-size: 0.82rem; margin: 1.6rem 0 0; }
+  .wl-out { margin: 1.1rem 0 0; font-family: var(--mono); font-size: 0.8rem; }
+  .wl-out.ok { color: var(--acid); }
+  .wl-out.bad { color: var(--zec); }
+  .wl-back { display: inline-block; margin-top: 2.5rem; color: var(--muted); font-family: var(--mono); font-size: 0.72rem; }
+</style>
+</head>
+<body>
+<main class="wl">
+  <p class="wl-eyebrow">collection 01 · 4,444</p>
+  <h1>Ask for a place in the cave.</h1>
+  <p class="wl-lede">
+    Whitelist applications are open. Every one is read by a person — there is no
+    score, no bot, and no advantage to applying twice.
+  </p>
+
+  <ol class="wl-steps">
+    <li><b>01</b><span>Follow <a href="https://x.com/cavebrowin" rel="noopener">@cavebrowin</a> on X.</span></li>
+    <li><b>02</b><span>Repost the pinned announcement and leave a comment on it.</span></li>
+    <li><b>03</b><span>Paste the link to your repost or comment below, so it can be checked.</span></li>
+  </ol>
+
+  <form class="wl-form" id="wl-form" novalidate>
+    <div class="wl-field">
+      <label for="handle">Your X handle</label>
+      <input id="handle" name="handle" autocomplete="off" spellcheck="false"
+             placeholder="@yourname" maxlength="16" required />
+    </div>
+    <div class="wl-field">
+      <label for="post">Link to your repost or comment</label>
+      <input id="post" name="post" type="url" autocomplete="off" spellcheck="false"
+             placeholder="https://x.com/yourname/status/…" required />
+      <span class="hint">This is what a reviewer opens. Without it there is nothing to check.</span>
+    </div>
+    <div class="wl-field">
+      <label for="note">Anything you want to say <span class="hint">(optional)</span></label>
+      <textarea id="note" name="note" maxlength="280"
+                placeholder="Why the cave, what you build, or nothing at all."></textarea>
+    </div>
+    <button class="wl-submit" id="wl-submit" type="submit">Apply</button>
+    <p class="wl-out" id="wl-out" role="status" aria-live="polite"></p>
+  </form>
+
+  <p class="wl-note">
+    We store your X handle, the link you paste and your note. Nothing else — no
+    email, no wallet address, no Zcash address. If you are given a place you
+    will receive an invitation code, and you connect a wallet then, not now.
+  </p>
+
+  <a class="wl-back" href="/">← back to the cave</a>
+</main>
+
+<script>
+  // A plain fetch to a same-origin function. The page holds no keys, reaches
+  // no chain and makes no decision — the reply only says whether the
+  // application was recorded.
+  const form = document.getElementById('wl-form');
+  const out = document.getElementById('wl-out');
+  const button = document.getElementById('wl-submit');
+
+  function say(message, ok) {
+    out.textContent = message;
+    out.className = 'wl-out ' + (ok ? 'ok' : 'bad');
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const body = {
+      handle: document.getElementById('handle').value,
+      post: document.getElementById('post').value,
+      note: document.getElementById('note').value,
+    };
+    if (!body.handle.trim() || !body.post.trim()) {
+      say('A handle and a link are both needed.', false);
+      return;
+    }
+    button.disabled = true;
+    say('Sending…', true);
+    try {
+      const res = await fetch('/api/whitelist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        say(
+          data.already
+            ? 'You already applied — once is enough. Nothing more to do.'
+            : 'Recorded. Applications are reviewed by hand; watch X for the result.',
+          true,
+        );
+        form.querySelectorAll('input, textarea').forEach((el) => (el.disabled = true));
+        return;
+      }
+      say(data.error || 'That did not go through. Try again in a moment.', false);
+      button.disabled = false;
+    } catch {
+      say('Could not reach the cave. Check your connection and try again.', false);
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
