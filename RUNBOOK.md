@@ -3287,9 +3287,25 @@ pass, and 1,638 lines was three anchors over six hours.
 ZYN_REANCHOR_EPOCHS=10477,10487,10495
 ```
 
-They queue at startup and go out once the vault has a spendable note. Expect a
-note-tree resync first — the reorg invalidates it, and on testnet that is about
-an hour. Remove the variable once they confirm.
+They queue at startup and go out once the vault has a spendable note.
+
+**Budget most of a day, and know the chain is down for it.** The reorg
+invalidates the note trees, so the restart triggers a full resync — and that
+resync runs in *startup*, before the main loop. Measured on 15 Sep: about 1,800
+blocks an hour, roughly 18,000 blocks to cover, near seven hours end to end.
+
+While it runs the node does not serve. The RPC socket is bound early, so `ss`
+shows a listener and nothing looks wrong, but nothing is accepting: `Recv-Q`
+climbs to the backlog size and clients time out. Signers log `cannot reach the
+node … Operation timed out` and endorsements stop. Check `Recv-Q`, not the
+presence of a listener.
+
+So the trade a restart makes is worth stating before taking it: anchoring was
+already stopped, but *everything else was working*. Restarting exchanges a
+stalled anchor for a chain that answers nobody until the resync finishes. On
+testnet that is acceptable. On mainnet, schedule it.
+
+Remove the variable once the re-anchors confirm.
 
 **A constraint worth knowing:** the §81 signer fix cannot reach testnet. It
 lives in a tree at `STATE_VERSION` 12, and chain 11 runs v10, so a v12
