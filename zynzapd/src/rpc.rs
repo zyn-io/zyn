@@ -596,6 +596,17 @@ pub fn dispatch(server: &Server, frame: &[u8]) -> Vec<u8> {
                 ("zyn-pol", swapvm::types::ZYN_POL),
             ];
             let mut e = Encoder::new();
+            // The market's schedule travels with the pots, because it is a
+            // fact about them: the date exists only once the pot is full.
+            e.u64(s.zcash_height);
+            match swapvm::launch::pol_open_height(s) {
+                Some(h) => {
+                    e.u8(1).u64(s.pol_open_armed_height.unwrap_or(0)).u64(h);
+                }
+                None => {
+                    e.u8(0);
+                }
+            }
             e.u32(pots.len() as u32);
             for (name, id) in pots {
                 e.u8(name.len() as u8).bytes(name.as_bytes()).bytes(&id);

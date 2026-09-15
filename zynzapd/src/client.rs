@@ -621,6 +621,35 @@ pub struct LaunchMe {
     pub markets: Vec<(AssetId, Fixed, Fixed, Fixed, u64)>,
 }
 
+/// When the ZYN market opens, in Zcash block height.
+///
+/// Both numbers are public the moment the POL pot fills, which is the whole
+/// mechanism: the date is arithmetic from chain state rather than something
+/// anyone has to announce.
+#[derive(Clone, Copy, Debug)]
+pub struct MarketSchedule {
+    /// Height at which the pot filled and the countdown started.
+    pub armed: u64,
+    /// Height at which the market opens.
+    pub opens: u64,
+}
+
+impl MarketSchedule {
+    /// Blocks remaining, or `0` once the market is due.
+    pub fn blocks_remaining(&self, now: u64) -> u64 {
+        self.opens.saturating_sub(now)
+    }
+}
+
+/// The pots, and the market schedule that depends on them.
+#[derive(Clone, Debug)]
+pub struct PotsView {
+    pub zcash_height: u64,
+    /// `None` until the POL pot fills.
+    pub schedule: Option<MarketSchedule>,
+    pub pots: Vec<(String, [u8; 32], Vec<(AssetId, Fixed)>)>,
+}
+
 impl Node {
     pub fn new(addr: &str, chain: u32) -> Node {
         Node {
@@ -1204,11 +1233,20 @@ impl Node {
     ///
     /// Public on purpose: nobody holds a key to these, and §71.3 requires the
     /// supply numbers to be derivable from chain state rather than asserted.
-    pub fn pots(&self) -> Result<Vec<(String, [u8; 32], Vec<(AssetId, Fixed)>)>, String> {
+    pub fn pots(&self) -> Result<PotsView, String> {
         let mut e = Encoder::new();
         e.u8(crate::rpc::OP_POTS).u32(self.chain);
         let body = self.call(e.finish())?;
         let mut d = Decoder::new(&body);
+        let zcash_height = d.u64().unwrap_or(0);
+        let schedule = match d.u8().unwrap_or(0) {
+            1 => {
+                let armed = d.u64().unwrap_or(0);
+                let opens = d.u64().unwrap_or(0);
+                Some(MarketSchedule { armed, opens })
+            }
+            _ => None,
+        };
         let n = d.u32().unwrap_or(0);
         let mut out = Vec::new();
         for _ in 0..n {
@@ -1224,7 +1262,11 @@ impl Node {
             }
             out.push((name, id, held));
         }
-        Ok(out)
+        Ok(PotsView {
+            zcash_height,
+            schedule,
+            pots: out,
+        })
     }
 
     /// Every Cave curve, including graduated launches and their ZynZap pool.

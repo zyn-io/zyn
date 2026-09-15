@@ -219,10 +219,15 @@ fn issue_zyn_at_genesis(n: &mut zyn::node::Node<swapvm::state::SwapState>, chain
             symbol: swapvm::state::symbol(b"ZYN"),
             supply: swapvm::fixed::Fixed::whole(21_000_000),
             unit: swapvm::fixed::Fixed::raw(1),
-            allocations: vec![
-                (swapvm::types::ZYN_POL_ZYN, swapvm::fixed::Fixed::whole(2_100_000)),
-                (swapvm::types::ZYN_RESERVE, swapvm::fixed::Fixed::whole(18_900_000)),
-            ],
+            // All of it into the reserve. The POL pot fills from here as
+            // ZEC.zy accrues (§71.24), one unit of ZYN per 0.0002 ZEC — which
+            // is what makes the opening price a fact about real backing rather
+            // than an allocation decided at genesis. Pre-filling the pot would
+            // leave nothing to match and the market with no way to become due.
+            allocations: vec![(
+                swapvm::types::ZYN_RESERVE,
+                swapvm::fixed::Fixed::whole(21_000_000),
+            )],
             policy: swapvm::state::SupplyPolicy::Fixed,
             native: true,
         },
@@ -232,8 +237,8 @@ fn issue_zyn_at_genesis(n: &mut zyn::node::Node<swapvm::state::SwapState>, chain
         return Err(format!("could not issue ZYN: {:?}", step.receipts));
     }
     eprintln!(
-        "zynzapd: ZYN issued — 21,000,000, fixed supply, no mint authority; \
-         2,100,000 to the POL pot and 18,900,000 to the reserve, both keyless"
+        "zynzapd: ZYN issued — 21,000,000, fixed supply, no mint authority, all of it \
+         in the keyless reserve; the POL pot fills from it as ZEC.zy accrues"
     );
     Ok(())
 }
@@ -1124,11 +1129,67 @@ fn run() -> Result<(), String> {
             n
         ),
     }
+    // A Zebra connection kept for the clock alone. The ZYN market's opening
+    // schedule is measured in Zcash blocks (§71.29) because that is a clock
+    // nobody trading on Zyn can accelerate — but it only works if the chain is
+    // actually told the height, so this runs whether or not a bridge is
+    // configured and independently of whether a scan is making progress.
+    let mut height_clock = cfg.zebra.as_ref().and_then(|z| {
+        let auth = match (&z.user, &z.password) {
+            (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
+            _ => None,
+        };
+        match Zebra::connect(&z.host, z.port, auth, cfg.network) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                eprintln!("zynzapd: no Zcash height clock ({}); the ZYN market schedule cannot advance", e);
+                None
+            }
+        }
+    });
+    let mut last_height = 0u64;
+
     let mut last_save = now_secs();
     let mut last_scan = 0u64;
     while !STOPPING.load(Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let now = now_secs();
+
+        // Once a minute is ample for a clock whose blocks are ~75 seconds.
+        if now.saturating_sub(last_height) >= 60 {
+            last_height = now;
+            if let Some(z) = height_clock.as_mut() {
+                match z.chain_info() {
+                    Ok(info) => {
+                        if let Ok(mut n) = shared.lock() {
+                            if info.blocks > n.state().zcash_height {
+                                let step = n.submit_operator(
+                                    swapvm::tx::Intent::ZcashHeight {
+                                        height: info.blocks,
+                                    },
+                                    now,
+                                );
+                                for r in &step.receipts {
+                                    if let swapvm::tx::Receipt::MarketOpened {
+                                        pool, amount, zec, ..
+                                    } = r
+                                    {
+                                        eprintln!(
+                                            "zynzapd: ZYN MARKET OPENED at Zcash height {} — {} ZYN against {} ZEC.zy in pool {}",
+                                            info.blocks,
+                                            amount,
+                                            zec,
+                                            pool.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("zynzapd: height clock unavailable: {}", e),
+                }
+            }
+        }
 
         let sealed = match shared.lock() {
             Err(_) => {

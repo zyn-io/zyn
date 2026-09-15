@@ -27,7 +27,8 @@ fn main() {
     );
 
     // Where it sits. Read back from the chain, not from what we meant to send.
-    let pots = c.pots().expect("pots");
+    let view = c.pots().expect("pots");
+    let pots = &view.pots;
     let held = |name: &str| -> swapvm::fixed::Fixed {
         pots.iter()
             .find(|(n, _, _)| n == name)
@@ -38,7 +39,8 @@ fn main() {
             })
             .unwrap_or(swapvm::fixed::Fixed::ZERO)
     };
-    for (name, want) in [("zyn-pol-zyn", 2_100_000i64), ("zyn-reserve", 18_900_000i64)] {
+    // At genesis everything is in the reserve; the POL pot fills from accrual.
+    for (name, want) in [("zyn-pol-zyn", 0i64), ("zyn-reserve", 21_000_000i64)] {
         let b = held(name);
         println!("{:<12}   {}", name, b);
         assert_eq!(b, swapvm::fixed::Fixed::whole(want), "{} holds the wrong amount", name);
@@ -46,7 +48,16 @@ fn main() {
     let total = held("zyn-pol-zyn").add(held("zyn-reserve")).unwrap();
     assert_eq!(total, t.supply, "every issued unit must be in a pot");
 
-    println!("ok — 21,000,000 ZYN, fixed, all of it in the two keyless pots");
+    match view.schedule {
+        None => println!("market: not due — the POL pot has not filled"),
+        Some(sch) => println!(
+            "market: armed at Zcash {}, opens at {} ({} blocks to go)",
+            sch.armed,
+            sch.opens,
+            sch.blocks_remaining(view.zcash_height)
+        ),
+    }
+    println!("ok — 21,000,000 ZYN, fixed, all of it in the keyless pots");
 }
 
 fn hex(b: &[u8; 32]) -> String {

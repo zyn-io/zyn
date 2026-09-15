@@ -721,6 +721,24 @@ pub struct SwapState {
     /// not restart it.
     pub seq: u64,
     pub params: Params,
+    /// Last Zcash block height the chain has been told about.
+    ///
+    /// Zyn's own clocks are poor for anything a person has to plan around:
+    /// epochs seal faster under load, so a countdown measured in them speeds up
+    /// exactly when the chain is busy. Zcash height is external, roughly 75
+    /// seconds a block, and nobody trading on Zyn can accelerate it — which is
+    /// what a published date has to rest on. It is also the chain Zyn anchors
+    /// to, so it is not a new dependency.
+    ///
+    /// Monotonic: an observation below the current height is refused.
+    pub zcash_height: u64,
+    /// Zcash height at which the ZYN market became *due* to open (§71.29).
+    ///
+    /// Set once, when the POL pot first reaches its 2,100,000 (§71.24), and
+    /// never cleared — nothing can leave a keyless pot, so the condition cannot
+    /// stop being true. The market opens `POL_OPEN_GRACE_BLOCKS` after this, so
+    /// the opening is announced by the chain itself well before it happens.
+    pub pol_open_armed_height: Option<u64>,
     pub accounts: BTreeMap<AccountId, Account>,
     pub tokens: BTreeMap<AssetId, TokenInfo>,
     pub pools: BTreeMap<PoolId, Pool>,
@@ -772,6 +790,8 @@ impl SwapState {
         tokens.insert(XZEC, TokenInfo::bridged(symbol(b"ZEC.zy"), ORIGIN_ZCASH));
         SwapState {
             chain_id,
+            zcash_height: 0,
+            pol_open_armed_height: None,
             epoch: 0,
             seq: 0,
             params,

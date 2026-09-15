@@ -31,7 +31,7 @@ use crate::wire::{Decoder, SwapDecode, SwapEncode, WireError};
 /// Version 8 activates authorization-aware intent commitments. The state body
 /// is unchanged, so versions 1-7 still decode for migration; continuing from
 /// one under VM v2 folds `ZYNAUTH1` records into the next epoch root.
-pub const STATE_VERSION: u16 = 11;
+pub const STATE_VERSION: u16 = 12;
 
 impl SwapState {
     /// Serialise the complete state.
@@ -45,7 +45,9 @@ impl SwapState {
             .bytes(&self.intent_acc)
             .u64(self.finalized_epoch)
             .u64(self.epoch_intents)
-            .fixed(self.epoch_gross_volume);
+            .fixed(self.epoch_gross_volume)
+            .u64(self.zcash_height)
+            .u64(self.pol_open_armed_height.unwrap_or(0));
         crate::wire::encode_params(&mut e, &self.params);
 
         // Tokens, in asset-id order — the same order the commitment uses, so a
@@ -268,6 +270,13 @@ impl SwapState {
         let finalized_epoch = d.u64()?;
         let epoch_intents = d.u64()?;
         let epoch_gross_volume = d.fixed()?;
+        let zcash_height = d.u64()?;
+        // `0` means never armed. A real arming height is always positive,
+        // because the pot cannot fill before the chain has seen a block.
+        let pol_open_armed_height = match d.u64()? {
+            0 => None,
+            h => Some(h),
+        };
         let params = d.params()?;
 
         let mut tokens = BTreeMap::new();
@@ -628,6 +637,8 @@ impl SwapState {
         state.finalized_epoch = finalized_epoch;
         state.epoch_intents = epoch_intents;
         state.epoch_gross_volume = epoch_gross_volume;
+        state.zcash_height = zcash_height;
+        state.pol_open_armed_height = pol_open_armed_height;
         // Replaces the genesis xZEC entry `new` installed, rather than merging
         // with it: a restored state is the encoded one exactly, not the encoded
         // one laid over a fresh chain.
