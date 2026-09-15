@@ -3040,26 +3040,33 @@ Ordered by what blocks what.
 8. **Monitoring.** Vault balance against issued supply, sequencer liveness,
    signer availability, and the age of the oldest unsettled exit.
 
-## Mainnet genesis — frozen at STATE_VERSION 11, 15 Sep 2026
+## Mainnet genesis — frozen at STATE_VERSION 12, 15 Sep 2026
 
-Chain 26460 is re-run at v11 and **stopped**, service `disable`d.
+Chain 26460 is re-run at v12 and **stopped**, service `disable`d.
 
 | | |
 |---|---|
 | ZYN | `49eb9241e2a0b1163a1eed09bb91a575c93bbc6e76cd7afeb65263640fd169d5` — 21,000,000, **fixed**, no mint authority |
-| ZYN POL pot | `51aece7b…6ba6` holds 2,100,000 |
-| ZYN reserve | `c13c1826…39b0` holds 18,900,000 |
+| ZYN reserve | `c13c1826…39b0` holds **all 21,000,000** |
+| ZYN POL pot | `51aece7b…6ba6` holds 0 — it fills from ZEC.zy accrual at 0.0002 (§71.24) |
 | Treasury | `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99` |
 | NAPMOLE | `d3090c31…9261` — cap 333, 100 bps, **Closed**, 333/333 |
 | CAVEZ | `024277b6…5f1e` — cap 4444, 100 bps, **Minting**, 0 |
 | Base root | `29de5266179130872cfc14b4517f21b042acb7c6e850e423c813331a9b60f25d` |
-| Data | `/var/lib/zyn/mainnet-v11`, DA in `/var/lib/zyn/mainnet-v11-da` |
-| Backup | `/var/backups/zyn/mainnet-v11-genesis-20260915-113908.tar.gz`, sha256 `6b479771…0b83e`, copy on the Mac |
+| Market | not due — no opening date until 420 ZEC.zy has accrued |
+| Zcash clock | last observed 3,484,298 before the stop; it resumes when the node does |
+| Data | `/var/lib/zyn/mainnet-v12`, DA in `/var/lib/zyn/mainnet-v12-da` |
+| Backup | `/var/backups/zyn/mainnet-v12-genesis-20260915-152842.tar.gz`, sha256 `ab2dd263…ad045`, copy on the Mac |
 
-The v10 state is **untouched** at `/var/lib/zyn/mainnet{,-da}` — the env file was
-repointed rather than the directories cleared, so a rollback is a one-line edit
-plus `/usr/local/bin/zynzapd.v10`. `/etc/zyn/zynzapd-mainnet.env.v10` holds the
-old paths.
+Every earlier state is **untouched**: `mainnet{,-da}` is v10, `mainnet-v11{,-da}`
+is v11. Each reset repointed the env file rather than clearing directories, so
+rolling back is a one-line edit plus the matching binary — `zynzapd.v10`,
+`zynzapd.v11` — with `zynzapd-mainnet.env.v10` and `.v11` holding the old paths.
+
+**The Zcash height clock must be running** for the market schedule to advance
+(§71.30). The node feeds it once a minute from its own Zebra; if that connection
+fails it says so at startup, and the grace period simply cannot begin. Silence
+in the journal means it is working.
 
 Still no Zcash anchor: the vault has never been paid, so the anchor pass fails
 with "waiting for a spendable Ironwood note". Expected, not a fault.
