@@ -1280,10 +1280,7 @@ fn charge_collection_fee(state: &mut SwapState, fee: CollectionFee) -> Result<Re
     c.pool = c.pool.add(to_pool).ok_or(ARITH)?;
     let (pool, redeem_price) = (c.pool, c.redeem_price());
     if to_pol.is_positive() {
-        state
-            .account_mut(&crate::types::ZYN_POL)
-            .credit(XZEC, to_pol)
-            .ok_or(ARITH)?;
+        crate::launch::credit_pol(state, to_pol)?;
     }
     if to_creator.is_positive() {
         state
@@ -2913,10 +2910,7 @@ fn credit_external_pool_fee(state: &mut SwapState, h: &Hop) -> Result<(), Reject
             .account_mut(&creator)
             .credit(XZEC, h.creator_fee)
             .ok_or(ARITH)?;
-        state
-            .account_mut(&crate::types::ZYN_POL)
-            .credit(XZEC, h.pol_fee)
-            .ok_or(ARITH)?;
+        crate::launch::credit_pol(state, h.pol_fee)?;
     } else {
         if h.creator_fee.is_positive() || h.pol_fee.is_positive() {
             return Err(ARITH);

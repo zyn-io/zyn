@@ -70,10 +70,82 @@ pub const POT_ASSETS: AccountId = [0xF5; 32];
 /// escrow is not ours to spend, and `state.offers` is the ledger of whose it is.
 pub const POT_OFFERS: AccountId = [0xF6; 32];
 
+/// ZEC per ZYN at which the reserve matches the POL pot: `0.0002`.
+///
+/// §71.11's Phase-2 trigger and §71.9's 2,100,000 are the same statement seen
+/// twice — 420 ZEC.zy divided by this ratio is exactly 2,100,000 ZYN. Holding
+/// the ratio here makes the opening price a property of how the pot was filled
+/// rather than a number someone has to remember to hit.
+pub const POL_ZEC_PER_ZYN: Fixed = Fixed::raw(200_000_000_000_000); // 0.0002 WAD
+
+/// The most ZYN the reserve will ever match into the POL pot (§71.9).
+pub const POL_ZYN_CAP: Fixed = Fixed::raw(2_100_000 * 1_000_000_000_000_000_000);
+
+/// Credit ZEC.zy to the POL pot, and match it with ZYN from the reserve.
+///
+/// Every route that accrues protocol-owned liquidity goes through here, so the
+/// matching cannot be forgotten at a call site added later — which is the whole
+/// reason this is a function and not five copies of a credit.
+///
+/// The reserve releases `zec / 0.0002` ZYN, stopping at [`POL_ZYN_CAP`]. That
+/// bound is what keeps this from being a tap: past 420 ZEC.zy the pot holds its
+/// full 2,100,000 and the reserve is never drawn on again by this path. What
+/// happens after is the AMM's job, not the reserve's — further accrual moves
+/// the price rather than the supply (§71.5's buyback).
+///
+/// No signature authorises this. A keyless pot cannot produce one, and that
+/// impossibility is exactly what §71.2 rests on: the release is a rule the VM
+/// applies, never a withdrawal anyone can request.
+pub fn credit_pol(state: &mut SwapState, zec: Fixed) -> Result<Fixed, Reject> {
+    if !zec.is_positive() {
+        return Ok(Fixed::ZERO);
+    }
+    state
+        .account_mut(&crate::types::ZYN_POL)
+        .credit(XZEC, zec)
+        .ok_or(Reject::ArithmeticFailure)?;
+
+    let zyn = crate::types::ZYN_MAINNET;
+    let held = state.balance(&crate::types::ZYN_POL_ZYN, zyn);
+    let room = POL_ZYN_CAP.sub(held).unwrap_or(Fixed::ZERO);
+    if !room.is_positive() {
+        return Ok(Fixed::ZERO);
+    }
+    let want = zec
+        .mul_div(Fixed::ONE, POL_ZEC_PER_ZYN)
+        .ok_or(Reject::ArithmeticFailure)?;
+    let available = state.balance(&crate::types::ZYN_RESERVE, zyn);
+    let release = want.min(room).min(available);
+    if !release.is_positive() {
+        return Ok(Fixed::ZERO);
+    }
+    state
+        .account_mut(&crate::types::ZYN_RESERVE)
+        .debit(zyn, release)
+        .ok_or(Reject::ArithmeticFailure)?;
+    state
+        .account_mut(&crate::types::ZYN_POL_ZYN)
+        .credit(zyn, release)
+        .ok_or(Reject::ArithmeticFailure)?;
+    Ok(release)
+}
+
 pub fn is_pot(a: &AccountId) -> bool {
     matches!(
         *a,
-        POT_GENESIS | POT_LP | POT_BRIDGE | POT_POL | POT_FEES | POT_ASSETS | POT_OFFERS
+        POT_GENESIS
+            | POT_LP
+            | POT_BRIDGE
+            | POT_POL
+            | POT_FEES
+            | POT_ASSETS
+            | POT_OFFERS
+            // The derived ZYN pots. Keyless like the rest, and excluded from
+            // reward distribution for the same reason: a pot that cannot spend
+            // should not be paid, or its share is stranded on every epoch.
+            | crate::types::ZYN_POL
+            | crate::types::ZYN_POL_ZYN
+            | crate::types::ZYN_RESERVE
     )
 }
 
@@ -1815,5 +1887,139 @@ mod tests {
             fresh.launch.as_ref().unwrap().params.threshold,
             Fixed::whole(7)
         );
+    }
+}
+
+#[cfg(test)]
+mod pol_release_tests {
+    use super::*;
+    use crate::types::{ZYN_MAINNET, ZYN_POL, ZYN_POL_ZYN, ZYN_RESERVE};
+
+    /// A chain with ZYN issued the way the node issues it at genesis.
+    fn genesis() -> SwapState {
+        let mut s = SwapState::new(26_460, crate::types::Params::v1());
+        s.account_mut(&ZYN_RESERVE)
+            .credit(ZYN_MAINNET, Fixed::whole(18_900_000))
+            .unwrap();
+        s.account_mut(&ZYN_POL_ZYN)
+            .credit(ZYN_MAINNET, Fixed::whole(2_100_000))
+            .unwrap();
+        s
+    }
+
+    /// The pot starts already full at genesis, so the reserve has nothing to
+    /// match — the cap is reached before any fee is ever earned.
+    #[test]
+    fn a_full_pot_draws_nothing_from_the_reserve() {
+        let mut s = genesis();
+        let released = credit_pol(&mut s, Fixed::whole(100)).unwrap();
+        assert_eq!(released, Fixed::ZERO);
+        assert_eq!(s.balance(&ZYN_RESERVE, ZYN_MAINNET), Fixed::whole(18_900_000));
+        assert_eq!(s.balance(&ZYN_POL_ZYN, ZYN_MAINNET), Fixed::whole(2_100_000));
+        assert_eq!(s.balance(&ZYN_POL, XZEC), Fixed::whole(100), "the ZEC still accrues");
+    }
+
+    /// The ratio is the point: 420 ZEC.zy fills the pot to exactly 2,100,000,
+    /// which is §71.11's trigger and §71.9's number arriving at the same place.
+    #[test]
+    fn four_hundred_and_twenty_zec_matches_exactly_two_point_one_million() {
+        let mut s = SwapState::new(26_460, crate::types::Params::v1());
+        s.account_mut(&ZYN_RESERVE)
+            .credit(ZYN_MAINNET, Fixed::whole(21_000_000))
+            .unwrap();
+        let released = credit_pol(&mut s, Fixed::whole(420)).unwrap();
+        assert_eq!(released, Fixed::whole(2_100_000));
+        assert_eq!(s.balance(&ZYN_POL_ZYN, ZYN_MAINNET), POL_ZYN_CAP);
+        assert_eq!(s.balance(&ZYN_POL, XZEC), Fixed::whole(420));
+    }
+
+    /// Past the cap the reserve is never drawn on again by this path. What
+    /// happens after is the AMM's job: price, not supply.
+    #[test]
+    fn the_reserve_stops_at_the_cap_however_much_accrues_after() {
+        let mut s = SwapState::new(26_460, crate::types::Params::v1());
+        s.account_mut(&ZYN_RESERVE)
+            .credit(ZYN_MAINNET, Fixed::whole(21_000_000))
+            .unwrap();
+        credit_pol(&mut s, Fixed::whole(400)).unwrap();
+        let before = s.balance(&ZYN_RESERVE, ZYN_MAINNET);
+        // Far past the trigger — ten times the accrual that fills the pot.
+        let released = credit_pol(&mut s, Fixed::whole(4_200)).unwrap();
+        assert_eq!(
+            s.balance(&ZYN_POL_ZYN, ZYN_MAINNET),
+            POL_ZYN_CAP,
+            "the pot never exceeds 2,100,000"
+        );
+        assert_eq!(released, Fixed::whole(100_000), "only the last 20 ZEC worth");
+        assert_eq!(
+            before.sub(s.balance(&ZYN_RESERVE, ZYN_MAINNET)).unwrap(),
+            Fixed::whole(100_000)
+        );
+        assert_eq!(s.balance(&ZYN_POL, XZEC), Fixed::whole(4_600), "all of it still accrues");
+    }
+
+    /// Supply is conserved: the release moves ZYN between two keyless pots and
+    /// creates none, so §71.3's `total` never moves (§71.4).
+    #[test]
+    fn releasing_moves_zyn_between_pots_and_creates_none() {
+        let mut s = genesis();
+        s.account_mut(&ZYN_POL_ZYN)
+            .debit(ZYN_MAINNET, Fixed::whole(2_100_000))
+            .unwrap();
+        let total = |s: &SwapState| {
+            s.balance(&ZYN_RESERVE, ZYN_MAINNET)
+                .add(s.balance(&ZYN_POL_ZYN, ZYN_MAINNET))
+                .unwrap()
+        };
+        let before = total(&s);
+        credit_pol(&mut s, Fixed::whole(50)).unwrap();
+        assert_eq!(total(&s), before, "conserved across the two pots");
+        assert_eq!(s.balance(&ZYN_POL_ZYN, ZYN_MAINNET), Fixed::whole(250_000));
+    }
+
+    /// The reserve cannot go negative even if the cap would allow more.
+    #[test]
+    fn an_empty_reserve_releases_what_it_has_and_no_more() {
+        let mut s = SwapState::new(26_460, crate::types::Params::v1());
+        s.account_mut(&ZYN_RESERVE)
+            .credit(ZYN_MAINNET, Fixed::whole(1_000))
+            .unwrap();
+        let released = credit_pol(&mut s, Fixed::whole(420)).unwrap();
+        assert_eq!(released, Fixed::whole(1_000), "capped by what the reserve holds");
+        assert_eq!(s.balance(&ZYN_RESERVE, ZYN_MAINNET), Fixed::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod pot_registry_tests {
+    use super::*;
+
+    /// Every keyless account the protocol holds value in must be known to
+    /// `is_pot`, or reward distribution pays a pot that can never spend and
+    /// strands the share. The derived ZYN pots were missing when they were
+    /// added, which is the shape of mistake this test exists to catch.
+    #[test]
+    fn every_keyless_account_is_registered_as_a_pot() {
+        for (name, id) in [
+            ("ZYN_POL", crate::types::ZYN_POL),
+            ("ZYN_POL_ZYN", crate::types::ZYN_POL_ZYN),
+            ("ZYN_RESERVE", crate::types::ZYN_RESERVE),
+            ("POT_GENESIS", POT_GENESIS),
+            ("POT_LP", POT_LP),
+            ("POT_BRIDGE", POT_BRIDGE),
+            ("POT_POL", POT_POL),
+            ("POT_FEES", POT_FEES),
+            ("POT_ASSETS", POT_ASSETS),
+            ("POT_OFFERS", POT_OFFERS),
+        ] {
+            assert!(is_pot(&id), "{} is keyless but is_pot does not know it", name);
+        }
+    }
+
+    /// And the treasury is not one: it holds a key, earns LP rewards through
+    /// the ordinary path, and can move what it holds.
+    #[test]
+    fn the_treasury_is_not_a_pot() {
+        assert!(!is_pot(&crate::types::TREASURY_26460));
     }
 }
