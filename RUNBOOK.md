@@ -3040,7 +3040,49 @@ Ordered by what blocks what.
 8. **Monitoring.** Vault balance against issued supply, sequencer liveness,
    signer availability, and the age of the oldest unsettled exit.
 
-## Mainnet genesis — frozen 15 Sep 2026
+## Mainnet genesis — pending re-run at STATE_VERSION 11
+
+> The 15 Sep freeze below was at `STATE_VERSION` 10. Adding the supply policy
+> (§71.17) changed state, so the version is now **11** and `codec.rs` hard
+> rejects a v10 file. Mainnet must therefore be **reset and re-run**, not
+> migrated. The v10 state is backed up in two places and the old binary kept as
+> `/usr/local/bin/zynzapd.v10`; nothing was ever anchored to Zcash, so the reset
+> costs only the time to re-run.
+
+### Resetting mainnet to v11
+
+1. **Deploy.** Cross-compiled on the Mac — the box is x86_64 and has no Rust
+   toolchain. Check `uname -m` on the target first (§75.5).
+
+   ```sh
+   cargo zigbuild --release --target x86_64-unknown-linux-gnu -p zynzapd --bin zynzapd
+   scp target/x86_64-unknown-linux-gnu/release/zynzapd root@95.111.240.24:/usr/local/bin/zynzapd
+   ```
+
+   The service is already stopped; a running executable cannot be overwritten.
+
+2. **Clear the v10 state.** Archive it first, then delete
+   `/var/lib/zyn/mainnet` and `/var/lib/zyn/mainnet-da`. The node will not load
+   a v10 file and will refuse to start against one.
+
+3. **Start.** `systemctl enable --now zynzapd-mainnet`. The node issues ZYN at
+   its own genesis before anything else touches state; confirm with
+   `journalctl -u zynzapd-mainnet -n 20 | grep "ZYN issued"`.
+
+4. **Run the 338 collection intents** from the Mac, through two custodians and
+   the SSH tunnel — the procedure under *Re-running or extending genesis*
+   below, unchanged.
+
+5. **Verify both halves against the chain**, not against what was intended:
+
+   ```sh
+   cargo run --example verify_zyn       # 21M fixed, all of it in the two pots
+   cargo run --example verify_genesis   # 333 items: address, binding, content
+   ```
+
+Then stop the node and back up, as before.
+
+## Mainnet genesis — frozen 15 Sep 2026 (STATE_VERSION 10, superseded)
 
 Chain 26460 holds its genesis objects and is **stopped**. The service is also
 `disable`d, so a reboot does not restart it.
@@ -3084,6 +3126,13 @@ cargo run --example verify_genesis    # address, binding and content, item by it
 ```
 
 Stop the custodians afterwards. They hold shares and should not sit listening.
+
+**ZYN is issued by the node, not by `zyn-genesis`.** It is the chain's native
+asset, and native addresses are operator-only so no account can forge one
+(§71.19). The node issues it once at startup if absent: 21,000,000, fixed
+supply, no mint authority, split 2,100,000 to `ZYN_POL_ZYN` and 18,900,000 to
+`ZYN_RESERVE`, both keyless. On chain 26460 it lands on the pinned
+`ZYN_MAINNET` = `49eb9241…69d5`, which `verify_zyn` asserts.
 
 **Serials are 0-based.** The VM requires `serial < cap`, so the 333 occupy
 serials 0..=332 while collectors count from one: `MOLE001` is serial 0, and

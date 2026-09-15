@@ -197,6 +197,47 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Issue ZYN at the chain's genesis, once.
+///
+/// ZYN is the chain's own asset, so the chain issues it: native addresses are
+/// operator-only precisely so that no account can forge one, which is what
+/// makes `is_official_asset` mean anything. The amounts and destinations are
+/// constants rather than configuration — DECISIONS §71 fixed them, and a
+/// genesis that could be fat-fingered at deploy time is not a fixed supply.
+///
+/// Idempotent: if the asset already exists this does nothing, so a restart
+/// never issues twice. And it cannot issue twice in any case, because the
+/// second attempt derives the same address and is refused as a duplicate.
+fn issue_zyn_at_genesis(n: &mut zyn::node::Node<swapvm::state::SwapState>, chain_id: u32) -> Result<(), String> {
+    let zyn = zyn_vm::native_address(swapvm::types::ADDRESS_SCOPE_V1, chain_id, b"ZYN");
+    if n.state().tokens.contains_key(&zyn) {
+        return Ok(());
+    }
+    let step = n.submit_operator(
+        swapvm::tx::Intent::IssueToken {
+            creator: [0u8; 32],
+            symbol: swapvm::state::symbol(b"ZYN"),
+            supply: swapvm::fixed::Fixed::whole(21_000_000),
+            unit: swapvm::fixed::Fixed::raw(1),
+            allocations: vec![
+                (swapvm::types::ZYN_POL_ZYN, swapvm::fixed::Fixed::whole(2_100_000)),
+                (swapvm::types::ZYN_RESERVE, swapvm::fixed::Fixed::whole(18_900_000)),
+            ],
+            policy: swapvm::state::SupplyPolicy::Fixed,
+            native: true,
+        },
+        now_secs(),
+    );
+    if step.rejected() {
+        return Err(format!("could not issue ZYN: {:?}", step.receipts));
+    }
+    eprintln!(
+        "zynzapd: ZYN issued — 21,000,000, fixed supply, no mint authority; \
+         2,100,000 to the POL pot and 18,900,000 to the reserve, both keyless"
+    );
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("zynzapd: {}", e);
@@ -253,6 +294,15 @@ fn run() -> Result<(), String> {
     }
 
     let shared: rpc::Shared = Arc::new(Mutex::new(node));
+
+    // ZYN exists from the chain's first moment, so this runs before anything
+    // else touches state. §71.1: minted once, and there is no second chance.
+    {
+        let mut n = shared
+            .lock()
+            .map_err(|_| "node lock poisoned".to_string())?;
+        issue_zyn_at_genesis(&mut n, cfg.chain_id)?;
+    }
 
     if cfg.launch || cfg.launch_threshold.is_some() {
         return Err("ZYN_LAUNCH and ZYN_LAUNCH_THRESHOLD belong to the superseded bridge-fee/halving design; remove them. Cave LaunchCurve is the only public fungible launch path".into());

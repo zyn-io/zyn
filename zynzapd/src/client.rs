@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use ed25519_dalek::{Signer, SigningKey};
+use swapvm::state::SupplyPolicy;
 use swapvm::state::SwapState;
 use swapvm::tx::{Hop, Intent};
 use swapvm::types::{AssetId, CollectionId, PoolId};
@@ -123,6 +124,8 @@ pub fn reject_name(code: u8) -> &'static str {
         44 => "the offer has expired",
         45 => "cannot take your own offer",
         46 => "not the maker",
+        53 => "not the issuer",
+        54 => "above the supply cap",
         47 => "invalid metadata",
         48 => "invalid developer buy",
         49 => "launch rate limited",
@@ -301,6 +304,12 @@ pub struct Asset {
     pub content: Option<[u8; 32]>,
     /// The collection whose pool backs it, if it is a collection item.
     pub collection: Option<CollectionId>,
+    /// Whether more of this asset can ever be issued, and by whom.
+    ///
+    /// Read this before quoting a price. A token whose issuer can mint freely
+    /// is a different instrument from one that cannot, and the chain is the
+    /// only place that answer cannot be faked.
+    pub supply_policy: SupplyPolicy,
 }
 
 /// A Cave launch as committed by the chain.
@@ -1167,6 +1176,17 @@ impl Node {
             let has_collection = d.u8().unwrap_or(0) != 0;
             let collection_id = d.array::<32>().unwrap_or([0; 32]);
             let collection = has_collection.then_some(collection_id);
+            let supply_policy = match d.u8().unwrap_or(0) {
+                1 => {
+                    let authority = d.array::<32>().unwrap_or([0; 32]);
+                    let cap = d.fixed().unwrap_or(Fixed::ZERO);
+                    SupplyPolicy::Capped { authority, cap }
+                }
+                2 => SupplyPolicy::Open {
+                    authority: d.array::<32>().unwrap_or([0; 32]),
+                },
+                _ => SupplyPolicy::Fixed,
+            };
             out.push(Asset {
                 id,
                 symbol,
@@ -1174,7 +1194,35 @@ impl Node {
                 lp_of: lp,
                 content: has_content.then_some(content),
                 collection,
+                supply_policy,
             });
+        }
+        Ok(out)
+    }
+
+    /// Balances of the protocol's pinned keyless pots.
+    ///
+    /// Public on purpose: nobody holds a key to these, and §71.3 requires the
+    /// supply numbers to be derivable from chain state rather than asserted.
+    pub fn pots(&self) -> Result<Vec<(String, [u8; 32], Vec<(AssetId, Fixed)>)>, String> {
+        let mut e = Encoder::new();
+        e.u8(crate::rpc::OP_POTS).u32(self.chain);
+        let body = self.call(e.finish())?;
+        let mut d = Decoder::new(&body);
+        let n = d.u32().unwrap_or(0);
+        let mut out = Vec::new();
+        for _ in 0..n {
+            let name_len = d.u8().unwrap_or(0) as usize;
+            let name = String::from_utf8_lossy(d.take_bytes(name_len).unwrap_or(&[])).to_string();
+            let id = d.array::<32>().unwrap_or([0; 32]);
+            let k = d.u32().unwrap_or(0);
+            let mut held = Vec::new();
+            for _ in 0..k {
+                let asset = d.array::<32>().unwrap_or([0; 32]);
+                let amount = d.fixed().unwrap_or(Fixed::ZERO);
+                held.push((asset, amount));
+            }
+            out.push((name, id, held));
         }
         Ok(out)
     }

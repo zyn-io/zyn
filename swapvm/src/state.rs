@@ -216,6 +216,58 @@ pub fn symbol(s: &[u8]) -> Symbol {
 /// other VM could not be swapped here — but it does not own the rules for them.
 pub use zyn_bridge::{Binding, PendingCredit, PendingExit, Vault};
 
+
+/// How a token's supply may change after creation.
+///
+/// Chosen once, at creation, and recorded on the token itself rather than in
+/// metadata a frontend could misreport. That placement is the point: a holder
+/// can see whether more units can appear before they buy, and no website is
+/// between them and the answer.
+///
+/// Mintability is not the risk. *Undisclosed* mintability is, which is why the
+/// only irreversible move is toward `Fixed` ([`Intent::RenounceMintAuthority`]):
+/// a token may always give up the power to issue, and may never acquire it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SupplyPolicy {
+    /// No unit can ever be issued again. There is no authority to renounce
+    /// because none exists.
+    Fixed,
+    /// `authority` may issue up to `cap` in total, and never past it.
+    Capped { authority: AccountId, cap: Fixed },
+    /// `authority` may issue without limit. The honest name for it, so an
+    /// explorer can say so plainly.
+    Open { authority: AccountId },
+}
+
+impl SupplyPolicy {
+    /// Who, if anyone, may issue more.
+    pub fn authority(&self) -> Option<AccountId> {
+        match self {
+            SupplyPolicy::Fixed => None,
+            SupplyPolicy::Capped { authority, .. } | SupplyPolicy::Open { authority } => {
+                Some(*authority)
+            }
+        }
+    }
+
+    /// The ceiling on total supply, if the policy names one.
+    pub fn cap(&self) -> Option<Fixed> {
+        match self {
+            SupplyPolicy::Capped { cap, .. } => Some(*cap),
+            _ => None,
+        }
+    }
+
+    /// Wire tag. Stable: these are consensus values.
+    pub fn code(&self) -> u8 {
+        match self {
+            SupplyPolicy::Fixed => 0,
+            SupplyPolicy::Capped { .. } => 1,
+            SupplyPolicy::Open { .. } => 2,
+        }
+    }
+}
+
 /// An asset the VM knows about.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TokenInfo {
@@ -284,6 +336,14 @@ pub struct TokenInfo {
     /// yet; the rail exists so that supporting Zcash Shielded Assets later is a
     /// parameter, not a change to what a balance *is*.
     pub unit: Fixed,
+    /// Whether more of this asset can ever be issued, and by whom.
+    ///
+    /// Every asset the VM creates for its own purposes — xZEC, LP shares,
+    /// bridged assets, collection items — is `Fixed` here. Their supply moves
+    /// through paths the VM controls (a deposit, an exit, adding liquidity),
+    /// never through [`Intent::MintToken`], so an issuer's authority and the
+    /// VM's own bookkeeping never share a mechanism.
+    pub supply_policy: SupplyPolicy,
 }
 
 impl TokenInfo {
@@ -299,6 +359,7 @@ impl TokenInfo {
             vault: None,
             content: None,
             collection: None,
+            supply_policy: SupplyPolicy::Fixed,
         }
     }
 

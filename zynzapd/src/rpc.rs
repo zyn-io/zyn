@@ -93,6 +93,17 @@ pub const OP_CURVE_QUOTE: u8 = 25;
 /// One Cave launch by immutable asset address: `asset[32]`.
 /// Returns `found[1]` followed by the same fields as one `OP_CURVES` row.
 pub const OP_CURVE: u8 = 26;
+/// Balances of the protocol's **pinned keyless pots**.
+///
+/// Ordinary balances are private: `OP_ACCOUNT` derives the account from a
+/// signature, so a stranger cannot look one up. These are the exception, and
+/// deliberately so. A keyless pot has no key, so nobody could ever sign for it
+/// — and its contents are the thing §71.3 says must be derivable from chain
+/// state rather than asserted. A reserve nobody can audit is just a claim.
+///
+/// The set is closed: only addresses pinned as constants appear here, so this
+/// cannot be used to read an ordinary account.
+pub const OP_POTS: u8 = 27;
 
 fn curve_market(
     state: &SwapState,
@@ -561,6 +572,41 @@ pub fn dispatch(server: &Server, frame: &[u8]) -> Vec<u8> {
                 e.u8(t.content.is_some() as u8)
                     .bytes(&t.content.unwrap_or([0u8; 32]));
                 e.opt_hash(t.collection);
+                // Whether more can ever exist. A holder is entitled to this
+                // before they buy, so it travels with the asset rather than
+                // being something a frontend has to ask for separately.
+                e.u8(t.supply_policy.code());
+                match t.supply_policy {
+                    swapvm::state::SupplyPolicy::Fixed => {}
+                    swapvm::state::SupplyPolicy::Capped { authority, cap } => {
+                        e.bytes(&authority).fixed(cap);
+                    }
+                    swapvm::state::SupplyPolicy::Open { authority } => {
+                        e.bytes(&authority);
+                    }
+                }
+            }
+            ok_frame(e.finish().to_vec())
+        }),
+        OP_POTS => with_node(server, |n| {
+            let s = n.state();
+            let pots: [(&str, [u8; 32]); 3] = [
+                ("zyn-pol-zyn", swapvm::types::ZYN_POL_ZYN),
+                ("zyn-reserve", swapvm::types::ZYN_RESERVE),
+                ("zyn-pol", swapvm::types::ZYN_POL),
+            ];
+            let mut e = Encoder::new();
+            e.u32(pots.len() as u32);
+            for (name, id) in pots {
+                e.u8(name.len() as u8).bytes(name.as_bytes()).bytes(&id);
+                let held = s.accounts.get(&id);
+                let n_assets = held.map(|a| a.balances.len()).unwrap_or(0);
+                e.u32(n_assets as u32);
+                if let Some(a) = held {
+                    for (asset, amount) in a.balances.iter() {
+                        e.bytes(asset).fixed(*amount);
+                    }
+                }
             }
             ok_frame(e.finish().to_vec())
         }),
@@ -2378,6 +2424,18 @@ mod tests {
             } else {
                 [0; 32]
             };
+            // The supply policy closes each asset record: a tag, then only the
+            // fields that tag carries.
+            match d.u8().unwrap() {
+                1 => {
+                    let _authority = d.array::<32>().unwrap();
+                    let _cap = d.fixed().unwrap();
+                }
+                2 => {
+                    let _authority = d.array::<32>().unwrap();
+                }
+                _ => {}
+            }
             if aid == item {
                 found = Some((has, content, coll));
             }

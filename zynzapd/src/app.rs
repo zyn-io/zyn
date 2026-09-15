@@ -2443,6 +2443,16 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
             "content": a.content.map(|c| c.iter().map(|b| format!("{:02x}", b)).collect::<String>()),
             "collection": a.collection,
             "price_zec": price_zec(a.id).map(|p| p.to_string()),
+            // Whether more can ever be issued. Named rather than coded, so a
+            // reader of the JSON needs no table to understand it.
+            "supply_policy": match a.supply_policy {
+                swapvm::state::SupplyPolicy::Fixed => "fixed",
+                swapvm::state::SupplyPolicy::Capped { .. } => "capped",
+                swapvm::state::SupplyPolicy::Open { .. } => "open",
+            },
+            "mint_authority": a.supply_policy.authority()
+                .map(|k| k.iter().map(|b| format!("{:02x}", b)).collect::<String>()),
+            "supply_cap": a.supply_policy.cap().map(|c| c.to_string()),
         })).collect::<Vec<_>>(),
         // Every collection the chain knows, with the floor it publishes.
         "collections": collections.iter().map(|c| json!({

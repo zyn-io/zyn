@@ -33,6 +33,7 @@ const CAVE_SYMBOL: &str = "CAVEZ";
 const CAVE_CAP: u32 = 4444;
 const FEE_BPS: u16 = 100;
 
+
 /// Phase codes, from `swapvm::state::Phase::code`.
 const PHASE_MINTING: u8 = 1;
 const PHASE_CLOSED: u8 = 2;
@@ -165,7 +166,6 @@ fn main() {
             NAPMOLE_CAP
         );
         eprintln!("  {}. AdvanceCollection {} -> Closed", 5 + NAPMOLE_CAP, NAPMOLE_SYMBOL);
-        eprintln!("zyn-genesis: {} intents total", 5 + NAPMOLE_CAP);
         eprintln!("zyn-genesis: first  item {} content {}", items[0].symbol, hex32(&items[0].content));
         eprintln!(
             "zyn-genesis: last   item {} content {}",
@@ -173,6 +173,11 @@ fn main() {
             hex32(&items[NAPMOLE_CAP as usize - 1].content)
         );
         eprintln!("zyn-genesis: {} stays in Minting — its items are minted on demand", CAVE_SYMBOL);
+        eprintln!(
+            "zyn-genesis: ZYN is issued by the node at its genesis, not here \
+             (native assets are operator-only)"
+        );
+        eprintln!("zyn-genesis: {} intents total", 5 + NAPMOLE_CAP);
         return;
     }
 
@@ -246,6 +251,12 @@ fn main() {
             }
         }
     };
+
+    // ZYN is not issued here. It is the chain's *native* asset, and native
+    // addresses are operator-only by design — `is_official_asset` decides
+    // officialdom by address, and that guarantee holds only because no account
+    // can derive one. So the node issues ZYN at its own genesis, and this
+    // driver, which speaks for an account, cannot and should not.
 
     // 1-2. Create both collections.
     for (sym, cap, id) in [

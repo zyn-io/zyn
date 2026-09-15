@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use crate::amm;
 use crate::fixed::Fixed;
-use crate::state::{Pool, SwapState, Symbol, TokenInfo};
+use crate::state::{SupplyPolicy, Pool, SwapState, Symbol, TokenInfo};
 use crate::tx::{Receipt, Reject};
 use crate::types::{AccountId, AssetId, PoolId, ADDRESS_SCOPE_V1, XZEC, ZYN_POL};
 
@@ -293,6 +293,7 @@ pub fn create(
             vault: None,
             content: None,
             collection: None,
+            supply_policy: SupplyPolicy::Fixed,
         },
     );
     state
@@ -593,6 +594,7 @@ fn graduate(state: &mut SwapState, asset: AssetId) -> Result<Receipt, Reject> {
             vault: None,
             content: None,
             collection: None,
+            supply_policy: SupplyPolicy::Fixed,
         },
     );
     state.pools.insert(

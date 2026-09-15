@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 use crate::fixed::Fixed;
 use crate::merkle::{Encoder, Hash};
 use crate::state::{
-    Account, Binding, Order, PendingCredit, PendingExit, Pool, Reference, SwapState, TokenInfo,
+    Account, Binding, Order, PendingCredit, PendingExit, Pool, Reference, SupplyPolicy, SwapState, TokenInfo,
     Vault,
 };
 use crate::wire::{Decoder, SwapDecode, SwapEncode, WireError};
@@ -31,7 +31,7 @@ use crate::wire::{Decoder, SwapDecode, SwapEncode, WireError};
 /// Version 8 activates authorization-aware intent commitments. The state body
 /// is unchanged, so versions 1-7 still decode for migration; continuing from
 /// one under VM v2 folds `ZYNAUTH1` records into the next epoch root.
-pub const STATE_VERSION: u16 = 10;
+pub const STATE_VERSION: u16 = 11;
 
 impl SwapState {
     /// Serialise the complete state.
@@ -72,6 +72,18 @@ impl SwapState {
             e.bool(t.content.is_some())
                 .bytes(&t.content.unwrap_or([0u8; 32]));
             e.opt_hash(t.collection);
+            // Supply policy: a tag, then only what that tag carries. `Fixed`
+            // carries nothing, which is why the common case costs one byte.
+            e.u8(t.supply_policy.code());
+            match t.supply_policy {
+                SupplyPolicy::Fixed => {}
+                SupplyPolicy::Capped { authority, cap } => {
+                    e.id(authority).fixed(cap);
+                }
+                SupplyPolicy::Open { authority } => {
+                    e.id(authority);
+                }
+            }
         }
 
         // Pools, in pool-id order.
@@ -308,6 +320,20 @@ impl SwapState {
                         None
                     },
                     collection: d.opt_hash()?,
+                    supply_policy: {
+                        let code = d.u8()?;
+                        match code {
+                            0 => SupplyPolicy::Fixed,
+                            1 => SupplyPolicy::Capped {
+                                authority: d.account()?,
+                                cap: d.fixed()?,
+                            },
+                            2 => SupplyPolicy::Open {
+                                authority: d.account()?,
+                            },
+                            b => return Err(WireError::UnknownDiscriminant(b)),
+                        }
+                    },
                 },
             );
         }
@@ -675,6 +701,7 @@ mod tests {
                 xzec_liquidity: Fixed::whole(1_000),
                 token_liquidity: Fixed::whole(100_000),
                 fee_bps: 30,
+                            policy: SupplyPolicy::Fixed,
             },
         );
         let cat = zyn_vm::asset_address(crate::types::ADDRESS_SCOPE_V1, &acct(1), b"CAT");

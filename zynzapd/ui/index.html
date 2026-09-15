@@ -154,6 +154,9 @@ td { padding: 7px 0 7px 10px; border-bottom: 1px solid var(--line); vertical-ali
 td:first-child, th:first-child { padding-left: 0; }
 td.r, th.r { text-align: right; white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
+.badge.warn { display:inline-block; margin-left:.4em; padding:.05em .45em; border-radius:.5em;
+  font-size:.78em; font-weight:600; letter-spacing:.02em; vertical-align:baseline;
+  background:var(--warn-bg,#d9822b22); color:var(--warn-fg,#b3690f); border:1px solid #d9822b55; }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; background: var(--surface-2); color: var(--ink-2); letter-spacing: 0.03em; white-space: nowrap; }
 .tag.pending { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .tag.exit { background: var(--accent-soft); color: var(--accent); }
@@ -987,10 +990,23 @@ function render(s) {
   $('dep-how').textContent = dep
     ? 'This address is yours alone. Anything sent to it from any shielded Zcash wallet is credited to this account — no memo needed. Deposit below pays it from this wallet.'
     : 'This node issues no per-account address, so deposits go to the shared vault and must carry the memo naming your account. Deposit below attaches it for you.';
+
+// Whether more of a token can ever exist. Shown only when the answer is yes:
+// a fixed-supply token is the ordinary case and needs no badge, while a
+// mintable one is a fact a holder should not have to go looking for.
+function mintBadge(assetId) {
+  const a = (z.assets || []).find((x) => x.id === assetId);
+  if (!a || !a.supply_policy || a.supply_policy === 'fixed') return '';
+  const title = a.supply_policy === 'capped'
+    ? `More can be issued, up to a cap of ${esc(String(a.supply_cap || '?'))}`
+    : 'The issuer can mint more of this at any time, without limit';
+  return ` <span class="badge warn" title="${title}">mintable</span>`;
+}
+
   const r = z.record;
   const bb = $('balances').querySelector('tbody'); bb.innerHTML = '';
-  for (const b of r.spendable) bb.insertAdjacentHTML('beforeend', `<tr><td>${b.symbol}</td><td class="r num">${fmt(b.amount)}</td><td></td></tr>`);
-  for (const b of r.unreleased) bb.insertAdjacentHTML('beforeend', `<tr><td>${b.symbol}</td><td class="r num">${fmt(b.amount)}</td><td><span class="tag pending">arriving · epoch ${b.epoch}</span></td></tr>`);
+  for (const b of r.spendable) bb.insertAdjacentHTML('beforeend', `<tr><td>${b.symbol}${mintBadge(b.asset)}</td><td class="r num">${fmt(b.amount)}</td><td></td></tr>`);
+  for (const b of r.unreleased) bb.insertAdjacentHTML('beforeend', `<tr><td>${b.symbol}${mintBadge(b.asset)}</td><td class="r num">${fmt(b.amount)}</td><td><span class="tag pending">arriving · epoch ${b.epoch}</span></td></tr>`);
   for (const b of r.exiting) bb.insertAdjacentHTML('beforeend', `<tr><td>${b.symbol}</td><td class="r num">${fmt(b.amount)}</td><td><span class="tag exit">leaving · since ${b.since}</span></td></tr>`);
   if (!bb.children.length) bb.innerHTML = `<tr><td colspan="3" class="muted">${r.known ? 'Nothing held on Zyn.' : 'Zyn has not seen this account yet. A deposit creates it.'}</td></tr>`;
   const bound = r.bound_here;
