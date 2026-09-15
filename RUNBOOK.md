@@ -3162,3 +3162,137 @@ supply, no mint authority, split 2,100,000 to `ZYN_POL_ZYN` and 18,900,000 to
 serials 0..=332 while collectors count from one: `MOLE001` is serial 0, and
 `MOLE333` is serial 332. `zyn-genesis` binds the two in one place so the
 off-by-one cannot spread.
+
+## Cave whitelist, end to end (15 Sep 2026)
+
+### Applying — what a visitor sees
+
+`cavebro.win/whitelist`. Three steps (follow, repost and comment, paste the
+link), then handle, link and an optional note. The link is required because it
+is the only thing a reviewer can open and check.
+
+It collects **nothing else** — no email, no wallet address, no Zcash address.
+An invitation binds an account on first use (§74.13), so asking for one here
+would gather exactly what that design avoids, before anyone has decided to buy.
+
+### Spam, in layers
+
+Aimed at volume rather than identity, because the last word is a person reading
+the application. In rising order of what they cost an attacker:
+
+| | |
+|---|---|
+| honeypot field | free; catches form-fillers that read the DOM |
+| dwell check | a person takes seconds, a script takes none |
+| rate limit | six per address per hour |
+| handle dedupe | one handle applies once |
+| post dedupe | one post backs one handle |
+| proof of work | the only one whose cost scales with volume |
+
+The proof is tied to the applicant's own handle and a ten-minute window, so it
+needs no secret, no round trip and no third party: work done for one handle is
+worth nothing for another, and work done an hour ago is worth nothing now. It
+runs when the handle field loses focus, so it finishes while the rest of the
+form is being filled. ~18 bits, roughly 900 ms on a desktop.
+
+There is deliberately **no CAPTCHA**. If volume ever outgrows the above,
+Cloudflare Turnstile is a dashboard key and a script tag, not a redesign.
+
+### Reviewing
+
+```sh
+cd apps/cave-collection-z
+npm run review     # print the queue: handle, date, the link to open, the note
+npm run export     # timestamped JSON + a flat handle/link list into register/
+```
+
+Or `/list` in Telegram, which the bot answers from the same endpoint.
+
+**Run `export` before and after a review session.** KV is durable, but it is one
+company's copy of a list you are going to act on, and the same account serves
+the site and the blobs. The Telegram messages are a second copy already,
+arriving one at a time; the export is the one you can grep. `register/` is
+gitignored — it holds other people's handles.
+
+### Where it all lives
+
+| | |
+|---|---|
+| page | `apps/cave-collection-z/whitelist.html`, served at `/whitelist` |
+| intake | `functions/api/whitelist.js` |
+| listing | `functions/api/whitelist/list.js`, bearer-token gated |
+| store | KV namespace `CAVE_WHITELIST` = `8181407749be40ff89d7691132723ae7` |
+| art | `/blobs/<hash>`, staged by `scripts/build.mjs`, immutable and CORS-open |
+
+Secrets on the Pages project: `TG_TOKEN`, `TG_CHAT` (the same
+`@Duchinski_bot` that monitors the chain) and `WHITELIST_ADMIN_TOKEN`. The bot
+holds the listing token in `/etc/zyn/zyn-tgbot.env` as `ZYN_WHITELIST_TOKEN`.
+
+**Pages secrets only bind on deploy.** Setting one and not redeploying leaves
+the old version running without it, which reads as "not configured" rather than
+as an error.
+
+### Invitations
+
+```sh
+ZYN_WHITELIST=~/.zyn/cave-whitelist.tsv zyn-whitelist issue 50 2   # 50 codes, 2 mints each
+ZYN_WHITELIST=… zyn-whitelist open|close|status
+```
+
+Codes print once and the file keeps only fingerprints. A registry is **closed
+until opened**, so one that is loaded and never opened cannot sell anything by
+accident, and closing survives a restart (§74.14).
+
+### Claiming a Nap Mole
+
+`zyn-claim` is the 333's gift path, not the 4444's sale. It needs two custodians
+reachable while it serves, because a transfer is signed at claim time and the
+signature commits to the recipient's account — which nobody knows until they
+say so. Bring them up for the event and take them down after.
+
+```sh
+ZYN_CLAIM_BOOK=… zyn-claim issue 1 333     # codes, printed once
+ZYN_CLAIM_BOOK=… ZYN_CLAIM_COLLECTION=d3090c31…9261 \
+  ZYN_CLAIM_CUSTODIANS=127.0.0.1:8211,192.168.1.27:8211 \
+  ZYN_CLAIM_TREASURY=~/.zyn/treasury zyn-claim serve
+```
+
+## Recovering from a Zcash testnet reorg (15 Sep 2026)
+
+Testnet reorgs go far deeper than any confirmation count. On 15 Sep one reached
+at least **1,240 blocks** and took three settled anchors — epochs 10477, 10487
+and 10495 — off the chain. The sequencer noticed, refused to extend a lineage no
+verifier could follow, and stopped. That is correct: a stalled chain is
+recoverable, an unverifiable one needs archaeology.
+
+**Diagnosing it.** The alert says an anchor "is no longer on Zcash", which is
+also what an unreachable node looks like. Tell them apart before acting:
+
+```sh
+# Is the node reachable and at tip? (testnet Zebra listens on 18232, not 8232)
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo","params":[]}' \
+  http://127.0.0.1:18232
+# Can it find *any* historical transaction? If not, the index is the problem.
+# If it can, and the anchor's block now holds only a coinbase, it is a real reorg.
+```
+
+Count **distinct** anchors, not log lines — the same few are re-logged every
+pass, and 1,638 lines was three anchors over six hours.
+
+**Repairing it.** Re-anchoring is manual by design: name the epochs and restart.
+
+```sh
+# /etc/zyn/zynzapd.env
+ZYN_REANCHOR_EPOCHS=10477,10487,10495
+```
+
+They queue at startup and go out once the vault has a spendable note. Expect a
+note-tree resync first — the reorg invalidates it, and on testnet that is about
+an hour. Remove the variable once they confirm.
+
+**A constraint worth knowing:** the §81 signer fix cannot reach testnet. It
+lives in a tree at `STATE_VERSION` 12, and chain 11 runs v10, so a v12
+`zyn-replica` rejects the state outright with "verified state does not match its
+root: Decode" and the signers exit. The testnet signers stay on the pre-§81
+binary until chain 11 is reset. Keep the previous binary beside any replacement.
