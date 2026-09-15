@@ -35,6 +35,16 @@ const WINDOW_SECONDS = 600;
 const PER_HOUR = 6;
 
 export async function onRequestPost({ request, env }) {
+  // Without the store there is nowhere to put an application, and answering
+  // anything but an error would lose it. This is a deployment fault, not the
+  // applicant's, so it says so.
+  if (!env.CAVE_WHITELIST) {
+    return json(
+      { ok: false, error: 'the register is not reachable — this is our fault, try again shortly' },
+      503,
+    );
+  }
+
   let form;
   try {
     const ct = request.headers.get('content-type') || '';
@@ -109,8 +119,29 @@ export async function onRequestPost({ request, env }) {
     // Coarse, for spotting a flood from one place. Never shown, never acted on.
     country: request.headers.get('cf-ipcountry') || null,
   };
-  await env.CAVE_WHITELIST.put(key, JSON.stringify(record));
-  await env.CAVE_WHITELIST.put(postKey, handle.toLowerCase());
+  // A resolved `put` is committed — KV's eventual consistency governs when a
+  // *read* elsewhere sees it, not whether it was stored. So a write that
+  // throws is the only way to lose an application, and it must reach the
+  // applicant as an error rather than as a cheerful ok.
+  //
+  // The application is written before the post claim, deliberately. If the
+  // second write fails, a post is left unclaimed and could be reused — a
+  // reviewer's problem. The other order would claim a post for an application
+  // that was never stored, which locks out the person it belonged to.
+  try {
+    await env.CAVE_WHITELIST.put(key, JSON.stringify(record));
+  } catch (e) {
+    return json(
+      { ok: false, error: 'the register did not accept that — nothing was saved, please try again' },
+      503,
+    );
+  }
+  try {
+    await env.CAVE_WHITELIST.put(postKey, handle.toLowerCase());
+  } catch {
+    // The application is safe; only the post claim is missing. Not worth
+    // failing a stored application over.
+  }
 
   // Tell the operator, after the application is safely stored and never in a
   // way that can lose one: a Telegram outage must not turn a good application
