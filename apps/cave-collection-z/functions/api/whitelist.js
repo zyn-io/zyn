@@ -112,12 +112,43 @@ export async function onRequestPost({ request, env }) {
   await env.CAVE_WHITELIST.put(key, JSON.stringify(record));
   await env.CAVE_WHITELIST.put(postKey, handle.toLowerCase());
 
+  // Tell the operator, after the application is safely stored and never in a
+  // way that can lose one: a Telegram outage must not turn a good application
+  // into an error the applicant sees.
+  await notify(env, record).catch(() => {});
+
   return json({ ok: true });
 }
 
 // A GET is how a person arrives here by accident.
 export async function onRequestGet() {
   return json({ ok: false, error: 'POST an application here' }, 405);
+}
+
+/// Push one application to Telegram.
+///
+/// Best-effort by construction. The register is the record; this is a tap on
+/// the shoulder, and a tap that does not arrive is not worth failing a
+/// submission over.
+async function notify(env, record) {
+  const token = env.TG_TOKEN;
+  const chat = env.TG_CHAT;
+  if (!token || !chat) return;                 // not configured, nothing to do
+  const text =
+    `new whitelist application\n\n` +
+    `@${record.handle}\n` +
+    `${record.post}\n` +
+    (record.note ? `\n"${record.note.slice(0, 200)}"\n` : '') +
+    `\n${record.at}${record.country ? ` · ${record.country}` : ''}`;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chat,
+      text,
+      disable_web_page_preview: true,
+    }),
+  });
 }
 
 /// Verify the proof of work.
