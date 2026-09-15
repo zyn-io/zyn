@@ -2307,6 +2307,7 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
 
     // Collections, so an item can show what backs it.
     let collections = app.node.collections().unwrap_or_default();
+    let pots = app.node.pots().ok();
     let offers = app.node.offers().unwrap_or_default();
     let anchors = app.node.anchors(0).unwrap_or_default();
     let floor_of = |asset: [u8; 32]| -> Option<([u8; 32], Fixed)> {
@@ -2461,6 +2462,57 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
             "fee_bps": c.fee_bps, "phase": c.phase, "phase_name": c.phase_name(),
             "remaining": c.remaining(), "redeem_price": c.redeem_price.to_string(),
         })).collect::<Vec<_>>(),
+        // The ZYN market's schedule. Before the pot fills there is no date,
+        // only progress toward one — which is the honest thing to show, since
+        // the pot filling is what says real backing exists. After it fills the
+        // date is fixed and public, so the page can count down to it rather
+        // than wait to be told.
+        "market": match &pots {
+            None => serde_json::Value::Null,
+            Some(v) => {
+                let held = |pot: &str, asset: [u8; 32]| -> Fixed {
+                    v.pots
+                        .iter()
+                        .find(|(n, _, _)| n == pot)
+                        .map(|(_, _, hs)| {
+                            hs.iter()
+                                .filter(|(a, _)| *a == asset)
+                                .fold(Fixed::ZERO, |acc, (_, amt)| {
+                                    acc.add(*amt).unwrap_or(acc)
+                                })
+                        })
+                        .unwrap_or(Fixed::ZERO)
+                };
+                let zyn_in_pot = held("zyn-pol-zyn", swapvm::types::ZYN_MAINNET);
+                let zec_in_pot = held("zyn-pol", swapvm::types::XZEC);
+                let target = swapvm::launch::POL_ZYN_CAP;
+                json!({
+                    "zcash_height": v.zcash_height,
+                    // The open drains the pot into the pool, so the pot's own
+                    // balance distinguishes "due" from "already happened"
+                    // without a second lookup.
+                    "state": match &v.schedule {
+                        None => "filling",
+                        Some(_) if zyn_in_pot >= target => "scheduled",
+                        Some(_) => "open",
+                    },
+                    "armed_height": v.schedule.map(|s| s.armed),
+                    "open_height": v.schedule.map(|s| s.opens),
+                    "blocks_remaining": v.schedule.map(|s| s.blocks_remaining(v.zcash_height)),
+                    // ~75 seconds a Zcash block, so a countdown in blocks can
+                    // be shown as a duration without the page guessing.
+                    "seconds_remaining": v.schedule
+                        .map(|s| s.blocks_remaining(v.zcash_height).saturating_mul(75)),
+                    "grace_blocks": swapvm::launch::POL_OPEN_GRACE_BLOCKS,
+                    "zyn_in_pot": zyn_in_pot.to_string(),
+                    "zyn_target": target.to_string(),
+                    "zec_in_pot": zec_in_pot.to_string(),
+                    "zec_target": "420",
+                    "open_price_zec": swapvm::launch::POL_ZEC_PER_ZYN.to_string(),
+                })
+            }
+        },
+
         // What the batching actually bought, as two numbers and a receipt:
         // how many epochs have been carried to Zcash, in how many
         // transactions, and the most recent one to link to.

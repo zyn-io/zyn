@@ -288,6 +288,12 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
     <div class="hint">Balances on Zyn are private: only this key can read them. Zyn is anchored to Zcash testnet.</div>
     <div class="hint" id="zyn-exit"></div>
   </section>
+  <section id="zyn-market" class="lead" hidden>
+    <h2>ZYN market <small id="zm-state" class="record"></small></h2>
+    <div id="zm-line"></div>
+    <div class="bar" id="zm-bar" hidden><div></div></div>
+    <div class="hint" id="zm-detail"></div>
+  </section>
   <section id="zyn-move">
     <h2>Move ZEC in and out</h2>
     <div class="hint" id="dep-how"></div>
@@ -586,6 +592,70 @@ function setFiat(totalZec, s) {
   // rather than let the figure imply otherwise.
   const note = s.network === 'mainnet' ? '' : ' <small>· testnet, not real value</small>';
   $('bal-fiat').innerHTML = '≈ ' + esc(money(totalZec * usd)) + note;
+}
+
+// The ZYN market's schedule, as the chain publishes it.
+//
+// Three states, and the honest one to show changes with them. Before the pot
+// fills there is no date, only progress toward one — so a countdown would be a
+// guess. Once it fills the date is fixed and public, so this counts down to a
+// block height rather than to anything anyone announced.
+function renderMarket(z) {
+  const m = z.market;
+  const sec = $('zyn-market');
+  if (!m) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  const chipFor = { filling: 'muted', scheduled: 'warn', open: 'ok' }[m.state] || 'muted';
+  $('zm-state').className = 'record ' + chipFor;
+
+  if (m.state === 'open') {
+    $('zm-state').textContent = 'open';
+    $('zm-line').textContent = `Trading since Zcash height ${m.open_height}.`;
+    $('zm-bar').hidden = true;
+    $('zm-detail').textContent = `Opened at ${m.open_price_zec} ZEC per ZYN.`;
+    return;
+  }
+
+  if (m.state === 'scheduled') {
+    $('zm-state').textContent = 'opens soon';
+    const blocks = Number(m.blocks_remaining || 0);
+    $('zm-line').innerHTML = blocks > 0
+      ? `Opens at Zcash height <b>${m.open_height}</b> — about <b>${humanDuration(m.seconds_remaining)}</b> from now.`
+      : `Due to open at Zcash height <b>${m.open_height}</b>, on the next block the chain sees.`;
+    // Progress through the grace period rather than through the fill.
+    const done = Math.max(0, Number(m.grace_blocks) - blocks);
+    $('zm-bar').hidden = false;
+    $('zm-bar').firstElementChild.style.width =
+      Math.min(100, Math.round(100 * done / Number(m.grace_blocks))) + '%';
+    $('zm-detail').textContent =
+      `${blocks.toLocaleString()} Zcash blocks to go. ${m.zyn_in_pot} ZYN will open against ` +
+      `${m.zec_target} ZEC.zy at ${m.open_price_zec} ZEC per ZYN — both fixed when the date was set.`;
+    return;
+  }
+
+  $('zm-state').textContent = 'not scheduled';
+  const have = Number(m.zec_in_pot || 0), want = Number(m.zec_target || 420);
+  $('zm-line').innerHTML =
+    `No opening date yet. One is set when the pot reaches <b>${want} ZEC.zy</b>, ` +
+    `and the market opens ${Number(m.grace_blocks).toLocaleString()} Zcash blocks after that.`;
+  $('zm-bar').hidden = false;
+  $('zm-bar').firstElementChild.style.width =
+    Math.min(100, Math.round(100 * have / want)) + '%';
+  $('zm-detail').textContent =
+    `${m.zec_in_pot} of ${want} ZEC.zy accrued · ${m.zyn_in_pot} of ${m.zyn_target} ZYN matched. ` +
+    `The pot fills from trading fees, so the date exists only once the backing does.`;
+}
+
+// Blocks are the chain's unit; hours and days are the reader's.
+function humanDuration(secs) {
+  const s = Number(secs || 0);
+  if (s <= 0) return 'moments';
+  const d = Math.floor(s / 86400), h = Math.round((s % 86400) / 3600);
+  if (d >= 1) return h > 0 ? `${d}d ${h}h` : `${d}d`;
+  const m = Math.round((s % 3600) / 60);
+  const hh = Math.floor(s / 3600);
+  return hh >= 1 ? `${hh}h ${m}m` : `${m}m`;
 }
 
 function renderPortfolio(z) {
@@ -984,6 +1054,7 @@ function render(s) {
   const dep = z.deposit_address || null;
   setAddr('dep-addr', dep || z.vault);
   renderPortfolio(z);
+  renderMarket(z);
   renderItems(z);
   $('dep-qr').innerHTML = z.deposit_qr_svg || '';
   $('dep-uri').value = z.deposit_uri || '';
