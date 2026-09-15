@@ -9,6 +9,7 @@ pub mod boot;
 pub mod bridge;
 pub mod claim;
 pub mod client;
+pub mod whitelist;
 pub mod config;
 pub mod deposits;
 pub mod exitproof;
