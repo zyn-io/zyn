@@ -6,38 +6,38 @@ Positioning Zyn as **the programmable execution layer for Zcash** rather than an
 L2 changes what is on the critical path. The claim to satisfy is "ZEC has
 somewhere to do things" — so the front door, the applications, and honest
 disclosure come first, and rollup-grade hardening waits for the rung it belongs
-to.
+to. Items are named here, defined below; this section carries no ids of its own.
 
 **Now — the claim must be true**
 
-| | |
-|---|---|
-| A75, A76 | **A deposit without a memo is not credited.** This is the front door and it is broken for anyone sending from an exchange or a faucet. Nothing else about "somewhere to do things" matters if ZEC arriving does nothing. |
-| A71 | **The Cave sale service.** The application layer *is* the product now. Registry and allocator exist; nothing joins them to a paid mint. |
-| A72 | The 4444's Zyn manifests — a morning's work, and it unblocks A71. |
-| A59 | Fund the mainnet vault, so "anchored to Zcash" is a fact a reader can check rather than a design. |
+- **A79** — Cave checkout issues a per-account deposit address. The front door:
+  a buyer given a shared address cannot be credited without a memo their
+  exchange will never set.
+- **A71** — the Cave sale service. The application layer *is* the product now;
+  the registry and allocator exist and nothing joins them to a paid mint.
+- **A72** — the 4444's Zyn manifests. A morning's work, and it unblocks A71.
+- **A59** — fund the mainnet vault, so "anchored to Zcash" is a fact a reader
+  can check rather than a design.
+- **A76** — finish the memo surfacing on cavebro.win and in the docs.
 
 **Next — earn the destination**
 
-| | |
-|---|---|
-| A77 | **One replica that is not ours** (§84.5 v1). The cheapest credibility on the ladder and the only named next step. |
-| A78 | Rewrite the public positioning to §84. |
-| A66 | Disclose that ZYN pool liquidity is treasury-withdrawable. Routine under this frame; an admission under the old one. |
-| A7 | ZCG grant and forum post — §84 *is* the grant pitch: Zcash lacks programmability, Zyn adds it. |
+- **A77** — one replica that is not ours (§84.5 v1). The cheapest credibility on
+  the ladder and the only named next step.
+- **A78** — rewrite the public positioning to §84.
+- **A66** — disclose that ZYN pool liquidity is treasury-withdrawable. Routine
+  under this frame; an admission under the old one.
+- **A7** — ZCG grant and forum post. §84 *is* the pitch.
 
 **Later — rollup-grade hardening, not now**
 
-A1, A4, A10, A11 are v3/v4 on the ladder. They are the right work for a chain
-claiming to inherit Zcash security, and Zyn does not claim that yet. Doing them
-early buys nothing the positioning needs; doing them eventually is how the L2
-claim becomes defensible.
+A1, A4, A10 and A11 are v3/v4 on the ladder. They are the right work for a chain
+claiming to inherit Zcash security, and Zyn does not claim that yet.
 
 **Unchanged**
 
-A55 (Chrome store) and A52/A63/A68 (surfacing) are distribution and polish. They
-matter for users, not for the claim.
-
+A55 (Chrome store) and A52, A63, A68 (surfacing) are distribution and polish.
+They matter for users, not for the claim.
 
 ## NFT privacy from the public — operator-trusted tier (13 September 2026)
 
@@ -270,8 +270,8 @@ an intent is half a mechanism, and it is beat 5 of the demo.
 | A72 | **Build the 4444's Zyn manifests.** Proven possible: the 333's `build_manifests.py` runs against `examples/zyn-pfp-concepts/*-collection-*` with a ~20-line adapter — the hash lives in `checksums.sha256` rather than inline, and integer attribute values need stringifying. Produced 2,222 manifests / 4,444 blobs / 77.8 MB for the moles; all three species land near 8,888 blobs and ~155 MB. |
 | A73 | ~~Fund the testnet vault~~ **DONE 16 Sep** — funded, attributed by hand, anchoring. Originally: The fresh chain is up, serving, publishing DA and endorsed by both signers, but every anchor is refused: `ironwood double-spend, in finalized state: true` — the note it picks is already spent. A small TAZ transfer creates an unambiguous unspent note and, in the same act, proves the deposit path against real Zcash (A70). |
 | A74 | **`ZYN_BRIDGE_FROM_HEIGHT` should default forward on a chain reset.** Nothing warns that a replica pointed below the previous incarnation's last anchor will find those anchors on Zcash and halt demanding bundles that never existed (§71.37). Either refuse to start when the scan start predates the base state, or say so loudly. |
-| A75 | **A deposit with no memo is not credited — it waits for a human.** The node requires `ZYN1:<32-byte account, hex>`; without it the funds reach the vault and sit unattributed until someone adds a line to `/etc/zyn/zcash-attributions`. A faucet will never set that memo, and neither will most exchanges. Before Cave's paid mint opens, decide what a buyer sending from an exchange gets: a per-account address that needs no memo, a claim flow that attributes by amount and timing, or an explicit "memo required" that the checkout enforces. |
-| A76 | **Say the memo requirement everywhere a deposit address is shown.** Nap Wallet's deposit panel, cavebro.win, and any doc that prints a vault address. Handing someone a bare address is handing them a deposit that will not credit. |
+| A75 | ~~A deposit with no memo is not credited~~ **RESOLVED 16 Sep, and the diagnosis was wrong** — attribution is by *address* first (§71.39): a per-account deposit address is derived from the account, recovered from the note, and needs no memo. The real failure is handing out the vault's **base** address, which by design falls through to memo. So the fix is never to present that address bare — done for the wallet in A76. What remains for Cave is narrower: a buyer needs a Zyn account before checkout so a per-account address can be issued. Originally: The node requires `ZYN1:<32-byte account, hex>`; without it the funds reach the vault and sit unattributed until someone adds a line to `/etc/zyn/zcash-attributions`. A faucet will never set that memo, and neither will most exchanges. Before Cave's paid mint opens, decide what a buyer sending from an exchange gets: a per-account address that needs no memo, a claim flow that attributes by amount and timing, or an explicit "memo required" that the checkout enforces. |
+| A76 | ~~Say the memo requirement everywhere a deposit address is shown~~ **DONE 16 Sep for the wallet** — the panel now flags a memo-requiring address, explains that a faucet or exchange will not set one, and shows the exact `ZYN1:<account>` with its own copy button. Still to do: cavebro.win and any doc printing a vault address. Originally: Nap Wallet's deposit panel, cavebro.win, and any doc that prints a vault address. Handing someone a bare address is handing them a deposit that will not credit. |
 | A77 | **Run one replica that is not ours** (§84.5, v1). Every signer today is the operator's, so the chain's verification is the operator asserting to itself. One independent replica endorsing moves the claim from "we say so" to "we and a stranger agree" — the cheapest credibility on the whole ladder, and the named next step toward being describable as an L2. Needs: a v12 `zyn-replica` binary, the base root, a DA mirror URL, and someone in the Zcash community willing to run it. |
 | A78 | **Rewrite the public positioning to §84.** "Programmable execution layer for Zcash" for engineers, grants and investors; what the apps do for consumers. The word "L2" appears only as a destination, and only with the ladder beside it. Covers the site, the README, the ZCG forum post and any deck. |
 | A65 | **Decide whether post-open buybacks are automatic or discretionary** (§71.25). Automatic on accrual is consistent with §71.5 and needs no key; discretionary needs the treasury and is therefore a market operation someone performs. Affects whether the ZYN price path is a protocol property or a decision. |

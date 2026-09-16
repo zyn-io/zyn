@@ -177,6 +177,10 @@ tr:last-child td { border-bottom: 0; }
 #log { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); max-height: 200px; overflow: auto; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
 #log li.err { color: var(--bad); }
 .empty { color: var(--ink-3); font-size: 13.5px; padding: 8px 0; }
+.memo-warning { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--warn-fg, #b3690f);
+  background: var(--warn-bg, #d9822b1a); border-radius: 4px; font-size: 12px; line-height: 1.7; }
+.memo-warning b { color: var(--warn-fg, #b3690f); }
+.addr code.needs-memo { border-bottom: 2px dotted var(--warn-fg, #b3690f); }
 .bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
 .busy { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); }
@@ -298,6 +302,13 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
     <h2>Move ZEC in and out</h2>
     <div class="hint" id="dep-how"></div>
     <div class="addr"><code id="dep-addr"></code><button class="btn small" id="copy-dep">Copy</button></div>
+    <div class="memo-warning" id="dep-memo-warning" hidden>
+      <b>This address needs a memo.</b> Sending to it without one — from a faucet,
+      an exchange, or any wallet that cannot set a memo — will not credit your
+      account. The funds reach the vault and wait for an operator to place them
+      by hand. Include exactly:
+      <div class="addr"><code id="dep-memo-line"></code><button class="btn small" id="copy-memo">Copy memo</button></div>
+    </div>
     <div class="row"><input class="grow num" id="dep-amount" placeholder="amount" inputmode="decimal"><button class="btn primary" id="deposit">Deposit</button></div>
     <input type="hidden" id="dep-uri">
     <details id="dep-elsewhere">
@@ -1073,7 +1084,16 @@ function render(s) {
   // with nothing to remember and no memo to get wrong. Older nodes cannot
   // issue one, and then the shared vault address plus the memo is still it.
   const dep = z.deposit_address || null;
+  // The fallback used to hand over the shared vault address as an ordinary
+  // copyable string. A deposit there is attributed by *memo*, and no faucet or
+  // exchange sets one — the funds arrive, sit unattributed, and wait for an
+  // operator to place them by hand. That is what happened to a 0.1 TAZ test
+  // deposit on 16 Sep (§71.39). So the bare address is no longer offered as
+  // though it were safe to paste anywhere; the memo travels with it.
   setAddr('dep-addr', dep || z.vault);
+  $('dep-addr').classList.toggle('needs-memo', !dep);
+  $('dep-memo-warning').hidden = !!dep;
+  $('dep-memo-line').textContent = dep ? '' : 'ZYN1:' + (z.account || '');
   renderPortfolio(z);
   renderMarket(z);
   renderItems(z);
@@ -1341,7 +1361,7 @@ $('t-shield').onclick = async () => {
   await run($('t-shield'), 'Moving in…', async () => { await api('/api/shield', {}); });
   await loadTransparent();
 };
-for (const [b, src] of [['copy-addr', 'address'], ['copy-acct', 'account'], ['copy-dep', 'dep-addr'], ['copy-content', 'it-content'], ['copy-taddr', 't-address'], ['copy-it-account', 'it-account']]) $(b).onclick = () => navigator.clipboard.writeText($(src).dataset.full || $(src).textContent).then(() => toast('copied')).catch(() => {});
+for (const [b, src] of [['copy-addr', 'address'], ['copy-acct', 'account'], ['copy-dep', 'dep-addr'], ['copy-memo', 'dep-memo-line'], ['copy-content', 'it-content'], ['copy-taddr', 't-address'], ['copy-it-account', 'it-account']]) $(b).onclick = () => navigator.clipboard.writeText($(src).dataset.full || $(src).textContent).then(() => toast('copied')).catch(() => {});
 
 try { const t = localStorage.getItem('tab'); if (t) showTab(t); } catch {}
 load();
