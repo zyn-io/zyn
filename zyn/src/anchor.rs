@@ -245,6 +245,12 @@ impl SignerSet {
     pub fn threshold(&self) -> usize {
         self.threshold
     }
+    /// The identities in the set, canonically ordered. Exposed so a monitor
+    /// can name a signer that has gone quiet — a set can only be watched
+    /// member by member (§89.2).
+    pub fn signers(&self) -> &[[u8; 32]] {
+        &self.signers
+    }
     pub fn contains(&self, signer: &[u8; 32]) -> bool {
         self.signers.binary_search(signer).is_ok()
     }

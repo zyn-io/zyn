@@ -1074,6 +1074,26 @@ fn run() -> Result<(), String> {
         cfg.chain_id,
     );
     alerter.after_failures = cfg.alert_after_failures;
+    // Every custodian this node would need a signature from, deduped: anchors
+    // and exits are usually the same federation, and a set watched twice reads
+    // as two failures for one cause.
+    let custodian_addrs: Vec<String> = {
+        let mut v: Vec<String> = Vec::new();
+        for list in [
+            cfg.zebra.as_ref().and_then(|z| z.settle.as_ref()).and_then(|s| s.custodians.clone()),
+            cfg.solana.as_ref().and_then(|s| s.settle.as_ref()).and_then(|s| s.custodians.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for a in list {
+                if !v.contains(&a) {
+                    v.push(a);
+                }
+            }
+        }
+        v
+    };
     alerter.stall_secs = cfg.stall_secs;
     match &cfg.alert_url {
         Some(u) => eprintln!(
@@ -1355,6 +1375,73 @@ fn run() -> Result<(), String> {
                     },
                 };
                 alerter.report("anchors", now, health);
+                // Each signer separately, because the aggregate cannot see
+                // this. `endorsement_health` fires when an anchor sits
+                // unendorsed — but with a threshold of two out of three, one
+                // signer can be dead for days while every certificate clears
+                // and every pass reports success. That is exactly what
+                // happened on 15-16 Sep (§89.2). A set is only as redundant as
+                // its quietest member, so the quietest member gets its own
+                // component and its own alert.
+                let rows: Vec<([u8; 32], Option<u64>, u64)> = shared
+                    .lock()
+                    .ok()
+                    .and_then(|n| {
+                        let at = n.ledger().len() as u64;
+                        n.signer_liveness().map(|(set, seen)| {
+                            set.signers()
+                                .iter()
+                                .map(|k| (*k, seen.get(k).copied(), at))
+                                .collect()
+                        })
+                    })
+                    .unwrap_or_default();
+                {
+                    // The custodians, by the cheapest honest question: does
+                    // anything accept a connection on that port. Threshold
+                    // signing needs them present, and a reverse tunnel that
+                    // dropped because its host went to sleep looks exactly like
+                    // a healthy quorum right up until a signature is needed
+                    // (§89.10). A connect proves the listener, not the share.
+                    for addr in custodian_addrs.iter() {
+                        let r = match std::net::TcpStream::connect_timeout(
+                            &match addr.parse() {
+                                Ok(a) => a,
+                                Err(e) => {
+                                    alerter.report(
+                                        &format!("custodian {}", addr),
+                                        now,
+                                        Err(format!("unparseable address: {}", e)),
+                                    );
+                                    continue;
+                                }
+                            },
+                            std::time::Duration::from_secs(3),
+                        ) {
+                            Ok(_) => Ok(0),
+                            Err(e) => Err(format!("not accepting connections: {}", e)),
+                        };
+                        alerter.report(&format!("custodian {}", addr), now, r);
+                    }
+                    for (key, last, at) in rows {
+                        let name = format!("signer {}", &zynzapd::client::hex(&key)[..8]);
+                        let behind = last.map(|l| at.saturating_sub(l));
+                        let r = match behind {
+                            // Silent for longer than an unendorsed anchor would
+                            // be tolerated: the same patience, per signer.
+                            Some(n) if cfg.endorse_stall_passes > 0
+                                && n > cfg.endorse_stall_passes as u64 => Err(format!(
+                                "no endorsement for {} anchors — the certificate still clears without it, which is why nothing else reports this",
+                                n
+                            )),
+                            Some(_) => Ok(at),
+                            None => Err(
+                                "never heard from since this node started".to_string()
+                            ),
+                        };
+                        alerter.report(&name, now, r);
+                    }
+                }
                 // Publish the proposal's bundle as soon as it is broadcast, so
                 // signers can verify and endorse before it settles. Idempotent:
                 // the index takes each epoch once, the files are rewritten (the

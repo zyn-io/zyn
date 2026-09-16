@@ -5315,3 +5315,25 @@ is worse than not doing it.
 | 89.8 | **A sleeping laptop is why the alerts then stopped, and why they will come back.** Failures count polls, not wall time, so a suspended replica freezes mid-incident rather than recovering; nothing after 18:45 means it slept, not that it healed. Waiting it out is not a fix — it resumes halted | 🔒 |
 | 89.9 | **Four machines hold Zyn roles and only three were in the deploy list.** The Air is unreachable from here (no key, and a password is not something to handle on an operator's behalf), which is exactly how it came to be three resets and one `STATE_VERSION` behind. A machine nobody can reach from the build host will be the machine that is forgotten | 🔒 |
 | 89.10 | **Mainnet custody drops to the bare threshold whenever the HP naps.** The mainnet sequencer expects three custodians on `8211/8212/8213`; `8211` is the Windows reverse tunnel and was closed while that box was in Modern Standby, leaving 2-of-3 with no margin. It returned on its own when the distro came back. Signing survived, but only because nothing else was down at the same time | 🔒 |
+
+## 90. Monitoring the set, not the threshold (16 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 90.1 | **Each signer is its own alert component.** `endorsement_health` fires when an anchor sits unendorsed, which cannot see the case that actually happened: with 2-of-3, one signer dies, every certificate still clears, every pass reports success. `Node` now records the anchor count at which each signer was last counted, and the sequencer reports one component per signer — so the quietest member of a set is the one that gets alerted about | ✅ |
+| 90.2 | **A repeat endorsement counts as life even though it adds no weight.** Re-offering is how a signer heals a sequencer restart (§63); treating a repeat as silence would report the healthy case as dead | ✅ |
+| 90.3 | **Liveness is in memory and never committed.** It is an observation about operators, not state the chain agrees on, and a restart legitimately knows nothing — reported as "never heard from since this node started" rather than as a failure | 🔒 |
+| 90.4 | **Custodians are probed by TCP connect, which proves the listener and not the share.** It is the cheapest honest question, and it catches the failure that happened: a reverse tunnel dropped because its host slept, leaving a quorum that looks healthy until a signature is needed (§89.10). Anything stronger would mean asking a custodian to sign something, which is not a health check | ✅ |
+| 90.5 | **The bot needed no change.** It renders whatever components the sequencer publishes, so per-signer and per-custodian rows appear in `/signers` for free. A monitor that has to be taught about each new thing is a monitor that will not be | ✅ |
+
+## 91. Enterprise-friendly, as a direction rather than a claim (16 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 91.1 | **The position is "confidential settlement with provable reserves and an exit no counterparty can block"**, written up in `docs/ENTERPRISE.md`. An institution can use neither a transparent chain (positions are trade secrets, often protected by law) nor an opaque one (auditors need proof). Almost nothing is allowed to be both | 🔒 |
+| 91.2 | **It is an addition, not a pivot.** Consumer surfaces stay: they are the proof the thing runs, and every institutional item below makes them more trustworthy too. A full reposition would burn cavebro, the whitelist, the 4,444 and the voice, in exchange for a 6-18 month sales cycle | 🔒 |
+| 91.3 | **Nothing may be said to an institution until the row carrying it is built.** The entire value of this position is that it survives diligence; asserting it early is the one way to lose it. `ENTERPRISE.md` is marked "direction, not a claim" for that reason | 🔒 |
+| 91.4 | **The gap is operations, not cryptography.** `backing.rs`, `exitproof.rs`, forced inclusion and the separated vault FVK already argue the case. What a first diligence call kills the deal over is §89: a signer dead 36 hours, custody at bare threshold because a machine slept, a vault share on a laptop, a role on a host the build machine cannot reach | 🔒 |
+| 91.5 | **Selective disclosure is the product to build next** — per-account viewing keys, scoped and time-boxed, producing an artefact an auditor verifies offline against an anchored root. Weeks, not months, and it improves the consumer product too | ⏳ |
+| 91.6 | **Issuer control is per-asset and never protocol-level.** Regulated instruments need transfer restrictions and freeze; `SupplyPolicy::authority()` is already the right shape. A chain with a freeze key is not credibly neutral; an asset whose issuer has one is a regulated security behaving correctly. Every institutional chain that failed resolved this tension in the protocol's favour, one reasonable exception at a time | 🔒 |
+| 91.7 | **Permissioning belongs at the gateway, never in consensus.** KYC on who may deposit, an allowlist of issuers, enforced at the edge with the chain seeing none of it. Identity in consensus destroys the only property worth buying | 🔒 |
