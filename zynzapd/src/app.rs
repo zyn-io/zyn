@@ -2612,3 +2612,26 @@ mod uri_tests {
         assert!(!deposit_uri(addr, None, Some(0)).contains("amount="));
     }
 }
+
+#[cfg(test)]
+mod deposit_uri_tests {
+    /// The cave's deposit page builds this same URI in JavaScript, because it
+    /// talks to the wallet provider rather than to this process. Two encoders
+    /// for one format drift silently — a memo that decodes to nothing looks
+    /// exactly like a memo that was never set — so the shape is pinned here
+    /// and mirrored by `apps/cave-collection-z/deposit.html`.
+    #[test]
+    fn the_zip321_request_is_the_shape_the_web_page_also_builds() {
+        let memo = format!("ZYN1:{}", "ab".repeat(32));
+        assert_eq!(
+            super::deposit_uri("utest1abc", Some(&memo), None),
+            "zcash:utest1abc?message=Zyn%20deposit&memo=WllOMTphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFi"
+        );
+        // Without a memo the request is the address and nothing more, which is
+        // what a per-account address wants: no field for a wallet to drop.
+        assert_eq!(
+            super::deposit_uri("utest1abc", None, None),
+            "zcash:utest1abc?message=Zyn%20deposit"
+        );
+    }
+}

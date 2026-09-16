@@ -29,6 +29,10 @@ await cp(new URL('whitelist.html', root), new URL('whitelist/index.html', output
 await mkdir(new URL('deposit/', output), { recursive: true });
 await cp(new URL('deposit.html', root), new URL('deposit/index.html', output));
 
+// The QR encoder is shared with the wallets rather than copied into each one.
+// This site has no bundler, so "shared" means staged here as a plain module.
+await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
+
 // Pages Functions ship from `functions/` beside the static output.
 await cp(new URL('functions', root), new URL('functions', output), { recursive: true });
 

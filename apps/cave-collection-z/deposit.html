@@ -103,6 +103,26 @@
         user-select: all;
       }
       .addr-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      /* The address and its picture are the same fact twice, so they sit
+         together and wrap together on a narrow screen. */
+      .addr-and-qr { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+      .addr-and-qr .addr { flex: 1 1 260px; margin: 0; }
+      .qr { margin: 0; display: grid; gap: 8px; justify-items: center; }
+      .qr[hidden] { display: none; }
+      .qr canvas {
+        display: block;
+        border: 1px solid var(--line);
+        background: #f0eee6;
+        padding: 8px;
+        image-rendering: pixelated;
+      }
+      .qr figcaption {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
       .tag {
         font-family: var(--mono);
         font-size: 8px;
@@ -229,7 +249,13 @@
               <span class="tag good" id="kind">Yours alone</span>
               <span class="tag" id="memo-tag" hidden>Memo required</span>
             </div>
-            <div class="addr" id="address"></div>
+            <div class="addr-and-qr">
+              <div class="addr" id="address"></div>
+              <figure class="qr" id="qr-wrap" hidden>
+                <canvas id="qr" width="180" height="180"></canvas>
+                <figcaption id="qr-caption">Scan from a phone wallet</figcaption>
+              </figure>
+            </div>
             <div class="addr-row">
               <button class="act" id="copy" type="button">Copy address</button>
               <button class="act ghost" id="again" type="button">Check again</button>
@@ -274,7 +300,9 @@
       <a class="back" href="/">← back to the cave</a>
     </main>
 
-    <script>
+    <script type="module">
+      import { toCanvas } from '/qr.js';
+
       // The provider is injected by the Nap Wallet extension. It may arrive
       // after this script runs, so the page waits for the event as well as
       // checking — a wallet that loads a beat late must not read as absent.
@@ -317,21 +345,67 @@
         }
       }
 
+      // ZIP-321, the same request the desktop wallet builds. The depositor's
+      // wallet fills in the address itself, and the memo where one is needed:
+      // a hundred-character shielded address retyped by hand is the likeliest
+      // way a deposit goes wrong, and a hand-typed memo the likeliest way one
+      // arrives unattributable.
+      const base64url = (text) =>
+        btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      const depositUri = (address, memo) =>
+        `zcash:${address}?message=${encodeURIComponent('Zyn deposit')}`
+        + (memo ? `&memo=${base64url(memo)}` : '');
+
       function render(address, needsMemo) {
         el('address').textContent = address;
         el('kind').textContent = needsMemo ? 'Shared vault' : 'Yours alone';
         el('kind').className = needsMemo ? 'tag warn' : 'tag good';
         el('memo-tag').hidden = !needsMemo;
         el('alarm').hidden = !needsMemo;
+        // With no memo the picture can be the bare address, which every wallet
+        // reads. With one, it has to be the ZIP-321 request instead, because a
+        // scanned address alone would produce a payment that credits nobody —
+        // and the caption has to name wallets that honour the memo rather than
+        // implying any scanner will do.
+        drawQr(needsMemo ? null : address);
         if (needsMemo) {
           // The account is what the memo has to carry. Ask for it separately so
           // a wallet that cannot issue an address can still be paid correctly.
           provider()
             .request({ method: 'zyn_account', params: {} })
-            .then((a) => { el('memo').textContent = 'ZYN1:' + ((a && a.account) || ''); })
+            .then((a) => {
+              const memo = 'ZYN1:' + ((a && a.account) || '');
+              el('memo').textContent = memo;
+              if (a && a.account) drawQr(address, memo);
+            })
             .catch(() => { el('memo').textContent = 'ZYN1:<ask your wallet for its Zyn account>'; });
         }
         show('addr');
+      }
+
+      function drawQr(address, memo) {
+        const wrap = el('qr-wrap');
+        if (!address) {
+          // Waiting on the account before a memo QR can be built. Showing the
+          // bare address in the meantime would be the exact wrong picture.
+          wrap.hidden = true;
+          return;
+        }
+        try {
+          // Dark on the parchment the rest of the cave uses, drawn at whatever
+          // module size fits 180px rather than a fixed one.
+          toCanvas(el('qr'), memo ? depositUri(address, memo) : address, {
+            level: 'M', width: 180, dark: '#0a0c0a', light: '#f0eee6',
+          });
+          el('qr-caption').textContent = memo
+            ? 'Carries the memo — Zashi, Ywallet, Zingo'
+            : 'Scan from a phone wallet';
+          wrap.hidden = false;
+        } catch {
+          wrap.hidden = true;
+        }
       }
 
       el('ask').addEventListener('click', ask);

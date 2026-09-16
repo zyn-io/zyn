@@ -698,6 +698,25 @@ impl Node {
         String::from_utf8(raw.to_vec()).map_err(|_| "deposit address is not text".to_string())
     }
 
+    /// The same address, asked for with a signed read rather than a bare
+    /// account id. The payload is `OP_ACCOUNT`'s byte for byte, so a client
+    /// that can read its own balance can already ask this.
+    pub fn deposit_address_signed(&self, payload: &[u8]) -> Result<String, String> {
+        let mut e = Encoder::new();
+        e.u8(crate::rpc::OP_DEPOSIT_ADDRESS_SIGNED)
+            .u32(self.chain)
+            .bytes(payload);
+        let body = self.call(e.finish())?;
+        let mut d = Decoder::new(&body);
+        let n = d
+            .u32()
+            .map_err(|_| "malformed deposit address reply".to_string())? as usize;
+        let raw = d
+            .take_bytes(n)
+            .map_err(|_| "truncated deposit address".to_string())?;
+        String::from_utf8(raw.to_vec()).map_err(|_| "deposit address is not text".to_string())
+    }
+
     /// Every collection the chain knows, with its floor.
     pub fn collections(&self) -> Result<Vec<CollectionView>, String> {
         let mut e = Encoder::new();

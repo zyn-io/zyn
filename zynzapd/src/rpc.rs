@@ -69,6 +69,17 @@ pub const OP_ENDORSE: u8 = 18;
 /// which the caller already supplied, and the address reveals nothing about
 /// the account to anyone who does not already hold the vault's viewing key.
 pub const OP_DEPOSIT_ADDRESS: u8 = 19;
+/// The same address, for a caller who proves the account is theirs:
+/// `account[32] epoch[8] scheme[1] key[32] sig[64]`, exactly `OP_ACCOUNT`'s
+/// payload.
+///
+/// `OP_DEPOSIT_ADDRESS` is safe to answer to anyone *reading*, but answering
+/// is not free: a first ask writes the account into the scan register, which
+/// the scanner then checks every note against. Over the node's own socket that
+/// is fine — it is not reachable from a browser. The public JSON-RPC is, so
+/// the method exposed there takes this op instead, and a stranger who cannot
+/// sign cannot make the register grow.
+pub const OP_DEPOSIT_ADDRESS_SIGNED: u8 = 28;
 /// Every collection: cap, minted, outstanding, pool, phase and the redeem
 /// price. Public, and it has to be — the floor is the thing a buyer is
 /// trusting, so it is exactly the number that must not require asking us.
@@ -699,6 +710,10 @@ pub fn dispatch(server: &Server, frame: &[u8]) -> Vec<u8> {
         }
         OP_ENDORSE => endorse(server, &mut d),
         OP_DEPOSIT_ADDRESS => deposit_address(server, &mut d),
+        OP_DEPOSIT_ADDRESS_SIGNED => match signed_read(server, &mut d) {
+            Ok(id) => address_for(server, id),
+            Err(e) => error_frame(e),
+        },
         OP_COLLECTIONS => with_node(server, |n| {
             let s = n.state();
             let mut e = Encoder::new();
@@ -1308,6 +1323,14 @@ fn deposit_address(server: &Server, d: &mut Decoder) -> Vec<u8> {
     let Ok(account) = d.array::<32>() else {
         return error_frame("malformed account");
     };
+    address_for(server, account)
+}
+
+/// The body both deposit-address ops share, once the account is settled — by
+/// the caller naming it, or by a signature proving it. Everything that can go
+/// wrong after that point is identical, and answering differently depending on
+/// how the caller arrived would be a way to probe the register.
+fn address_for(server: &Server, account: [u8; 32]) -> Vec<u8> {
     if account == [0u8; 32] {
         return error_frame("the all-zero account is the vault's own, not a depositor's");
     }
@@ -1535,14 +1558,73 @@ mod tests {
         let out = dispatch(&s, &req(OP_DEPOSIT_ADDRESS, 9, &[0u8; 32]));
         assert_eq!(out[0], wire::STATUS_ERR);
 
-        // The scanner's register now attributes both accounts' notes.
+        // The signed op answers with the same address for the same account,
+        // and only to whoever can sign for it. This is the one the public
+        // JSON-RPC exposes: a bare-id method there would let a stranger grow
+        // the scan register by asking.
+        let k = ed25519_key(11);
+        let signed_account = acct_of(&k);
+        let epoch = s.node.lock().unwrap().state().epoch();
+        use ed25519_dalek::Signer as _;
+        let payload = |key: &ed25519_dalek::SigningKey, account: &[u8; 32]| {
+            let sig = key.sign(&read_challenge(9, account, epoch)).to_bytes();
+            let mut e = Encoder::new();
+            e.bytes(account)
+                .u64(epoch)
+                .u8(Scheme::Ed25519.tag())
+                .bytes(key.verifying_key().as_bytes())
+                .bytes(&sig);
+            e.finish().to_vec()
+        };
+
+        let out = dispatch(
+            &s,
+            &req(OP_DEPOSIT_ADDRESS_SIGNED, 9, &payload(&k, &signed_account)),
+        );
+        assert_eq!(
+            out[0],
+            wire::STATUS_OK,
+            "{:?}",
+            String::from_utf8_lossy(&out[3..])
+        );
+        assert_eq!(
+            read(out),
+            read(dispatch(&s, &req(OP_DEPOSIT_ADDRESS, 9, &signed_account))),
+            "signed and unsigned name the same address for one account"
+        );
+
+        // Someone else's signature over this account: refused, so asking is
+        // bounded to people who hold a key.
+        let stranger = ed25519_key(12);
+        assert_eq!(
+            dispatch(
+                &s,
+                &req(OP_DEPOSIT_ADDRESS_SIGNED, 9, &payload(&stranger, &signed_account)),
+            )[0],
+            wire::STATUS_ERR,
+            "a stranger cannot ask for an account that is not theirs"
+        );
+
+        // A bare account id is not a signed read, and must not be treated as
+        // one by falling through to the unsigned path.
+        assert_eq!(
+            dispatch(&s, &req(OP_DEPOSIT_ADDRESS_SIGNED, 9, &signed_account))[0],
+            wire::STATUS_ERR,
+        );
+
+        // The scanner's register now attributes every issued account's notes —
+        // including the one issued through the signed op, which must register
+        // for scanning exactly like the others or its deposits arrive
+        // unattributable.
         let shared = s.deposits.as_ref().unwrap().lock().unwrap().0.shared();
         let m = shared.lock().unwrap();
-        assert_eq!(m.len(), 2);
-        assert_eq!(
-            m.get(zyn_custody::shielded::deposit_index(&alice).as_bytes()),
-            Some(&alice)
-        );
+        assert_eq!(m.len(), 3);
+        for account in [alice, bob, signed_account] {
+            assert_eq!(
+                m.get(zyn_custody::shielded::deposit_index(&account).as_bytes()),
+                Some(&account)
+            );
+        }
     }
 
     #[test]
