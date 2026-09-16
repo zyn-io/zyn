@@ -24,6 +24,11 @@ for (const file of ['index.html', 'app.js', 'styles.css', 'assets']) {
 await mkdir(new URL('whitelist/', output), { recursive: true });
 await cp(new URL('whitelist.html', root), new URL('whitelist/index.html', output));
 
+// The deposit door, same shape. Everything in the cave is priced in ZEC, so
+// this is the page that has to exist before any of the prices mean anything.
+await mkdir(new URL('deposit/', output), { recursive: true });
+await cp(new URL('deposit.html', root), new URL('deposit/index.html', output));
+
 // Pages Functions ship from `functions/` beside the static output.
 await cp(new URL('functions', root), new URL('functions', output), { recursive: true });
 

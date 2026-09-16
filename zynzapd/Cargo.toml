@@ -25,6 +25,9 @@ zyn = { path = "../zyn" }
 zyn-vm = { path = "../zyn-vm" }
 swapvm = { path = "../swapvm" }
 zyn-custody = { path = "../zyn-custody" }
+# The allocation engine. This crate wires it to a chain and a clock; the engine
+# itself owns neither, which is what lets anyone replay an allocation offline.
+cave-randomness = { path = "../cave-randomness" }
 # Signals. A node that is killed between seals loses the intents since the last
 # one, which is exactly the loss a clean shutdown exists to avoid.
 libc = "0.2"
