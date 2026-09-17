@@ -1,0 +1,2611 @@
+{
+  "version": "1.0.0",
+  "scope": "Zyn Collection 01: Moth 889, Owl 1333, Mole 2222",
+  "provenanceLimit": "Release metadata records atomic source canvas, row, column and visual family. It does not record independent background/body/mouth/eyes/headgear/light master IDs.",
+  "statusMeaning": {
+    "theme-confirmed": "A released source family explicitly invokes this light direction.",
+    "not-individually-tracked": "The master exists, but exact use cannot be proven from saved metadata.",
+    "priority-next-batch": "No released family explicitly invokes this direction; reserve it first."
+  },
+  "species": {
+    "Moth": {
+      "supply": 889,
+      "componentMasterTarget": 60,
+      "collectionImages": {
+        "count": 889,
+        "uniqueHashes": 889,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "componentMasters": {
+        "count": 60,
+        "uniqueHashes": 60,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "releasedSourcePortraits": 889,
+      "cleanReservePortraits": 49,
+      "rejectedSourceCells": 9,
+      "releasedFamilies": {
+        "Balanced Genesis": 81,
+        "Vault and Tunnel": 100,
+        "Aurora and Prism": 81,
+        "Moonlight and Starlight": 81,
+        "Color Reserve": 41,
+        "Bioluminescence and Caustics": 81,
+        "Afterglow and Eclipse": 81,
+        "Rare Signals": 81,
+        "Shielded Stealth": 81,
+        "Genesis Finale": 81,
+        "Vault Reserve": 100
+      },
+      "reserveFamilies": {
+        "Color Reserve": 49
+      },
+      "components": {
+        "background": [
+          {
+            "id": "deep-black",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "tunnel-grid",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-pool",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-vault",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-cavern",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-blocks",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-garden",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse-gate",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-archive",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zero-field",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "body": [
+          {
+            "id": "charcoal-velvet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "ashwing",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "brown-dustwing",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "silver-silk",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moonwhite",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-circuit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-wing",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-pattern",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "obsidian-mantle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-wing",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "eyes": [
+          {
+            "id": "round",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "faceted",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sleepy",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "mint",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "violet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Prism",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Prism",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "void",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "luminous",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "mouth": [
+          {
+            "id": "small-mouthparts",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "curled-proboscis",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "long-proboscis",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "hidden-mouth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "glowing-mouth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "respirator",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crystal-feeder",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "headgear": [
+          {
+            "id": "none",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "black-hood",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "miner-helmet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "beanie",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zyn-cap",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-headset",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "vault-crown",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-halo",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-helm",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "light": [
+          {
+            "id": "neutral",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sunlight",
+            "status": "priority-next-batch",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "prioritize for a later batch; visually review for accidental similarity first"
+          },
+          {
+            "id": "moonlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "starlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "bioluminescence",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Bioluminescence and Caustics",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "aurora",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Prism",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "afterglow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "caustics",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Bioluminescence and Caustics",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "prism",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Prism",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "laser",
+            "status": "priority-next-batch",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "prioritize for a later batch; visually review for accidental similarity first"
+          },
+          {
+            "id": "veiled-light",
+            "status": "priority-next-batch",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "prioritize for a later batch; visually review for accidental similarity first"
+          },
+          {
+            "id": "eclipse",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          }
+        ]
+      }
+    },
+    "Owl": {
+      "supply": 1333,
+      "componentMasterTarget": 90,
+      "collectionImages": {
+        "count": 1333,
+        "uniqueHashes": 1333,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "componentMasters": {
+        "count": 90,
+        "uniqueHashes": 90,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "releasedSourcePortraits": 1333,
+      "cleanReservePortraits": 199,
+      "rejectedSourceCells": 60,
+      "releasedFamilies": {
+        "Balanced Genesis": 90,
+        "Vault and Tunnel": 90,
+        "Moonlight and Starlight": 100,
+        "Aurora and Bioluminescence": 71,
+        "Sunlight and Dawn": 90,
+        "Afterglow and Eclipse": 100,
+        "Prism and Laser": 90,
+        "Caustics and Veiled Light": 90,
+        "Nebula and Comet": 90,
+        "Lantern Gold and Voidlight": 90,
+        "Shielded Stealth": 90,
+        "Node and Cipher": 90,
+        "Archivists and Moon Scribes": 90,
+        "Miners and Navigators": 81,
+        "Royal Vault": 81
+      },
+      "reserveFamilies": {
+        "Royal Vault": 9,
+        "Rare Signals": 100,
+        "Full-Spectrum Reserve": 90
+      },
+      "components": {
+        "background": [
+          {
+            "id": "deep-black",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "tunnel-grid",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-pool",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-vault",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-cavern",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-blocks",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-garden",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse-gate",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-archive",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zero-field",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "midnight-observatory",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-forest",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "lunar-ruins",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "star-map-vault",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "solar-archive",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "nebula-tunnel",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "body": [
+          {
+            "id": "charcoal-sentinel",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "brown-scholar",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "ash-courier",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "silver-oracle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "snow-watcher",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-circuit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-flecked",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "obsidian-armor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-robe",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-keeper",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "teal-navigator",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "bronze-cartographer",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dusk-plum",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse-feather",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-white",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "mouth": [
+          {
+            "id": "calm-diamond-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "short-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "open-hooting-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sharp-hooked-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "respirator",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "signal-whistle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crystal-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crescent-moon-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "split-rune-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cipher-beak",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "eyes": [
+          {
+            "id": "round-cyan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "narrowed-cyan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sleepy",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moonlit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "constellation",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "monocle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dark-visor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 100,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 71,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "void",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "star-map",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-scan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "luminous-white",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "headgear": [
+          {
+            "id": "none",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "black-hood",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "miner-helmet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "beanie",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zyn-cap",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-headset",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "vault-crown",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-halo",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-helm",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "archivist-circlet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "solar-visor-helmet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cipher-cowl",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "night-watch-crest",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "light": [
+          {
+            "id": "neutral",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sunlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Sunlight and Dawn",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "moonlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 100,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "starlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 100,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "bioluminescence",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 71,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "aurora",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 71,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "afterglow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 100,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "caustics",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Caustics and Veiled Light",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "prism",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "laser",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "veiled-light",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Caustics and Veiled Light",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "eclipse",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 100,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "dawn-beam",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Sunlight and Dawn",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "nebula-glow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Nebula and Comet",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "comet-trail",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Nebula and Comet",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "lantern-gold",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Lantern Gold and Voidlight",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "voidlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Lantern Gold and Voidlight",
+            "familyReleasedCount": 90,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "constellation-sweep",
+            "status": "priority-next-batch",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "prioritize for a later batch; visually review for accidental similarity first"
+          }
+        ]
+      }
+    },
+    "Mole": {
+      "supply": 2222,
+      "componentMasterTarget": 150,
+      "collectionImages": {
+        "count": 2222,
+        "uniqueHashes": 2222,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "componentMasters": {
+        "count": 150,
+        "uniqueHashes": 150,
+        "dimensions": [
+          [
+            192,
+            192
+          ]
+        ]
+      },
+      "releasedSourcePortraits": 2222,
+      "cleanReservePortraits": 68,
+      "rejectedSourceCells": 247,
+      "releasedFamilies": {
+        "Balanced Genesis": 90,
+        "Vault and Tunnel": 70,
+        "Moonlight and Starlight": 86,
+        "Aurora and Bioluminescence": 70,
+        "Sunlight and Dawn": 81,
+        "Afterglow and Eclipse": 70,
+        "Prism and Laser": 70,
+        "Caustics and Veiled Light": 70,
+        "Nebula and Comet": 60,
+        "Lantern Gold and Voidlight": 80,
+        "Shielded Stealth": 79,
+        "Node and Cipher": 60,
+        "Archivists and Geologists": 70,
+        "Miners and Prospectors": 66,
+        "Royal Vault": 70,
+        "Rare Signals": 70,
+        "Burrow Cross-Sections": 54,
+        "Crystal Geodes": 70,
+        "Ancient Rail": 70,
+        "Root Network": 60,
+        "Subterranean Phosphor": 70,
+        "Quantum Tunnel": 60,
+        "Gold Vein": 70,
+        "Genesis Core": 70,
+        "Full-Spectrum Reserve A": 61,
+        "Material Reserve": 67,
+        "Face Variation Reserve": 70,
+        "Headgear Reserve": 69,
+        "Final Quality Reserve": 70,
+        "Neutral QA Reserve": 70,
+        "Clean Geometry Reserve A": 60,
+        "Clean Geometry Reserve B": 60,
+        "Clean Geometry Reserve C": 9
+      },
+      "reserveFamilies": {
+        "Clean Geometry Reserve C": 68
+      },
+      "components": {
+        "background": [
+          {
+            "id": "deep-black",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "tunnel-grid",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-pool",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-vault",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-cavern",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-blocks",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-garden",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse-gate",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-archive",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zero-field",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "burrow-cross-section",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crystal-geode",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "encrypted-mine",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moonlit-shaft",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "biolume-fungus",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "ancient-rail",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-vault-door",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "subterranean-lake",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-vein",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "root-network",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "obsidian-cavern",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-reactor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zcash-archive",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dust-chamber",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "quantum-tunnel",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "lantern-gallery",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-quarry",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-core",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "body": [
+          {
+            "id": "charcoal-hoodie",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "earth-miner",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "slate-utility",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "brown-tunnel-scout",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "silver-node-technician",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "albino-archivist",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan-circuit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-dust-keeper",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "obsidian-armor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-robe",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moss-burrower",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moonstone-scout",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "copper-engineer",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "violet-cipher",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "teal-excavator",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "ash-surveyor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cream-geologist",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "midnight-runner",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-suit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-prospector",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "vault-warden",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "solar-driller",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "biolume-keeper",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse-miner",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-white",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "mouth": [
+          {
+            "id": "neutral-dash",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "friendly-smile",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "side-smirk",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "small-open-o",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "star-mouth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold-tooth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "compact-respirator",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "short-pipe",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "signal-whistle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crystal-breather",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "clenched-line",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "surprised-ring",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "signal-grille",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "crescent-mouth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "diamond-vent",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cipher-mouth",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "glowing-grin",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dust-mask",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "eyes": [
+          {
+            "id": "hidden",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "sleepy",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "alert",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "suspicious",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cyan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "gold",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "scarred",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "round-goggles",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dark-visor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "pixel-shades",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "laser",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moonlit",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "starlight",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 86,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "bioluminescent",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "eclipse",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-scan",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cipher-crosshair",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "monocle",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "geode-lenses",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "dust-goggles",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "infrared",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "void-eyes",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "luminous-white",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "headgear": [
+          {
+            "id": "none",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "black-hood",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "miner-helmet",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "beanie",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zyn-cap",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "node-headset",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "vault-crown",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "moon-halo",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "genesis-helm",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "tunnel-lamp",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prospector-goggles",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "geode-crown",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "rail-conductor-cap",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "drill-visor",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "archivist-hood",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "shielded-cowl",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "aurora-helm",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "prism-hardhat",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "zero-field-halo",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "root-crown",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "lantern-helm",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          },
+          {
+            "id": "cipher-mining-rig",
+            "status": "not-individually-tracked",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": null,
+            "familyReleasedCount": 0,
+            "nextBatchAction": "manual visual tagging required before exclusive reuse claims"
+          }
+        ],
+        "light": [
+          {
+            "id": "neutral",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Neutral QA Reserve",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "sunlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Sunlight and Dawn",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "moonlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 86,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "starlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Moonlight and Starlight",
+            "familyReleasedCount": 86,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "bioluminescence",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "aurora",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Aurora and Bioluminescence",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "afterglow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "caustics",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Caustics and Veiled Light",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "prism",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "laser",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Prism and Laser",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "veiled-light",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Caustics and Veiled Light",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "eclipse",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Afterglow and Eclipse",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "dawn-beam",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Sunlight and Dawn",
+            "familyReleasedCount": 81,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "nebula-glow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Nebula and Comet",
+            "familyReleasedCount": 60,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "comet-trail",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Nebula and Comet",
+            "familyReleasedCount": 60,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "lantern-gold",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Lantern Gold and Voidlight",
+            "familyReleasedCount": 80,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "voidlight",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Lantern Gold and Voidlight",
+            "familyReleasedCount": 80,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "constellation-sweep",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Full-Spectrum Reserve A",
+            "familyReleasedCount": 61,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "tunnel-glimmer",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Vault and Tunnel",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "geode-refraction",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Crystal Geodes",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "mining-lamp-beam",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Miners and Prospectors",
+            "familyReleasedCount": 66,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "vault-pulse",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Royal Vault",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "root-glow",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Root Network",
+            "familyReleasedCount": 60,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "subterranean-phosphor",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Subterranean Phosphor",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "gold-vein-shimmer",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Gold Vein",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "cipher-scan",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Node and Cipher",
+            "familyReleasedCount": 60,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "shielded-haze",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Shielded Stealth",
+            "familyReleasedCount": 79,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "quantum-bloom",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Quantum Tunnel",
+            "familyReleasedCount": 60,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "dust-sparkle",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Material Reserve",
+            "familyReleasedCount": 67,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          },
+          {
+            "id": "genesis-flare",
+            "status": "theme-confirmed",
+            "exactReleasedUsageCount": null,
+            "familyEvidence": "Genesis Core",
+            "familyReleasedCount": 70,
+            "nextBatchAction": "avoid treating as a new direction without a redesign"
+          }
+        ]
+      }
+    }
+  }
+}

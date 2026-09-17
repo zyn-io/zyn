@@ -1,0 +1,84 @@
+{
+  "version": "2.0.0-atomic-canvas-slices",
+  "canvas": [
+    192,
+    192
+  ],
+  "atomic": true,
+  "composableLayers": false,
+  "method": "author complete PFP in one canvas cell, then slice; never rebuild from independent overlays",
+  "categories": {
+    "background": [
+      "deep-black.png",
+      "tunnel-grid.png",
+      "shielded-pool.png",
+      "node-chamber.png",
+      "gold-vault.png",
+      "cyan-cavern.png",
+      "moon-blocks.png",
+      "aurora-garden.png",
+      "eclipse-gate.png",
+      "prism-archive.png",
+      "genesis-chamber.png",
+      "zero-field.png"
+    ],
+    "body": [
+      "charcoal-velvet.png",
+      "ashwing.png",
+      "brown-dustwing.png",
+      "silver-silk.png",
+      "moonwhite.png",
+      "cyan-circuit.png",
+      "aurora-wing.png",
+      "gold-pattern.png",
+      "obsidian-mantle.png",
+      "genesis-wing.png"
+    ],
+    "eyes": [
+      "round.png",
+      "faceted.png",
+      "sleepy.png",
+      "cyan.png",
+      "mint.png",
+      "violet.png",
+      "aurora.png",
+      "prism.png",
+      "void.png",
+      "luminous.png"
+    ],
+    "mouth": [
+      "small-mouthparts.png",
+      "curled-proboscis.png",
+      "long-proboscis.png",
+      "hidden-mouth.png",
+      "glowing-mouth.png",
+      "respirator.png",
+      "crystal-feeder.png"
+    ],
+    "headgear": [
+      "none.png",
+      "black-hood.png",
+      "miner-helmet.png",
+      "beanie.png",
+      "zyn-cap.png",
+      "node-headset.png",
+      "vault-crown.png",
+      "moon-halo.png",
+      "genesis-helm.png"
+    ],
+    "light": [
+      "neutral.png",
+      "sunlight.png",
+      "moonlight.png",
+      "starlight.png",
+      "bioluminescence.png",
+      "aurora.png",
+      "afterglow.png",
+      "caustics.png",
+      "prism.png",
+      "laser.png",
+      "veiled-light.png",
+      "eclipse.png"
+    ]
+  }
+}

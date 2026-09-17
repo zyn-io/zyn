@@ -1,0 +1,51 @@
+{
+  "name": "Nap Mole #225",
+  "description": "A sleeping Mole from the Nap early-user collection.",
+  "image": "0225.png",
+  "image_sha256": "fbf509a31281515311bd166f430ab692d905a9da3e0429b3153102e8edf58793",
+  "image_dimensions": {
+    "width": 128,
+    "height": 192
+  },
+  "attributes": [
+    {
+      "trait_type": "Species",
+      "value": "Mole"
+    },
+    {
+      "trait_type": "Collection",
+      "value": "Nap Early Users"
+    },
+    {
+      "trait_type": "Pose",
+      "value": "Sleeping 35-degree"
+    },
+    {
+      "trait_type": "Expression",
+      "value": "Sleeping"
+    },
+    {
+      "trait_type": "Headwear",
+      "value": "Sleep Mask"
+    },
+    {
+      "trait_type": "Mouth",
+      "value": "Neutral Dash"
+    },
+    {
+      "trait_type": "Setting",
+      "value": "Cave"
+    },
+    {
+      "trait_type": "Sleep Glyphs",
+      "value": "z z Z"
+    }
+  ],
+  "source": {
+    "candidateId": 358,
+    "canvas": 2,
+    "row": 1,
+    "column": 2
+  },
+  "visual_trait_source": "Manual review of the final token PNG"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "Zyn Moles \u2014 Collection 01",
+  "species": "Mole",
+  "supply": 2222,
+  "canvasCount": 33,
+  "authoredCellCapacity": 2537,
+  "acceptedUniqueSourceCells": 2290,
+  "reserveSourceCells": 68,
+  "rejectedSourceCells": 247,
+  "rendering": "exact full-cell slices, edge-padded to square, uniformly resized",
+  "metadataSchema": "zyn-atomic-components/v1",
+  "viewerRenderer": "zyn-light-v1",
+  "storeFilters": [
+    "Species",
+    "Visual Family",
+    "Interactive Light",
+    "Background",
+    "Body",
+    "Eyes",
+    "Mouth",
+    "Headgear"
+  ],
+  "rarity": "none; controlled family distribution only",
+  "detailedTraitTagging": "complete \u2014 visually categorized"
+}

@@ -1,0 +1,382 @@
+{
+  "version": "1.0.0-mole-atomic-canvas-masters",
+  "species": "Mole",
+  "supply": 2222,
+  "mothSupplyRatio": 2.499437570303712,
+  "canvas": [
+    192,
+    192
+  ],
+  "atomic": true,
+  "composableLayers": false,
+  "componentMasterTarget": 150,
+  "method": "author complete PFP in one canvas cell, then slice; never rebuild from independent generated overlays",
+  "categories": {
+    "background": [
+      "deep-black.png",
+      "tunnel-grid.png",
+      "shielded-pool.png",
+      "node-chamber.png",
+      "gold-vault.png",
+      "cyan-cavern.png",
+      "moon-blocks.png",
+      "aurora-garden.png",
+      "eclipse-gate.png",
+      "prism-archive.png",
+      "genesis-chamber.png",
+      "zero-field.png",
+      "burrow-cross-section.png",
+      "crystal-geode.png",
+      "encrypted-mine.png",
+      "moonlit-shaft.png",
+      "biolume-fungus.png",
+      "ancient-rail.png",
+      "shielded-vault-door.png",
+      "subterranean-lake.png",
+      "gold-vein.png",
+      "root-network.png",
+      "obsidian-cavern.png",
+      "node-reactor.png",
+      "zcash-archive.png",
+      "dust-chamber.png",
+      "quantum-tunnel.png",
+      "lantern-gallery.png",
+      "prism-quarry.png",
+      "genesis-core.png"
+    ],
+    "body": [
+      "charcoal-hoodie.png",
+      "earth-miner.png",
+      "slate-utility.png",
+      "brown-tunnel-scout.png",
+      "silver-node-technician.png",
+      "albino-archivist.png",
+      "cyan-circuit.png",
+      "gold-dust-keeper.png",
+      "obsidian-armor.png",
+      "genesis-robe.png",
+      "moss-burrower.png",
+      "moonstone-scout.png",
+      "copper-engineer.png",
+      "violet-cipher.png",
+      "teal-excavator.png",
+      "ash-surveyor.png",
+      "cream-geologist.png",
+      "midnight-runner.png",
+      "aurora-suit.png",
+      "prism-prospector.png",
+      "vault-warden.png",
+      "solar-driller.png",
+      "biolume-keeper.png",
+      "eclipse-miner.png",
+      "shielded-white.png"
+    ],
+    "mouth": [
+      "neutral-dash.png",
+      "friendly-smile.png",
+      "side-smirk.png",
+      "small-open-o.png",
+      "star-mouth.png",
+      "gold-tooth.png",
+      "compact-respirator.png",
+      "short-pipe.png",
+      "signal-whistle.png",
+      "crystal-breather.png",
+      "clenched-line.png",
+      "surprised-ring.png",
+      "signal-grille.png",
+      "crescent-mouth.png",
+      "diamond-vent.png",
+      "cipher-mouth.png",
+      "glowing-grin.png",
+      "dust-mask.png"
+    ],
+    "eyes": [
+      "hidden.png",
+      "sleepy.png",
+      "alert.png",
+      "suspicious.png",
+      "cyan.png",
+      "gold.png",
+      "scarred.png",
+      "round-goggles.png",
+      "dark-visor.png",
+      "pixel-shades.png",
+      "laser.png",
+      "moonlit.png",
+      "starlight.png",
+      "bioluminescent.png",
+      "aurora.png",
+      "prism.png",
+      "eclipse.png",
+      "node-scan.png",
+      "cipher-crosshair.png",
+      "monocle.png",
+      "geode-lenses.png",
+      "dust-goggles.png",
+      "infrared.png",
+      "void-eyes.png",
+      "luminous-white.png"
+    ],
+    "headgear": [
+      "none.png",
+      "black-hood.png",
+      "miner-helmet.png",
+      "beanie.png",
+      "zyn-cap.png",
+      "node-headset.png",
+      "vault-crown.png",
+      "moon-halo.png",
+      "genesis-helm.png",
+      "tunnel-lamp.png",
+      "prospector-goggles.png",
+      "geode-crown.png",
+      "rail-conductor-cap.png",
+      "drill-visor.png",
+      "archivist-hood.png",
+      "shielded-cowl.png",
+      "aurora-helm.png",
+      "prism-hardhat.png",
+      "zero-field-halo.png",
+      "root-crown.png",
+      "lantern-helm.png",
+      "cipher-mining-rig.png"
+    ],
+    "light": [
+      "neutral.png",
+      "sunlight.png",
+      "moonlight.png",
+      "starlight.png",
+      "bioluminescence.png",
+      "aurora.png",
+      "afterglow.png",
+      "caustics.png",
+      "prism.png",
+      "laser.png",
+      "veiled-light.png",
+      "eclipse.png",
+      "dawn-beam.png",
+      "nebula-glow.png",
+      "comet-trail.png",
+      "lantern-gold.png",
+      "voidlight.png",
+      "constellation-sweep.png",
+      "tunnel-glimmer.png",
+      "geode-refraction.png",
+      "mining-lamp-beam.png",
+      "vault-pulse.png",
+      "root-glow.png",
+      "subterranean-phosphor.png",
+      "gold-vein-shimmer.png",
+      "cipher-scan.png",
+      "shielded-haze.png",
+      "quantum-bloom.png",
+      "dust-sparkle.png",
+      "genesis-flare.png"
+    ]
+  },
+  "sources": [
+    {
+      "category": "background",
+      "file": "atlases/backgrounds-a.png",
+      "grid": [
+        5,
+        3
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        298,
+        299,
+        301,
+        300,
+        296
+      ],
+      "cellHeights": [
+        301,
+        301,
+        301
+      ]
+    },
+    {
+      "category": "background",
+      "file": "atlases/backgrounds-b.png",
+      "grid": [
+        5,
+        3
+      ],
+      "xBoundaryMode": "measured-dark-gutters",
+      "yBoundaryMode": "measured-dark-gutters",
+      "cellWidths": [
+        304,
+        303,
+        302,
+        303,
+        303
+      ],
+      "cellHeights": [
+        306,
+        307,
+        308
+      ]
+    },
+    {
+      "category": "body",
+      "file": "atlases/bodies.png",
+      "grid": [
+        5,
+        5
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        229,
+        229,
+        227,
+        228,
+        228
+      ],
+      "cellHeights": [
+        217,
+        216,
+        218,
+        217,
+        217
+      ]
+    },
+    {
+      "category": "mouth",
+      "file": "atlases/mouths.png",
+      "grid": [
+        6,
+        3
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        233,
+        233,
+        233,
+        233,
+        233,
+        233
+      ],
+      "cellHeights": [
+        282,
+        283,
+        284
+      ]
+    },
+    {
+      "category": "eyes",
+      "file": "atlases/eyes.png",
+      "grid": [
+        5,
+        5
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        229,
+        229,
+        227,
+        229,
+        228
+      ],
+      "cellHeights": [
+        227,
+        228,
+        228,
+        229,
+        228
+      ]
+    },
+    {
+      "category": "headgear",
+      "file": "atlases/headgear-a.png",
+      "grid": [
+        6,
+        2
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        335,
+        334,
+        335,
+        335,
+        334,
+        335
+      ],
+      "cellHeights": [
+        333,
+        333
+      ]
+    },
+    {
+      "category": "headgear",
+      "file": "atlases/headgear-b.png",
+      "grid": [
+        5,
+        2
+      ],
+      "xBoundaryMode": "gold-frame-interiors",
+      "yBoundaryMode": "gold-frame-interiors",
+      "cellWidths": [
+        365,
+        364,
+        364,
+        364,
+        365
+      ],
+      "cellHeights": [
+        360,
+        360
+      ]
+    },
+    {
+      "category": "light",
+      "file": "atlases/lights-a.png",
+      "grid": [
+        5,
+        3
+      ],
+      "xBoundaryMode": "measured-dark-gutters",
+      "yBoundaryMode": "measured-dark-gutters",
+      "cellWidths": [
+        307,
+        308,
+        308,
+        307,
+        306
+      ],
+      "cellHeights": [
+        305,
+        310,
+        311
+      ]
+    },
+    {
+      "category": "light",
+      "file": "atlases/lights-b.png",
+      "grid": [
+        5,
+        3
+      ],
+      "xBoundaryMode": "measured-dark-gutters",
+      "yBoundaryMode": "measured-dark-gutters",
+      "cellWidths": [
+        304,
+        304,
+        304,
+        304,
+        302
+      ],
+      "cellHeights": [
+        307,
+        307,
+        308
+      ]
+    }
+  ]
+}

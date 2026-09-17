@@ -1,0 +1,55 @@
+{
+  "schema": "zyn-component-review-overrides/v1",
+  "species": "Mole",
+  "method": "direct inspection of full-resolution spot-check portraits",
+  "items": {
+    "0001": {
+      "eyes": {
+        "id": "alert",
+        "note": "Two small uncovered alert eyes; the miner lamp is not an eye scanner."
+      }
+    },
+    "0041": {
+      "eyes": {
+        "id": "monocle",
+        "note": "One oversized circular purple lens visibly covers the far eye."
+      },
+      "mouth": {
+        "id": "neutral-dash",
+        "note": "The dark snout has no crystal breathing attachment."
+      },
+      "headgear": {
+        "id": "none",
+        "note": "The white head is bare; the circular lens belongs to the eye category."
+      }
+    },
+    "0901": {
+      "eyes": {
+        "id": "monocle",
+        "note": "A large single chained lens is visible over one eye."
+      },
+      "mouth": {
+        "id": "neutral-dash",
+        "note": "The classifier confused the monocle chain with a pipe."
+      },
+      "headgear": {
+        "id": "none",
+        "note": "The head is bare apart from the eye-mounted monocle."
+      }
+    },
+    "1937": {
+      "eyes": {
+        "id": "node-scan",
+        "note": "A cyan rectangular HUD scanner surrounds both eyes."
+      },
+      "mouth": {
+        "id": "neutral-dash",
+        "note": "No open mouth ring is visible on the snout."
+      },
+      "headgear": {
+        "id": "beanie",
+        "note": "A close black knitted cap is visible above the scanner."
+      }
+    }
+  }
+}

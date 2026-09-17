@@ -1,0 +1,24 @@
+{
+  "name": "Zyn Moths \u2014 Collection 01",
+  "species": "Moth",
+  "supply": 889,
+  "canvasCount": 11,
+  "authoredCellCapacity": 947,
+  "acceptedSourceCells": 938,
+  "reserveSourceCells": 49,
+  "rejectedSourceCells": 9,
+  "rendering": "atomic full-PFP canvas slices",
+  "metadataSchema": "zyn-atomic-components/v1",
+  "viewerRenderer": "zyn-light-v1",
+  "storeFilters": [
+    "Species",
+    "Visual Family",
+    "Interactive Light",
+    "Background",
+    "Body",
+    "Eyes",
+    "Mouth",
+    "Headgear"
+  ],
+  "detailedTraitTagging": "complete \u2014 visually categorized"
+}

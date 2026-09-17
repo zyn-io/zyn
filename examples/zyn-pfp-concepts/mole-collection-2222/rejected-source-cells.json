@@ -1,0 +1,2472 @@
+[
+  {
+    "canvas": 2,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 121,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 123,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 121,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 120,
+    "sourceHeight": 105,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 81,
+    "row": 9,
+    "column": 1,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 121,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 82,
+    "row": 9,
+    "column": 2,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 83,
+    "row": 9,
+    "column": 3,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 84,
+    "row": 9,
+    "column": 4,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 85,
+    "row": 9,
+    "column": 5,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 86,
+    "row": 9,
+    "column": 6,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 123,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 87,
+    "row": 9,
+    "column": 7,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 88,
+    "row": 9,
+    "column": 8,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 121,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 89,
+    "row": 9,
+    "column": 9,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 122,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 2,
+    "cell": 90,
+    "row": 9,
+    "column": 10,
+    "family": "Vault and Tunnel",
+    "sourceWidth": 120,
+    "sourceHeight": 103,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 3,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Moonlight and Starlight",
+    "sourceWidth": 122,
+    "sourceHeight": 115,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 3,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Moonlight and Starlight",
+    "sourceWidth": 123,
+    "sourceHeight": 115,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 3,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Moonlight and Starlight",
+    "sourceWidth": 122,
+    "sourceHeight": 115,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 3,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Moonlight and Starlight",
+    "sourceWidth": 122,
+    "sourceHeight": 115,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 4,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 121,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 123,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 121,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 122,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 120,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 123,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 121,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 121,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 121,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 4,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 120,
+    "sourceHeight": 119,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 5,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 125,
+    "sourceHeight": 118,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 125,
+    "sourceHeight": 118,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 82,
+    "row": 9,
+    "column": 2,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 125,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 83,
+    "row": 9,
+    "column": 3,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 84,
+    "row": 9,
+    "column": 4,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 86,
+    "row": 9,
+    "column": 6,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 87,
+    "row": 9,
+    "column": 7,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 125,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 88,
+    "row": 9,
+    "column": 8,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 5,
+    "cell": 89,
+    "row": 9,
+    "column": 9,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 7,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Prism and Laser",
+    "sourceWidth": 129,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Prism and Laser",
+    "sourceWidth": 130,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Prism and Laser",
+    "sourceWidth": 129,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Prism and Laser",
+    "sourceWidth": 130,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Prism and Laser",
+    "sourceWidth": 129,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Prism and Laser",
+    "sourceWidth": 132,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Prism and Laser",
+    "sourceWidth": 130,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Prism and Laser",
+    "sourceWidth": 130,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Prism and Laser",
+    "sourceWidth": 129,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 7,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Prism and Laser",
+    "sourceWidth": 126,
+    "sourceHeight": 108,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 11,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Shielded Stealth",
+    "sourceWidth": 131,
+    "sourceHeight": 124,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 12,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Node and Cipher",
+    "sourceWidth": 126,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Node and Cipher",
+    "sourceWidth": 129,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Node and Cipher",
+    "sourceWidth": 123,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Node and Cipher",
+    "sourceWidth": 129,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Node and Cipher",
+    "sourceWidth": 128,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Node and Cipher",
+    "sourceWidth": 116,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Node and Cipher",
+    "sourceWidth": 126,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Node and Cipher",
+    "sourceWidth": 129,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Node and Cipher",
+    "sourceWidth": 123,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Node and Cipher",
+    "sourceWidth": 127,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Node and Cipher",
+    "sourceWidth": 129,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Node and Cipher",
+    "sourceWidth": 128,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 12,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Node and Cipher",
+    "sourceWidth": 116,
+    "sourceHeight": 104,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 128,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 132,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 128,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 14,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 122,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 14,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 122,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 14,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 131,
+    "sourceHeight": 122,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 14,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Miners and Prospectors",
+    "sourceWidth": 132,
+    "sourceHeight": 122,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 9,
+    "row": 1,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 138,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 19,
+    "row": 2,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 134,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 29,
+    "row": 3,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 136,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 39,
+    "row": 4,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 137,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 49,
+    "row": 5,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 137,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 59,
+    "row": 6,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 132,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 17,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 126,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 125,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 121,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 123,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 123,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 127,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 128,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 126,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 138,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 126,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 125,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 121,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 123,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 123,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 127,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 128,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 126,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 153,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 17,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Burrow Cross-Sections",
+    "sourceWidth": 138,
+    "sourceHeight": 121,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Root Network",
+    "sourceWidth": 128,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Root Network",
+    "sourceWidth": 129,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Root Network",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 20,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Root Network",
+    "sourceWidth": 128,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 128,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 126,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 128,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 124,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 22,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Quantum Tunnel",
+    "sourceWidth": 125,
+    "sourceHeight": 116,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 23,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Gold Vein",
+    "sourceWidth": 127,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Gold Vein",
+    "sourceWidth": 130,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Gold Vein",
+    "sourceWidth": 130,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Gold Vein",
+    "sourceWidth": 129,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 23,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Gold Vein",
+    "sourceWidth": 127,
+    "sourceHeight": 120,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 24,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Genesis Core",
+    "sourceWidth": 122,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Genesis Core",
+    "sourceWidth": 128,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Genesis Core",
+    "sourceWidth": 127,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Genesis Core",
+    "sourceWidth": 128,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Genesis Core",
+    "sourceWidth": 127,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Genesis Core",
+    "sourceWidth": 127,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Genesis Core",
+    "sourceWidth": 127,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Genesis Core",
+    "sourceWidth": 128,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Genesis Core",
+    "sourceWidth": 128,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 24,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Genesis Core",
+    "sourceWidth": 121,
+    "sourceHeight": 94,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 127,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 130,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 114,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 25,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 130,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 131,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 25,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Material Reserve",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Material Reserve",
+    "sourceWidth": 127,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Material Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Material Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Material Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Material Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Material Reserve",
+    "sourceWidth": 127,
+    "sourceHeight": 117,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 26,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Material Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 123,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 27,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 127,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 129,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 27,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Face Variation Reserve",
+    "sourceWidth": 127,
+    "sourceHeight": 109,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Headgear Reserve",
+    "sourceWidth": 138,
+    "sourceHeight": 129,
+    "reason": "source cell height is below 95% of its width; vertical padding could repeat a horizontal edge line"
+  },
+  {
+    "canvas": 28,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Headgear Reserve",
+    "sourceWidth": 125,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Headgear Reserve",
+    "sourceWidth": 126,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Headgear Reserve",
+    "sourceWidth": 127,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Headgear Reserve",
+    "sourceWidth": 125,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Headgear Reserve",
+    "sourceWidth": 138,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Headgear Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Headgear Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Headgear Reserve",
+    "sourceWidth": 130,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Headgear Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 28,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Headgear Reserve",
+    "sourceWidth": 123,
+    "sourceHeight": 112,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 128,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 130,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 129,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 127,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 124,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 130,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 129,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 126,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 129,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 31,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 117,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 130,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 135,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 132,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 129,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 129,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 138,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 136,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 137,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 135,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 32,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 134,
+    "sourceHeight": 111,
+    "reason": "cell row is below 90% of the canvas median height"
+  }
+]

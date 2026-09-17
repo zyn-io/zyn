@@ -1,0 +1,3385 @@
+[
+  {
+    "canvas": 15,
+    "cell": 82,
+    "row": 9,
+    "column": 2,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      132,
+      249
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 83,
+    "row": 9,
+    "column": 3,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      257,
+      374
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 84,
+    "row": 9,
+    "column": 4,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      381,
+      498
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 85,
+    "row": 9,
+    "column": 5,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      506,
+      623
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 86,
+    "row": 9,
+    "column": 6,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 121,
+    "xRange": [
+      631,
+      749
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 87,
+    "row": 9,
+    "column": 7,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 121,
+    "xRange": [
+      757,
+      875
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 88,
+    "row": 9,
+    "column": 8,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 121,
+    "xRange": [
+      881,
+      999
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 89,
+    "row": 9,
+    "column": 9,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 15,
+    "cell": 90,
+    "row": 9,
+    "column": 10,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      1131,
+      1248
+    ],
+    "yRange": [
+      1030,
+      1151
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 1,
+    "row": 1,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 120,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 2,
+    "row": 1,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 3,
+    "row": 1,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 4,
+    "row": 1,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 120,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 5,
+    "row": 1,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 6,
+    "row": 1,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 120,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 7,
+    "row": 1,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 8,
+    "row": 1,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 9,
+    "row": 1,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 10,
+    "row": 1,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      6,
+      126
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 11,
+    "row": 2,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 121,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 12,
+    "row": 2,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 13,
+    "row": 2,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 121,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 14,
+    "row": 2,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 121,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 15,
+    "row": 2,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 16,
+    "row": 2,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 121,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 17,
+    "row": 2,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 121,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 18,
+    "row": 2,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 121,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 19,
+    "row": 2,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 121,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 20,
+    "row": 2,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 121,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      133,
+      254
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 21,
+    "row": 3,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 118,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 22,
+    "row": 3,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 118,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 23,
+    "row": 3,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 118,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 24,
+    "row": 3,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 118,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 25,
+    "row": 3,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 118,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 26,
+    "row": 3,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 118,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 27,
+    "row": 3,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 118,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 28,
+    "row": 3,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 118,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 29,
+    "row": 3,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 118,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 30,
+    "row": 3,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 118,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      267,
+      385
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 31,
+    "row": 4,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 123,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 32,
+    "row": 4,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 33,
+    "row": 4,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 34,
+    "row": 4,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 123,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 35,
+    "row": 4,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 36,
+    "row": 4,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 123,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 37,
+    "row": 4,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 38,
+    "row": 4,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 39,
+    "row": 4,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 40,
+    "row": 4,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      392,
+      515
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 41,
+    "row": 5,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 123,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 42,
+    "row": 5,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 43,
+    "row": 5,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 44,
+    "row": 5,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 123,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 45,
+    "row": 5,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 46,
+    "row": 5,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 123,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 47,
+    "row": 5,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 48,
+    "row": 5,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 49,
+    "row": 5,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 50,
+    "row": 5,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      522,
+      645
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 51,
+    "row": 6,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 123,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 52,
+    "row": 6,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 53,
+    "row": 6,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 54,
+    "row": 6,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 123,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 55,
+    "row": 6,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 56,
+    "row": 6,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 123,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 57,
+    "row": 6,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 123,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 58,
+    "row": 6,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 59,
+    "row": 6,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 60,
+    "row": 6,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 123,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      653,
+      776
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 117,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 117,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 117,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 117,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 117,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 117,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 117,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 117,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 117,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 117,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      788,
+      905
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 115,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 115,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 115,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 115,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 115,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 115,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 115,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 115,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 115,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 115,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      912,
+      1027
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 81,
+    "row": 9,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 94,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 82,
+    "row": 9,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 94,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 83,
+    "row": 9,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 94,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 84,
+    "row": 9,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 94,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 85,
+    "row": 9,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 94,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 86,
+    "row": 9,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 94,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 87,
+    "row": 9,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 94,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 88,
+    "row": 9,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 94,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 89,
+    "row": 9,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 94,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 90,
+    "row": 9,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 94,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      1034,
+      1128
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Rare Signals",
+    "sourceWidth": 115,
+    "sourceHeight": 114,
+    "xRange": [
+      6,
+      121
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 114,
+    "xRange": [
+      130,
+      247
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 114,
+    "xRange": [
+      255,
+      371
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Rare Signals",
+    "sourceWidth": 110,
+    "sourceHeight": 114,
+    "xRange": [
+      381,
+      491
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 114,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Rare Signals",
+    "sourceWidth": 114,
+    "sourceHeight": 114,
+    "xRange": [
+      633,
+      747
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Rare Signals",
+    "sourceWidth": 117,
+    "sourceHeight": 114,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 114,
+    "xRange": [
+      883,
+      999
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 114,
+    "xRange": [
+      1008,
+      1124
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 16,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Rare Signals",
+    "sourceWidth": 116,
+    "sourceHeight": 114,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      1135,
+      1249
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 1,
+    "row": 1,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 125,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 2,
+    "row": 1,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 3,
+    "row": 1,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 4,
+    "row": 1,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 5,
+    "row": 1,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 6,
+    "row": 1,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 125,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 7,
+    "row": 1,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 8,
+    "row": 1,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 125,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 9,
+    "row": 1,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 10,
+    "row": 1,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      5,
+      130
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 11,
+    "row": 2,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 128,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 12,
+    "row": 2,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 13,
+    "row": 2,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 14,
+    "row": 2,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 15,
+    "row": 2,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 16,
+    "row": 2,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 128,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 17,
+    "row": 2,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 18,
+    "row": 2,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 128,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 19,
+    "row": 2,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 20,
+    "row": 2,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      135,
+      263
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 21,
+    "row": 3,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 128,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 22,
+    "row": 3,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 23,
+    "row": 3,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 24,
+    "row": 3,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 25,
+    "row": 3,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 26,
+    "row": 3,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 128,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 27,
+    "row": 3,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 28,
+    "row": 3,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 128,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 29,
+    "row": 3,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 128,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 30,
+    "row": 3,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 128,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      271,
+      399
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 31,
+    "row": 4,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 131,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 32,
+    "row": 4,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 131,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 33,
+    "row": 4,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 131,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 34,
+    "row": 4,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 131,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 35,
+    "row": 4,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 131,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 36,
+    "row": 4,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 131,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 37,
+    "row": 4,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 131,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 38,
+    "row": 4,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 131,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 39,
+    "row": 4,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 131,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 40,
+    "row": 4,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 131,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      406,
+      537
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 41,
+    "row": 5,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 130,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 42,
+    "row": 5,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 43,
+    "row": 5,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 44,
+    "row": 5,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 45,
+    "row": 5,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 46,
+    "row": 5,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 130,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 47,
+    "row": 5,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 48,
+    "row": 5,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 130,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 49,
+    "row": 5,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 50,
+    "row": 5,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      543,
+      673
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 51,
+    "row": 6,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 130,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 52,
+    "row": 6,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 53,
+    "row": 6,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 54,
+    "row": 6,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 55,
+    "row": 6,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 56,
+    "row": 6,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 130,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 57,
+    "row": 6,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 58,
+    "row": 6,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 130,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 59,
+    "row": 6,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 130,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 60,
+    "row": 6,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 130,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      680,
+      810
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 61,
+    "row": 7,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 125,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 62,
+    "row": 7,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 63,
+    "row": 7,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 64,
+    "row": 7,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 65,
+    "row": 7,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 66,
+    "row": 7,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 125,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 67,
+    "row": 7,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 68,
+    "row": 7,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 125,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 69,
+    "row": 7,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 125,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 70,
+    "row": 7,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 125,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      817,
+      942
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 71,
+    "row": 8,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 120,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 72,
+    "row": 8,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 73,
+    "row": 8,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 74,
+    "row": 8,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 75,
+    "row": 8,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 76,
+    "row": 8,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 120,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 77,
+    "row": 8,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 78,
+    "row": 8,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 120,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 79,
+    "row": 8,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 120,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 80,
+    "row": 8,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 120,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      948,
+      1068
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 81,
+    "row": 9,
+    "column": 1,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 136,
+    "xRange": [
+      6,
+      124
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 82,
+    "row": 9,
+    "column": 2,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 136,
+    "xRange": [
+      132,
+      248
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 83,
+    "row": 9,
+    "column": 3,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 136,
+    "xRange": [
+      256,
+      372
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 84,
+    "row": 9,
+    "column": 4,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 136,
+    "xRange": [
+      380,
+      497
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 85,
+    "row": 9,
+    "column": 5,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 136,
+    "xRange": [
+      505,
+      622
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 86,
+    "row": 9,
+    "column": 6,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 119,
+    "sourceHeight": 136,
+    "xRange": [
+      630,
+      749
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 87,
+    "row": 9,
+    "column": 7,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 136,
+    "xRange": [
+      757,
+      874
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 88,
+    "row": 9,
+    "column": 8,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 118,
+    "sourceHeight": 136,
+    "xRange": [
+      882,
+      1000
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 89,
+    "row": 9,
+    "column": 9,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 117,
+    "sourceHeight": 136,
+    "xRange": [
+      1007,
+      1124
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  },
+  {
+    "canvas": 17,
+    "cell": 90,
+    "row": 9,
+    "column": 10,
+    "family": "Full-Spectrum Reserve",
+    "sourceWidth": 116,
+    "sourceHeight": 136,
+    "xRange": [
+      1132,
+      1248
+    ],
+    "yRange": [
+      1075,
+      1211
+    ]
+  }
+]

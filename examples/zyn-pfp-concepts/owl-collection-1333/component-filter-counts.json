@@ -1,0 +1,119 @@
+{
+  "status": "pass",
+  "supply": 1333,
+  "categories": {
+    "background": {
+      "counts": {
+        "aurora-garden": 34,
+        "cyan-cavern": 119,
+        "deep-black": 249,
+        "eclipse-gate": 2,
+        "genesis-chamber": 36,
+        "gold-vault": 179,
+        "lunar-ruins": 55,
+        "midnight-observatory": 107,
+        "moon-blocks": 2,
+        "nebula-tunnel": 28,
+        "node-chamber": 247,
+        "prism-archive": 78,
+        "shielded-forest": 4,
+        "shielded-pool": 23,
+        "solar-archive": 129,
+        "star-map-vault": 3,
+        "tunnel-grid": 5,
+        "zero-field": 33
+      },
+      "confidence": {
+        "high": 467,
+        "low": 334,
+        "medium": 532
+      }
+    },
+    "body": {
+      "counts": {
+        "ash-courier": 147,
+        "bronze-cartographer": 39,
+        "brown-scholar": 65,
+        "charcoal-sentinel": 405,
+        "cyan-circuit": 60,
+        "dusk-plum": 36,
+        "eclipse-feather": 3,
+        "genesis-keeper": 37,
+        "gold-flecked": 6,
+        "moon-robe": 30,
+        "obsidian-armor": 209,
+        "shielded-white": 15,
+        "silver-oracle": 18,
+        "snow-watcher": 228,
+        "teal-navigator": 35
+      },
+      "confidence": {
+        "high": 467,
+        "low": 334,
+        "medium": 532
+      }
+    },
+    "eyes": {
+      "counts": {
+        "aurora": 45,
+        "constellation": 1,
+        "dark-visor": 241,
+        "eclipse": 72,
+        "gold": 363,
+        "luminous-white": 2,
+        "monocle": 192,
+        "moonlit": 26,
+        "prism": 45,
+        "round-cyan": 47,
+        "sleepy": 251,
+        "star-map": 1,
+        "void": 47
+      },
+      "confidence": {
+        "high": 467,
+        "low": 334,
+        "medium": 532
+      }
+    },
+    "mouth": {
+      "counts": {
+        "calm-diamond-beak": 776,
+        "cipher-beak": 21,
+        "crescent-moon-beak": 5,
+        "crystal-beak": 7,
+        "gold-beak": 135,
+        "respirator": 31,
+        "sharp-hooked-beak": 14,
+        "short-beak": 337,
+        "split-rune-beak": 7
+      },
+      "confidence": {
+        "high": 467,
+        "low": 334,
+        "medium": 532
+      }
+    },
+    "headgear": {
+      "counts": {
+        "archivist-circlet": 285,
+        "beanie": 15,
+        "black-hood": 27,
+        "cipher-cowl": 38,
+        "genesis-helm": 84,
+        "miner-helmet": 31,
+        "moon-halo": 227,
+        "night-watch-crest": 22,
+        "node-headset": 274,
+        "none": 251,
+        "solar-visor-helmet": 31,
+        "vault-crown": 45,
+        "zyn-cap": 3
+      },
+      "confidence": {
+        "high": 467,
+        "low": 334,
+        "medium": 532
+      }
+    }
+  }
+}

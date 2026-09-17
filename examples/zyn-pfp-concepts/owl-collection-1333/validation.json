@@ -1,0 +1,562 @@
+{
+  "status": "pass",
+  "expectedSupply": 1333,
+  "imageCount": 1333,
+  "metadataCount": 1333,
+  "uniqueImageHashes": 1333,
+  "dimensions": [
+    [
+      192,
+      192
+    ]
+  ],
+  "canvasCount": 17,
+  "authoredCellCapacity": 1592,
+  "acceptedSourceCells": 1532,
+  "releasedSourceCells": 1333,
+  "reserveSourceCells": 199,
+  "rejectedSourceCells": 60,
+  "sourceGrids": {
+    "canvas-01": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        116,
+        117,
+        116,
+        108,
+        114,
+        116,
+        108,
+        116,
+        116,
+        114
+      ],
+      "cellHeights": [
+        120,
+        114,
+        123,
+        116,
+        127,
+        123,
+        117,
+        121,
+        114,
+        85
+      ],
+      "medianCellWidth": 116.0,
+      "medianCellHeight": 118.5
+    },
+    "canvas-02": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        121,
+        119,
+        116,
+        114,
+        115,
+        116,
+        117,
+        114,
+        117,
+        119
+      ],
+      "cellHeights": [
+        122,
+        130,
+        129,
+        134,
+        133,
+        126,
+        124,
+        127,
+        132
+      ],
+      "medianCellWidth": 116.5,
+      "medianCellHeight": 129.0
+    },
+    "canvas-03": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        118,
+        117,
+        118,
+        117,
+        118,
+        117,
+        118,
+        117,
+        116,
+        117
+      ],
+      "cellHeights": [
+        122,
+        120,
+        121,
+        121,
+        120,
+        121,
+        120,
+        120,
+        113,
+        111
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 120.0
+    },
+    "canvas-04": {
+      "columns": 9,
+      "rows": 9,
+      "cellCapacity": 81,
+      "cellWidths": [
+        130,
+        130,
+        130,
+        130,
+        130,
+        130,
+        130,
+        130,
+        130
+      ],
+      "cellHeights": [
+        134,
+        135,
+        135,
+        135,
+        137,
+        136,
+        137,
+        134,
+        118
+      ],
+      "medianCellWidth": 130.0,
+      "medianCellHeight": 135.0
+    },
+    "canvas-05": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        121,
+        121,
+        121,
+        121,
+        121,
+        122,
+        121,
+        120,
+        121,
+        119
+      ],
+      "cellHeights": [
+        123,
+        128,
+        129,
+        130,
+        129,
+        131,
+        125,
+        126,
+        126
+      ],
+      "medianCellWidth": 121.0,
+      "medianCellHeight": 128.0
+    },
+    "canvas-06": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        117,
+        117,
+        117,
+        116,
+        116,
+        118,
+        116,
+        117,
+        116,
+        117
+      ],
+      "cellHeights": [
+        122,
+        120,
+        120,
+        119,
+        120,
+        119,
+        119,
+        119,
+        113,
+        117
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 119.0
+    },
+    "canvas-07": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        127,
+        117,
+        121,
+        118,
+        107,
+        110,
+        112,
+        115,
+        122,
+        124
+      ],
+      "cellHeights": [
+        137,
+        131,
+        134,
+        135,
+        135,
+        139,
+        135,
+        131,
+        122
+      ],
+      "medianCellWidth": 117.5,
+      "medianCellHeight": 135.0
+    },
+    "canvas-08": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        118,
+        118,
+        117,
+        117,
+        118,
+        117,
+        117,
+        117,
+        117,
+        115
+      ],
+      "cellHeights": [
+        122,
+        125,
+        128,
+        128,
+        130,
+        127,
+        125,
+        126,
+        136
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 127.0
+    },
+    "canvas-09": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        116,
+        112,
+        115,
+        115,
+        128,
+        123,
+        118,
+        116,
+        118,
+        118
+      ],
+      "cellHeights": [
+        121,
+        121,
+        122,
+        124,
+        124,
+        126,
+        121,
+        117,
+        109,
+        107
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 121.0
+    },
+    "canvas-10": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        120,
+        118,
+        119,
+        118,
+        117,
+        119,
+        119,
+        119,
+        118,
+        119
+      ],
+      "cellHeights": [
+        120,
+        122,
+        125,
+        125,
+        128,
+        128,
+        125,
+        118,
+        110,
+        92
+      ],
+      "medianCellWidth": 119.0,
+      "medianCellHeight": 123.5
+    },
+    "canvas-11": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        107,
+        112,
+        111,
+        111,
+        106,
+        116,
+        111,
+        108,
+        115,
+        109
+      ],
+      "cellHeights": [
+        115,
+        118,
+        117,
+        116,
+        121,
+        122,
+        122,
+        118,
+        123
+      ],
+      "medianCellWidth": 111.0,
+      "medianCellHeight": 118.0
+    },
+    "canvas-12": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        115,
+        116,
+        113,
+        115,
+        115,
+        116,
+        115,
+        116,
+        116,
+        115
+      ],
+      "cellHeights": [
+        127,
+        126,
+        124,
+        126,
+        126,
+        123,
+        126,
+        123,
+        129
+      ],
+      "medianCellWidth": 115.0,
+      "medianCellHeight": 126.0
+    },
+    "canvas-13": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        120,
+        118,
+        116,
+        115,
+        120,
+        117,
+        115,
+        116,
+        119,
+        116
+      ],
+      "cellHeights": [
+        120,
+        125,
+        124,
+        128,
+        125,
+        123,
+        118,
+        121,
+        105,
+        93
+      ],
+      "medianCellWidth": 116.5,
+      "medianCellHeight": 122.0
+    },
+    "canvas-14": {
+      "columns": 9,
+      "rows": 9,
+      "cellCapacity": 81,
+      "cellWidths": [
+        136,
+        129,
+        132,
+        132,
+        126,
+        135,
+        129,
+        132,
+        127
+      ],
+      "cellHeights": [
+        131,
+        132,
+        134,
+        132,
+        135,
+        134,
+        136,
+        131,
+        124
+      ],
+      "medianCellWidth": 132.0,
+      "medianCellHeight": 132.0
+    },
+    "canvas-15": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        120,
+        117,
+        117,
+        117,
+        117,
+        118,
+        118,
+        118,
+        117,
+        117
+      ],
+      "cellHeights": [
+        120,
+        120,
+        123,
+        123,
+        122,
+        123,
+        123,
+        122,
+        121,
+        97
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 122.0
+    },
+    "canvas-16": {
+      "columns": 10,
+      "rows": 10,
+      "cellCapacity": 100,
+      "cellWidths": [
+        115,
+        117,
+        116,
+        110,
+        117,
+        114,
+        117,
+        116,
+        116,
+        116
+      ],
+      "cellHeights": [
+        120,
+        121,
+        118,
+        123,
+        123,
+        123,
+        117,
+        115,
+        94,
+        114
+      ],
+      "medianCellWidth": 116.0,
+      "medianCellHeight": 119.0
+    },
+    "canvas-17": {
+      "columns": 10,
+      "rows": 9,
+      "cellCapacity": 90,
+      "cellWidths": [
+        118,
+        116,
+        116,
+        117,
+        117,
+        119,
+        117,
+        118,
+        117,
+        116
+      ],
+      "cellHeights": [
+        125,
+        128,
+        128,
+        131,
+        130,
+        130,
+        125,
+        120,
+        136
+      ],
+      "medianCellWidth": 117.0,
+      "medianCellHeight": 128.0
+    }
+  },
+  "compressedFinalRowsRejected": {
+    "canvas-01": 10,
+    "canvas-04": 9,
+    "canvas-09": 10,
+    "canvas-10": 10,
+    "canvas-13": 10,
+    "canvas-15": 10
+  },
+  "releasedCellsFromCompressedFinalRows": 0,
+  "visuallyInvalidCellsRejected": [
+    {
+      "canvas": 4,
+      "row": 8,
+      "column": 1,
+      "reason": "empty background; required Owl subject is absent"
+    }
+  ],
+  "releasedCellsFromVisuallyInvalidCells": 0,
+  "gridPolicy": "record rendered grid; never assume requested row or column count",
+  "gutterPolicy": "measure full-dark gutters and exclude blank edge margins",
+  "slicePolicy": "exact measured gutter-bounded cell; no internal crop",
+  "squarePolicy": "edge-pad complete cell to square; no subject crop or non-uniform scale",
+  "internalCropping": false,
+  "horizontalOrVerticalStretching": false,
+  "rarityWeights": null
+}

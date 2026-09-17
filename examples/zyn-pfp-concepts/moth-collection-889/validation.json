@@ -1,0 +1,89 @@
+{
+  "status": "pass",
+  "expectedSupply": 889,
+  "imageCount": 889,
+  "metadataCount": 889,
+  "uniqueImageHashes": 889,
+  "dimensions": [
+    [
+      192,
+      192
+    ]
+  ],
+  "canvasCount": 11,
+  "authoredCellCapacity": 947,
+  "acceptedSourceCells": 938,
+  "reserveSourceCells": 49,
+  "rejectedSourceCells": 9,
+  "sourceGrids": {
+    "canvas-01": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-02": {
+      "columns": 10,
+      "rows": 10
+    },
+    "canvas-03": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-04": {
+      "columns": 10,
+      "rows": 9
+    },
+    "canvas-05": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-06": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-07": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-08": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-09": {
+      "columns": 9,
+      "rows": 9
+    },
+    "canvas-10": {
+      "columns": 10,
+      "rows": 10
+    },
+    "canvas-11": {
+      "columns": 10,
+      "rows": 9
+    }
+  },
+  "cropMethod": "detected dark-gutter boundaries with five-pixel inset",
+  "compressedFinalRows": "aspect ratio preserved by extending only the bottom edge to the median normal-row height",
+  "normalizedFinalRowItemRanges": [
+    "0073-0081",
+    "0172-0181",
+    "0254-0262",
+    "0343-0352",
+    "0425-0433",
+    "0506-0514",
+    "0587-0595",
+    "0668-0676",
+    "0749-0757",
+    "0848-0857"
+  ],
+  "replacedMalformedColumnItems": [
+    "0272",
+    "0282",
+    "0292",
+    "0302",
+    "0312",
+    "0322",
+    "0332",
+    "0342",
+    "0352"
+  ]
+}

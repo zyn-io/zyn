@@ -1,0 +1,18 @@
+{
+  "name": "zyn-settlement-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4177",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4177",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}

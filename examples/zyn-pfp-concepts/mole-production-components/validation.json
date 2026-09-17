@@ -1,0 +1,24 @@
+{
+  "status": "pass",
+  "expectedMasters": 150,
+  "exportedMasters": 150,
+  "uniqueHashes": 150,
+  "dimensions": [
+    [
+      192,
+      192
+    ]
+  ],
+  "categoryCounts": {
+    "background": 30,
+    "body": 25,
+    "mouth": 18,
+    "eyes": 25,
+    "headgear": 22,
+    "light": 30
+  },
+  "slicePolicy": "measured frame interiors or full dark-gutter-bounded cells; no subject crop",
+  "squarePolicy": "edge-pad complete cell to square; uniform nearest-neighbor resize",
+  "horizontalOrVerticalStretching": false,
+  "internalSubjectCropping": false
+}

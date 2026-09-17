@@ -1,0 +1,150 @@
+{
+  "version": "zyn-atomic-components/v1",
+  "species": "Moth",
+  "provenance": "Atomic portraits; component IDs describe visually reviewed categories, not composited source layers.",
+  "filterableNow": [
+    "Species",
+    "Visual Family",
+    "Interactive Light",
+    "Background",
+    "Body",
+    "Eyes",
+    "Mouth",
+    "Headgear"
+  ],
+  "filterableAfterVisualReview": [],
+  "componentOptions": {
+    "background": [
+      "deep-black",
+      "tunnel-grid",
+      "shielded-pool",
+      "node-chamber",
+      "gold-vault",
+      "cyan-cavern",
+      "moon-blocks",
+      "aurora-garden",
+      "eclipse-gate",
+      "prism-archive",
+      "genesis-chamber",
+      "zero-field"
+    ],
+    "body": [
+      "charcoal-velvet",
+      "ashwing",
+      "brown-dustwing",
+      "silver-silk",
+      "moonwhite",
+      "cyan-circuit",
+      "aurora-wing",
+      "gold-pattern",
+      "obsidian-mantle",
+      "genesis-wing"
+    ],
+    "eyes": [
+      "round",
+      "faceted",
+      "sleepy",
+      "cyan",
+      "mint",
+      "violet",
+      "aurora",
+      "prism",
+      "void",
+      "luminous"
+    ],
+    "mouth": [
+      "small-mouthparts",
+      "curled-proboscis",
+      "long-proboscis",
+      "hidden-mouth",
+      "glowing-mouth",
+      "respirator",
+      "crystal-feeder"
+    ],
+    "headgear": [
+      "none",
+      "black-hood",
+      "miner-helmet",
+      "beanie",
+      "zyn-cap",
+      "node-headset",
+      "vault-crown",
+      "moon-halo",
+      "genesis-helm"
+    ],
+    "light": [
+      "neutral",
+      "sunlight",
+      "moonlight",
+      "starlight",
+      "bioluminescence",
+      "aurora",
+      "afterglow",
+      "caustics",
+      "prism",
+      "laser",
+      "veiled-light",
+      "eclipse"
+    ]
+  },
+  "viewer": {
+    "renderer": "zyn-light-v1",
+    "effects": [
+      {
+        "id": "laser",
+        "label": "Laser",
+        "rendererIndex": 0
+      },
+      {
+        "id": "sunlight",
+        "label": "Sunlight",
+        "rendererIndex": 1
+      },
+      {
+        "id": "moonlight",
+        "label": "Moonlight",
+        "rendererIndex": 2
+      },
+      {
+        "id": "eclipse",
+        "label": "Eclipse",
+        "rendererIndex": 3
+      },
+      {
+        "id": "starlight",
+        "label": "Starlight",
+        "rendererIndex": 4
+      },
+      {
+        "id": "veiled-light",
+        "label": "Veiled Light",
+        "rendererIndex": 5
+      },
+      {
+        "id": "prism",
+        "label": "Prism",
+        "rendererIndex": 6
+      },
+      {
+        "id": "aurora",
+        "label": "Aurora",
+        "rendererIndex": 7
+      },
+      {
+        "id": "bioluminescence",
+        "label": "Bioluminescence",
+        "rendererIndex": 8
+      },
+      {
+        "id": "afterglow",
+        "label": "Afterglow",
+        "rendererIndex": 9
+      },
+      {
+        "id": "caustics",
+        "label": "Caustics",
+        "rendererIndex": 10
+      }
+    ]
+  }
+}

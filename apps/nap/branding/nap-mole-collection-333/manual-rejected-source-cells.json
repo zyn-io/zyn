@@ -1,0 +1,26 @@
+[
+  {
+    "canvas": 6,
+    "row": 4,
+    "column": 1,
+    "reason": "open circular eye"
+  },
+  {
+    "canvas": 6,
+    "row": 4,
+    "column": 3,
+    "reason": "open cyan eye"
+  },
+  {
+    "canvas": 9,
+    "row": 2,
+    "column": 1,
+    "reason": "eye-mask decoration reads as an open eye"
+  },
+  {
+    "canvas": 5,
+    "row": 4,
+    "column": 3,
+    "reason": "malformed double mouth mark"
+  }
+]
