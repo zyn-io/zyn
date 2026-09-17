@@ -6,8 +6,17 @@ is that it can survive diligence; asserting it early is the one way to lose it.
 
 ## The sentence
 
-**Confidential settlement with provable reserves and an exit no counterparty
-can block.**
+**We hold your ZEC, and here is exactly what stops us abusing it.**
+
+That is a custodian's pitch with unusually good receipts, and under §84's
+positioning — a programmable application layer, not yet a rollup — it is the
+honest one. The earlier framing ("confidential settlement with provable
+reserves and an exit no counterparty can block") is the same set of facts in
+rollup language, and rollup language invites rollup diligence: permissionless
+verification, decentralised sequencing, fraud proofs. Zyn does not have those
+and is not currently trying to. What it has is better receipts than any
+custodian can produce, and those are worth stating in the language of custody
+rather than of L2s.
 
 An institution cannot use a transparent chain: positions, counterparties and
 flows are trade secrets, and frequently protected by law rather than
@@ -15,6 +24,10 @@ preference. It cannot use an opaque one either, because auditors, regulators
 and its own risk desk need proof. Almost nothing is allowed to be both. Zyn is
 shaped to be — Zcash's shielded pool underneath, an execution layer above it,
 and disclosure as an explicit act rather than a default.
+
+The risk in this framing is being heard as "a custodian with extra steps". The
+answer is not rhetoric: it is `backing.rs` and `exitproof.rs`, which are
+genuinely things a custodian cannot copy. Lead with them.
 
 This is not a pivot. It is the same system with the operational bar raised and
 three primitives added. Consumer surfaces (Cave, Nap Wallet) stay: they are the
