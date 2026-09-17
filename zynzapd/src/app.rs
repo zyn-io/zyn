@@ -1702,6 +1702,15 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 "expires_at_epoch": o.expires_at_epoch,
             })).collect::<Vec<_>>() }))
         }
+        // Which key signs an item operation.
+        //
+        // Once items are received into a per-collection account (§97.5), the
+        // identity does not hold them and cannot escrow them — so signing with
+        // it would simply fail. Naming the collection makes the offer come from
+        // the account that actually holds the item, and the unlinkability is a
+        // consequence rather than a feature bolted on: a listing discloses that
+        // *this collection account* holds the item, which is what a public
+        // order book must disclose, and not who that is.
         ("POST", "/api/offer") => {
             zyn_only(app)?;
             let offer_asset = id_of(input, "asset")?;
@@ -1717,8 +1726,9 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             // honest default for a listing: a silent lapse would look like a
             // theft to whoever was about to take it.
             let expires = input.get("expires_at_epoch").and_then(Value::as_u64).unwrap_or(u64::MAX);
+            let signer = item_signer(app, input)?;
             let acc = app.node
-                .place_offer(&app.key(), offer_asset, offer_amount, swapvm::types::XZEC, want_amount, expires)
+                .place_offer(&signer, offer_asset, offer_amount, swapvm::types::XZEC, want_amount, expires)
                 .map_err(|e| e.to_string())?;
             app.note(format!("offered asset {} at {} ZEC.zy (seq {})", hex(&offer_asset), want_amount, acc.seq));
             Ok(json!({ "placed": true, "seq": acc.seq, "epoch": acc.epoch }))
@@ -1726,14 +1736,24 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         ("POST", "/api/take") => {
             zyn_only(app)?;
             let offer = input.get("offer").and_then(Value::as_u64).ok_or("which offer?")?;
-            let acc = app.node.take_offer(&app.key(), offer).map_err(|e| e.to_string())?;
+            // Taking pays and receives, so the taker is whoever will hold the
+            // item — name the collection to receive it into that account
+            // directly rather than into the identity and then moving it, which
+            // would write the link into the journal anyway.
+            let acc = app.node
+                .take_offer(&item_signer(app, input)?, offer)
+                .map_err(|e| e.to_string())?;
             app.note(format!("took offer {} (seq {})", offer, acc.seq));
             Ok(json!({ "taken": true, "seq": acc.seq, "epoch": acc.epoch }))
         }
         ("POST", "/api/cancel-offer") => {
             zyn_only(app)?;
             let offer = input.get("offer").and_then(Value::as_u64).ok_or("which offer?")?;
-            let acc = app.node.cancel_offer(&app.key(), offer).map_err(|e| e.to_string())?;
+            // Only the maker may cancel, so this must be the same key that
+            // placed it.
+            let acc = app.node
+                .cancel_offer(&item_signer(app, input)?, offer)
+                .map_err(|e| e.to_string())?;
             app.note(format!("cancelled offer {} (seq {})", offer, acc.seq));
             Ok(json!({ "cancelled": true, "seq": acc.seq, "epoch": acc.epoch }))
         }
@@ -2175,6 +2195,26 @@ fn qr_svg(text: &str) -> String {
             .quiet_zone(false)
             .build(),
         Err(_) => String::new(),
+    }
+}
+
+/// The key that signs an item operation: the collection's receiving account
+/// when one is named, otherwise the wallet's identity.
+///
+/// Optional rather than required, because a collection held on the identity —
+/// everything minted before §97.5 — must keep working. Naming a collection the
+/// wallet cannot derive an account for is an error rather than a silent
+/// fallback to the identity: falling back would place the offer from an
+/// account that does not hold the item, and the refusal would come from the VM
+/// with none of this context attached.
+fn item_signer(app: &App, input: &Value) -> Result<ed25519_dalek::SigningKey, String> {
+    match input.get("collection") {
+        None | Some(Value::Null) => Ok(app.key()),
+        Some(_) => {
+            let collection = id_of(input, "collection")?;
+            let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+            w.receiving_key_for_collection(&collection)
+        }
     }
 }
 

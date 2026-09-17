@@ -581,7 +581,11 @@ mod tests {
 
         abandon(&mut r, &mut b, "invite");
         assert_eq!(r.lookup("invite").unwrap().remaining(), 2, "given back");
-        assert_eq!(r.lookup("invite").unwrap().bound_to, Some(A), "still theirs");
+        assert_eq!(
+            r.lookup("invite").unwrap().bound_to,
+            Some(crate::whitelist::bind(&r.salt, &A)),
+            "still theirs — the registry keeps a commitment, never the account"
+        );
         assert_eq!(
             quote(&mut r, &mut b, "invite", B, 1, price()),
             Err(Refused::BoundElsewhere)

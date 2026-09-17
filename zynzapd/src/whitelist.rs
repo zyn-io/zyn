@@ -35,10 +35,31 @@ pub struct Entry {
     pub code_hash: CodeHash,
     /// The most this invitation may ever mint.
     pub allocation: u32,
-    /// The account it belongs to, once someone has used it.
-    pub bound_to: Option<AccountId>,
+    /// A commitment to the account it belongs to, once someone has used it —
+    /// `H("zyn.whitelist.bound.v1" || salt || account)`, never the account.
+    ///
+    /// The registry only ever needs to answer "is this the same account as
+    /// last time", and a commitment answers that exactly as well as the
+    /// account does. Storing the account instead would make this file an owner
+    /// map: invitation to account, sitting beside a KV store that already maps
+    /// handle to invitation.
+    ///
+    /// It is honest about what it does not stop. An operator holding *both*
+    /// this file and the journal can still test every account the journal
+    /// names against every entry and rebuild the map. What it stops is this
+    /// file alone being the map — and this file is the one that gets copied,
+    /// backed up and passed around (§98.2).
+    pub bound_to: Option<Bound>,
     /// How much of the allocation has been taken.
     pub minted: u32,
+}
+
+/// A commitment to the account an invitation is bound to.
+pub type Bound = [u8; 32];
+
+/// Commit to an account under this registry's salt.
+pub fn bind(salt: &[u8; 32], account: &AccountId) -> Bound {
+    zyn_vm::derive::derive(b"zyn.whitelist.bound.v1", b"bound", &[salt, account])
 }
 
 impl Entry {
@@ -72,6 +93,12 @@ pub struct Registry {
     /// a restart: a window that reopens because a process was bounced is not a
     /// window.
     pub open: bool,
+    /// Salt for the account commitments. Generated once with the registry and
+    /// persisted with it: a commitment nobody can recompute is a commitment
+    /// that cannot be checked either, so the salt travels with the file it
+    /// protects. Its job is to stop a *stolen* registry from being tested
+    /// against a list of accounts obtained elsewhere.
+    pub salt: [u8; 32],
     path: Option<PathBuf>,
 }
 
@@ -80,6 +107,7 @@ impl Registry {
         Registry {
             entries: BTreeMap::new(),
             open: false,
+            salt: rand::random(),
             path: None,
         }
     }
@@ -132,8 +160,9 @@ impl Registry {
         let Some(entry) = self.entries.get_mut(&code_hash) else {
             return Err(Refused::Unknown);
         };
+        let commitment = bind(&self.salt, &account);
         match entry.bound_to {
-            Some(bound) if bound != account => return Err(Refused::BoundElsewhere),
+            Some(bound) if bound != commitment => return Err(Refused::BoundElsewhere),
             _ => {}
         }
         if want == 0 || want > entry.remaining() {
@@ -141,7 +170,7 @@ impl Registry {
                 remaining: entry.remaining(),
             });
         }
-        entry.bound_to = Some(account);
+        entry.bound_to = Some(commitment);
         entry.minted = entry.minted.saturating_add(want);
         Ok(entry.clone())
     }
@@ -162,7 +191,11 @@ impl Registry {
     pub fn encode(&self) -> String {
         let mut s = String::from("# zyn whitelist v1\n");
         s.push_str(&format!("# open\t{}\n", if self.open { 1 } else { 0 }));
-        s.push_str("# code_hash\tallocation\tminted\tbound_to\n");
+        // The salt is not a secret from whoever holds this file — it cannot
+        // be, or the commitments could not be checked. It is what stops the
+        // file being testable against a list of accounts from somewhere else.
+        s.push_str(&format!("# salt\t{}\n", hex(&self.salt)));
+        s.push_str("# code_hash\tallocation\tminted\tbound\n");
         for e in self.entries.values() {
             s.push_str(&format!(
                 "{}\t{}\t{}\t{}\n",
@@ -181,6 +214,11 @@ impl Registry {
             let line = line.trim_end();
             if let Some(v) = line.strip_prefix("# open\t") {
                 r.open = v.trim() == "1";
+                continue;
+            }
+            if let Some(v) = line.strip_prefix("# salt\t") {
+                r.salt = unhex32(v.trim())
+                    .ok_or_else(|| format!("line {}: salt is not 32 bytes", n + 1))?;
                 continue;
             }
             if line.trim().is_empty() || line.starts_with('#') {
@@ -202,7 +240,7 @@ impl Registry {
             let bound_to = match f.next() {
                 None | Some("-") | Some("") => None,
                 Some(a) => Some(
-                    unhex32(a).ok_or_else(|| format!("line {}: bad account", n + 1))?,
+                    unhex32(a).ok_or_else(|| format!("line {}: bad binding", n + 1))?,
                 ),
             };
             r.entries.insert(
@@ -290,7 +328,7 @@ mod tests {
     fn an_invitation_binds_to_the_first_account_and_never_rebinds() {
         let mut r = open_registry();
         r.issue("invite", 3);
-        assert_eq!(r.reserve("invite", A, 1).unwrap().bound_to, Some(A));
+        assert_eq!(r.reserve("invite", A, 1).unwrap().bound_to, Some(bind(&r.salt, &A)));
         assert_eq!(r.reserve("invite", B, 1), Err(Refused::BoundElsewhere));
         // And the refusal took nothing from the allocation.
         assert_eq!(r.lookup("invite").unwrap().remaining(), 2);
@@ -343,7 +381,7 @@ mod tests {
         r.release("invite", 2);
         let e = r.lookup("invite").unwrap();
         assert_eq!(e.remaining(), 2, "the allocation came back");
-        assert_eq!(e.bound_to, Some(A), "and it is still theirs");
+        assert_eq!(e.bound_to, Some(bind(&r.salt, &A)), "and it is still theirs");
         assert_eq!(
             r.reserve("invite", B, 1),
             Err(Refused::BoundElsewhere),
@@ -360,9 +398,51 @@ mod tests {
         let back = Registry::decode(&r.encode()).expect("decode");
         assert!(back.open);
         assert_eq!(back.entries.len(), 2);
+        // The salt must survive, or every existing binding becomes
+        // uncheckable and every invitation silently rebinds.
+        assert_eq!(back.salt, r.salt, "the salt round-trips with the file");
         let two = back.lookup("two").unwrap();
-        assert_eq!((two.allocation, two.minted, two.bound_to), (5, 3, Some(A)));
+        assert_eq!(
+            (two.allocation, two.minted, two.bound_to),
+            (5, 3, Some(bind(&back.salt, &A)))
+        );
         assert_eq!(back.lookup("one").unwrap().bound_to, None);
+    }
+
+    /// The property the commitment exists for: this file, on its own, is not
+    /// an owner map. It answers "same account as before?" without carrying the
+    /// account (§98.2).
+    #[test]
+    fn the_registry_file_never_contains_the_account() {
+        let mut r = open_registry();
+        r.issue("two", 5);
+        r.reserve("two", A, 1).unwrap();
+        let text = r.encode();
+        assert!(
+            !text.contains(&hex(&A)),
+            "the account itself must not appear in the file"
+        );
+        // And the binding still works across a reload, which is the whole job.
+        let back = Registry::decode(&text).unwrap();
+        assert!(matches!(back.lookup("two").unwrap().bound_to, Some(_)));
+        let mut back = back;
+        back.open = true;
+        assert!(back.reserve("two", A, 1).is_ok(), "the same account is recognised");
+        assert_eq!(
+            back.reserve("two", B, 1),
+            Err(Refused::BoundElsewhere),
+            "and a different one is still refused"
+        );
+    }
+
+    /// Two registries must not produce the same commitment for one account, or
+    /// a binding copied between them would be accepted.
+    #[test]
+    fn a_binding_does_not_transfer_between_registries() {
+        let one = Registry::new();
+        let two = Registry::new();
+        assert_ne!(one.salt, two.salt, "each registry salts its own bindings");
+        assert_ne!(bind(&one.salt, &A), bind(&two.salt, &A));
     }
 
     /// A closed phase must survive a restart, or bouncing the process reopens

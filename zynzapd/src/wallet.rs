@@ -905,6 +905,17 @@ impl Wallet {
         )
     }
 
+    /// The signing key for a collection's receiving account.
+    pub fn receiving_key_for_collection(&self, collection: &[u8; 32]) -> Result<SigningKey, String> {
+        if !matches!(self.material, KeyMaterial::Bip39 { .. }) {
+            return Err(
+                "receiving accounts need a recovery phrase; this wallet has an independent key"
+                    .into(),
+            );
+        }
+        crate::receive::collection_key(&self.material.seed()?, self.material.account(), collection)
+    }
+
     /// The account id an item should be minted to at `index`.
     pub fn receiving_account(&self, index: u32) -> Result<swapvm::types::AccountId, String> {
         let k = self.receiving_key(index)?;
