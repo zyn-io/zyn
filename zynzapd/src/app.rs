@@ -1411,6 +1411,18 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // item no recovery will find. `/api/receiving/next` is the honest way
         // to get one; passing an index by hand is for a retry of a checkout
         // that already claimed it.
+        // The account to receive a whole collection at. One derivation, no
+        // counter to keep and nothing to orphan — prefer this over an index
+        // unless per-item unlinkability is worth a read per item (§97.5).
+        ("GET", "/api/receiving/collection") => {
+            zyn_only(app)?;
+            let collection = id_of(input, "collection")?;
+            let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+            Ok(json!({
+                "collection": hex(&collection),
+                "account": hex(&w.collection_account(&collection)?),
+            }))
+        }
         ("GET", "/api/receiving") => {
             zyn_only(app)?;
             let index = input

@@ -280,7 +280,13 @@ impl<V: MicrochainVm> Node<V> {
     /// false with no set — there is nothing to clear.
     pub fn certificate_clears(&self, anchor_id: AnchorId) -> bool {
         match (&self.signers, self.certificate_for(anchor_id)) {
-            (Some(set), Some(cert)) => cert.weight(set) >= set.threshold(),
+            // Both thresholds, or the sequencer would report an anchor as
+            // ready that `Certificate::verify` will then refuse — and an
+            // operator would carry it to Zcash before finding out.
+            (Some(set), Some(cert)) => {
+                cert.weight(set) >= set.threshold()
+                    && cert.backing_weight(set) >= set.backing().1
+            }
             _ => false,
         }
     }

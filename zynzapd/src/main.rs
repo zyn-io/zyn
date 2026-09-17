@@ -279,6 +279,28 @@ fn run() -> Result<(), String> {
         match zyn::anchor::SignerSet::new(keys.clone(), *threshold) {
             Ok(set) => {
                 eprintln!("zynzapd: SIGNER SET configured — {} of {} endorsements release each root; a root nobody reproduces never settles", threshold, keys.len());
+                // Where the vault's viewing key is narrowed to some signers,
+                // say how many of *those* must endorse. Without it a threshold
+                // could be met entirely by signers who cannot check a credit
+                // at all, and a fabricated deposit would settle unexamined
+                // (§97.2).
+                let set = match &cfg.backing_signers {
+                    Some(who) => match set.requiring_backing(who.clone(), cfg.backing_threshold) {
+                        Ok(s) => {
+                            eprintln!(
+                                "zynzapd: BACKING — {} of {} endorsers must be verifiers that hold the vault's viewing key and check each credit against Zcash",
+                                cfg.backing_threshold,
+                                who.len()
+                            );
+                            s
+                        }
+                        Err(e) => return Err(format!("ZYN_BACKING_SIGNERS: {}", e)),
+                    },
+                    None => {
+                        eprintln!("zynzapd: BACKING — no subset named, so every signer is assumed to hold the vault's viewing key and check credits");
+                        set
+                    }
+                };
                 node = node.with_signers(set);
             }
             Err(e) => return Err(format!("ZYN_SIGNER_SET: {}", e)),

@@ -886,6 +886,25 @@ impl Wallet {
         crate::receive::receiving_key(&self.material.seed()?, self.material.account(), index)
     }
 
+    /// The account this wallet receives a whole collection at — the default
+    /// granularity (§97.5). No counter, no gap, one derivation.
+    pub fn collection_account(
+        &self,
+        collection: &[u8; 32],
+    ) -> Result<swapvm::types::AccountId, String> {
+        if !matches!(self.material, KeyMaterial::Bip39 { .. }) {
+            return Err(
+                "receiving accounts need a recovery phrase; this wallet has an independent key"
+                    .into(),
+            );
+        }
+        crate::receive::collection_account(
+            &self.material.seed()?,
+            self.material.account(),
+            collection,
+        )
+    }
+
     /// The account id an item should be minted to at `index`.
     pub fn receiving_account(&self, index: u32) -> Result<swapvm::types::AccountId, String> {
         let k = self.receiving_key(index)?;

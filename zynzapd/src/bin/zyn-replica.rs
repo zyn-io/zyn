@@ -220,6 +220,7 @@ fn run() -> Result<(), String> {
         )
         .strict(strict);
         replica = replica.backed_by(Box::new(backing));
+        eprintln!("zyn-replica: BACKING VERIFIER — each credit is checked against this node's own Zcash before any root is endorsed");
         eprintln!(
             "zyn-replica: deposits are checked against THIS node — a credit it cannot see is refused, not endorsed{}",
             if strict { "; STRICT: a credit whose owner only the operator can vouch for is refused too" } else { "" }

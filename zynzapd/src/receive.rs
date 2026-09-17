@@ -77,7 +77,49 @@ pub fn receiving_key(seed: &[u8], wallet_account: u32, index: u32) -> Result<Sig
     Ok(SigningKey::from_bytes(&out))
 }
 
-/// The account id an item should be minted to.
+/// The account a holder receives **a whole collection** at.
+///
+/// This is the granularity to prefer, and the reason is UX rather than
+/// cryptography. One account per *item* costs a signed read per item on the
+/// most-viewed screen in the wallet, and twenty more before a restore can show
+/// anything — an O(N) tax on the hot path, paid to hide which of your three
+/// moles is which from a reader who already knows you bought three moles.
+///
+/// Deriving from the collection instead of a counter also deletes the gap
+/// limit and everything that hangs off it: there is no sequence to issue in
+/// order, no index to skip, and nothing to orphan. Discovery is one derivation
+/// per collection the holder cares about, and collections are public.
+pub fn collection_account(
+    seed: &[u8],
+    wallet_account: u32,
+    collection: &[u8; 32],
+) -> Result<AccountId, String> {
+    let k = collection_key(seed, wallet_account, collection)?;
+    Ok(account_of(Scheme::Ed25519, k.verifying_key().as_bytes()))
+}
+
+/// The signing key for a collection's receiving account.
+pub fn collection_key(
+    seed: &[u8],
+    wallet_account: u32,
+    collection: &[u8; 32],
+) -> Result<SigningKey, String> {
+    let hk = Hkdf::<Sha256>::new(Some(RECEIVE_SALT), seed);
+    // A distinct info prefix, so a collection account and an indexed one can
+    // never collide even if a collection id were ever mistaken for an index.
+    let mut info = b"collection".to_vec();
+    info.extend_from_slice(&wallet_account.to_be_bytes());
+    info.extend_from_slice(collection);
+    let mut out = [0u8; 32];
+    hk.expand(&info, &mut out)
+        .map_err(|_| "cannot derive a collection key".to_string())?;
+    Ok(SigningKey::from_bytes(&out))
+}
+
+/// The account id an item should be minted to, at a sequential index.
+///
+/// Kept for the case that genuinely wants per-item unlinkability and will pay
+/// for it. [`collection_account`] is the default.
 pub fn receiving_account(seed: &[u8], wallet_account: u32, index: u32) -> Result<AccountId, String> {
     let k = receiving_key(seed, wallet_account, index)?;
     Ok(account_of(Scheme::Ed25519, k.verifying_key().as_bytes()))
@@ -262,6 +304,32 @@ mod tests {
         );
         assert!(e.is_err(), "an unreachable node must not look like no holdings");
         assert_eq!(*calls.borrow(), 1, "and it stops at the first failure");
+    }
+
+    /// The default granularity: one account per collection, derived from the
+    /// collection rather than a counter — so there is no sequence to keep, no
+    /// gap, and one read instead of N.
+    #[test]
+    fn a_collection_account_is_stable_and_needs_no_counter() {
+        let cavez = [0x02u8; 32];
+        let moles = [0x03u8; 32];
+        let a = collection_account(SEED, 0, &cavez).unwrap();
+        assert_eq!(a, collection_account(SEED, 0, &cavez).unwrap(), "restorable");
+        assert_ne!(a, collection_account(SEED, 0, &moles).unwrap(), "per collection");
+        assert_ne!(a, collection_account(SEED, 1, &cavez).unwrap(), "per persona");
+        assert_ne!(a, collection_account(b"other seed", 0, &cavez).unwrap());
+    }
+
+    /// The two branches must not collide, or a collection id that happened to
+    /// look like an index would hand over the wrong account.
+    #[test]
+    fn collection_and_indexed_accounts_never_collide() {
+        let mut collection = [0u8; 32];
+        collection[28..].copy_from_slice(&7u32.to_be_bytes());
+        let by_collection = collection_account(SEED, 0, &collection).unwrap();
+        for i in 0..64 {
+            assert_ne!(by_collection, receiving_account(SEED, 0, i).unwrap());
+        }
     }
 
     #[test]
