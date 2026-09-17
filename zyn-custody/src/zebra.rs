@@ -348,6 +348,24 @@ impl Zebra {
         unhex(hex).ok_or(RpcError::Malformed("raw block is not hex"))
     }
 
+    /// The hash of the block at `height`, as Zcash reports it.
+    ///
+    /// Asked of the node rather than computed from the header: a Zcash header
+    /// is not a Bitcoin header, and re-deriving the hash here would be a second
+    /// implementation of consensus that could disagree with the first. The
+    /// reveal binds this value (§100.3), so a wrong one assigns the wrong
+    /// items.
+    pub fn block_hash(&self, height: u64) -> Result<[u8; 32], RpcError> {
+        let v = self.call("getblockhash", serde_json::json!([height]))?;
+        let hex = v.as_str().ok_or(RpcError::Malformed("block hash"))?;
+        let raw = unhex(hex).ok_or(RpcError::Malformed("block hash is not hex"))?;
+        // Zcash prints block hashes big-endian, the reverse of the internal
+        // byte order. Kept exactly as printed, because that is what a person
+        // comparing against a block explorer will have.
+        raw.try_into()
+            .map_err(|_| RpcError::Malformed("block hash is not 32 bytes"))
+    }
+
     /// Like [`Zebra::connect`], but for reading a chain rather than
     /// custodying on it: mainnet is allowed. A wallet or a block server holds
     /// no vault key, so the guard that protects custody has nothing to

@@ -19,6 +19,7 @@ pub mod feeds;
 pub mod publish;
 pub mod receive;
 pub mod replica;
+pub mod reveal;
 mod restore;
 pub mod rpc;
 pub mod sale;

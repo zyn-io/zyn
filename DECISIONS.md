@@ -5506,3 +5506,14 @@ All three were verified in code before being accepted.
 | 104.5 | **An account that did not enter gets an empty answer, not an error.** Not being in a draw is an ordinary fact; a caller that treats absence as failure reports the sale as broken to everyone who never entered it | 🔒 |
 | 104.6 | **Fewer items than reserved is refused, not partially filled.** The reservation is what the buyer paid against, so a short set is a support problem rather than a sale | 🔒 |
 | 104.7 | **Unallocated items are reported rather than inferred.** They roll into the open mint (§64.17), and the batch names them so nobody has to subtract two lists and hope | ✅ |
+
+## 105. Gathering what the draw needs (18 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 105.1 | **The tickets were already on Zcash; nothing had turned them into a ledger.** A Cave entry payment carries its own coordinates — txid, height, transaction index, output index, amount — and its memo names the Zyn recipient. `reveal::ledger_from` walks what the scanner saw and admits each one, so the ledger is derived from the chain rather than from anything this process remembers | ✅ |
+| 105.2 | **A payment that cannot be a ticket is returned with its reason, never dropped.** Someone's money is in the vault and they are owed an answer; a sale that silently discards near-misses acquires a support queue nobody can reconstruct. Entries for another sale's terms digest are *skipped* rather than refused — they are not ours to answer for | 🔒 |
+| 105.3 | **The beacon is verified before it is returned.** `cave-randomness` will not take a signature it has not checked against the pinned Quicknet key, and neither does the fetch. An unverified beacon is a number somebody sent you | ✅ |
+| 105.4 | **The endpoint was wrong and every stubbed test passed.** A transport double proves the parsing and the verification; it cannot prove the address. `tests/drand_live.rs` fetches a real past round, verifies it, and flips a bit to confirm the verification is doing something. Ignored by default so an outage is not a failing build, and to be run before any reveal | ✅ |
+| 105.5 | **The Zcash block hash is asked of a node, not derived from a header.** A Zcash header is not a Bitcoin header, and re-deriving the hash would be a second implementation of consensus that could disagree with the first. What this cannot establish is that the node is honest about which block is canonical — that is why you ask a node you run | 🔒 |
+| 105.6 | **`Sighting` mirrors the scanner's type rather than importing it**, so this is testable without a scanner and a change to the scanner's shape is a compile error here instead of a silent mismatch | 🔒 |
