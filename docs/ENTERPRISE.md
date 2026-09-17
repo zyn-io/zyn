@@ -11,8 +11,8 @@ is that it can survive diligence; asserting it early is the one way to lose it.
 That is a custodian's pitch with unusually good receipts, and under §84's
 positioning — a programmable application layer, not yet a rollup — it is the
 honest one. The earlier framing ("confidential settlement with provable
-reserves and an exit no counterparty can block") is the same set of facts in
-rollup language, and rollup language invites rollup diligence: permissionless
+reserves and an exit no counterparty can block") was both rollup language *and*
+an overclaim — see §103 — but the underlying receipts are real, and rollup language invites rollup diligence: permissionless
 verification, decentralised sequencing, fraud proofs. Zyn does not have those
 and is not currently trying to. What it has is better receipts than any
 custodian can produce, and those are worth stating in the language of custody
@@ -41,10 +41,10 @@ available at all.
 | | What it is | Why an institution cares |
 |---|---|---|
 | `zynzapd/src/backing.rs` | A signer refuses to endorse a credit its **own** Zcash node cannot see | Proof of reserves by construction, not an attestation letter. The failure mode it prevents — a fabricated credit that replays identically on every signer — is the one an auditor would ask about |
-| `zynzapd/src/exitproof.rs` | A holder's record, leaf index and path to the anchored root. Kilobytes, refreshed each anchor | Exit "with the sequencer gone and every mirror dark". *Nobody can trap my assets* outranks throughput in every institutional risk review |
+| `zynzapd/src/exitproof.rs` | A holder's record, leaf index and path to the anchored root. Kilobytes, refreshed each anchor | A holder keeps **evidence of what they held**, verifiable against a root anchored on Zcash, without depending on us to still be serving it. It is not a withdrawal: releasing the backing ZEC still requires the threshold custodians (§103.2). What it removes is *"prove you had it"*, not *"make them pay"* |
 | Vault FVK held by verifiers | Spend authority and visibility already separated | The seed of selective disclosure: a party can be given sight without power |
-| Forced inclusion (`ZYF` memos, §33) | An intent that reaches Zcash must be sequenced | Censorship by the operator is bounded, and the bound is checkable |
-| Anchors every ~3 min to Zcash | Settlement finality inherited from a public chain | A finality story that does not rest on the operator's word |
+| Forced inclusion (`ZYF` memos, §33) | An intent published through Zcash that the sequencer does not apply becomes a recorded refusal | Censorship becomes **detectable and evidenced**, not impossible. The operator can still decline; what it cannot do is decline quietly |
+| Anchors every ~3 min to Zcash | Anchor-transaction finality comes from Zcash; Zyn state validity is checked by Zyn replicas and signers | A timestamp and an ordering nobody can rewrite — not a validation of the state itself |
 
 ## What is missing
 
@@ -78,7 +78,10 @@ Institutions buy operations, not cryptography. So:
   incidents; they expect them to be found, explained and closed. `DECISIONS`
   already is this — it needs an outward-facing summary.
 - **Documented finality tiers**: accepted → sealed → anchored → Zcash-confirmed
-  at N. Each with what it guarantees and against whom.
+  at N. Each with what it guarantees and against whom. Note what the last one
+  is: Zcash finalises the *anchor transaction* and the 32-byte commitment in
+  it. It does not validate the Zyn state that commitment stands for — replicas
+  and signers do that (§103.3).
 
 ### 2. Selective disclosure as a product
 

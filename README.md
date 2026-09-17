@@ -1,7 +1,44 @@
 # Zyn
 
-The shielded microchain: VM, addressing, anchors, bridge, custody, and the
-sequencer daemon.
+**Zyn is an application execution layer built for Zcash.** It runs deterministic
+application state machines, batches their activity, and anchors state
+commitments to Zcash.
+
+> ZEC has private money. Zyn gives it somewhere to do things.
+
+**Cave** is the first consumer application powered by Zyn — a ZEC-settled object
+market. **ZynZap / SwapVM** is Zyn's first execution environment.
+
+## The trust model, up front
+
+Read this before the rest. It decides whether anything else matters to you.
+
+- **Zyn is operator-sequenced.** One sequencer orders transactions. There are no
+  fraud proofs and no validity proofs.
+- **Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault operated by the Zyn
+  team.** Withdrawals depend on those custodians.
+- **Zcash records deposits, withdrawals and anchor commitments. It does not
+  validate Zyn state transitions.** Built *for* Zcash, not *of* it: Zcash does
+  not recognise Zyn, and Zyn does not inherit Zcash's security.
+- **Account reads require the holder's signature**, so a stranger cannot look up
+  a balance. The operator and its verifiers can see activity in the journal.
+
+Present-tense facts, not a roadmap. Where this is heading is `DECISIONS.md`
+§84 and §103.
+
+## What is actually strong
+
+Not adjectives — things a custodian cannot produce:
+
+| | |
+|---|---|
+| `zynzapd/src/backing.rs` | A signer refuses to endorse a credit its **own** Zcash node cannot see. Proof of reserves by construction, not an attestation letter |
+| `zynzapd/src/exitproof.rs` | A holder keeps evidence of what they held, checkable against an anchored root without our cooperation. **Evidence, not a withdrawal** — releasing the backing still needs the custodians |
+| Forced inclusion (`ZYF` memos) | An intent published through Zcash that the sequencer does not apply becomes a recorded refusal. Censorship becomes detectable, not impossible |
+| Per-signer liveness + backing requirement | A threshold that clears cannot hide a signer who verified nothing |
+
+Before writing any public copy, read [`docs/MESSAGING.md`](docs/MESSAGING.md):
+it lists what may and may not be claimed, and why.
 
 ## Layout
 

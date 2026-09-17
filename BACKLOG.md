@@ -88,7 +88,7 @@ everything else is detail hanging off it.
 
 | Rung | What it means | State |
 |---|---|---|
-| **0** | Anchors on Zcash, DA off the box, an independent verifying replica | ✅ §32 — anchors confirmed on Zcash, DA mirrored, replicas reproduce roots |
+| **0** | Anchors on Zcash, DA off the box, a verifying replica off the sequencer box (not an *independent operator* — every signer is still ours, A77) | ✅ §32 — anchors confirmed on Zcash, DA mirrored, replicas reproduce roots |
 | **1** | Forced inclusion — the sequencer cannot silently exclude you | ✅ §33, §44 — detection proven 7 Sep; **delivery proven 10 Sep**, unaided, after fixing the range gap that had made it impossible |
 | **2** | k-of-n signers: a deposit releases only once k replicas reproduce its root | ✅ §34, §36 — 2-of-3 live on three machines since 9 Sep |
 | **3** | Sequencers that verify before signing; standby sequencer from a replica's state | 🔒 §32.8, §33.6 — not started |

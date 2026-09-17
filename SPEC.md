@@ -51,8 +51,11 @@ A Zyn microchain is a deterministic state machine driven by an ordered stream of
                        └──> checkpoint ──┴──> anchor ──> Zcash
 ```
 
-Zcash keeps custody and final settlement. Zyn keeps the interaction. The reason
-the arrangement pays for itself is compression: thousands of microchain actions
+A threshold vault on Zcash holds the backing ZEC. Zyn executes application
+state. Zcash timestamps and finalises deposits, withdrawals and state
+commitments — it does not validate the application state those commitments
+stand for; Zyn replicas and signers do (§103.3). The reason the arrangement
+pays for itself is compression: thousands of microchain actions
 per Zcash transaction, which is what makes a small trade worth making at all.
 
 ---
