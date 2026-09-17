@@ -3312,3 +3312,87 @@ lives in a tree at `STATE_VERSION` 12, and chain 11 runs v10, so a v12
 `zyn-replica` rejects the state outright with "verified state does not match its
 root: Decode" and the signers exit. The testnet signers stay on the pre-§81
 binary until chain 11 is reset. Keep the previous binary beside any replacement.
+
+## Ownership privacy: the three settings and the order they go in (17 Sep 2026)
+
+Three switches, all off by default, all safe to deploy before they are turned
+on. Full reasoning in DECISIONS §93, §95, §97; the public summary is
+`docs/NFT-PUBLIC-PRIVACY.md`.
+
+### 1. Seal the journal and base state — `ZYN_DA_KEY`
+
+Those two files are the only ones in a bundle that carry ownership, and they
+carry it because they are what a verifier replays. Sealed, a mirror keeps bytes
+it cannot read.
+
+```bash
+openssl rand -hex 32      # the key. A MIRROR MUST NEVER BE GIVEN IT.
+```
+
+Set `ZYN_DA_KEY=<hex>` on **every verifier first**, and on the **sequencer
+last**. A sequencer sealing before verifiers have the key halts them with
+`… is sealed and this verifier has no ZYN_DA_KEY`, which is a clear message but
+a stopped chain.
+
+- verifiers: the Mac's two signer plists, the Air's plist, `/etc/zyn/zyn-signer.env`
+- sequencer: `/etc/zyn/zynzapd.env`
+
+Deploying the binaries with no key set changes nothing — the publisher emits
+byte-for-byte what it always did, and a test asserts exactly that. So binaries
+can go everywhere first, and the switch flipped afterwards.
+
+Privacy begins at the cutoff and is never retroactive (§70.8): everything on the
+mirrors today is plaintext and stays plaintext. Do not promise otherwise.
+
+### 2. Narrow the vault viewing key — `ZYN_BACKING_SIGNERS`
+
+Anyone holding the vault FVK can map a Zcash payment to a Zyn account (§97.1).
+That derivability is deliberate — it is what makes a credit checkable instead of
+the operator's word — so the move is to shrink who holds the key, not to change
+what it derives.
+
+**The order matters, and getting it wrong silently removes the guarantee.** A
+replica without the FVK skips the backing check and endorses anyway, so if the
+key is removed before the backing set is named, a threshold can be met entirely
+by signers who cannot check a credit at all, and a fabricated deposit settles
+unexamined.
+
+```bash
+# 1. FIRST: name who verifies backing, on the sequencer.
+ZYN_BACKING_SIGNERS=<hex pubkey>,<hex pubkey>
+ZYN_BACKING_THRESHOLD=2
+systemctl restart zynzapd
+# Look for: "zynzapd: BACKING — 2 of 2 endorsers must be verifiers …"
+
+# 2. ONLY THEN: remove ZYN_VAULT_FVK from replicas that are not in that set.
+```
+
+A backing verifier logs `zyn-replica: BACKING VERIFIER — each credit is checked
+against this node's own Zcash…` at startup. One that does not print that line is
+not checking, whatever else it says.
+
+### 3. Receive items into per-collection accounts
+
+No setting: the wallet exposes `GET /api/receiving/collection?collection=<hex>`
+and the mint takes that account as the recipient. `GET /api/receiving/next` and
+`GET /api/receiving?index=N` are the indexed form, for the rare case that wants
+per-item unlinkability and will pay a read per item for it.
+
+Item operations then have to be signed by the account holding the item, so
+`POST /api/offer`, `/api/take` and `/api/cancel-offer` take an optional
+`collection`. Absent, they sign with the identity — which is correct for
+anything minted before this.
+
+### Checking it worked
+
+```bash
+# sealed at rest, and the journal is not readable
+ssh root@168.119.53.39 "head -c 8 /var/zyn/mirror/chain-11/<epoch>/intents/epoch-<n>.intents"
+# expect: ZYNSEAL<0x01>
+
+# a verifier still verifies
+journalctl -u zyn-signer -n 5    # "verified N anchor(s); through epoch …"
+```
+
+If a verifier halts on a sealed file, it has the wrong key or no key — those
+report differently on purpose, because the fixes differ.

@@ -51,6 +51,13 @@ Institutions buy operations, not cryptography. So:
   certificate cleared. A set of three with one silently gone is a set of two
   with no margin (§89.2). **Built 16 Sep**: `Node::signer_liveness`, one alert
   component per signer, plus a TCP probe per custodian.
+- **Tiered endorsement** — **built 17 Sep** (§97.2). A certificate now has to
+  contain enough signers who actually verified that the money behind its
+  credits exists, not merely enough who reproduced the root. This is what makes
+  it safe to hold the vault's viewing key in fewer hands, which is in turn what
+  limits who can link a Zcash payment to an account. An institution's first
+  question about a bridge is who can see the flows; this is the answer having a
+  number in it.
 - **Shares off personal machines.** Named, independent operators on
   infrastructure that does not sleep. Three machines in one house is not three
   operators, and diligence will say so.
@@ -69,7 +76,9 @@ to this auditor, with no spend authority and no ability to widen the window.
 The primitive exists (the vault's FVK is already handed to verifiers); the
 product does not. What is needed:
 
-- derivation of a disclosure key per account, independent of the spend key
+- derivation of a disclosure key per account, independent of the spend key —
+  the per-artifact DA keys (§93.3) are already this shape: one epoch can be
+  handed to an auditor without handing over the chain
 - a scope: account set, epoch range, and which fields
 - an artefact an auditor can verify offline against an anchored root — so the
   disclosure proves itself rather than requiring trust in whoever exported it

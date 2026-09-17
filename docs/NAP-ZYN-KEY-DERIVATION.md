@@ -50,6 +50,65 @@ The fixture suite additionally pins the complete epoch-42 signed-read payload,
 ZynZap v2 VM id, transfer intent, Ed25519 signature, and submission frame in
 both Rust and JavaScript.
 
+## Receiving accounts (v1, added 17 September 2026)
+
+Status: normative. A wallet that implements the identity above but not this
+will restore the phrase and still not find items received into these accounts.
+
+An item received at the holder's identity puts that identity in the journal:
+`MintCollectionItem` names its recipient, and a reader who can decrypt the
+journal has the owner map. Receiving accounts exist so what the journal names
+is an account with no other history.
+
+They are a **separate branch**, not another value of the account index. There
+the index means *which wallet*, and `zyn_signing_key` refuses an index that
+differs from the wallet's on purpose — two personas must not share an identity.
+Receiving accounts are a different axis, many per wallet, so they take their
+own salt. The two can never collide.
+
+```text
+salt = UTF8("nap.zyn.receive.v1")
+
+per collection (preferred)
+  info = UTF8("collection") || U32_BE(account) || collection_id[32]
+
+per item (only where per-item unlinkability is worth a read per item)
+  info = UTF8("receive")    || U32_BE(account) || U32_BE(index)
+
+OKM = HKDF-SHA256(IKM = BIP39-Seed, salt, info, 32)
+```
+
+`OKM` is the RFC 8032 Ed25519 seed, and the account id follows the same
+`zyn.account.v1` rule as the identity.
+
+**Prefer the per-collection form.** It needs no counter, so there is nothing to
+issue in order and nothing to orphan, and discovery is one derivation per
+collection rather than a scan. The indexed form carries a **gap limit of 20**:
+discovery stops after twenty consecutive empty indices, which makes "issued in
+order, never skipped" a recoverability requirement. A wallet that jumps to
+index 50 over an empty 0..29 has created an item its own restore will not find.
+Raising the gap later is safe; lowering it can orphan an item a previous
+version could still reach.
+
+Only a BIP-39 wallet has these. A legacy independent key has no seed to branch
+from, and inventing one would produce accounts no restore could find.
+
+### Test vectors
+
+Same 24-word mnemonic as above, empty passphrase. `CAVEZ` is collection
+`024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e`.
+
+| Branch | Account | Ed25519 seed | Zyn account |
+|---|---|---|---|
+| collection `CAVEZ` | 0 | `7cf4fe776a4a36615e5ed17585d5eba8f99b00c4e0ed40f304135b191eedb48a` | `ccb0a7aa79d032e65df27afc13fc1fd5f013e30aca2f700fe5abdfdb839ecf53` |
+| collection `CAVEZ` | 7 | — | `86c85b008f08476cc9bd7a881e29c1d676b71ff5b7ef685851ae0a72c89e9db9` |
+| index 0 | 0 | `a3fa8f79e857f5c8a2d13eefba5d3a88665066196cff3dfbb829442007fb40b8` | `b23d6f7e2d40a71108412c0eaf13727b8404e3453be8b8322220da9189832b6d` |
+| index 1 | 0 | — | `277dc2783c01ca1b317d4aede043febf77e97965da11dac3e24c99de072c8eb7` |
+
+None of these equals the identity account `b85db260…` from the same seed, which
+is the property the separate salt exists for and which `zynzapd::receive` tests
+directly.
+
 ## Backups and compatibility
 
 Nap backup version 2 adds a `zyn` object:
