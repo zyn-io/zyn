@@ -1403,6 +1403,55 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 None => Ok(json!({ "address": app.vault, "memo": true })),
             }
         }
+        // A fresh account to receive one item at, so the journal names
+        // something that has never been used and never will be again (§95).
+        //
+        // The index is the caller's to track and must be issued **in order** —
+        // `receive::GAP` is what a restore can cross, and a skipped range is an
+        // item no recovery will find. `/api/receiving/next` is the honest way
+        // to get one; passing an index by hand is for a retry of a checkout
+        // that already claimed it.
+        ("GET", "/api/receiving") => {
+            zyn_only(app)?;
+            let index = input
+                .get("index")
+                .and_then(Value::as_u64)
+                .ok_or("which receiving index?")? as u32;
+            let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+            Ok(json!({
+                "index": index,
+                "account": hex(&w.receiving_account(index)?),
+            }))
+        }
+        // The next unused index, found by walking the branch until the gap.
+        // One signed read per index, which is why the gap is small — and the
+        // read is signed with the *derived* key, so the node never learns which
+        // accounts belong together from the question itself.
+        ("GET", "/api/receiving/next") => {
+            zyn_only(app)?;
+            let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+            let found = crate::receive::discover(
+                &|index| w.receiving_account(index),
+                &|index, _| {
+                    let key = w.receiving_key(index)?;
+                    Ok(app
+                        .node
+                        .account(&key)
+                        .map_err(|e| e.to_string())?
+                        .map(|r| !r.spendable.is_empty())
+                        .unwrap_or(false))
+                },
+                crate::receive::GAP,
+            );
+            let found = found?;
+            let index = found.next_index();
+            Ok(json!({
+                "index": index,
+                "account": hex(&w.receiving_account(index)?),
+                "occupied": found.occupied.len(),
+                "gap": crate::receive::GAP,
+            }))
+        }
         ("GET", "/api/zyn-key") => {
             zyn_only(app)?;
             let current_key = app.key();

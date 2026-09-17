@@ -158,7 +158,20 @@ fn run() -> Result<(), String> {
     };
 
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let fetch = Http::new(mirrors.clone());
+    // Bundles may be sealed (§92): the journal and base state carry ownership,
+    // so they are encrypted at rest on every mirror. Wrapping the fetch is the
+    // whole integration — everything downstream asks for a path and is handed
+    // plaintext, and a bundle published without a key still reads.
+    let da_key = match std::env::var("ZYN_DA_KEY").ok().filter(|s| !s.trim().is_empty()) {
+        Some(v) => Some(zynzapd::dacrypt::key_from_hex(&v)?),
+        None => None,
+    };
+    let raw = Http::new(mirrors.clone());
+    let fetch = zynzapd::dacrypt::Opening {
+        inner: raw,
+        key: da_key,
+        chain: chain_id,
+    };
     let base = match std::env::var("ZYN_BASE_ROOT")
         .ok()
         .filter(|s| !s.is_empty())
@@ -180,6 +193,9 @@ fn run() -> Result<(), String> {
         params,
         base.as_ref().map(|(b, r)| (b.as_slice(), *r)),
     )?;
+    // A replica that re-serves bundles must seal them again, or mirroring
+    // for others would publish in the clear what the sequencer encrypted.
+    replica = replica.sealing_with(da_key);
     if let Some(set) = require_set {
         replica = replica.requiring(set);
         eprintln!("zyn-replica: only roots this replica reproduces AND the signer set endorses will be believed");

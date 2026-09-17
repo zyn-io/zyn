@@ -869,6 +869,32 @@ impl Wallet {
     /// Derive the Zyn Ed25519 seed from the full BIP-39 seed. The derivation is
     /// intentionally network-independent: a Nap recovery phrase has one Zyn
     /// identity, while signed intents still bind themselves to a chain id.
+    /// The signing key for one **receiving account** — a fresh account per
+    /// item, so the journal names something unlinkable rather than the
+    /// holder's identity (§95, `crate::receive`).
+    ///
+    /// Only a BIP-39 wallet can have them. A legacy raw key has no seed to
+    /// branch from, and inventing one would produce accounts a restore could
+    /// never find — the exact failure this whole scheme exists to avoid.
+    pub fn receiving_key(&self, index: u32) -> Result<SigningKey, String> {
+        if !matches!(self.material, KeyMaterial::Bip39 { .. }) {
+            return Err(
+                "receiving accounts need a recovery phrase; this wallet has an independent key"
+                    .into(),
+            );
+        }
+        crate::receive::receiving_key(&self.material.seed()?, self.material.account(), index)
+    }
+
+    /// The account id an item should be minted to at `index`.
+    pub fn receiving_account(&self, index: u32) -> Result<swapvm::types::AccountId, String> {
+        let k = self.receiving_key(index)?;
+        Ok(zyn_vm::auth::account_of(
+            zyn_vm::auth::Scheme::Ed25519,
+            k.verifying_key().as_bytes(),
+        ))
+    }
+
     pub fn zyn_signing_key(&self, source: &ZynKeySource) -> Result<SigningKey, String> {
         match source {
             ZynKeySource::Legacy { seed } => Ok(SigningKey::from_bytes(seed)),

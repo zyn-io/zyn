@@ -91,6 +91,12 @@ pub struct Config {
     pub da_dir: PathBuf,
     /// `url[|token],…` — where bundles are pushed. Empty means local only.
     pub da_mirrors: String,
+    /// 32-byte hex. When set, the ownership-bearing files in a bundle — the
+    /// journal and the base state — are encrypted under keys derived from it,
+    /// and the public commitments are not. Shared out of band with the
+    /// verifier set; a mirror never needs it and should never be given it
+    /// (§92, `dacrypt`). Unset publishes in the clear, as before.
+    pub da_key: Option<[u8; 32]>,
     /// Re-read forced intents from this height at boot and queue the unhandled.
     pub forced_rescan_from: Option<u64>,
     /// Signer public keys (ed25519, hex, comma-separated) and the threshold —
@@ -312,6 +318,15 @@ impl Config {
                 Err(_) => PathBuf::from(var("ZYN_DATA_DIR", "./zyn-data".to_string())?).join("da"),
             },
             da_mirrors: env::var("ZYN_DA_MIRRORS").unwrap_or_default(),
+            // A malformed key stops the node rather than quietly publishing
+            // ownership in the clear: an operator who set this meant it.
+            da_key: match env::var("ZYN_DA_KEY").ok().filter(|s| !s.trim().is_empty()) {
+                Some(v) => Some(
+                    crate::dacrypt::key_from_hex(&v)
+                        .map_err(|_| ConfigError::Bad("ZYN_DA_KEY", v.clone()))?,
+                ),
+                None => None,
+            },
             forced_rescan_from: env::var("ZYN_FORCED_RESCAN_FROM")
                 .ok()
                 .and_then(|v| v.parse().ok()),

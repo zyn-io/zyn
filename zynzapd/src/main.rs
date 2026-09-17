@@ -265,6 +265,7 @@ fn run() -> Result<(), String> {
         now_secs(),
         manual,
         &cfg.da_dir,
+        cfg.da_key.as_ref(),
     )?;
     let zynzapd::boot::Booted {
         mut node,
@@ -1339,7 +1340,7 @@ fn run() -> Result<(), String> {
                                 )
                             })
                             .and_then(|b| {
-                                zynzapd::publish::write_local(&cfg.da_dir, cfg.chain_id, &b)
+                                zynzapd::publish::write_local_sealed(&cfg.da_dir, cfg.chain_id, &b, cfg.da_key.as_ref())
                             });
                         match built {
                             Ok(files) => {
@@ -1483,7 +1484,7 @@ fn run() -> Result<(), String> {
                                     )
                                 })
                                 .and_then(|b| {
-                                    zynzapd::publish::write_local(&cfg.da_dir, cfg.chain_id, &b)
+                                    zynzapd::publish::write_local_sealed(&cfg.da_dir, cfg.chain_id, &b, cfg.da_key.as_ref())
                                 });
                             match built {
                                 Ok(files) => { eprintln!("zynzapd: proposed bundle for epoch {} published for endorsement ({} files)", epoch, files.len()); publisher.queue(files); }
