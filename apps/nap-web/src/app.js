@@ -42,6 +42,30 @@ async function loadConfig() {
   return value;
 }
 
+// Asking a gateway for the picture of an item you own tells that host your IP,
+// which item you hold, and when — on a shielded chain, the one thing the chain
+// itself will not reveal. The desktop wallet has always kept this behind an
+// explicit toggle; this one fetched art for every holding on every render, so a
+// single page load handed over the complete list. Off until the holder says
+// otherwise, and the reason is on the button rather than in a help page.
+const ART_KEY = 'nap_web_art';
+function artEnabled() {
+  try {
+    return localStorage.getItem(ART_KEY) === '1';
+  } catch {
+    // A browser that refuses storage is a browser that cannot remember consent,
+    // and unremembered consent is not consent. Stay off.
+    return false;
+  }
+}
+function setArtEnabled(on) {
+  try {
+    localStorage.setItem(ART_KEY, on ? '1' : '0');
+  } catch {
+    /* refused storage: the setting lasts for this render only */
+  }
+}
+
 function shell(content) {
   root.innerHTML = `<div class="grain"></div><header><a class="brand" href="/" aria-label="Nap Wallet"><img src="/nap-mark.png" alt=""><span>Nap</span></a>${networkPill()}</header>${content}<footer><span>Keys stay in this tab.</span><span>Nap Wallet · Zyn</span></footer>`;
 }
@@ -112,7 +136,7 @@ function wallet(message = '') {
       <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh">↻ Refresh</button></div>
       <div class="notice ${message ? 'show' : ''}" id="notice">${escapeHtml(message)}</div>
       ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD DETECTED</p><h2>Your mole is waiting.</h2><p>The coordinator sees this public account ID—not your phrase or key.</p></div><button id="claim">Claim gift <span>→</span></button></section>` : ''}
-      <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
+      <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork — fetches each item's picture from the gateway, which tells that host your IP, which items you hold, and when. Off by default.</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
       <section class="activity"><div class="section-title"><h2>Account</h2></div><div class="account-card"><div><span>Public account</span><code>${account}</code></div><canvas id="qr" width="164" height="164"></canvas></div></section>
       <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
     </section>
@@ -210,7 +234,28 @@ function renderItems() {
   root.querySelector('#item-count').textContent = String(list.length);
   root.querySelector('#items').innerHTML = list.length ? list.map((h, i) => `<article class="item" data-index="${i}"><div class="art" data-content="${escapeHtml(h.meta.content)}"><img src="/nap-mark.png" alt="Generic placeholder; artwork not verified"></div><div><p class="kicker">ITEM · #${escapeHtml(h.asset)}</p><h3>${escapeHtml(h.meta.symbol || `Item ${h.asset}`)}</h3><p class="media-status">Artwork not verified</p><button>Review & send →</button></div></article>`).join('') : `<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Claim a gift or receive a Zyn item at the account below.</p></div>`;
   root.querySelectorAll('.item').forEach((el) => el.querySelector('button').onclick = () => openSend(list[Number(el.dataset.index)]));
-  list.forEach((h, i) => loadVerifiedArt(root.querySelectorAll('.art')[i], h.meta.content));
+  // The gate. Nothing reaches the gateway until this is on, so the default
+  // render makes no request that names an item.
+  if (artEnabled()) {
+    list.forEach((h, i) => loadVerifiedArt(root.querySelectorAll('.art')[i], h.meta.content));
+  } else {
+    root.querySelectorAll('.media-status').forEach((el) => {
+      el.textContent = 'Artwork not fetched — privacy';
+    });
+  }
+  const artToggle = root.querySelector('#art-toggle');
+  if (artToggle) {
+    artToggle.checked = artEnabled();
+    artToggle.onchange = () => {
+      setArtEnabled(artToggle.checked);
+      note(
+        artToggle.checked
+          ? 'Artwork on. The gateway now learns which items you hold.'
+          : 'Artwork off. Nothing is requested for your items.',
+      );
+      renderItems();
+    };
+  }
 }
 function decimalRaw(value) {
   if (!/^(0|[1-9]\d{0,38})(\.\d{1,18})?$/.test(String(value))) throw new Error('Invalid holdings amount');

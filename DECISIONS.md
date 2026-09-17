@@ -5390,3 +5390,13 @@ is worse than not doing it.
 | 95.6 | **The derivation is taken as a closure, so it exists in one place.** `discover` asks for `account_at(index)` rather than a seed, because the caller that can *sign* a probe is the wallet, not the scanner. An earlier draft passed the seed to both and quietly derived twice — which is precisely how a restore ends up scanning the wrong branch while every test still passes | ✅ |
 | 95.7 | **An unreachable node must not look like an empty wallet.** A failing probe stops the scan and returns the error; reporting "no holdings" would tell someone their items were gone | ✅ |
 | 95.8 | **A legacy raw-key wallet is refused rather than accommodated.** It has no seed to branch from, and inventing one would produce accounts no restore could find — the exact failure the scheme exists to prevent | 🔒 |
+
+## 96. The gateway was the owner map nobody sealed (17 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 96.1 | **The browser wallet fetched art for every holding on every render, with no consent and no warning.** One page load handed the gateway the complete list of what that IP holds — an owner map that never touches the chain and that §93 and §95 do nothing about. The desktop wallet has always kept this behind an explicit toggle; the two had simply diverged | ✅ fixed |
+| 96.2 | **The disclosure goes on the control, not in a help page.** The label names what is given away — IP, which items, and when — because a consent that does not say what it costs is not consent. It sits beside the items it governs, where the holder can see what the choice is about | 🔒 |
+| 96.3 | **A browser that refuses storage stays off.** Unremembered consent is not consent, so a `localStorage` failure reads as "off" rather than defaulting to on and re-asking. Tested | ✅ |
+| 96.4 | **Bucketing was considered and rejected as over-engineering.** Grouping blobs so a fetch reveals one of ~35 would weaken the link without closing it, leaks across repeated fetches anyway, and would put the two wallets on different models. Informed opt-in is what the desktop wallet already chose; matching it is worth more than a second mechanism | 🔒 |
+| 96.5 | **This is the shape of the remaining gaps: off-chain and mundane.** Consolidating a receiving account into the identity, listing an item on the public order book, funding a receiving account from an attributable deposit, and the invitation→account binding in the registry each rebuild part of the map. None is cryptographic, all are reachable, and each needs naming rather than assuming §93 and §95 covered it | 🔒 |
