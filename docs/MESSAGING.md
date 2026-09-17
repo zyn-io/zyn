@@ -42,6 +42,8 @@ The hierarchy, which keeps getting flattened:
 | operator-sequenced; progressively minimising trust | decentralised; L2; rollup | one operator, and no fraud or validity proofs |
 | a **programmable architecture** for ZEC applications | anyone can deploy; permissionless applications; Zcash smart contracts | `host.rs`: applications compile into the node |
 | threshold-vault-backed ZEC | fully backed / 1:1 without qualification | backed, by a vault two of three of our machines can move |
+| Zyn, the execution layer | the chain, our chain, a chain we built | "chain" invites *which consensus? who validates?* — the same questions "L2" invites, and it slipped through four drafts because it sounds harmless |
+| how the VM clears / what the mechanism does | how our users trade / what traders get | **built and enabled is not in use.** Batch clearing is switched on in production and nothing has ever traded through it; describe the mechanism, never the usage |
 | Cave: a **ZEC-settled object market** powered by Zyn | private object market (as a description of today) | privacy is the destination; keep it in the future tense |
 
 ## The privacy sentence
