@@ -3,6 +3,7 @@
 
 pub mod alert;
 pub mod anchor;
+pub mod allocation;
 pub mod app;
 pub mod backing;
 pub mod boot;

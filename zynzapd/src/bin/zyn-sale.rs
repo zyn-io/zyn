@@ -63,6 +63,7 @@ use std::sync::{Arc, Mutex};
 use swapvm::fixed::Fixed;
 use swapvm::tx::Intent;
 use zynzapd::client::{fixed_of, hex, Node};
+use zynzapd::allocation as crate_allocation;
 use zynzapd::sale::{self, Book, Refused, State};
 use zynzapd::whitelist::Registry;
 
@@ -143,6 +144,9 @@ struct Service {
     public: zyn_custody::treasury::PublicKeyPackage<zyn_custody::treasury::ZynAccount>,
     treasury: [u8; 32],
     request: std::sync::atomic::AtomicU64,
+    /// The completed draw, once it has run. `None` until then, which is why
+    /// `/settle` can record a payment before the reveal and only mints after.
+    allocation: Mutex<Option<crate_allocation::Run>>,
 }
 
 fn main() {
@@ -224,6 +228,7 @@ fn main() {
         public,
         treasury,
         request: std::sync::atomic::AtomicU64::new(1),
+        allocation: Mutex::new(None),
     });
 
     let listener = TcpListener::bind(&listen).unwrap_or_else(|e| {
@@ -401,8 +406,28 @@ fn settle(s: &Service, stream: &mut TcpStream, body: &[u8]) -> std::io::Result<(
         // account that receives the item, so nothing has to move afterwards.
         Ok(held)
     };
-    let allocate = |_n: u32| -> Result<Vec<u32>, String> {
-        Err("the allocation policy is not committed yet — see A71 and §64.16".to_string())
+    // A lookup, never a draw. The collection-wide allocation runs once, after
+    // the reveal, over the whole ticket ledger (§104.1); settling an order
+    // reads what that run gave this account. Calling the draw here instead —
+    // once per buyer, against whatever ledger existed at that moment — is how
+    // two people end up holding results from two different allocations.
+    let allocate = |want: u32| -> Result<Vec<u32>, String> {
+        let run = s.allocation.lock().map_err(|_| "allocation lock poisoned")?;
+        let Some(run) = run.as_ref() else {
+            return Err("the draw has not run yet — it happens once, after the reveal".into());
+        };
+        let mine = run.serials_for(&account);
+        if mine.len() < want as usize {
+            // Fewer items than the order reserved. Refusing beats handing over
+            // a short set, because the reservation is what the buyer paid
+            // against and a partial fill is a support problem, not a sale.
+            return Err(format!(
+                "the draw gave this account {} item(s), not the {} reserved",
+                mine.len(),
+                want
+            ));
+        }
+        Ok(mine.into_iter().take(want as usize).collect())
     };
     let mint = |serial: u32, to: [u8; 32]| -> Result<(), String> {
         // The content commitment comes from the manifest the root was computed
