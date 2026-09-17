@@ -416,6 +416,25 @@ pub struct CloseAnnouncement {
     pub deposit_close_zcash_height: u32,
 }
 
+/// Evidence that an announcement was on Zcash by a given height.
+///
+/// The engine cannot fetch anything, so this is supplied by a caller who has
+/// checked it — the same arrangement as [`RevealEvidence`], and the same
+/// obligation: the caller must confirm that the transaction at `txid` is in the
+/// canonical chain at `height` and that its memo is
+/// `memo::encode_publication(announcement.digest())`.
+///
+/// Without it an announcement is a document the operator could have written at
+/// any time, including after seeing what it would produce (§100.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PublicationProof {
+    /// The Zcash transaction carrying the announcement's digest in its memo.
+    pub txid: Hash,
+    /// The height it confirmed at. Notice is measured from here, not from what
+    /// the announcement says about itself.
+    pub height: u32,
+}
+
 /// The targets an announcement resolves to, all derived and none chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResolvedClose {
@@ -439,8 +458,36 @@ impl CloseAnnouncement {
         domain_hash(ANNOUNCE_DIGEST_DOMAIN, &self.canonical_bytes())
     }
 
-    /// Check this announcement against its policy and derive the targets.
-    pub fn resolve(&self, policy: &AllocationPolicy) -> Result<ResolvedClose, Error> {
+    /// Check this announcement against its policy and its publication, and
+    /// derive the targets.
+    ///
+    /// `proof` is what makes the notice real. The announcement's own
+    /// `announced_at_zcash_height` is the operator's claim about when it acted;
+    /// the proof is Zcash's. They must agree, and the notice is measured from
+    /// the proof — so an announcement written late and backdated fails here
+    /// rather than passing quietly.
+    pub fn resolve(
+        &self,
+        policy: &AllocationPolicy,
+        proof: &PublicationProof,
+    ) -> Result<ResolvedClose, Error> {
+        // The claim and the chain must say the same thing. Taking the lower of
+        // the two, or ignoring the field, would leave a number in the canonical
+        // bytes that means nothing.
+        if proof.height != self.announced_at_zcash_height {
+            return Err(Error::InvalidTicket(
+                "the announcement claims a different height than the block that carries it",
+            ));
+        }
+        self.resolve_unproven(policy)
+    }
+
+    /// The derivation without the publication check.
+    ///
+    /// Separate and named so that using it is a decision. It is correct for
+    /// building an announcement — there is no proof yet, because it has not
+    /// been published — and wrong for accepting one.
+    pub fn resolve_unproven(&self, policy: &AllocationPolicy) -> Result<ResolvedClose, Error> {
         let rule = policy
             .randomness
             .announced_close
@@ -1900,6 +1947,15 @@ mod announced_close_tests {
         }
     }
 
+    /// A proof that agrees with what the announcement says about itself —
+    /// the honest case. Tests that care about disagreement build their own.
+    fn proof(a: &CloseAnnouncement) -> PublicationProof {
+        PublicationProof {
+            txid: a.digest(),
+            height: a.announced_at_zcash_height,
+        }
+    }
+
     fn announce(p: &AllocationPolicy, at: u32, close: u32) -> CloseAnnouncement {
         CloseAnnouncement {
             policy_digest: p.digest().unwrap(),
@@ -1918,8 +1974,8 @@ mod announced_close_tests {
 
         let three_days = announce(&p, 3_486_737, 3_486_737 + 3 * 1_152);
         let five_days = announce(&p, 3_486_737, 3_486_737 + 5 * 1_152);
-        let a = three_days.resolve(&p).unwrap();
-        let b = five_days.resolve(&p).unwrap();
+        let a = three_days.resolve(&p, &proof(&three_days)).unwrap();
+        let b = five_days.resolve(&p, &proof(&five_days)).unwrap();
 
         // Both legal, and in both the reveal is derived rather than chosen.
         assert_eq!(a.reveal_zcash_height, a.deposit_close_zcash_height + 100);
@@ -1947,11 +2003,11 @@ mod announced_close_tests {
     fn a_close_with_too_little_notice_is_refused() {
         let p = policy();
         let hasty = announce(&p, 3_486_737, 3_486_737 + 10);
-        assert!(hasty.resolve(&p).is_err(), "ten blocks is not notice");
+        assert!(hasty.resolve(&p, &proof(&hasty)).is_err(), "ten blocks is not notice");
         // And a close already in the past is the same failure, not a special
         // case: it gives negative notice.
         let backdated = announce(&p, 3_486_737, 3_486_000);
-        assert!(backdated.resolve(&p).is_err());
+        assert!(backdated.resolve(&p, &proof(&backdated)).is_err());
     }
 
     #[test]
@@ -1960,9 +2016,9 @@ mod announced_close_tests {
         let mut other = policy();
         other.collection_id = [9; 32];
         let a = announce(&p, 3_486_737, 3_486_737 + 3 * 1_152);
-        assert!(a.resolve(&p).is_ok());
+        assert!(a.resolve(&p, &proof(&a)).is_ok());
         assert_eq!(
-            a.resolve(&other),
+            a.resolve(&other, &proof(&a)),
             Err(Error::InvalidTicket("announcement is for another policy"))
         );
     }
@@ -1992,6 +2048,29 @@ mod announced_close_tests {
             ..rule()
         });
         assert!(p.validate().is_err(), "a reveal at the close uses a block that already existed");
+    }
+
+    /// The point of the proof: an announcement written after the fact, claiming
+    /// to have been made earlier so that a short notice looks long, is refused
+    /// by the block that actually carries it.
+    #[test]
+    fn a_backdated_claim_fails_against_the_block_that_carries_it() {
+        let p = policy();
+        // Claims to have been announced a day earlier than it really was.
+        let a = announce(&p, 3_486_737, 3_486_737 + 1_152);
+        let truth = PublicationProof {
+            txid: a.digest(),
+            height: 3_486_737 + 1_000,
+        };
+        assert_eq!(
+            a.resolve(&p, &truth),
+            Err(Error::InvalidTicket(
+                "the announcement claims a different height than the block that carries it"
+            ))
+        );
+        // And with an honest proof the same announcement is fine, so the
+        // refusal is about the disagreement and not about the notice.
+        assert!(a.resolve(&p, &proof(&a)).is_ok());
     }
 
     /// The announcement's digest must cover everything that could change the

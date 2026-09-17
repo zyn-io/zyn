@@ -5451,3 +5451,15 @@ is worse than not doing it.
 | 100.6 | **The honest limit: nothing here proves *when* an announcement was written.** The type enforces every ordering it can see, but a verifier needs the publication timestamped by something outside the operator's control. That is the publication service §64.4 already requires, and the fairness claim is incomplete without it | 🔒 |
 | 100.7 | **`POLICY_VERSION` is now `cave-allocation/v2`.** The canonical bytes changed, so the digests changed; putting the version inside those bytes is what stops a v1 and a v2 digest being confused and keeps an older published commitment meaning what it meant. The two pinned vectors were re-pinned deliberately rather than loosened | ✅ |
 | 100.8 | **Chosen shape for Collection Z: reveal +100 blocks (~2 h), drand +2,400 rounds (~2 h), notice 1,152 blocks (~1 day).** Long enough past the close to be clear of ordinary reorg depth, short enough that buyers are not left waiting on nothing | 🔒 |
+
+## 101. A commitment the operator cannot backdate (17 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 101.1 | **The announcement is stamped onto Zcash, because nothing inside a document can establish its own age.** §100.6 left the fairness claim resting on the operator not having written the announcement late. A `ZYP` memo carrying its digest turns "we announced on the 3rd" into a block height nobody can move | ✅ |
+| 101.2 | **Deliberately the same shape as an anchor**, so the scanner needed one condition changed rather than a new path: tag, version, digest, zero padding — recorded, never credited. It is money only in the sense that a postmark is | ✅ |
+| 101.3 | **`resolve` now takes the proof and refuses when the claim and the chain disagree.** The announcement's own `announced_at_zcash_height` is the operator's account of when they acted; the proof is Zcash's. Notice is measured from the proof, so an announcement written late and backdated to make a short notice look long fails here instead of passing quietly | ✅ |
+| 101.4 | **`resolve_unproven` exists and is named so that using it is a decision.** It is correct while *building* an announcement, which has no proof because it has not been published yet, and wrong for accepting one. An `Option<Proof>` would have made the dangerous case the easy one | 🔒 |
+| 101.5 | **The padding is strict, as it is for anchors.** A memo carrying a digest and something else is not a publication: reading one out of it would let a single transaction be claimed as publishing several different things | ✅ |
+| 101.6 | **The three vault-stamped namespaces are tested against each other.** A deposit read as a publication is money never credited; a publication read as a deposit is worse. `ZYA`, `ZYP` and `ZYC` are asserted mutually exclusive rather than assumed to be | ✅ |
+| 101.7 | **What remains outside the code**: someone must actually broadcast the memo and hand the verifier the txid and height. The engine fetches nothing by design — the same arrangement as the drand and Zcash reveal evidence it already takes | ⏳ |
