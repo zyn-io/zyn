@@ -21,6 +21,7 @@ pub mod replica;
 mod restore;
 pub mod rpc;
 pub mod sale;
+pub mod tickets;
 pub mod settle;
 pub mod treasury;
 pub mod wallet;

@@ -28,6 +28,7 @@ pub const POLICY_VERSION: &str = "cave-allocation/v2";
 pub const RECEIPT_VERSION: &str = "cave-allocation-receipt/v1";
 pub const BATCH_VERSION: &str = "cave-allocation-batch/v1";
 pub const ANNOUNCE_VERSION: &str = "cave-close-announcement/v1";
+pub const TERMS_VERSION: &str = "cave-sale-terms/v1";
 pub const QUICKNET_CHAIN_HASH: Hash =
     hex!("52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971");
 pub const QUICKNET_PUBLIC_KEY: [u8; 96] = hex!(
@@ -38,6 +39,7 @@ const POLICY_DIGEST_DOMAIN: &[u8] = b"cave.policy.digest.v1";
 const RECEIPT_DIGEST_DOMAIN: &[u8] = b"cave.receipt.digest.v1";
 const BATCH_DIGEST_DOMAIN: &[u8] = b"cave.batch.digest.v1";
 const ANNOUNCE_DIGEST_DOMAIN: &[u8] = b"cave.close.announcement.v1";
+const TERMS_DIGEST_DOMAIN: &[u8] = b"cave.sale.terms.v1";
 const MANIFEST_LEAF_DOMAIN: &[u8] = b"cave.manifest.entry.v1";
 const TICKET_ID_DOMAIN: &[u8] = b"cave.ticket.id.v1";
 const TICKET_LEAF_DOMAIN: &[u8] = b"cave.ticket.resolved.v1";
@@ -382,6 +384,123 @@ impl AllocationPolicy {
                 .unwrap_or(0),
             QuantityPolicy::BuyerChooses { maximum, .. } => *maximum,
         }
+    }
+}
+
+/// The whole primary-sale promise, in one commitment (§64.16).
+///
+/// The allocation policy says how items are assigned. It says nothing about
+/// what anything costs, who receives the money, or how much of it reaches the
+/// pool — and those are the parts a buyer is trusting. Left in a web form or a
+/// service environment variable they can be changed between two buyers without
+/// either knowing, which is exactly the shape of the rug-pulls this collection
+/// is trying not to resemble.
+///
+/// So they are committed here, once, before the first deposit, and the digest
+/// is what a ticket references. Anything that could change what a buyer gets
+/// for their money belongs in these bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SaleTerms {
+    /// The allocation policy these terms sit over.
+    pub policy_digest: Hash,
+    /// Repeated from the policy rather than referenced, so the terms can be
+    /// read without it. A mismatch is caught by [`SaleTerms::check`].
+    pub collection_id: Hash,
+    pub manifest_root: Hash,
+    /// Where the money goes. `TREASURY_26460` in production (§83.1).
+    pub treasury: Hash,
+    /// 0 = Zcash mainnet, 1 = Zcash testnet. Named because paying the right
+    /// price on the wrong network is a complete loss and an easy mistake.
+    pub network: u8,
+    /// The three prices, in zatoshi (§64.17).
+    pub entry_price_zatoshi: u64,
+    pub claim_price_zatoshi: u64,
+    pub open_mint_price_zatoshi: u64,
+    /// Confirmations before a deposit counts. Below this a ticket is not a
+    /// ticket, so it is part of the promise rather than an operational knob.
+    pub min_confirmations: u32,
+    /// Blocks after the deposit close during which an allocation may still be
+    /// claimed. An offset rather than a height, because the close itself is
+    /// announced (§100.2) and a fixed claim height would drift out of step.
+    pub claim_window_blocks: u32,
+    /// Basis points of every primary-sale payment retained by the treasury;
+    /// the remainder funds the collection and becomes the floor. 1,000 = 10%
+    /// (§64.17).
+    pub treasury_bps: u16,
+}
+
+impl SaleTerms {
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        put_bytes(&mut out, TERMS_VERSION.as_bytes());
+        out.extend_from_slice(&self.policy_digest);
+        out.extend_from_slice(&self.collection_id);
+        out.extend_from_slice(&self.manifest_root);
+        out.extend_from_slice(&self.treasury);
+        out.push(self.network);
+        put_u64(&mut out, self.entry_price_zatoshi);
+        put_u64(&mut out, self.claim_price_zatoshi);
+        put_u64(&mut out, self.open_mint_price_zatoshi);
+        put_u32(&mut out, self.min_confirmations);
+        put_u32(&mut out, self.claim_window_blocks);
+        put_u32(&mut out, self.treasury_bps as u32);
+        out
+    }
+
+    pub fn digest(&self) -> Hash {
+        domain_hash(TERMS_DIGEST_DOMAIN, &self.canonical_bytes())
+    }
+
+    /// Everything checkable without leaving the process.
+    pub fn check(&self, policy: &AllocationPolicy) -> Result<(), Error> {
+        if self.policy_digest != policy.digest()? {
+            return Err(Error::InvalidPolicy("terms are for another policy"));
+        }
+        // Repeated fields must agree with the policy, or the two documents
+        // describe different sales and a reader has no way to know which won.
+        if self.collection_id != policy.collection_id || self.manifest_root != policy.manifest_root
+        {
+            return Err(Error::InvalidPolicy("terms contradict the policy"));
+        }
+        if self.entry_price_zatoshi != policy.entry_price_zatoshi {
+            return Err(Error::InvalidPolicy("terms price a different entry"));
+        }
+        if self.treasury == [0; 32] {
+            return Err(Error::InvalidPolicy("the zero account is not a treasury"));
+        }
+        if self.network > 1 {
+            return Err(Error::InvalidPolicy("unknown Zcash network"));
+        }
+        if self.entry_price_zatoshi == 0
+            || self.claim_price_zatoshi == 0
+            || self.open_mint_price_zatoshi == 0
+        {
+            return Err(Error::InvalidPolicy("a zero price is not a price"));
+        }
+        // A treasury taking everything leaves nothing behind the items, and
+        // the floor is the thing a buyer is actually trusting.
+        if self.treasury_bps >= 10_000 {
+            return Err(Error::InvalidPolicy(
+                "the treasury cannot take the whole payment; the remainder is the floor",
+            ));
+        }
+        if self.min_confirmations == 0 {
+            return Err(Error::InvalidPolicy(
+                "a deposit with no confirmations can still be reorged away",
+            ));
+        }
+        if self.claim_window_blocks == 0 {
+            return Err(Error::InvalidPolicy("a claim window of zero blocks is no window"));
+        }
+        Ok(())
+    }
+
+    /// What reaches the collection's pool from one payment, and what the
+    /// treasury keeps. Rounding goes to the pool: the floor is what buyers are
+    /// trusting, so a spare zatoshi belongs on their side of the split.
+    pub fn split(&self, paid_zatoshi: u64) -> (u64, u64) {
+        let treasury = paid_zatoshi.saturating_mul(self.treasury_bps as u64) / 10_000;
+        (paid_zatoshi.saturating_sub(treasury), treasury)
     }
 }
 
@@ -1907,7 +2026,7 @@ mod tests {
 mod announced_close_tests {
     use super::*;
 
-    fn rule() -> AnnouncedClose {
+    pub fn rule() -> AnnouncedClose {
         AnnouncedClose {
             // ~2 hours of mainnet blocks: past ordinary reorg depth, and not
             // long enough that buyers are left waiting on nothing.
@@ -1919,7 +2038,7 @@ mod announced_close_tests {
         }
     }
 
-    fn policy() -> AllocationPolicy {
+    pub fn policy() -> AllocationPolicy {
         AllocationPolicy {
             collection_id: [2; 32],
             supply: 4_444,
@@ -2087,6 +2206,111 @@ mod announced_close_tests {
             |a: &mut CloseAnnouncement| a.policy_digest[0] ^= 1,
         ] {
             let mut m = base.clone();
+            mutate(&mut m);
+            assert_ne!(m.digest(), d);
+        }
+    }
+}
+
+#[cfg(test)]
+mod terms_tests {
+    use super::*;
+    use super::announced_close_tests::policy;
+
+    fn terms(p: &AllocationPolicy) -> SaleTerms {
+        SaleTerms {
+            policy_digest: p.digest().unwrap(),
+            collection_id: p.collection_id,
+            manifest_root: p.manifest_root,
+            treasury: [0xa7; 32],
+            network: 0,
+            entry_price_zatoshi: 1_000_000,
+            claim_price_zatoshi: 500_000,
+            open_mint_price_zatoshi: 1_330_000,
+            min_confirmations: 6,
+            claim_window_blocks: 20_000,
+            treasury_bps: 1_000,
+        }
+    }
+
+    #[test]
+    fn terms_bind_to_their_policy_and_refuse_another() {
+        let p = policy();
+        let t = terms(&p);
+        t.check(&p).unwrap();
+        let mut other = policy();
+        other.collection_id = [9; 32];
+        assert!(t.check(&other).is_err());
+    }
+
+    #[test]
+    fn terms_that_contradict_the_policy_are_refused() {
+        let p = policy();
+        let mut t = terms(&p);
+        t.entry_price_zatoshi = 2_000_000;
+        assert!(t.check(&p).is_err(), "two documents, two prices");
+        let mut t = terms(&p);
+        t.manifest_root = [1; 32];
+        assert!(t.check(&p).is_err());
+    }
+
+    /// The split is the floor, so rounding goes to the pool and a treasury
+    /// taking everything is refused outright.
+    #[test]
+    fn the_split_favours_the_pool_and_cannot_take_everything() {
+        let p = policy();
+        let t = terms(&p);
+        let (pool, treasury) = t.split(1_000_000);
+        assert_eq!((pool, treasury), (900_000, 100_000));
+        // A payment that does not divide evenly leaves the remainder behind the
+        // items rather than in the treasury.
+        let (pool, treasury) = t.split(7);
+        assert_eq!((pool, treasury), (7, 0));
+        assert_eq!(pool + treasury, 7, "nothing is created or lost");
+
+        let mut greedy = t;
+        greedy.treasury_bps = 10_000;
+        assert!(greedy.check(&p).is_err());
+    }
+
+    #[test]
+    fn a_zero_price_confirmation_or_window_is_refused() {
+        let p = policy();
+        for mutate in [
+            |t: &mut SaleTerms| t.claim_price_zatoshi = 0,
+            |t: &mut SaleTerms| t.open_mint_price_zatoshi = 0,
+            |t: &mut SaleTerms| t.min_confirmations = 0,
+            |t: &mut SaleTerms| t.claim_window_blocks = 0,
+            |t: &mut SaleTerms| t.treasury = [0; 32],
+            |t: &mut SaleTerms| t.network = 7,
+        ] {
+            let mut m = terms(&p);
+            mutate(&mut m);
+            assert!(m.check(&p).is_err());
+        }
+    }
+
+    /// Every field must move the digest, or something a buyer is trusting
+    /// could be changed after publication without the reference changing.
+    #[test]
+    fn every_field_moves_the_terms_digest() {
+        let p = policy();
+        let base = terms(&p);
+        let d = base.digest();
+        for mutate in [
+            |t: &mut SaleTerms| t.policy_digest[0] ^= 1,
+            |t: &mut SaleTerms| t.collection_id[0] ^= 1,
+            |t: &mut SaleTerms| t.manifest_root[0] ^= 1,
+            |t: &mut SaleTerms| t.treasury[0] ^= 1,
+            |t: &mut SaleTerms| t.network = 1,
+            |t: &mut SaleTerms| t.entry_price_zatoshi += 1,
+            |t: &mut SaleTerms| t.claim_price_zatoshi += 1,
+            |t: &mut SaleTerms| t.open_mint_price_zatoshi += 1,
+            |t: &mut SaleTerms| t.min_confirmations += 1,
+            |t: &mut SaleTerms| t.claim_window_blocks += 1,
+            |t: &mut SaleTerms| t.treasury_bps += 1,
+        ] {
+            let mut m = base;
             mutate(&mut m);
             assert_ne!(m.digest(), d);
         }

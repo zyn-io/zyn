@@ -5463,3 +5463,17 @@ is worse than not doing it.
 | 101.5 | **The padding is strict, as it is for anchors.** A memo carrying a digest and something else is not a publication: reading one out of it would let a single transaction be claimed as publishing several different things | ✅ |
 | 101.6 | **The three vault-stamped namespaces are tested against each other.** A deposit read as a publication is money never credited; a publication read as a deposit is worse. `ZYA`, `ZYP` and `ZYC` are asserted mutually exclusive rather than assumed to be | ✅ |
 | 101.7 | **What remains outside the code**: someone must actually broadcast the memo and hand the verifier the txid and height. The engine fetches nothing by design — the same arrangement as the drand and Zcash reveal evidence it already takes | ⏳ |
+
+## 102. The engine gets a caller (17 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 102.1 | **A ticket is a confirmed Zcash payment, and nothing built one.** `cave-randomness` was complete and tested with zero callers, so a buyer could pay and no ticket existed to allocate over. `zynzapd::tickets` is the bridge: admission checks the amount is exactly the entry price, the confirmations are deep enough, the height is not past the close, and the outpoint is not already admitted | ✅ |
+| 102.2 | **Admission is where the rules bite, so a ticket that passes has nothing left to argue about.** That is what lets allocation stay a pure function over the ledger. A near miss on the price is refused *here*, where it can still be refunded by hand, rather than at allocation where it cannot | 🔒 |
+| 102.3 | **The order depends only on Zcash, never on when this process saw a deposit.** Height, then transaction index, then output index, then ticket id (§64.12). A test feeds the same deposits forwards and backwards and asserts the ledgers are identical, because a stranger replaying the allocation must arrive at the same sequence | ✅ |
+| 102.4 | **The close is passed in, not read from the policy.** Under an announced close the policy does not know it, and a function that quietly admitted everything when the close was unknown would be the worst of both | 🔒 |
+| 102.5 | **`SaleTerms` exists, because a policy says nothing about price, recipient or routing** — and those are what a buyer is trusting. Left in a web form they can change between two buyers without either knowing, which is the shape of the thing this collection is trying not to resemble. Repeated fields are checked against the policy, so two documents cannot describe different sales | ✅ |
+| 102.6 | **Rounding in the split goes to the pool.** The floor is what buyers are trusting, so a spare zatoshi belongs on their side; a treasury taking the whole payment is refused outright | ✅ |
+| 102.7 | **Collection Z's numbers are assembled and printed, never re-decided.** `zyn-cave-terms` repeats what was settled — the draw from 9 Sep, prices from §64.17, the root from §86.3, the close rule from §100.8 — and a test asserts they were transcribed rather than chosen. **`POLICY DIGEST 12da4f1b…`, `TERMS DIGEST 159b454e…`** | ✅ |
+| 102.8 | **It prints and does not broadcast.** Publishing is a deliberate act; this is the thing you read before taking it | 🔒 |
+| 102.9 | **`cavebro.win/deposit` is live** — the first of three days' work to actually reach a user | ✅ |
