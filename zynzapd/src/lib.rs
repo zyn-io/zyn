@@ -6,6 +6,7 @@ pub mod anchor;
 pub mod allocation;
 pub mod app;
 pub mod backing;
+pub mod cave_z;
 pub mod boot;
 pub mod bridge;
 pub mod claim;

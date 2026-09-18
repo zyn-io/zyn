@@ -12,93 +12,12 @@
 //!   zyn-cave-terms                 print the policy and terms, with digests
 //!   zyn-cave-terms announce <H>    the close announcement for close height H
 
-use cave_randomness::{
-    AllocationPolicy, AnnouncedClose, CloseAnnouncement, IdentityPolicy, QuantityPolicy,
-    RandomnessPlan, SaleTerms, WeightedOutcome, QUICKNET_CHAIN_HASH,
-};
-use swapvm::types::TREASURY_26460;
-use zyn_vm::derive::ADDRESS_SCOPE_V1;
 
-const SYMBOL: &str = "CAVEZ";
-const SUPPLY: u32 = 4_444;
-
-/// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3). Pinned
-/// rather than recomputed: the terms must commit to a root someone checked,
-/// not to whatever a rebuild happens to produce today.
-const MANIFEST_ROOT: &str = "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19";
-
-/// §64.17, frozen: entry / claim / open mint, in zatoshi.
-const ENTRY: u64 = 1_000_000; // 0.01 ZEC
-const CLAIM: u64 = 500_000; // 0.005 ZEC
-const OPEN_MINT: u64 = 1_330_000; // 0.0133 ZEC
-/// 10% to the treasury; the remaining 90% funds the collection and is the floor.
-const TREASURY_BPS: u16 = 1_000;
-/// Six confirmations before a deposit is a ticket.
-const CONFIRMATIONS: u32 = 6;
-/// A claim may be made for about a fortnight of mainnet blocks after the close.
-const CLAIM_WINDOW: u32 = 16_128;
+use cave_randomness::CloseAnnouncement;
+use zynzapd::cave_z::{policy, terms};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
-}
-
-fn unhex32(s: &str) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    for (i, b) in out.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex");
-    }
-    out
-}
-
-pub fn policy() -> AllocationPolicy {
-    AllocationPolicy {
-        collection_id: zyn_vm::collection_address(ADDRESS_SCOPE_V1, &TREASURY_26460, SYMBOL.as_bytes()),
-        supply: SUPPLY,
-        entry_price_zatoshi: ENTRY,
-        // Announced, not committed: how long to run is judged by watching
-        // demand, and the reveal is derived from whatever is announced so the
-        // timing stays a decision and the outcome does not (§100.2).
-        deposit_close_zcash_height: 0,
-        // Decided 9 Sep: one ticket draws 1, 2 or 3 items.
-        quantity: QuantityPolicy::Weighted {
-            outcomes: vec![
-                WeightedOutcome { items: 1, weight: 80 },
-                WeightedOutcome { items: 2, weight: 19 },
-                WeightedOutcome { items: 3, weight: 1 },
-            ],
-        },
-        identity: IdentityPolicy::ConcealedShuffle,
-        manifest_root: unhex32(MANIFEST_ROOT),
-        randomness: RandomnessPlan {
-            drand_chain_hash: QUICKNET_CHAIN_HASH,
-            // A weighted draw resolves at a round this far past the ticket's
-            // own, so it cannot be known when the ticket is made.
-            ticket_round_delay: 10,
-            reveal_drand_round: None,
-            reveal_zcash_height: None,
-            announced_close: Some(AnnouncedClose {
-                reveal_offset_blocks: 100,   // ~2 h past the close
-                reveal_offset_rounds: 2_400, // ~2 h of 3 s drand rounds
-                min_notice_blocks: 1_152,    // ~1 day of notice
-            }),
-        },
-    }
-}
-
-pub fn terms(p: &AllocationPolicy) -> SaleTerms {
-    SaleTerms {
-        policy_digest: p.digest().expect("the policy must validate"),
-        collection_id: p.collection_id,
-        manifest_root: p.manifest_root,
-        treasury: TREASURY_26460,
-        network: 0, // Zcash mainnet
-        entry_price_zatoshi: ENTRY,
-        claim_price_zatoshi: CLAIM,
-        open_mint_price_zatoshi: OPEN_MINT,
-        min_confirmations: CONFIRMATIONS,
-        claim_window_blocks: CLAIM_WINDOW,
-        treasury_bps: TREASURY_BPS,
-    }
 }
 
 fn main() {
@@ -143,7 +62,7 @@ fn main() {
 
     println!("Cave Collection Z — sale policy and terms");
     println!();
-    println!("collection {}   {}", SYMBOL, hex(&p.collection_id));
+    println!("collection CAVEZ   {}", hex(&p.collection_id));
     println!("supply                {}", p.supply);
     println!("manifest root         {}", hex(&p.manifest_root));
     println!("quantity              weighted 1:80  2:19  3:1");
@@ -182,7 +101,10 @@ mod tests {
         let p = policy();
         p.validate().expect("valid");
         assert_eq!(hex(&p.collection_id), "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e");
-        assert_eq!(hex(&p.manifest_root), MANIFEST_ROOT);
+        assert_eq!(
+            hex(&p.manifest_root),
+            "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19"
+        );
         assert_eq!(p.supply, 4_444);
         // The draw recorded on 9 Sep, and the reservation it forces.
         assert_eq!(p.maximum_receipt(), 3);
@@ -194,7 +116,7 @@ mod tests {
             "§64.17, frozen"
         );
         assert_eq!(t.split(1_000_000), (900_000, 100_000), "90 to the pool, 10 to the treasury");
-        assert_eq!(t.treasury, TREASURY_26460);
+        assert_eq!(t.treasury, swapvm::types::TREASURY_26460);
     }
 
     /// An announced close means the policy must *not* carry reveal targets;
