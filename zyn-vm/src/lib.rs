@@ -36,6 +36,7 @@ pub mod eip712;
 pub mod fixed;
 pub mod manifest;
 pub mod object;
+pub mod program;
 pub mod read;
 pub mod session;
 pub mod spec;

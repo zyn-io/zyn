@@ -1,0 +1,165 @@
+//! What a transaction says it is.
+//!
+//! A spend does not merely move objects; it moves them *under some rule*. A
+//! private transfer conserves value. A swap conserves it against a pool's
+//! invariant. Adding liquidity conserves it into a position. Same objects,
+//! same nullifiers, different law — and something has to name which law the
+//! transaction was meant to obey, or the verifier is guessing.
+//!
+//! ```text
+//!   Transaction {
+//!       inputs · outputs · nullifiers · public state
+//!       program_id    ← this
+//!       proof
+//!   }
+//! ```
+//!
+//! # Why this field exists before anything needs it
+//!
+//! Today every one of these maps to a fixed rule the VM enforces directly.
+//! Later some of them map to a proof that an arbitrary program ran (DECISIONS
+//! §131). The difference between those two worlds is entirely on the verifier's
+//! side — the *transaction* looks identical — but only if the field is there
+//! from the start. Added afterwards it is a `STATE_VERSION` bump and a
+//! coordinated replacement of every node, which §71.34 is explicit about.
+//!
+//! One field now, while `objectvm` exists only in tests, is the whole cost.
+//!
+//! # Why a fixed id can never collide with a program hash
+//!
+//! Both are 32 bytes, and a caller who could make a zkVM program whose hash
+//! equals [`private_transfer`] would have a program the VM executes under the
+//! transfer rule without checking it. The two are therefore derived under
+//! **different domains**: a named rule hashes its name, a program hashes its
+//! code, and no input to one is an input to the other.
+
+use crate::commit::{Encoder, Hash};
+
+/// Which rule a transaction claims to obey.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+pub struct ProgramId(pub Hash);
+
+/// Domain for the rules the VM implements itself.
+const NAMED: &[u8] = b"zyn.program.named.v1";
+/// Domain for a program named by its code. Distinct from [`NAMED`] so that no
+/// program hash can ever equal a named rule's id.
+const CODE: &[u8] = b"zyn.program.code.v1";
+
+fn named(name: &[u8]) -> ProgramId {
+    let mut e = Encoder::new();
+    e.bytes(NAMED).u32(name.len() as u32).bytes(name);
+    ProgramId(e.leaf())
+}
+
+/// Consume objects and create others, conserving value. The rule behind
+/// transfer, split and merge, which are the same transaction seen three ways.
+pub fn private_transfer() -> ProgramId {
+    named(b"private-transfer")
+}
+
+/// Trade against a pool, conserving value under the pool's invariant.
+pub fn amm_swap() -> ProgramId {
+    named(b"amm-swap")
+}
+
+/// Convert objects into a liquidity position.
+pub fn add_liquidity() -> ProgramId {
+    named(b"add-liquidity")
+}
+
+/// Turn a position back into objects.
+pub fn remove_liquidity() -> ProgramId {
+    named(b"remove-liquidity")
+}
+
+/// Leave for Zcash: consume objects and authorise a vault payout.
+pub fn withdraw() -> ProgramId {
+    named(b"withdraw")
+}
+
+/// A program named by its code rather than by a rule the VM knows.
+///
+/// `code` is the hash of the program as shipped — an rv32im ELF, per §2.5's
+/// Stage 1. Nothing accepts one of these yet, and teaching a VM to accept them
+/// is the deliberate act that opens permissionless deployment. It should look
+/// like a decision in a diff, not like a default.
+pub fn of_code(code: &Hash) -> ProgramId {
+    let mut e = Encoder::new();
+    e.bytes(CODE).bytes(code);
+    ProgramId(e.leaf())
+}
+
+/// Whether this is a rule the VM implements directly.
+///
+/// A VM should refuse anything else rather than ignore it: an unknown program
+/// id on a transaction that otherwise verifies is a transaction obeying a rule
+/// nobody checked.
+pub fn is_named(id: &ProgramId) -> bool {
+    [
+        private_transfer(),
+        amm_swap(),
+        add_liquidity(),
+        remove_liquidity(),
+        withdraw(),
+    ]
+    .contains(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinct rules must be distinct ids, or a swap could be presented as a
+    /// transfer and checked under the wrong law.
+    #[test]
+    fn every_named_rule_has_its_own_id() {
+        let all = [
+            private_transfer(),
+            amm_swap(),
+            add_liquidity(),
+            remove_liquidity(),
+            withdraw(),
+        ];
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                assert_eq!(i == j, a == b, "ids {i} and {j} must differ");
+            }
+        }
+    }
+
+    /// The ids are a wire format: a transaction signed today names a rule, and
+    /// that name may not drift under it.
+    #[test]
+    fn the_ids_are_stable() {
+        assert_eq!(private_transfer(), private_transfer());
+        assert_eq!(private_transfer(), named(b"private-transfer"));
+        assert_ne!(private_transfer(), named(b"private-transfer "));
+    }
+
+    /// The collision that would matter: a program whose code hashed to a named
+    /// rule's id would be run under that rule without being checked. Separate
+    /// domains are what make it impossible rather than merely unlikely.
+    #[test]
+    fn a_program_hash_can_never_equal_a_named_rule() {
+        // Even handing `of_code` the exact preimage the named domain uses.
+        let mut e = Encoder::new();
+        e.bytes(NAMED)
+            .u32(b"private-transfer".len() as u32)
+            .bytes(b"private-transfer");
+        let same_preimage: Hash = e.leaf();
+
+        assert_ne!(of_code(&same_preimage), private_transfer());
+        assert!(!is_named(&of_code(&same_preimage)));
+        assert!(!is_named(&of_code(&[0u8; 32])));
+    }
+
+    /// A VM must be able to tell "a rule I implement" from "a program I have
+    /// not been taught", so that accepting the second is a change someone made.
+    #[test]
+    fn an_unknown_program_is_not_mistaken_for_a_named_rule() {
+        assert!(is_named(&private_transfer()));
+        assert!(is_named(&withdraw()));
+        assert!(!is_named(&ProgramId([0u8; 32])));
+        assert!(!is_named(&ProgramId([0xFF; 32])));
+    }
+}

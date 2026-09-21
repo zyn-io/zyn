@@ -48,6 +48,7 @@ use std::collections::BTreeMap;
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
 use zyn_vm::object::{commitment, Commitments, Note, Nullifiers, ObjectError};
+use zyn_vm::program::{self, ProgramId};
 use zyn_vm::read::Decoder;
 use zyn_vm::spec::{AccountId, MicrochainVm};
 use zyn_vm::{Checkpoint, Fixed};
@@ -75,9 +76,14 @@ pub enum Op {
         owner: AccountId,
         nonce: Hash,
     },
-    /// Consume objects and create their successors.
+    /// Consume objects and create their successors, under a named rule.
     Spend {
         spender: AccountId,
+        /// Which law this transaction claims to obey (DECISIONS §131.4).
+        /// Today the VM implements the rule itself; later this may name a
+        /// program proved elsewhere, and the transaction will not change
+        /// shape when it does.
+        program: ProgramId,
         /// `(commitment, nullifier)` for each object being consumed.
         inputs: Vec<(Hash, Hash)>,
         outputs: Vec<Note>,
@@ -168,9 +174,20 @@ impl ObjectVm {
     fn apply_spend(
         &mut self,
         spender: &AccountId,
+        program: &ProgramId,
         inputs: &[(Hash, Hash)],
         outputs: &[Note],
     ) -> Vec<Receipt> {
+        // An unknown rule is refused rather than ignored: a transaction that
+        // otherwise verifies but names a law nobody checked is worse than one
+        // that fails. Teaching this VM to accept a program hash is the
+        // deliberate act that opens permissionless deployment (§131.4).
+        if !program::is_named(program) {
+            return vec![Receipt::Refused("unknown program")];
+        }
+        if *program != program::private_transfer() {
+            return vec![Receipt::Refused("this VM implements only private transfer")];
+        }
         if inputs.is_empty() || outputs.is_empty() {
             return vec![Receipt::Refused("a spend consumes and creates")];
         }
@@ -347,9 +364,10 @@ impl MicrochainVm for ObjectVm {
             }
             Op::Spend {
                 spender,
+                program,
                 inputs,
                 outputs,
-            } => self.apply_spend(spender, inputs, outputs),
+            } => self.apply_spend(spender, program, inputs, outputs),
             Op::Seal => {
                 let state_root = self.state_root();
                 let cp = Checkpoint {
@@ -441,11 +459,13 @@ impl MicrochainVm for ObjectVm {
             }
             Op::Spend {
                 spender,
+                program,
                 inputs,
                 outputs,
             } => {
                 e.u8(2)
                     .bytes(spender)
+                    .bytes(&program.0)
                     .u32(inputs.len() as u32)
                     .u32(outputs.len() as u32);
                 for (c, n) in inputs {
@@ -476,6 +496,7 @@ impl MicrochainVm for ObjectVm {
             }),
             2 => {
                 let spender = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
                 let ins = d.u32().ok()? as usize;
                 let outs = d.u32().ok()? as usize;
                 let mut inputs = Vec::with_capacity(ins.min(1024));
@@ -493,6 +514,7 @@ impl MicrochainVm for ObjectVm {
                 }
                 Some(Op::Spend {
                     spender,
+                    program,
                     inputs,
                     outputs,
                 })

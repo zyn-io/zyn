@@ -11,6 +11,7 @@
 use objectvm::{Limits, ObjectVm, Op, Receipt};
 use zyn_vm::conformance::{check, Fixture};
 use zyn_vm::object::{commitment, nullifier, Note};
+use zyn_vm::program;
 use zyn_vm::spec::{AccountId, MicrochainVm, SECTION_ACCOUNTS};
 use zyn_vm::Fixed;
 
@@ -66,6 +67,7 @@ fn an_object_is_minted_spent_and_conserved() {
         2,
         &Op::Spend {
             spender: ALICE,
+            program: program::private_transfer(),
             inputs: vec![(input, n)],
             outputs: vec![to_bob, change],
         },
@@ -94,6 +96,7 @@ fn the_same_object_cannot_be_spent_twice() {
     let n = nullifier(&ALICE_KEY, &input);
     let spend = Op::Spend {
         spender: ALICE,
+        program: program::private_transfer(),
         inputs: vec![(input, n)],
         outputs: vec![note(17, BOB, 9)],
     };
@@ -115,6 +118,7 @@ fn a_spend_cannot_mint_value() {
         2,
         &Op::Spend {
             spender: ALICE,
+            program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
             outputs: vec![note(18, ALICE, 4)], // one more than existed
         },
@@ -140,6 +144,7 @@ fn a_refused_spend_moves_no_committed_leaf() {
         2,
         &Op::Spend {
             spender: BOB,
+            program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
             outputs: vec![note(17, BOB, 5)],
         },
@@ -195,6 +200,7 @@ fn a_published_nullifier_does_not_name_its_commitment() {
         2,
         &Op::Spend {
             spender: ALICE,
+            program: program::private_transfer(),
             inputs: vec![(input, n)],
             outputs: vec![note(17, BOB, 6)],
         },
@@ -225,12 +231,14 @@ fn objectvm_satisfies_the_conformance_suite() {
         state: vm,
         accepted: Op::Spend {
             spender: ALICE,
+            program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
             outputs: vec![note(5, BOB, 7), note(12, ALICE, 8)],
         },
         // Bob spending Alice's object: refused, and must move nothing.
         rejected: Op::Spend {
             spender: BOB,
+            program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
             outputs: vec![note(17, BOB, 10)],
         },
@@ -246,4 +254,73 @@ fn objectvm_satisfies_the_conformance_suite() {
         violations.is_empty(),
         "conformance violations: {violations:#?}"
     );
+}
+
+/// The field is only worth carrying if an unknown value is refused. A
+/// transaction that otherwise verifies but names a rule nobody checked is
+/// worse than one that fails — it is a spend that obeyed no law at all.
+#[test]
+fn a_transaction_naming_an_unknown_program_is_refused() {
+    let (mut vm, input) = funded();
+    let before = vm.commitments.root();
+
+    let r = vm.apply(
+        2,
+        &Op::Spend {
+            spender: ALICE,
+            program: zyn_vm::program::ProgramId([0x5A; 32]),
+            inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
+            outputs: vec![note(17, BOB, 20)],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("unknown program"));
+    assert_eq!(vm.commitments.root(), before, "and nothing moved");
+}
+
+/// A *named* rule this VM does not implement is refused too. The distinction
+/// matters: "I have never heard of this" and "I know what that is and do not
+/// do it" are different failures, and only the second is a VM that could be
+/// taught.
+#[test]
+fn a_named_rule_this_vm_does_not_implement_is_refused() {
+    let (mut vm, input) = funded();
+    let r = vm.apply(
+        2,
+        &Op::Spend {
+            spender: ALICE,
+            program: zyn_vm::program::amm_swap(),
+            inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
+            outputs: vec![note(17, BOB, 21)],
+        },
+    );
+    assert_eq!(
+        r[0],
+        Receipt::Refused("this VM implements only private transfer")
+    );
+}
+
+/// The id is part of the wire format, not a local field. If it did not survive
+/// encoding, a replica would replay the transaction under whatever rule it
+/// assumed — which is the failure the field exists to prevent.
+#[test]
+fn the_program_id_survives_the_wire() {
+    let spend = Op::Spend {
+        spender: ALICE,
+        program: program::private_transfer(),
+        inputs: vec![([1u8; 32], [2u8; 32])],
+        outputs: vec![note(5, BOB, 22)],
+    };
+    let bytes = ObjectVm::encode_intent(&spend);
+    let mut d = zyn_vm::read::Decoder::new(&bytes);
+    assert_eq!(ObjectVm::decode_intent(&mut d), Some(spend));
+
+    // And a different rule is a different encoding, so one cannot be replayed
+    // as the other.
+    let swapish = Op::Spend {
+        spender: ALICE,
+        program: program::amm_swap(),
+        inputs: vec![([1u8; 32], [2u8; 32])],
+        outputs: vec![note(5, BOB, 22)],
+    };
+    assert_ne!(ObjectVm::encode_intent(&swapish), bytes);
 }
