@@ -43,11 +43,12 @@
 //! when there is no amount left to sum — which is the argument for doing the
 //! container change and the hiding change as two steps rather than one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
+use zyn_vm::note_enc::EncryptedNote;
 use zyn_vm::object::{commitment, Commitments, Note, Nullifiers, ObjectError};
 use zyn_vm::program::{self, ProgramId};
 use zyn_vm::read::Decoder;
@@ -89,6 +90,25 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         outputs: Vec<Note>,
     },
+    /// ZEC confirmed in the vault becomes an object for its depositor.
+    ///
+    /// The one rule that creates value rather than moving it, and the only
+    /// one carrying an `external_ref`: a backing signer decrypts that Zcash
+    /// transaction, sums what it actually paid the vault, and refuses if it
+    /// is less than `amount` (§130.13). That check is why the amount is in
+    /// the clear here and why tier 3 cannot simply hide it.
+    Deposit {
+        program: ProgramId,
+        asset: Address,
+        amount: Fixed,
+        owner: AccountId,
+        nonce: Hash,
+        /// How the depositor finds the object we just made for them. Without
+        /// it the note exists and is unspendable (§133.6).
+        enc: EncryptedNote,
+        /// The Zcash txid this is backed by.
+        external_ref: Hash,
+    },
     /// Encumber an object against a price. It does not move.
     PlaceOffer {
         seller: AccountId,
@@ -125,6 +145,7 @@ pub enum Op {
 pub enum Receipt {
     Minted { commitment: Hash, position: u64 },
     Spent { spent: Vec<Hash>, created: Vec<Hash> },
+    Deposited { commitment: Hash, position: u64 },
     Listed { item: Hash },
     Delisted { item: Hash },
     Taken { item: Hash, created: Vec<Hash> },
@@ -173,6 +194,9 @@ pub struct ObjectVm {
     pub live: BTreeMap<Hash, Live>,
     /// Issued supply per asset, the quantity conservation is checked against.
     pub issued: BTreeMap<Address, Fixed>,
+    /// Zcash transactions already credited. One deposit, one object: without
+    /// this, replaying the same intent mints the same ZEC twice.
+    pub deposits: BTreeSet<Hash>,
     /// Encumbered commitment → its terms. Public, and deliberately so: a
     /// listing nobody can see is not a listing (§132.4). It names the object,
     /// never the owner.
@@ -201,6 +225,13 @@ impl ObjectVm {
         e.bytes(b"objectvm.supply.v1").u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        // Credited deposits belong in the root, not merely in memory: a
+        // verifier replaying the chain has to reach the same conclusion about
+        // which Zcash transactions have already been spent against.
+        e.u32(self.deposits.len() as u32);
+        for r in &self.deposits {
+            e.bytes(r);
         }
         e.leaf()
     }
@@ -510,6 +541,7 @@ impl MicrochainVm for ObjectVm {
             live: BTreeMap::new(),
             issued: BTreeMap::new(),
             offers: BTreeMap::new(),
+            deposits: BTreeSet::new(),
         }
     }
 
@@ -577,6 +609,57 @@ impl MicrochainVm for ObjectVm {
                 inputs,
                 outputs,
             } => self.apply_spend(spender, program, inputs, outputs),
+            Op::Deposit {
+                program,
+                asset,
+                amount,
+                owner,
+                nonce,
+                enc,
+                external_ref,
+            } => {
+                if *program != program::deposit() {
+                    return vec![Receipt::Refused("wrong program for a deposit")];
+                }
+                if *external_ref == [0u8; 32] {
+                    return vec![Receipt::Refused("a deposit names the transaction behind it")];
+                }
+                // A deposit nobody can find is a deposit nobody can spend. The
+                // VM cannot check that the ciphertext opens to this note — it
+                // holds no viewing key — but it can refuse an absent one.
+                if enc.ciphertext.is_empty() {
+                    return vec![Receipt::Refused("a deposit needs an encrypted note")];
+                }
+                if self.deposits.contains(external_ref) {
+                    return vec![Receipt::Refused("that deposit was already credited")];
+                }
+                let note = Note {
+                    asset: *asset,
+                    amount: *amount,
+                    owner: *owner,
+                    nonce: *nonce,
+                };
+                let c = match commitment(&note) {
+                    Ok(c) => c,
+                    Err(_) => return vec![Receipt::Refused("a deposit needs a nonce and a value")],
+                };
+                if self.live.contains_key(&c) {
+                    return vec![Receipt::Refused("that object already exists")];
+                }
+                let supply = self.issued.entry(*asset).or_insert(Fixed::ZERO);
+                *supply = match supply.0.checked_add(amount.0) {
+                    Some(v) => Fixed(v),
+                    None => return vec![Receipt::Refused("supply overflow")],
+                };
+                let position = self.commitments.append(c) as u64;
+                self.live.insert(c, note);
+                self.deposits.insert(*external_ref);
+                self.accounts.entry(*owner).or_insert(0);
+                vec![Receipt::Deposited {
+                    commitment: c,
+                    position,
+                }]
+            }
             Op::PlaceOffer {
                 seller,
                 program,
@@ -804,6 +887,26 @@ impl MicrochainVm for ObjectVm {
                         .bytes(&o.nonce);
                 }
             }
+            Op::Deposit {
+                program,
+                asset,
+                amount,
+                owner,
+                nonce,
+                enc,
+                external_ref,
+            } => {
+                e.u8(6)
+                    .bytes(&program.0)
+                    .bytes(asset)
+                    .fixed(*amount)
+                    .bytes(owner)
+                    .bytes(nonce)
+                    .bytes(external_ref)
+                    .bytes(&enc.epk)
+                    .u32(enc.ciphertext.len() as u32)
+                    .bytes(&enc.ciphertext);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -887,6 +990,26 @@ impl MicrochainVm for ObjectVm {
                     outputs,
                 })
             }
+            6 => {
+                let program = ProgramId(d.hash().ok()?);
+                let asset = d.hash().ok()?;
+                let amount = d.fixed().ok()?;
+                let owner = d.account().ok()?;
+                let nonce = d.hash().ok()?;
+                let external_ref = d.hash().ok()?;
+                let epk = d.hash().ok()?;
+                let n = d.u32().ok()? as usize;
+                let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                Some(Op::Deposit {
+                    program,
+                    asset,
+                    amount,
+                    owner,
+                    nonce,
+                    enc: EncryptedNote { epk, ciphertext },
+                    external_ref,
+                })
+            }
             _ => None,
         }
     }
@@ -924,6 +1047,10 @@ impl MicrochainVm for ObjectVm {
         e.u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        e.u32(self.deposits.len() as u32);
+        for r in &self.deposits {
+            e.bytes(r);
         }
         e.u32(self.offers.len() as u32);
         for (item, o) in &self.offers {
@@ -978,6 +1105,10 @@ impl MicrochainVm for ObjectVm {
         for _ in 0..d.u32().ok()? {
             issued.insert(d.hash().ok()?, d.fixed().ok()?);
         }
+        let mut deposits = BTreeSet::new();
+        for _ in 0..d.u32().ok()? {
+            deposits.insert(d.hash().ok()?);
+        }
         let mut offers = BTreeMap::new();
         for _ in 0..d.u32().ok()? {
             let item = d.hash().ok()?;
@@ -1005,6 +1136,7 @@ impl MicrochainVm for ObjectVm {
             live,
             issued,
             offers,
+            deposits,
         })
     }
 

@@ -550,3 +550,135 @@ fn a_stranger_cannot_cancel_someone_elses_listing() {
     assert_eq!(r[0], Receipt::Refused("not the seller's listing"));
     assert!(vm.offers.contains_key(&listed));
 }
+
+// ---------------------------------------------------------------- deposits
+
+use zyn_vm::note_enc::{open, seal, viewing_public, EncryptedNote, StaticSecret};
+
+const TXID: [u8; 32] = [0xD1; 32];
+
+/// What the sequencer attaches so a depositor can find what was made for them.
+fn sealed_for(to: &StaticSecret, eph: u8, note: &Note) -> EncryptedNote {
+    let mut plain = Vec::new();
+    plain.extend_from_slice(&note.asset);
+    plain.extend_from_slice(&note.amount.0.to_be_bytes());
+    plain.extend_from_slice(&note.nonce);
+    seal(&viewing_public(to), StaticSecret::from([eph; 32]), &plain).unwrap()
+}
+
+fn deposit_of(amount: i64, owner: AccountId, nonce: u8, to: &StaticSecret, txid: [u8; 32]) -> Op {
+    let note = Note { asset: ZEC, amount: Fixed::whole(amount), owner, nonce: [nonce; 32] };
+    Op::Deposit {
+        program: program::deposit(),
+        asset: ZEC,
+        amount: Fixed::whole(amount),
+        owner,
+        nonce: [nonce; 32],
+        enc: sealed_for(to, nonce, &note),
+        external_ref: txid,
+    }
+}
+
+/// The whole point of the deposit path: ZEC arrives, an object exists, and
+/// the depositor can *find* it — which is the part that does not happen by
+/// itself on an object ledger.
+#[test]
+fn a_deposit_creates_an_object_its_owner_can_find() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let alice_view = StaticSecret::from([0x0A; 32]);
+
+    let d = deposit_of(17, ALICE, 0x31, &alice_view, TXID);
+    let enc = match &d {
+        Op::Deposit { enc, .. } => enc.clone(),
+        _ => unreachable!(),
+    };
+    let r = vm.apply(1, &d);
+    let c = match &r[0] {
+        Receipt::Deposited { commitment, .. } => *commitment,
+        o => panic!("deposit refused: {o:?}"),
+    };
+    assert_eq!(vm.conserved(), Ok(()));
+    assert!(vm.live.contains_key(&c));
+
+    // Alice scans the epoch's outputs and opens the one that is hers.
+    let plain = open(&alice_view, &enc).expect("the depositor must be able to open it");
+    assert_eq!(&plain[..32], &ZEC, "and learn which asset");
+    assert_eq!(&plain[48..80], &[0x31u8; 32], "and the nonce she needs to spend it");
+    assert_eq!(plain.len(), 80, "asset(32) + amount(16) + nonce(32)");
+
+    // A stranger scanning the same output learns nothing.
+    assert!(open(&StaticSecret::from([0xBB; 32]), &enc).is_err());
+}
+
+/// One Zcash transaction, one object. Without this the same intent replayed
+/// mints the same ZEC twice — which is the only way an object ledger can
+/// inflate against its backing.
+#[test]
+fn the_same_zcash_transaction_cannot_be_credited_twice() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([0x0A; 32]);
+
+    assert!(matches!(
+        vm.apply(1, &deposit_of(17, ALICE, 0x32, &view, TXID))[0],
+        Receipt::Deposited { .. }
+    ));
+    // Same txid, different nonce, different owner — still refused.
+    let r = vm.apply(2, &deposit_of(17, BOB, 0x33, &view, TXID));
+    assert_eq!(r[0], Receipt::Refused("that deposit was already credited"));
+    assert_eq!(vm.issued[&ZEC], Fixed::whole(17), "supply did not move");
+    assert_eq!(vm.conserved(), Ok(()));
+}
+
+/// A deposit with no ciphertext is an object nobody can spend. The VM cannot
+/// check that the ciphertext *opens* — it holds no viewing key — but it can
+/// refuse an absent one.
+#[test]
+fn a_deposit_without_an_encrypted_note_is_refused() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let r = vm.apply(
+        1,
+        &Op::Deposit {
+            program: program::deposit(),
+            asset: ZEC,
+            amount: Fixed::whole(5),
+            owner: ALICE,
+            nonce: [0x34; 32],
+            enc: EncryptedNote { epk: [0u8; 32], ciphertext: Vec::new() },
+            external_ref: TXID,
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("a deposit needs an encrypted note"));
+}
+
+/// §130.13: the backing signers compare this amount against what the named
+/// Zcash transaction actually paid the vault. Both halves must be in the
+/// journal for that check to have two sides.
+#[test]
+fn a_deposit_names_the_transaction_behind_it() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([0x0A; 32]);
+    let mut d = deposit_of(9, ALICE, 0x35, &view, [0u8; 32]);
+    if let Op::Deposit { external_ref, .. } = &mut d {
+        *external_ref = [0u8; 32];
+    }
+    assert_eq!(
+        vm.apply(1, &d)[0],
+        Receipt::Refused("a deposit names the transaction behind it")
+    );
+}
+
+/// The ciphertext rides inside the intent, so `intent_acc` commits it and a
+/// sequencer that withheld one would be publishing a root nobody can rebuild.
+#[test]
+fn the_encrypted_note_survives_the_wire_and_is_committed() {
+    let view = StaticSecret::from([0x0A; 32]);
+    let d = deposit_of(4, ALICE, 0x36, &view, TXID);
+    let bytes = ObjectVm::encode_intent(&d);
+    let mut dec = zyn_vm::read::Decoder::new(&bytes);
+    assert_eq!(ObjectVm::decode_intent(&mut dec), Some(d.clone()));
+
+    // A different ciphertext is a different intent, so it cannot be swapped
+    // after the fact without changing the accumulator.
+    let other = deposit_of(4, ALICE, 0x37, &view, TXID);
+    assert_ne!(ObjectVm::encode_intent(&other), bytes);
+}

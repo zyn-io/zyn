@@ -77,6 +77,13 @@ pub fn withdraw() -> ProgramId {
     named(b"withdraw")
 }
 
+/// Create an object against ZEC confirmed in the vault. The one rule that
+/// makes value rather than moving it, which is why it names an external
+/// reference the backing signers can check (DECISIONS §130.13).
+pub fn deposit() -> ProgramId {
+    named(b"deposit")
+}
+
 /// Encumber an object against a price, without moving it (DECISIONS §132.1).
 pub fn place_offer() -> ProgramId {
     named(b"place-offer")
@@ -121,6 +128,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         place_offer(),
         cancel_offer(),
         take_offer(),
+        deposit(),
     ]
     .contains(id)
 }
@@ -142,6 +150,7 @@ mod tests {
             place_offer(),
             cancel_offer(),
             take_offer(),
+            deposit(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

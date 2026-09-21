@@ -40,7 +40,8 @@ use alloc::vec::Vec;
 
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use x25519_dalek::{PublicKey, StaticSecret};
+pub use x25519_dalek::StaticSecret;
+use x25519_dalek::PublicKey;
 
 use crate::commit::{Encoder, Hash};
 
