@@ -2572,6 +2572,15 @@ exercised against money.
   /var/lib/zyn-object/*; systemctl start zyn-object-node`. Wallets that had
   scanned it will report zero afterwards, correctly, because the chain they
   scanned no longer exists.
+- **A browser GET on `/object` answers with the chain's status** (22 Sep). It
+  used to return nginx's raw `405 Not Allowed` page, which is what anybody
+  clicking a link in a post or a chat would see — a working endpoint that
+  reads as broken. nginx now rewrites a GET to an `internal` location that
+  performs the `zyn_status` call on the reader's behalf (`proxy_method POST`
+  + `proxy_set_body`). `POST` is untouched, and `/object-status` returns 404
+  if requested directly. Config backup at `/root/zyn-rpc.bak.getstatus`.
+  `/` and `/testnet` still 405 on GET, deliberately: the mainnet sequencer's
+  surface is not widened to make a link prettier.
 - **Rate limiting is shared** with the other two routes (`limit_req zone=zynrpc
   burst=20`). Hammering `/object` in a loop returns nothing and looks like an
   outage; space the requests before concluding anything is broken.
