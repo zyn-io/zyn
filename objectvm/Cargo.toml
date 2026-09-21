@@ -8,3 +8,4 @@ edition = "2021"
 # devnet chain and is free to break.
 [dependencies]
 zyn-vm = { path = "../zyn-vm" }
+zyn = { path = "../zyn" }
