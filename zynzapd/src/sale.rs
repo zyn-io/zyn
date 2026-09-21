@@ -28,8 +28,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use swapvm::fixed::Fixed;
-use swapvm::types::AccountId;
+// Straight from zyn-vm rather than through swapvm, which only re-exported
+// them: `swapvm::fixed::Fixed` *is* `zyn_vm::fixed::Fixed` and both
+// `AccountId`s are `[u8; 32]`. Going through the VM crate made the sale look
+// bound to one application when it never was — and Cave now mints on
+// objectvm, not swapvm (DECISIONS §133.1).
+use zyn_vm::fixed::Fixed;
+use zyn_vm::spec::AccountId;
 
 pub use crate::claim::{hash_code, CodeHash};
 
