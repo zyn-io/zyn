@@ -266,3 +266,171 @@ fn a_deposit_for_an_unregistered_holder_stays_pending_across_polls() {
     assert!(matches!(r[0], Receipt::Deposited { .. }), "refused: {:?}", r[0]);
     assert_eq!(vm.commitments.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// A117: the vault must not forget what it owes.
+// ---------------------------------------------------------------------------
+
+use zynzapd::object_ingress::pending::{Debt, Pending};
+
+/// The failure A116's test exposed. A deposit arrives for someone who has not
+/// registered, the watcher marks the height scanned and will never report it
+/// again, and the bridge restarts. Without a written record the money is in
+/// the vault and nothing anywhere says whose it is.
+#[test]
+fn a_pending_deposit_survives_the_restart_that_used_to_lose_it() {
+    let chain = Blocks {
+        tip: Cell::new(110),
+        deposits: vec![(100, [0xD1; 32], 3)],
+    };
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let mut seq = 0u64;
+    let mut watcher = Watcher::new(CONFIRMATIONS, 0);
+    let mut owed = Pending::new();
+
+    let planned = drive(&mut vm, &mut seq, &chain, &mut watcher);
+    owed.record(&planned, 100);
+    assert_eq!(owed.len(), 1, "the debt is recorded");
+
+    // The bridge dies. Everything in memory goes; only the file survives.
+    let saved = owed.encode();
+    let mut owed = Pending::decode(&saved).expect("the debts file must reload");
+    assert_eq!(owed.debts()[0].amount, Fixed::whole(3));
+    assert_eq!(owed.debts()[0].height, 100, "and the way back to the evidence");
+
+    // The watcher, resumed from its cursor, will not mention it again.
+    let mut resumed = Watcher::resume(CONFIRMATIONS, 0, 105);
+    assert!(
+        resumed.poll(&chain).expect("chain answered").is_empty(),
+        "the watcher does not repeat itself -- the file is the only record"
+    );
+
+    // Alice registers, and the debt is payable from the file alone.
+    seq += 1;
+    vm.apply(
+        seq,
+        &Op::Register {
+            account: ALICE,
+            program: program::register_viewing_key(),
+            viewing: viewing_public(&alice_view()),
+        },
+    );
+    let retry = owed.replayable(&vm);
+    assert_eq!(retry.len(), 1, "it is now creditable");
+
+    let planned = plan(&vm, SEED, ZEC, &retry);
+    let Planned::Submit(op) = &planned[0] else { panic!("{planned:?}") };
+    seq += 1;
+    assert!(matches!(vm.apply(seq, op)[0], Receipt::Deposited { .. }));
+    assert!(owed.settle(&[0xD1; 32]), "and the debt is discharged");
+    assert!(owed.is_empty());
+}
+
+/// A debt is only discharged against a receipt. Until the holder registers it
+/// stays owed, however many times the bridge restarts and retries.
+#[test]
+fn an_unregistered_holders_debt_is_not_replayable_and_is_not_dropped() {
+    let vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let mut owed = Pending::new();
+    owed.record(
+        &[Planned::AwaitingViewingKey {
+            account: ALICE,
+            amount: Fixed::whole(3),
+            txid: [0xD1; 32],
+        }],
+        100,
+    );
+    for _ in 0..3 {
+        assert!(owed.replayable(&vm).is_empty(), "nobody to pay yet");
+        assert_eq!(owed.len(), 1, "and it is still owed");
+    }
+}
+
+/// Recording the same deposit twice is one debt, not two. A rewind replays a
+/// range on purpose, so this is the ordinary case rather than a corner.
+#[test]
+fn replaying_a_range_does_not_double_the_debt() {
+    let mut owed = Pending::new();
+    let p = [Planned::AwaitingViewingKey {
+        account: ALICE,
+        amount: Fixed::whole(3),
+        txid: [0xD1; 32],
+    }];
+    owed.record(&p, 100);
+    owed.record(&p, 100);
+    assert_eq!(owed.len(), 1);
+}
+
+/// The height is what makes a lost list recoverable: rewind to the earliest
+/// debt and the range is read again.
+#[test]
+fn the_earliest_debt_says_how_far_to_rewind() {
+    let mut owed = Pending::new();
+    owed.record(
+        &[Planned::AwaitingViewingKey { account: ALICE, amount: Fixed::whole(1), txid: [0xD2; 32] }],
+        140,
+    );
+    owed.record(
+        &[Planned::AwaitingViewingKey { account: ALICE, amount: Fixed::whole(1), txid: [0xD1; 32] }],
+        100,
+    );
+    assert_eq!(owed.earliest_height(), Some(100));
+    assert_eq!(owed.debts()[0].height, 100, "oldest first");
+}
+
+/// A half-read debts file reports a shorter list of what the vault owes, and
+/// the missing entries are invisible rather than wrong. It must be refused.
+#[test]
+fn a_truncated_or_padded_debts_file_is_refused_not_guessed() {
+    let mut owed = Pending::new();
+    owed.record(
+        &[Planned::AwaitingViewingKey { account: ALICE, amount: Fixed::whole(3), txid: [0xD1; 32] }],
+        100,
+    );
+    let good = owed.encode();
+    assert!(Pending::decode(&good).is_some());
+
+    for cut in 1..good.len() {
+        assert!(
+            Pending::decode(&good[..cut]).is_none(),
+            "a file cut at {cut} must not decode"
+        );
+    }
+    let mut padded = good.clone();
+    padded.push(0);
+    assert!(Pending::decode(&padded).is_none(), "trailing bytes are not a debts file");
+
+    let mut wrong_magic = good.clone();
+    wrong_magic[0] = b'X';
+    assert!(Pending::decode(&wrong_magic).is_none());
+}
+
+/// An empty list round-trips, so "nothing owed" is a state the file can hold
+/// rather than an absence indistinguishable from a lost file.
+#[test]
+fn an_empty_debts_file_round_trips() {
+    let owed = Pending::new();
+    let back = Pending::decode(&owed.encode()).expect("empty is a real state");
+    assert!(back.is_empty());
+    assert_eq!(back.earliest_height(), None);
+}
+
+/// Every field has to survive the round trip; an amount that reloads wrong is
+/// a debt paid in the wrong quantity.
+#[test]
+fn every_field_survives_the_round_trip() {
+    let mut owed = Pending::new();
+    owed.record(
+        &[Planned::AwaitingViewingKey {
+            account: [0xAB; 32],
+            amount: Fixed::whole(123_456),
+            txid: [0xCD; 32],
+        }],
+        4_371_399,
+    );
+    let back = Pending::decode(&owed.encode()).unwrap();
+    assert_eq!(
+        back.debts()[0],
+        Debt { account: [0xAB; 32], amount: Fixed::whole(123_456), txid: [0xCD; 32], height: 4_371_399 }
+    );
+}

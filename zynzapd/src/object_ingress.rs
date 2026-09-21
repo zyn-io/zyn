@@ -409,3 +409,182 @@ mod tests {
         assert_eq!(EPHEMERAL_INFO, b"ephemeral");
     }
 }
+
+/// Deposits the vault holds and the ledger has not credited.
+///
+/// A deposit for an account that never registered a viewing key cannot become
+/// an object: the object would be one nobody can open. Refusing is right, and
+/// refusing is not enough, because of what the watcher does next — it marks
+/// that height scanned and records the txid as credited, and **never reports
+/// the deposit again**. The pending list is then the only record anywhere
+/// that the vault owes that money. In memory, a restart loses it, and the
+/// holder's ZEC sits in the vault with nothing on either chain saying whose
+/// it is (A117).
+///
+/// So it is written down, with the same discipline as the watcher cursor it
+/// sits beside: a magic, a version, and a decode that refuses trailing bytes
+/// rather than guessing.
+///
+/// # Why the height is kept
+///
+/// Because the list can still be wrong. If it is lost or truncated while the
+/// cursor survives, the cursor says "scanned" for a height whose deposit was
+/// never credited, and no forward scan will ever look there again. The height
+/// is what makes that recoverable: rewind the watcher to the earliest pending
+/// deposit and the range is read again. A pending entry without its height is
+/// a debt with no way back to the evidence.
+pub mod pending {
+    use super::*;
+    use std::collections::BTreeMap;
+    use zyn_vm::commit::Encoder;
+    use zyn_vm::read::Decoder;
+
+    /// v1 of the pending list. Kept separate from the watcher's own progress
+    /// file: losing one must not mean rewriting the other, and the set that
+    /// prevents double-credits should never share a write with the set that
+    /// records debts.
+    const MAGIC: &[u8; 8] = b"ZYNPEND1";
+
+    /// One deposit in the vault with nowhere to go yet.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Debt {
+        pub account: AccountId,
+        pub amount: Fixed,
+        pub txid: [u8; 32],
+        /// The Zcash height it was mined at. The way back to the evidence.
+        pub height: u64,
+    }
+
+    /// Everything the vault owes and has not credited.
+    ///
+    /// Keyed by txid, so recording the same deposit twice is not a second
+    /// debt — which matters because a rewind replays a range deliberately.
+    #[derive(Clone, PartialEq, Eq, Debug, Default)]
+    pub struct Pending {
+        debts: BTreeMap<[u8; 32], Debt>,
+    }
+
+    impl Pending {
+        pub fn new() -> Pending {
+            Pending::default()
+        }
+
+        pub fn len(&self) -> usize {
+            self.debts.len()
+        }
+        pub fn is_empty(&self) -> bool {
+            self.debts.is_empty()
+        }
+
+        /// Everything owed, in a stable order. Oldest height first: it is the
+        /// order these should be retried in and the order a reviewer checks.
+        pub fn debts(&self) -> Vec<Debt> {
+            let mut v: Vec<Debt> = self.debts.values().copied().collect();
+            v.sort_by_key(|d| (d.height, d.txid));
+            v
+        }
+
+        /// The earliest height still owed. What to rewind a watcher to when
+        /// the cursor and this list disagree.
+        pub fn earliest_height(&self) -> Option<u64> {
+            self.debts.values().map(|d| d.height).min()
+        }
+
+        /// Take note of everything a pass could not credit.
+        ///
+        /// `height` is the height the pass covered. Recording a debt is the
+        /// last thing that should ever be skipped, so this cannot fail.
+        pub fn record(&mut self, planned: &[Planned], height: u64) {
+            for p in planned {
+                if let Planned::AwaitingViewingKey {
+                    account,
+                    amount,
+                    txid,
+                } = p
+                {
+                    self.debts.entry(*txid).or_insert(Debt {
+                        account: *account,
+                        amount: *amount,
+                        txid: *txid,
+                        height,
+                    });
+                }
+            }
+        }
+
+        /// Forget a debt, once the ledger has actually taken it.
+        ///
+        /// Only call this against a receipt. Dropping a debt because an
+        /// intent was *built* would lose it in exactly the window this
+        /// module exists to cover.
+        pub fn settle(&mut self, txid: &[u8; 32]) -> bool {
+            self.debts.remove(txid).is_some()
+        }
+
+        /// The credits to retry, for every debt whose holder has since
+        /// registered.
+        ///
+        /// Returns watcher actions rather than intents so the retry path and
+        /// the live path are the same code — a retry that went down a
+        /// different road would be a road nothing tests.
+        pub fn replayable(&self, vm: &ObjectVm) -> Vec<WatcherAction> {
+            self.debts()
+                .into_iter()
+                .filter(|d| vm.viewing.contains_key(&d.account))
+                .map(|d| WatcherAction::Credit {
+                    account: d.account,
+                    amount: d.amount,
+                    index: 0,
+                    external_ref: d.txid,
+                    asset: None,
+                })
+                .collect()
+        }
+
+        pub fn encode(&self) -> Vec<u8> {
+            let mut e = Encoder::new();
+            e.bytes(MAGIC).u32(self.debts.len() as u32);
+            for d in self.debts() {
+                e.bytes(&d.account)
+                    .fixed(d.amount)
+                    .bytes(&d.txid)
+                    .u64(d.height);
+            }
+            e.finish().to_vec()
+        }
+
+        /// Refuses anything it does not fully understand.
+        ///
+        /// A half-read debts file is worse than none: it would report a
+        /// shorter list of what the vault owes, and the missing entries are
+        /// invisible rather than wrong. `None` tells the caller to recover
+        /// from the chain instead of trusting a number.
+        pub fn decode(b: &[u8]) -> Option<Pending> {
+            let mut d = Decoder::new(b);
+            if d.array::<8>().ok()? != *MAGIC {
+                return None;
+            }
+            let n = d.u32().ok()?;
+            let mut debts = BTreeMap::new();
+            for _ in 0..n {
+                let account = d.account().ok()?;
+                let amount = d.fixed().ok()?;
+                let txid = d.hash().ok()?;
+                let height = d.u64().ok()?;
+                debts.insert(
+                    txid,
+                    Debt {
+                        account,
+                        amount,
+                        txid,
+                        height,
+                    },
+                );
+            }
+            if d.remaining() != 0 {
+                return None;
+            }
+            Some(Pending { debts })
+        }
+    }
+}
