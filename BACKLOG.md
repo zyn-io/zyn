@@ -470,7 +470,7 @@ other people's money.
 
 ## Known operating characteristics
 
-**Restarting `zynzapd` costs a ~45-minute note-tree rebuild.** Observed 21 Sep
+**Restarting `zynzapd` costs a multi-hour note-tree rebuild.** Observed 21 Sep
 on testnet: after a restart the node logs `note trees synced to N of M` and
 grinds from its saved position to the chain tip at ~5 blocks/s with one core
 pinned. While it runs it serves no status and produces no epochs, so the RPC
@@ -479,9 +479,17 @@ hang. It is not. Check the `synced to` number is advancing over a **two-minute**
 window, not thirty seconds; a shorter sample straddles one log line and reads
 as stalled.
 
+**Measured, after three wrong estimates.** ~16,000 blocks took over 2.5 hours:
+an average of **1.2 blocks/s**, not the 5 and 15 blocks/s that thirty-second
+samples reported. The rate is bursty, so a short sample lands in a burst and
+reads five to ten times too fast. Measure across the whole run or do not quote
+a number.
+
 This is the real cost of any change requiring a sequencer restart, and it is
-why an env-only change should be batched with a binary deploy rather than done
-separately. On mainnet the same restart is a ~45-minute window with no anchors.
+why an env-only change must be batched with a binary deploy rather than done
+separately. **On mainnet the same restart is a multi-hour window with no
+anchors** — which, once deposits are open, is a multi-hour window in which no
+state root reaches Zcash. Budget it as half a day, not as a coffee break.
 
 
 | # | Behaviour | Consequence |
