@@ -75,7 +75,6 @@ fn registered_vm() -> ObjectVm {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
         },
     );
@@ -245,7 +244,6 @@ fn a_deposit_for_an_unregistered_holder_stays_pending_across_polls() {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
         },
     );
@@ -318,7 +316,6 @@ fn a_pending_deposit_survives_the_restart_that_used_to_lose_it() {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
         },
     );

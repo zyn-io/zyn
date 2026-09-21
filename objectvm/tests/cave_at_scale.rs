@@ -80,7 +80,6 @@ fn collection_z_mints_and_sells_at_full_size() {
             &Op::Register {
                 account: who,
                 program: program::register_viewing_key(),
-                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(view),
             },
         );

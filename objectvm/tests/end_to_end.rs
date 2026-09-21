@@ -843,7 +843,6 @@ fn register(vm: &mut ObjectVm, seq: u64, who: AccountId, view: &StaticSecret) {
         &Op::Register {
             account: who,
             program: program::register_viewing_key(),
-            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(view),
         },
     );

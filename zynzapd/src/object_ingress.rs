@@ -220,7 +220,6 @@ mod tests {
             &Op::Register {
                 account: ALICE,
                 program: program::register_viewing_key(),
-                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
             },
         );
@@ -325,7 +324,6 @@ mod tests {
             &Op::Register {
                 account: ALICE,
                 program: program::register_viewing_key(),
-                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
             },
         );

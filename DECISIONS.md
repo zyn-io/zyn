@@ -6070,55 +6070,69 @@ A holder must establish two things:
 2. **It was not spent** — its nullifier is absent from the spent set at that
    same root.
 
-### §136.1 — Why the nullifier key is revealed, and why that is not enough
+### §136.1 — Unspentness comes from the live set, not from the nullifiers
 
-A nullifier is `H(nullifier_key, commitment)`. If a proof merely *stated* its
-nullifier, a claimant could state one that happens to be absent while the
-note's real nullifier sat in the set — being paid for a note they had already
-spent. So the verifier derives the nullifier itself, which means the proof
-carries the key.
+The first version of this design proved unspentness by showing the note's
+nullifier was absent from the spent set. **That is unsound at this tier, and
+the audit that found it also demonstrated it.**
 
-Revealing it costs privacy, not money: a nullifier key recognises spends and
-cannot authorise one. This is the recovery path, where the holder is already
-claiming in public.
+A spend carries `(commitment, nullifier)` pairs chosen by the spender. The VM
+cannot check that a nullifier derives from the spender's key: it does not hold
+the key, and there is no circuit yet to constrain one. So a spender publishes
+any nullifier they like. `live` still stops them spending the object twice, so
+this is not a double-spend — it is worse. The object leaves the live set while
+its real nullifier is never published, and an exit proof that tests absence
+then says the note is unspent. **The vault pays for a note that was already
+sold.** `a_spend_with_an_invented_nullifier_must_not_leave_an_exitable_note`
+reproduces it.
 
-**Revealing the key alone is still unsound**, and this was a real hole in the
-first version of this design. If the key is not bound to the account, a
-claimant presents *any* key, the derived nullifier is absent because nobody
-ever published it, and a spent note is paid twice. The fix is that
-`Op::Register` now carries `H(nullifier key)`, the accounts section commits to
-it alongside the viewing key, and an exit proof opens that leaf. A key that
-the account did not register is refused before it is used to derive anything.
+The fix is to prove membership in the **live set**, which is the VM's own
+record of what remains unspent. It needs no key, so nothing about it can be
+forged by a spender, and it is now a committed section (`SECTION_LIVE`).
 
-Registering the *commitment* rather than the key keeps the key secret until
-its holder chooses to reveal it, which is the moment they exit and not before.
+Three things fall out of it, all improvements:
 
-### §136.2 — Why the whole spent set travels with the proof
+- **No nullifier key is revealed.** The earlier design leaked it by necessity;
+  this one never asks for it, so exiting no longer costs the holder the
+  linkability of their past spends.
+- **Registration is no longer a precondition of exiting.** A119 is dissolved
+  rather than deferred: it existed only because the proof was bound to a
+  registered key.
+- **`Op::Register` no longer carries a nullifier-key commitment.** It was
+  added for the earlier design and nothing uses it now. An unused consensus
+  field that looks like a security check is worse than no field, because the
+  next reader assumes it is enforced.
 
-Absence is not provable from a root alone. The verifier recomputes the
-nullifier root from the set it is given, which makes a forged set fail against
-the anchor, and checks the set is sorted and unique — the structure the
-absence check reasons about.
+### §136.2 — What the nullifier set is still for
 
-The cost is a proof linear in total spends rather than logarithmic. That is
-the trade the account model already makes, and it is preferable to a compact
-exclusion proof whose soundness rests on sortedness that a verifier holding
-two neighbours cannot check. When the set outgrows it, the fix is to bind each
-leaf's index into its hash so adjacency becomes provable.
+It is how a *wallet* recognises its own spends (`scan.rs`). A spender who
+publishes a nullifier other than their own only confuses their own wallet, so
+nothing else rests on it.
+
+It is **not** a double-spend audit trail, and §130.10's claim that "anyone can
+check we did not double-spend" has to be read against the live set instead: an
+object leaves `live` exactly once, and that transition is committed. Tier 3+4
+makes the nullifier sound by constraining its derivation inside the circuit,
+at which point the two records agree and either can be checked.
 
 ### §136.3 — One encoding for the account leaf
 
 `account_record` and `account_leaf` encoded the same thing separately, and
-when the leaf grew the registered keys the record did not follow. The
-conformance suite caught it (rule S6). They now share one function. Two
-encodings of one fact is a drift waiting to happen.
+when the leaf grew a field the record did not follow. The conformance suite
+caught it (rule S6). They now share one function. Two encodings of one fact is
+a drift waiting to happen.
 
-### §136.4 — What this does not cover
+### §136.4 — Who gets paid
 
-A note whose owner never registered cannot be exited: nothing on chain binds a
-nullifier key to them. `ingress::credit` already refuses to credit an
-unregistered account, so no deposit lands in that state — but a `Spend` output
-addressed to an unregistered owner would. Either registration becomes a
-precondition of receiving, or such an output is refused at apply time. Filed
-as A119, and it gates the mainnet switch.
+The proof names the note's **owner**, and a custodian pays that account's
+bound destination rather than whoever presented the proof. That is what makes
+an exit proof safe to publish: holding a copy of someone else's buys nothing.
 
+It also means the proof needs no signature. What it proves is a statement
+about an account, not a request from a person.
+
+### §136.5 — What a verifier still has to supply
+
+That `anchored` is a root Zcash actually saw. The proof shows its sections
+hash to that root; it cannot show the root was witnessed, and nothing
+self-contained could. A custodian looks the anchor up.

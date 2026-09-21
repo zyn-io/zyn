@@ -57,7 +57,6 @@ fn chain() -> (ObjectVm, u64, Note) {
                 account: who,
                 program: program::register_viewing_key(),
                 viewing: viewing_public(&view(v)),
-                nullifier_commitment: ObjectVm::nullifier_commitment(&nk),
             },
         );
         assert!(matches!(r[0], Receipt::Registered { .. }), "{:?}", r[0]);
@@ -90,15 +89,13 @@ fn anchored(vm: &ObjectVm) -> [u8; 32] {
 fn a_holder_can_prove_what_the_vault_owes_them() {
     let (vm, _, n) = chain();
     let root = anchored(&vm);
-    let p = prove(&vm, &n, ALICE_NK, root).expect("Alice holds this note");
+    let p = prove(&vm, &n, root).expect("Alice holds this note");
 
     assert_eq!(p.verify(), Ok(()));
     assert_eq!(p.claim(), Ok((ZEC, Fixed::whole(9))));
-    // Derived, never asserted.
-    assert_eq!(
-        p.nullifier().unwrap(),
-        nullifier(&ALICE_NK, &commitment(&n).unwrap())
-    );
+    // The claim names the note's owner. A custodian pays that account's
+    // bound destination, not whoever produced the proof.
+    assert_eq!(p.note.owner, ALICE);
 }
 
 /// The attack the whole design turns on. Alice spends her note, then tries to
@@ -125,66 +122,11 @@ fn a_spent_note_cannot_be_claimed() {
     );
     assert!(matches!(r[0], Receipt::Spent { .. }), "{:?}", r[0]);
 
-    let root = anchored(&vm);
-    let p = prove(&vm, &n, ALICE_NK, root).expect("the commitment is still in the tree");
-    // The commitment tree is append-only, so it is still there — and that is
-    // exactly why absence from the nullifier set is the load-bearing half.
-    assert_eq!(p.verify(), Err(ExitError::AlreadySpent));
-    assert_eq!(p.claim(), Err(ExitError::AlreadySpent));
-}
-
-/// The reason the nullifier key is bound to its account on chain.
-///
-/// Without that binding a claimant presents any key they like, the derived
-/// nullifier is absent from the spent set because nobody ever published it,
-/// and a note that was spent long ago gets paid a second time.
-#[test]
-fn a_spent_note_cannot_be_claimed_with_an_invented_key() {
-    let (mut vm, mut seq, n) = chain();
-    let c = commitment(&n).unwrap();
-    let out = note(MALLORY, 9, 0xD2);
-    seq += 1;
-    vm.apply(
-        seq,
-        &Op::Spend {
-            spender: ALICE,
-            program: program::private_transfer(),
-            inputs: vec![(c, nullifier(&ALICE_NK, &c))],
-            outputs: vec![Output {
-                enc: sealed(&view(0x22), 0x42, &out),
-                note: out,
-            }],
-        },
-    );
-    let root = anchored(&vm);
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-
-    // A key nobody registered. Its nullifier is absent from the spent set.
-    let invented = [0x99u8; 32];
-    assert!(
-        !p.spent
-            .contains(&nullifier(&invented, &commitment(&n).unwrap())),
-        "the invented key's nullifier really is absent — that is the trap"
-    );
-    p.nullifier_key = invented;
-
-    assert_eq!(
-        p.verify(),
-        Err(ExitError::NullifierKeyNotThisAccount),
-        "an unbound key must be refused before it is used to derive anything"
-    );
-}
-
-/// Mallory cannot claim Alice's note by presenting her own registered key.
-#[test]
-fn one_holder_cannot_claim_anothers_note() {
-    let (vm, _, n) = chain();
-    let root = anchored(&vm);
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-
-    // Mallory's key is genuinely registered — just not to this note's owner.
-    p.nullifier_key = MALLORY_NK;
-    assert_eq!(p.verify(), Err(ExitError::NullifierKeyNotThisAccount));
+    // The commitment tree is append-only, so the commitment is still there.
+    // The live set is what moved, and it is what the proof now rests on — so
+    // a spent note cannot even be given a proof, let alone verify one.
+    assert!(vm.commitments.leaves().contains(&c), "still in the tree");
+    assert_eq!(prove(&vm, &n, anchored(&vm)), Err(ExitError::NotLive));
 }
 
 /// A note that was never on the chain is not a claim, however well-formed.
@@ -193,69 +135,46 @@ fn a_note_that_was_never_deposited_cannot_be_claimed() {
     let (vm, _, _) = chain();
     let invented = note(ALICE, 1_000_000, 0x77);
     assert_eq!(
-        prove(&vm, &invented, ALICE_NK, anchored(&vm)),
+        prove(&vm, &invented, anchored(&vm)),
         Err(ExitError::NotInCommitmentTree)
     );
 }
 
-/// Raising the amount after the fact changes the commitment, so the path stops
-/// opening. The note is the preimage, not a label attached to one.
+/// Forging the live path is the direct attack now. It fails because the live
+/// root is a section of the root Zcash anchored.
+///
+/// Tested with more than one live object on purpose: a one-leaf tree has the
+/// leaf as its root, so *any* path opens it and a test built on a single
+/// object would pass no matter what the verifier did.
 #[test]
-fn the_claimed_amount_cannot_be_inflated() {
-    let (vm, _, n) = chain();
-    let root = anchored(&vm);
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-    p.note.amount = Fixed::whole(9_000);
-    assert_eq!(p.verify(), Err(ExitError::NotInCommitmentTree));
-}
-
-/// Dropping one's own nullifier from the set is the obvious forgery.
-#[test]
-fn a_trimmed_spent_set_does_not_match_the_root() {
+fn a_forged_live_path_does_not_open_the_anchored_root() {
     let (mut vm, mut seq, n) = chain();
-    let c = commitment(&n).unwrap();
-    let out = note(MALLORY, 9, 0xD2);
     seq += 1;
+    let other = note(MALLORY, 4, 0xB7);
     vm.apply(
         seq,
-        &Op::Spend {
-            spender: ALICE,
-            program: program::private_transfer(),
-            inputs: vec![(c, nullifier(&ALICE_NK, &c))],
-            outputs: vec![Output {
-                enc: sealed(&view(0x22), 0x42, &out),
-                note: out,
-            }],
+        &Op::Deposit {
+            program: program::deposit(),
+            asset: other.asset,
+            amount: other.amount,
+            owner: other.owner,
+            nonce: other.nonce,
+            enc: sealed(&view(0x22), 0x43, &other),
+            external_ref: [0xE1; 32],
         },
     );
-    let root = anchored(&vm);
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-    assert_eq!(p.verify(), Err(ExitError::AlreadySpent));
+    assert!(vm.live_commitments().len() > 1, "more than one leaf, so the path matters");
 
-    // Remove the inconvenient entry.
-    p.spent.retain(|x| *x != nullifier(&ALICE_NK, &c));
-    assert_eq!(
-        p.verify(),
-        Err(ExitError::SpentSetDoesNotMatchRoot),
-        "a set that hides an entry no longer hashes to the anchored root"
-    );
-}
+    let mut p = prove(&vm, &n, anchored(&vm)).unwrap();
+    assert_eq!(p.verify(), Ok(()));
 
-/// The absence check reasons about a sorted, unique set. A set that is neither
-/// could hide an entry in plain sight, so it is refused as a structure rather
-/// than searched.
-#[test]
-fn an_unsorted_or_duplicated_spent_set_is_refused() {
-    let (vm, _, n) = chain();
-    let root = anchored(&vm);
+    p.live_path = vec![];
+    assert_eq!(p.verify(), Err(ExitError::NotLive));
 
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-    p.spent = vec![[0x05; 32], [0x03; 32]];
-    assert_eq!(p.verify(), Err(ExitError::SpentSetMalformed));
-
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
-    p.spent = vec![[0x03; 32], [0x03; 32]];
-    assert_eq!(p.verify(), Err(ExitError::SpentSetMalformed));
+    // And a path borrowed from the other object does not open this one.
+    let borrowed = prove(&vm, &other, anchored(&vm)).unwrap();
+    p.live_path = borrowed.live_path;
+    assert_eq!(p.verify(), Err(ExitError::NotLive));
 }
 
 /// A proof has to hang off a root Zcash actually saw. Otherwise it is
@@ -264,7 +183,7 @@ fn an_unsorted_or_duplicated_spent_set_is_refused() {
 #[test]
 fn a_proof_against_an_unanchored_root_is_refused() {
     let (vm, _, n) = chain();
-    let mut p = prove(&vm, &n, ALICE_NK, anchored(&vm)).unwrap();
+    let mut p = prove(&vm, &n, anchored(&vm)).unwrap();
     p.anchored = [0xAB; 32];
     assert_eq!(p.verify(), Err(ExitError::SectionsDoNotOpenAnchor));
 }
@@ -275,7 +194,7 @@ fn a_proof_against_an_unanchored_root_is_refused() {
 fn rewriting_a_section_breaks_the_anchor() {
     let (vm, _, n) = chain();
     let root = anchored(&vm);
-    let mut p = prove(&vm, &n, ALICE_NK, root).unwrap();
+    let mut p = prove(&vm, &n, root).unwrap();
     p.sections[objectvm::SECTION_COMMITMENTS] = [0xCC; 32];
     // The path stops opening first, which is the earlier and clearer refusal.
     assert_eq!(p.verify(), Err(ExitError::NotInCommitmentTree));
@@ -286,7 +205,7 @@ fn rewriting_a_section_breaks_the_anchor() {
 #[test]
 fn a_truncated_section_list_is_refused_not_panicked_on() {
     let (vm, _, n) = chain();
-    let mut p = prove(&vm, &n, ALICE_NK, anchored(&vm)).unwrap();
+    let mut p = prove(&vm, &n, anchored(&vm)).unwrap();
     p.sections.truncate(2);
     assert_eq!(p.verify(), Err(ExitError::MalformedSections));
     p.sections.clear();
@@ -300,7 +219,7 @@ fn a_truncated_section_list_is_refused_not_panicked_on() {
 fn a_proof_is_still_good_after_the_chain_moves_on() {
     let (mut vm, mut seq, n) = chain();
     let root = anchored(&vm);
-    let kept: ExitProof = prove(&vm, &n, ALICE_NK, root).unwrap();
+    let kept: ExitProof = prove(&vm, &n, root).unwrap();
 
     // Mallory deposits, the tree grows, the state root changes.
     seq += 1;
@@ -326,11 +245,15 @@ fn a_proof_is_still_good_after_the_chain_moves_on() {
     assert_eq!(kept.claim(), Ok((ZEC, Fixed::whole(9))));
 }
 
-/// A note whose owner never registered has nothing binding a key to them, so
-/// no proof can be built — and saying so at build time is better than handing
-/// out evidence that no verifier will accept.
+/// An unregistered owner can still prove what they hold.
+///
+/// This used to be impossible, and the impossibility was a bug: the first
+/// design bound the proof to a registered nullifier key, so an object sent to
+/// someone who had never registered could never be exited by them, and the
+/// sender caused that loss rather than the recipient. Resting the proof on
+/// the live set removes the requirement entirely (A119).
 #[test]
-fn an_unregistered_owner_cannot_be_given_a_proof() {
+fn an_unregistered_owner_can_still_prove_what_they_hold() {
     let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
     let n = note(ALICE, 5, 0xC4);
     // Mint straight to an unregistered owner.
@@ -347,25 +270,7 @@ fn an_unregistered_owner_cannot_be_given_a_proof() {
         },
     );
     assert!(matches!(r[0], Receipt::Deposited { .. }));
-    assert_eq!(
-        prove(&vm, &n, ALICE_NK, vm.state_root()),
-        Err(ExitError::AccountNotRegistered)
-    );
-}
-
-/// A registration with no nullifier commitment is refused, because an account
-/// registered that way could never produce a checkable exit proof.
-#[test]
-fn a_registration_without_a_nullifier_commitment_is_refused() {
-    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
-    let r = vm.apply(
-        1,
-        &Op::Register {
-            account: ALICE,
-            program: program::register_viewing_key(),
-            viewing: viewing_public(&view(0x11)),
-            nullifier_commitment: [0u8; 32],
-        },
-    );
-    assert_eq!(r[0], Receipt::Refused("not a nullifier-key commitment"));
+    let p = prove(&vm, &n, vm.state_root()).expect("holding it is enough");
+    assert_eq!(p.verify(), Ok(()));
+    assert_eq!(p.claim(), Ok((ZEC, Fixed::whole(5))));
 }
