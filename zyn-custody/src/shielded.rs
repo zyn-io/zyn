@@ -819,11 +819,10 @@ impl Scanner {
             {
                 continue; // read once already, above
             }
-            for txid_hex in zebra.block_txids(height)? {
-                let raw = zebra.raw_transaction_bytes(&txid_hex)?;
-                let Some(txid) = txid_bytes(&txid_hex) else {
-                    continue;
-                };
+            // One request for the whole block. Fetching each transaction
+            // separately cost a round-trip and a JSON parse apiece, which
+            // is what made a rescan take hours (A115).
+            for (txid, raw) in zebra.block_transactions(height)? {
                 // A transaction we cannot parse is not our problem: the
                 // chain contains every version there has ever been.
                 let Ok(scanned) = self.keys.scan_actions_lenient(&raw, txid, height) else {
@@ -878,11 +877,10 @@ impl Scanner {
             return Ok((to.min(end), found));
         }
         for height in start..=end {
-            for txid_hex in zebra.block_txids(height)? {
-                let raw = zebra.raw_transaction_bytes(&txid_hex)?;
-                let Some(txid) = txid_bytes(&txid_hex) else {
-                    continue;
-                };
+            // One request for the whole block. Fetching each transaction
+            // separately cost a round-trip and a JSON parse apiece, which
+            // is what made a rescan take hours (A115).
+            for (txid, raw) in zebra.block_transactions(height)? {
                 let Ok(scanned) = self.keys.scan_actions_lenient(&raw, txid, height) else {
                     continue;
                 };
@@ -958,11 +956,10 @@ impl Scanner {
             return Ok((to.min(end), found));
         }
         for height in start..=end {
-            for txid_hex in zebra.block_txids(height)? {
-                let raw = zebra.raw_transaction_bytes(&txid_hex)?;
-                let Some(txid) = txid_bytes(&txid_hex) else {
-                    continue;
-                };
+            // One request for the whole block. Fetching each transaction
+            // separately cost a round-trip and a JSON parse apiece, which
+            // is what made a rescan take hours (A115).
+            for (txid, raw) in zebra.block_transactions(height)? {
                 let Ok(scanned) = self.keys.scan_actions_lenient(&raw, txid, height) else {
                     continue;
                 };
@@ -1087,11 +1084,10 @@ impl Scanner {
         let result = (|| {
             let mut deposits = Vec::new();
             let mut forced = Vec::new();
-            for txid_hex in zebra.block_txids(height)? {
-                let raw = zebra.raw_transaction_bytes(&txid_hex)?;
-                let Some(txid) = txid_bytes(&txid_hex) else {
-                    continue;
-                };
+            // One request for the whole block. Fetching each transaction
+            // separately cost a round-trip and a JSON parse apiece, which
+            // is what made a rescan take hours (A115).
+            for (txid, raw) in zebra.block_transactions(height)? {
                 // Lenient here, and strict below, once we know what the
                 // transaction is: one that spends our own note is one we
                 // sent, and a note it returns to us is **change** — held,

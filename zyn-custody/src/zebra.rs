@@ -396,6 +396,54 @@ impl Zebra {
             .collect())
     }
 
+    /// A txid as the scanner needs it: the display form is reversed.
+    fn txid_from_hex(hex: &str) -> Option<[u8; 32]> {
+        if hex.len() != 64 {
+            return None;
+        }
+        let mut out = [0u8; 32];
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+        }
+        out.reverse();
+        Some(out)
+    }
+
+    /// Every transaction in a block, with its raw bytes, in one call.
+    ///
+    /// The scan used to ask for the txid list and then fetch each transaction
+    /// separately: a 55-transaction block cost 56 round-trips, 56 JSON
+    /// documents to parse, and the same hex decoded one piece at a time. At
+    /// `verbosity = 2` Zebra returns the transactions already, `hex` and all,
+    /// so the same work is one request.
+    ///
+    /// This is what made a restart cost hours rather than minutes (A115).
+    pub fn block_transactions(&self, height: u64) -> Result<Vec<([u8; 32], Vec<u8>)>, RpcError> {
+        let v = self.call("getblock", serde_json::json!([height.to_string(), 2]))?;
+        let Some(txs) = v.get("tx").and_then(Value::as_array) else {
+            return Err(RpcError::Malformed("block has no tx list"));
+        };
+        let mut out = Vec::with_capacity(txs.len());
+        for t in txs {
+            // A node that answered verbosity 2 with bare txids is not one we
+            // can scan from; say so rather than silently scanning nothing.
+            let Some(obj) = t.as_object() else {
+                return Err(RpcError::Malformed("verbosity 2 returned txids"));
+            };
+            let Some(hex) = obj.get("hex").and_then(Value::as_str) else {
+                return Err(RpcError::Malformed("transaction has no hex"));
+            };
+            let Some(txid_hex) = obj.get("txid").and_then(Value::as_str) else {
+                return Err(RpcError::Malformed("transaction has no txid"));
+            };
+            let (Some(raw), Some(txid)) = (unhex(hex), Self::txid_from_hex(txid_hex)) else {
+                return Err(RpcError::Malformed("transaction is not hex"));
+            };
+            out.push((txid, raw));
+        }
+        Ok(out)
+    }
+
     /// One transaction's raw bytes, for shielded scanning.
     ///
     /// Verbose 0 rather than 1: a shielded deposit is not visible in the JSON
