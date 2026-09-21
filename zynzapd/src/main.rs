@@ -722,6 +722,15 @@ fn run() -> Result<(), String> {
                         Err(e) => return Err(format!("note tree catch-up: {:?}", e)),
                     }
                     eprintln!("zynzapd: note trees synced to {} of {}", synced, target);
+                    // Persist every batch, because this loop runs *before* the
+                    // main loop's periodic save and can last hours. Without
+                    // this, a restart during catch-up throws away everything
+                    // catch-up did and begins again from the same stale
+                    // position — which is how a five-minute deploy became a
+                    // multi-hour outage on 21 Sep (A115). A batch is 200
+                    // blocks; rewriting the tree that often is cheap beside
+                    // rescanning it.
+                    save_trees(&cfg, scanner.notes());
                 }
             }
         }
