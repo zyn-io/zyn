@@ -4,7 +4,17 @@ import { test } from 'node:test';
 
 const page = await readFile(new URL('../mint.html', import.meta.url), 'utf8');
 const relay = await readFile(new URL('../functions/api/sale/[[path]].js', import.meta.url), 'utf8');
-const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8');
+const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8').catch(() => null);
+
+// The wallet provider lives in a different repository. When the store is
+// checked out on its own, these cross-repo assertions cannot run — so they
+// skip with a reason rather than passing quietly. A silent pass here would
+// mean the store could call a method the wallet does not have and nothing
+// would say so, which is the exact failure this file exists to catch.
+const WALLET = background
+  ? false
+  : 'apps/extension is not checked out — run in the monorepo to check the store against the wallet provider';
+
 
 test('the checkout quotes against the collection receiving account, not the identity', async () => {
   // §97.5: the money and the item must land in an account with no other
@@ -14,7 +24,7 @@ test('the checkout quotes against the collection receiving account, not the iden
   assert.doesNotMatch(page, /method: 'zyn_account'/);
 });
 
-test('the methods it calls exist on the provider', () => {
+test('the methods it calls exist on the provider', { skip: WALLET }, () => {
   for (const method of ['zyn_receivingAccount', 'zyn_receivingRead']) {
     assert.match(page, new RegExp(`method: '${method}'`), `page calls ${method}`);
     assert.match(background, new RegExp(`${method}:`), `provider exposes ${method}`);
@@ -67,7 +77,7 @@ test('the built site serves the checkout at /mint', async () => {
   assert.equal(built, page, 'dist/mint/index.html is the page');
 });
 
-test('the entry is paid, not merely proven', async () => {
+test('the entry is paid, not merely proven', { skip: WALLET }, async () => {
   // The floor buyers are trusting is funded by the entries. A checkout that
   // proved a balance and moved nothing left the pool funded by nobody (§113.8).
   assert.match(page, /method: 'zyn_receivingPay'/);
@@ -75,7 +85,7 @@ test('the entry is paid, not merely proven', async () => {
   assert.match(background, /zyn_receivingPay:/);
 });
 
-test('the payment is signed by the wallet and sent by the sale', () => {
+test('the payment is signed by the wallet and sent by the sale', { skip: WALLET }, () => {
   // Signing without sending: a payment that leaves the wallet but never
   // reaches the sale is a buyer who paid for nothing.
   assert.match(background, /zyn_receivingPay: \{ read: false/, 'paying is approval-gated');

@@ -16,12 +16,22 @@ const exit = await read('exit.html');
 const background = await readFile(
   new URL('../../extension/src/background.js', import.meta.url),
   'utf8',
-);
+).catch(() => null);
+
+// The wallet provider lives in a different repository. When the store is
+// checked out on its own, these cross-repo assertions cannot run — so they
+// skip with a reason rather than passing quietly. A silent pass here would
+// mean the store could call a method the wallet does not have and nothing
+// would say so, which is the exact failure this file exists to catch.
+const WALLET = background
+  ? false
+  : 'apps/extension is not checked out — run in the monorepo to check the store against the wallet provider';
+
 const build = await read('scripts/build.mjs');
 
 const pages = { items, item, market, exit };
 
-test('every method these pages call exists on the provider', () => {
+test('every method these pages call exists on the provider', { skip: WALLET }, () => {
   // The failure this catches is silent in a browser: a typo'd method is a
   // rejected promise the page reports as "the wallet could not answer",
   // which reads as the user's problem rather than ours.
