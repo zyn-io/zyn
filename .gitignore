@@ -1,0 +1,47 @@
+target/
+node_modules/
+.venv/
+.DS_Store
+*.key
+*.env
+
+# Collection art: ~12,500 rendered PNGs and their bundles, 1.1 GB. The
+# generator, the trait schema and the specs are tracked; the pixels are not.
+# What commits to them is the manifest root (§86.3), which is in DECISIONS —
+# that root is the artifact worth versioning, and it is 32 bytes.
+examples/**/images/
+examples/**/previews/
+examples/**/canvases/
+examples/**/metadata/
+examples/**/archive/
+examples/**/out/
+examples/**/*.zip
+examples/**/*.png
+apps/nap/branding/**/images/
+apps/nap/branding/**/out/
+apps/nap/branding/**/*.png
+videos/
+bounties/*/source/
+# Vendored Solidity dependencies; they have their own repos.
+contracts/lib/
+# Build output.
+apps/*/dist/
+apps/*/.wrangler/
+apps/*/.mf/
+.wrangler/
+# A vendored copy of Blender.app — 500 MB of someone else's application, with a
+# single 167 MB binary GitHub would refuse anyway.
+examples/**/tools/
+**/*.app/
+
+# Secrets must never be committable from here. `*.key` and `*.env` are above.
+# Deliberately NOT `*.hex`: the published sale terms are `.hex` files whose
+# whole purpose is that a buyer can fetch and verify them (§125). A blanket
+# pattern to catch one secret would have dropped the artifact that exists to
+# be public.
+sslkey
+
+# A checked-in Blender.app (814 MB) and rendered video (63 MB). Tools and
+# output, not source.
+examples/zcash-pixel-nft/tools/
+videos/

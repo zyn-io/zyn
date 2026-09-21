@@ -1,0 +1,96 @@
+{
+  "status": "pass",
+  "supply": 889,
+  "categories": {
+    "background": {
+      "counts": {
+        "aurora-garden": 8,
+        "cyan-cavern": 7,
+        "deep-black": 285,
+        "eclipse-gate": 29,
+        "genesis-chamber": 30,
+        "gold-vault": 297,
+        "moon-blocks": 62,
+        "node-chamber": 82,
+        "prism-archive": 57,
+        "shielded-pool": 1,
+        "zero-field": 31
+      },
+      "confidence": {
+        "high": 311,
+        "low": 223,
+        "medium": 355
+      }
+    },
+    "body": {
+      "counts": {
+        "ashwing": 68,
+        "aurora-wing": 37,
+        "brown-dustwing": 6,
+        "charcoal-velvet": 19,
+        "cyan-circuit": 6,
+        "genesis-wing": 26,
+        "gold-pattern": 371,
+        "moonwhite": 3,
+        "obsidian-mantle": 353
+      },
+      "confidence": {
+        "high": 311,
+        "low": 223,
+        "medium": 355
+      }
+    },
+    "eyes": {
+      "counts": {
+        "aurora": 95,
+        "cyan": 620,
+        "faceted": 4,
+        "luminous": 77,
+        "mint": 41,
+        "round": 33,
+        "sleepy": 2,
+        "violet": 13,
+        "void": 4
+      },
+      "confidence": {
+        "high": 311,
+        "low": 223,
+        "medium": 355
+      }
+    },
+    "mouth": {
+      "counts": {
+        "crystal-feeder": 14,
+        "curled-proboscis": 1,
+        "glowing-mouth": 394,
+        "hidden-mouth": 21,
+        "long-proboscis": 44,
+        "respirator": 102,
+        "small-mouthparts": 313
+      },
+      "confidence": {
+        "high": 311,
+        "low": 223,
+        "medium": 355
+      }
+    },
+    "headgear": {
+      "counts": {
+        "beanie": 1,
+        "black-hood": 62,
+        "genesis-helm": 20,
+        "miner-helmet": 49,
+        "moon-halo": 54,
+        "node-headset": 232,
+        "none": 449,
+        "vault-crown": 17,
+        "zyn-cap": 5
+      },
+      "confidence": {
+        "high": 311,
+        "low": 223,
+        "medium": 355
+      }
+    }
+  }
+}

@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="The sale terms for Cave Collection Z, published before the first deposit — with the bytes and the recipe to check them yourself." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/terms" />
+    <meta property="og:title" content="Cave Collection Z — the terms" />
+    <meta property="og:description" content="Published before the door opens. Recompute the digest yourself." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave Collection Z — the terms" />
+    <meta name="twitter:description" content="Published before the door opens. Recompute the digest yourself." />
+    <title>Cave Collection Z — the terms</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>    
+      /* Same cave, same torch. This is the mouth of the tunnel where money
+         comes in, so it is lit a little warmer than the register. */
+      .register {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px;
+        position: relative;
+        z-index: 2;
+      }
+      .register::before {
+        content: "";
+        position: absolute;
+        inset: -20% -30% auto;
+        height: 70%;
+        background: radial-gradient(
+          ellipse 46% 60% at 30% 0%,
+          rgba(244, 183, 40, 0.07),
+          transparent 68%
+        );
+        pointer-events: none;
+      }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
+      .lede strong { color: var(--ink); font-weight: 400; }
+
+      .ledger {
+        margin: 52px 0 0;
+        border: 1px solid var(--line);
+        box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5);
+        background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95));
+      }
+      .ledger-index {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--line);
+        color: #62665f;
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+
+      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 400; }
+
+      .act {
+        justify-self: start;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 13px 22px;
+        color: var(--black);
+        background: var(--zec);
+        border: 0;
+        cursor: pointer;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+      }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      /* The address is the whole point of the page, so it is the largest
+         readable thing on it and it wraps rather than truncating — a
+         truncated address that looks complete is how money goes missing. */
+      .addr {
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.4);
+        padding: 18px;
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        line-height: 1.85;
+        word-break: break-all;
+        color: var(--ink);
+        user-select: all;
+      }
+      .addr-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      /* The address and its picture are the same fact twice, so they sit
+         together and wrap together on a narrow screen. */
+      .addr-and-qr { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+      .addr-and-qr .addr { flex: 1 1 260px; margin: 0; }
+      .qr { margin: 0; display: grid; gap: 8px; justify-items: center; }
+      .qr[hidden] { display: none; }
+      .qr canvas {
+        display: block;
+        border: 1px solid var(--line);
+        background: #f0eee6;
+        padding: 8px;
+        image-rendering: pixelated;
+      }
+      .qr figcaption {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .tag.good { color: var(--acid); border-color: rgba(199, 240, 75, 0.4); }
+      .tag.warn { color: var(--zec); border-color: rgba(244, 183, 40, 0.45); }
+
+      /* A shared address with no memo silently loses money, so this is the one
+         thing on the page allowed to shout. */
+      .alarm {
+        border: 1px solid rgba(244, 183, 40, 0.5);
+        background: rgba(244, 183, 40, 0.07);
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+      .alarm h2 {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        color: var(--zec);
+      }
+      .memo {
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        word-break: break-all;
+        color: var(--ink);
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid var(--line);
+        padding: 12px;
+        user-select: all;
+      }
+
+      .facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+      .facts li {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 12px;
+        align-items: baseline;
+        font-size: clamp(11px, 1vw, 13px);
+        line-height: 1.75;
+        color: var(--muted);
+      }
+      .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
+      .facts strong { color: var(--ink); font-weight: 400; }
+
+      .out { margin: 0; font-size: 11px; line-height: 1.7; min-height: 1.2em; }
+      .out.bad { color: #ff8b6b; }
+      .out.ok { color: var(--acid); }
+
+      .smallprint {
+        margin: 34px 0 0;
+        font-size: 10px;
+        line-height: 1.9;
+        color: #5c6058;
+        max-width: 60ch;
+      }
+      .smallprint strong { color: var(--muted); font-weight: 400; }
+      .back {
+        display: inline-block;
+        margin: 40px 0 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .back:hover { color: var(--acid); }
+    
+      /* The terms page is a document, not a shopfront: wider measure, and the
+         bytes get room to be read rather than admired. */
+      .facts.terms-facts li b { min-width: 3ch; }
+      .term-table { margin: 30px 0 0; border-top: 1px solid var(--line); }
+      .term-table div {
+        display: grid;
+        grid-template-columns: 210px 1fr;
+        gap: 18px;
+        padding: 13px 0;
+        border-bottom: 1px solid var(--line);
+        align-items: baseline;
+      }
+      .term-table span {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: #62665f;
+      }
+      .term-table b { font-size: 13px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+      .term-table b.hash { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--acid); }
+      @media (max-width: 680px) { .term-table div { grid-template-columns: 1fr; gap: 5px; } }
+
+      .bytes {
+        margin: 16px 0 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.32);
+        font-family: var(--mono);
+        font-size: 10px;
+        line-height: 1.9;
+        color: #b9bcb2;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      pre.recipe {
+        margin: 16px 0 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--acid);
+        background: rgba(0, 0, 0, 0.32);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.75;
+        color: #d7d8d2;
+        overflow-x: auto;
+      }
+      .not-yet {
+        margin: 34px 0 0;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--zec);
+      }
+      .not-yet h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 19px; color: var(--zec); }
+      .not-yet p { margin: 0 0 10px; font-size: 12px; line-height: 1.85; color: var(--muted); }
+      .not-yet p:last-child { margin-bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <main class="register">
+      <h1><span>The terms,</span><span>before the door.</span></h1>
+
+      <p class="lede">
+        This is the whole promise Collection Z is sold under, published
+        <strong>before the first deposit</strong> — because terms published afterwards
+        are a description, not a commitment. Every number below is inside the digest,
+        and you can recompute that digest yourself from the bytes on this page.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>cave-sale-terms/v1</span>
+          <span>4,444 · <b>committed</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <div class="term-table">
+            <div><span>Collection</span><b class="hash">024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e</b></div>
+            <div><span>Supply</span><b>4,444</b></div>
+            <div><span>Manifest root</span><b class="hash">02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19</b></div>
+            <div><span>Quantity</span><b>Weighted — 80% one item, 19% two, 1% three, per entry</b></div>
+            <div><span>Identity</span><b>Concealed shuffle</b></div>
+            <div><span>Close</span><b>Announced, with at least 1,152 blocks' notice</b></div>
+            <div><span>Reveal</span><b>Close + 100 blocks; announced drand round + 2,400</b></div>
+            <div><span>Entry price</span><b>1,000,000 zatoshi (0.01 ZEC)</b></div>
+            <div><span>Claim price</span><b>500,000 zatoshi</b></div>
+            <div><span>Open mint</span><b>1,330,000 zatoshi</b></div>
+            <div><span>Confirmations</span><b>6 before a deposit is an entry</b></div>
+            <div><span>Claim window</span><b>16,128 blocks after the close</b></div>
+            <div><span>Split of one entry</span><b>900,000 zatoshi to the collection's pool, 100,000 to the treasury</b></div>
+            <div><span>Treasury</span><b class="hash">b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99</b></div>
+            <div><span>Policy digest</span><b class="hash">12da4f1b1052660d5496207eefa0231801dcad04d6a85b77db0134883500abaf</b></div>
+            <div><span>Terms digest</span><b class="hash">159b454efe0bfe7778f58924e6e2951d7e585e918a9a7d94bbab8e69ae016267</b></div>
+          </div>
+
+          <ul class="facts terms-facts">
+            <li><b>01</b><span>The <strong>pool</strong> is what a redeemed item is paid out of. 90% of every entry funds it.</span></li>
+            <li><b>02</b><span>Every entry references the <strong>terms digest</strong>. Anything changed after this is a different sale, not an amended one.</span></li>
+            <li><b>03</b><span>The <strong>close is announced</strong>, not fixed here — how long to run is judged by watching demand. Everything the outcome depends on is derived from it by rules already committed.</span></li>
+            <li><b>04</b><span>The <strong>reveal beats the operator</strong>: it lands on a drand round and a Zcash block that do not exist when the close is named.</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <section style="margin-top:52px">
+        <h2 style="font-family:var(--serif);font-size:26px;margin:0">Check it yourself</h2>
+        <p class="smallprint" style="margin-top:12px;max-width:66ch">
+          These are the canonical bytes — <strong>187 of them</strong>, the exact input the digest is
+          taken over. Nothing else goes in.
+        </p>
+        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f763112da4f1b1052660d5496
+207eefa0231801dcad04d6a85b77db0134883500abaf024277b607ce4edbf78f
+e2855aba562096d00264729168bd0ddea71bdf5b5f1e02b01b16da58e0d71ae2
+7099daba30a0a7936cdd852ee325853f679886dd8f19b3e4c493bb7934927026
+0f7d2e2882b4f1a736348935493331e18c95098cfe990000000000000f424000
+0000000007a1200000000000144b500000000600003f00000003e8</div>
+        <button class="act ghost" id="copy-bytes" type="button" style="margin-top:14px">Copy the bytes</button>
+        <p class="out" id="out" role="status" aria-live="polite"></p>
+
+        <p class="smallprint" style="margin-top:26px;max-width:66ch">
+          Six lines of standard-library Python, no dependencies. The domain string and the
+          payload are each length-prefixed before hashing, so no two different documents can
+          ever hash the same way.
+        </p>
+        <pre class="recipe">from hashlib import sha256
+
+payload = bytes.fromhex(open("terms.hex").read().strip())
+domain  = b"cave.sale.terms.v1"
+h = sha256()
+h.update(len(domain).to_bytes(4, "big"));  h.update(domain)
+h.update(len(payload).to_bytes(4, "big")); h.update(payload)
+print(h.hexdigest())
+# 159b454efe0bfe7778f58924e6e2951d7e585e918a9a7d94bbab8e69ae016267</pre>
+      </section>
+
+      <div class="not-yet">
+        <h2>What this page does not yet prove</h2>
+        <p>
+          It proves <strong>what</strong> the terms are and that this digest is taken over exactly
+          these bytes. It does <strong>not</strong> prove <em>when</em> they were written — nothing
+          inside a document can establish its own age, and this is our own web server.
+        </p>
+        <p>
+          That takes a stamp on Zcash: the terms digest written into a transaction memo, so the
+          chain dates it rather than us. <strong>That has not happened yet</strong>, and until it
+          does a careful reader should treat this page as a publication with our word on the
+          timing. We would rather say so here than have you find out by checking.
+        </p>
+      </div>
+
+      <p class="smallprint">
+        Published under <strong>cave-sale-terms/v1</strong>. The digest is what every entry
+        references, so if this page and a ticket ever disagree, the ticket is right and this
+        page is wrong.
+      </p>
+
+      <a class="back" href="/">← back to the cave</a>
+    </main>
+
+    <script type="module">
+      const bytes = document.getElementById('bytes').textContent.replace(/\s+/g, '');
+      const out = document.getElementById('out');
+      document.getElementById('copy-bytes').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(bytes);
+          out.textContent = 'Copied — ' + (bytes.length / 2) + ' bytes. Save it as terms.hex and run the recipe.';
+          out.className = 'out ok';
+        } catch {
+          out.textContent = 'Could not reach the clipboard — select the bytes and copy them.';
+          out.className = 'out bad';
+        }
+      });
+    </script>
+  </body>
+</html>

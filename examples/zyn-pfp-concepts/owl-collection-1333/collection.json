@@ -1,0 +1,25 @@
+{
+  "name": "Zyn Owls \u2014 Collection 01",
+  "species": "Owl",
+  "supply": 1333,
+  "canvasCount": 17,
+  "authoredCellCapacity": 1592,
+  "acceptedSourceCells": 1532,
+  "reserveSourceCells": 199,
+  "rejectedSourceCells": 60,
+  "rendering": "exact full-cell slices, edge-padded to square, uniformly resized",
+  "metadataSchema": "zyn-atomic-components/v1",
+  "viewerRenderer": "zyn-light-v1",
+  "storeFilters": [
+    "Species",
+    "Visual Family",
+    "Interactive Light",
+    "Background",
+    "Body",
+    "Eyes",
+    "Beak",
+    "Headgear"
+  ],
+  "rarity": "none; controlled family distribution only",
+  "detailedTraitTagging": "complete \u2014 visually categorized"
+}

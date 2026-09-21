@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="Apply for a place in Cave Collection Z. 4,444 underground creatures, settled on ZEC." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/whitelist" />
+    <meta property="og:title" content="Cave Collection Z — the list" />
+    <meta property="og:description" content="Nothing leaves the cave early. Ask for a place." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave Collection Z — the list" />
+    <meta name="twitter:description" content="Nothing leaves the cave early. Ask for a place." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave Collection Z — the list</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>
+      /* The landing page is the cave. This is the register pinned just inside
+         its mouth — same materials, same light, nothing new invented. */
+      .register {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px;
+        position: relative;
+        z-index: 2;
+      }
+      /* The torch reaches this far in and no further. */
+      .register::before {
+        content: "";
+        position: absolute;
+        inset: -20% -30% auto;
+        height: 70%;
+        background: radial-gradient(
+          ellipse 46% 60% at 30% 0%,
+          rgba(199, 240, 75, 0.07),
+          transparent 68%
+        );
+        pointer-events: none;
+      }
+      .register h1 > span { font-size: clamp(58px, 9vw, 116px); }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); }
+
+      .ledger {
+        margin: 52px 0 0;
+        border: 1px solid var(--line);
+        box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5);
+        background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95));
+      }
+      .ledger-index {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--line);
+        color: #62665f;
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .ledger-index b { color: var(--acid); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 26px; }
+
+      .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+      .steps li {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 14px;
+        align-items: baseline;
+        font-size: clamp(11px, 1vw, 13px);
+        line-height: 1.75;
+      }
+      .steps b {
+        font-family: var(--serif);
+        font-size: 15px;
+        color: var(--acid);
+        font-weight: 400;
+      }
+      .steps a { color: var(--zec); }
+
+      .field { display: grid; gap: 9px; }
+      .field > label {
+        color: #62665f;
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .field input,
+      .field textarea {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--ink);
+        background: #050605;
+        border: 1px solid var(--line);
+        box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.55);
+        padding: 13px 14px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .field textarea { min-height: 92px; resize: vertical; line-height: 1.7; }
+      .field input::placeholder,
+      .field textarea::placeholder { color: #43463f; }
+      .field input:focus-visible,
+      .field textarea:focus-visible {
+        outline: none;
+        border-color: var(--acid);
+        box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.55), 0 0 0 1px var(--acid);
+      }
+      .field .hint { color: #62665f; font-size: 10px; line-height: 1.7; }
+
+      /* Off-screen rather than display:none — a bot reading the DOM finds it,
+         a screen reader is told to skip it, and nobody sees it. */
+      .burrow {
+        position: absolute;
+        left: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+      }
+
+      .apply-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+      .apply {
+        font-family: var(--serif);
+        font-size: 17px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--black);
+        background: var(--acid);
+        border: 0;
+        padding: 14px 30px;
+        cursor: pointer;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+      }
+      .apply:hover:not([disabled]) { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.55); }
+      .apply:active:not([disabled]) { transform: translate(2px, 2px); box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55); }
+      .apply[disabled] { opacity: 0.45; cursor: default; }
+
+      /* The dig. Work the browser does while the form is being filled, shown
+         because a thing happening silently looks like a thing stuck. */
+      .dig {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: #62665f;
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .dig i {
+        width: 5px;
+        height: 5px;
+        background: #43463f;
+        border-radius: 50%;
+        transition: background 0.2s, box-shadow 0.2s;
+      }
+      .dig.working i { background: var(--zec); box-shadow: 0 0 10px var(--zec); animation: pulse 0.9s infinite; }
+      .dig.done i { background: var(--acid); box-shadow: 0 0 10px var(--acid); }
+      @keyframes pulse { 50% { opacity: 0.25; } }
+
+      .out { margin: 0; font-size: 11px; line-height: 1.8; min-height: 1.8em; }
+      .out.ok { color: var(--acid); }
+      .out.bad { color: var(--zec); }
+
+      .smallprint {
+        margin: 34px 0 0;
+        color: #62665f;
+        font-size: 10px;
+        line-height: 1.9;
+      }
+      .smallprint strong { color: #82857d; font-weight: 400; }
+      .back {
+        display: inline-block;
+        margin: 40px 0 0;
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 9px;
+        letter-spacing: 0.19em;
+        text-decoration: none;
+      }
+      .back:hover { color: var(--acid); }
+      @media (prefers-reduced-motion: reduce) {
+        .dig.working i { animation: none; }
+        .apply:hover:not([disabled]) { transform: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <p class="batch"><span></span> batch 01 / 4,444</p>
+      <nav class="header-actions" aria-label="Collection links">
+        <a class="x-button" href="https://x.com/cavebrowin" target="_blank" rel="noopener noreferrer">X</a>
+      </nav>
+    </header>
+
+    <main class="register">
+      <p class="eyebrow">the list <span>·</span> collection 01 <span>·</span> read by hand</p>
+      <h1><span>Ask for</span><span>a place<i>.</i></span></h1>
+
+      <p class="statement">
+        Nothing leaves the cave early. Places are given, not bought, and every
+        application is read by a person — there is no score, no bot, and no
+        advantage to asking twice.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>register / 01</span>
+          <span><b>open</b></span>
+          <span>4,444</span>
+        </div>
+        <div class="ledger-body">
+          <ol class="steps">
+            <li><b>01</b><span>Follow <a href="https://x.com/cavebrowin" target="_blank" rel="noopener noreferrer">@cavebrowin</a>.</span></li>
+            <li><b>02</b><span>Repost the pinned post and leave a comment on it.</span></li>
+            <li><b>03</b><span>Paste the link to your repost or comment, so it can be checked.</span></li>
+          </ol>
+
+          <form id="form" novalidate>
+            <div class="field" style="margin-bottom: 26px">
+              <label for="handle">Your X handle</label>
+              <input id="handle" name="handle" autocomplete="off" spellcheck="false"
+                     placeholder="@yourname" maxlength="16" required />
+            </div>
+
+            <div class="field" style="margin-bottom: 26px">
+              <label for="post">Link to your repost or comment</label>
+              <input id="post" name="post" type="url" autocomplete="off" spellcheck="false"
+                     placeholder="https://x.com/yourname/status/…" required />
+              <span class="hint">This is what a reviewer opens. Without it there is nothing to check.</span>
+            </div>
+
+            <div class="field" style="margin-bottom: 26px">
+              <label for="note">Anything you want to say — optional</label>
+              <textarea id="note" name="note" maxlength="280"
+                        placeholder="Why the cave, what you build, or nothing at all."></textarea>
+            </div>
+
+            <div class="burrow" aria-hidden="true">
+              <label for="burrow">Leave this empty</label>
+              <input id="burrow" name="burrow" tabindex="-1" autocomplete="off" />
+            </div>
+
+            <div class="apply-row">
+              <button class="apply" id="apply" type="submit">Apply</button>
+              <span class="dig" id="dig"><i></i><span id="dig-text">waiting for a handle</span></span>
+            </div>
+            <p class="out" id="out" role="status" aria-live="polite"></p>
+          </form>
+        </div>
+      </div>
+
+      <p class="smallprint">
+        We keep your <strong>X handle</strong>, the <strong>link</strong> you paste and your
+        <strong>note</strong>. Nothing else — no email, no wallet address, no Zcash address.
+        A place comes with an invitation code; you connect a wallet when you use it, not now.
+      </p>
+
+      <a class="back" href="/">← back to the cave</a>
+    </main>
+
+    <script>
+      // The dig: a small proof of work, tied to the applicant's own handle and
+      // to a ten-minute window. It runs while the rest of the form is being
+      // filled, so nobody waits for it — and it makes a thousand forged
+      // applications cost a thousand times as much as one.
+      const POW_BITS = 18;
+      const WINDOW_SECONDS = 600;
+
+      const form = document.getElementById('form');
+      const out = document.getElementById('out');
+      const apply = document.getElementById('apply');
+      const dig = document.getElementById('dig');
+      const digText = document.getElementById('dig-text');
+      const handleEl = document.getElementById('handle');
+      const loadedAt = Date.now();
+
+      let solved = null;        // { handle, nonce }
+      let solving = false;
+
+      function say(message, ok) {
+        out.textContent = message;
+        out.className = 'out ' + (ok ? 'ok' : 'bad');
+      }
+
+      function setDig(state, text) {
+        dig.className = 'dig' + (state ? ' ' + state : '');
+        digText.textContent = text;
+      }
+
+      async function zeroBits(text, bits) {
+        const digest = new Uint8Array(
+          await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)),
+        );
+        let left = bits;
+        for (const byte of digest) {
+          if (left >= 8) {
+            if (byte !== 0) return false;
+            left -= 8;
+          } else {
+            return byte >> (8 - left) === 0;
+          }
+          if (left === 0) return true;
+        }
+        return true;
+      }
+
+      // Yields between batches so the page stays responsive on a slow phone.
+      async function solve(handle) {
+        const window_ = Math.floor(Date.now() / 1000 / WINDOW_SECONDS);
+        const prefix = 'cave:' + handle.toLowerCase() + ':' + window_ + ':';
+        for (let n = 0; n < 50_000_000; n++) {
+          if (await zeroBits(prefix + n, POW_BITS)) return String(n);
+          if ((n & 1023) === 0) await new Promise((r) => setTimeout(r, 0));
+        }
+        return null;
+      }
+
+      async function startDig() {
+        const handle = handleEl.value.trim().replace(/^@/, '');
+        if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+          solved = null;
+          setDig('', 'waiting for a handle');
+          return;
+        }
+        if (solving || (solved && solved.handle === handle)) return;
+        solving = true;
+        setDig('working', 'digging');
+        const nonce = await solve(handle);
+        solving = false;
+        if (nonce === null) {
+          setDig('', 'dig failed — reload');
+          return;
+        }
+        solved = { handle, nonce };
+        setDig('done', 'through');
+      }
+
+      handleEl.addEventListener('blur', startDig);
+      handleEl.addEventListener('change', startDig);
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const handle = handleEl.value.trim().replace(/^@/, '');
+        const post = document.getElementById('post').value.trim();
+        if (!handle || !post) {
+          say('A handle and a link are both needed.', false);
+          return;
+        }
+        // If they typed fast and submitted before the dig finished, wait for it
+        // here rather than refusing — the work is the same either way.
+        if (!solved || solved.handle !== handle) {
+          apply.disabled = true;
+          say('One moment — digging in.', true);
+          await startDig();
+        }
+        if (!solved || solved.handle !== handle) {
+          apply.disabled = false;
+          say('The dig did not finish. Reload and try again.', false);
+          return;
+        }
+
+        apply.disabled = true;
+        say('Sending…', true);
+        try {
+          const res = await fetch('/api/whitelist', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              handle,
+              post,
+              note: document.getElementById('note').value,
+              burrow: document.getElementById('burrow').value,
+              nonce: solved.nonce,
+              dwell: Date.now() - loadedAt,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) {
+            say(
+              data.already
+                ? 'You are already on the register. Once is enough.'
+                : 'Recorded. Every application is read by hand — watch X for the result.',
+              true,
+            );
+            form.querySelectorAll('input, textarea').forEach((el) => (el.disabled = true));
+            setDig('done', 'registered');
+            return;
+          }
+          say(data.error || 'That did not go through. Try again in a moment.', false);
+          apply.disabled = false;
+        } catch {
+          say('Could not reach the cave. Check your connection and try again.', false);
+          apply.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

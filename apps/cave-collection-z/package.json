@@ -1,0 +1,14 @@
+{
+  "name": "cave-collection-z",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/build.mjs && python3 -m http.server 4174 --directory dist",
+    "edges": "python3 scripts/make_shadow_assets.py",
+    "build": "node scripts/build.mjs",
+    "review": "node scripts/review.mjs",
+    "export": "node scripts/export.mjs",
+    "test": "node --test tests/*.test.js"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "title": "SHIELDED BYTE",
+  "subtitle": "ZCASH-INSPIRED • LEGENDARY",
+  "technique": "ZERO TRACE",
+  "tagline": "Privacy is power.",
+  "edition": "001 / 100",
+  "collection": "ZYN PRIVACY RELICS",
+  "description": "An original pixel-art privacy guardian carrying value through the encrypted dark. Fan-made concept; not affiliated with the Zcash Foundation or Electric Coin Co.",
+  "font": "/System/Library/Fonts/SFNSMono.ttf",
+  "assets": {
+    "model": "./assets/card.glb",
+    "subject": "./assets/subject.png",
+    "background": "./assets/background.png",
+    "text": "./assets/text.png",
+    "lineart": "./assets/lineart.png"
+  },
+  "parameters": {
+    "subjectScale": 1.2,
+    "subjectDepth": 0.38,
+    "backgroundDepth": -0.22,
+    "foil": 0.72
+  },
+  "safeArea": {
+    "scale": 1.08,
+    "offset": [
+      -0.04,
+      -0.075
+    ]
+  },
+  "viewer": {
+    "renderer": "zyn-light-v1",
+    "effectId": "laser"
+  }
+}

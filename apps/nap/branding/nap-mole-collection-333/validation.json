@@ -1,0 +1,103 @@
+{
+  "valid": true,
+  "sourceCanvasCount": 16,
+  "sourceCellCount": 400,
+  "candidateCount": 400,
+  "removedCandidateCount": 67,
+  "finalCount": 333,
+  "metadataCount": 333,
+  "imageSize": [
+    128,
+    192
+  ],
+  "wrongSizeFileCount": 0,
+  "wrongSizeFiles": [],
+  "exactDuplicateCount": 0,
+  "finalExactDuplicateCount": 0,
+  "metadataImagePairMismatchCount": 0,
+  "metadataImagePairMismatches": [],
+  "closedEyeVisualReview": "all selected final cells show closed eyelids or a complete sleep mask; rejected source cells are listed separately",
+  "manualRejectedSourceCellCount": 4,
+  "manualRejectedSourceCells": [
+    {
+      "canvas": 5,
+      "row": 4,
+      "column": 3,
+      "reason": "malformed double mouth mark"
+    },
+    {
+      "canvas": 6,
+      "row": 4,
+      "column": 1,
+      "reason": "open circular eye"
+    },
+    {
+      "canvas": 6,
+      "row": 4,
+      "column": 3,
+      "reason": "open cyan eye"
+    },
+    {
+      "canvas": 9,
+      "row": 2,
+      "column": 1,
+      "reason": "eye-mask decoration reads as an open eye"
+    }
+  ],
+  "finalCanvasCounts": {
+    "1": 21,
+    "2": 21,
+    "3": 21,
+    "4": 21,
+    "5": 21,
+    "6": 21,
+    "7": 21,
+    "8": 21,
+    "9": 21,
+    "10": 21,
+    "11": 21,
+    "12": 21,
+    "13": 21,
+    "14": 20,
+    "15": 20,
+    "16": 20
+  },
+  "skinFamiliesRequested": [
+    "charcoal",
+    "earth-brown",
+    "slate",
+    "warm-tunnel-brown",
+    "silver",
+    "albino-ivory",
+    "cyan",
+    "gold-dust",
+    "obsidian",
+    "violet",
+    "moss",
+    "moonstone",
+    "copper",
+    "violet-cipher",
+    "privacy-teal",
+    "ash",
+    "cream",
+    "midnight-navy",
+    "aurora-gradient",
+    "prism-mosaic",
+    "vault-black-gold",
+    "solar-orange",
+    "bioluminescent-green",
+    "eclipse",
+    "shielded-white-cyan"
+  ],
+  "skinFamilyCount": 25,
+  "metadataTraitCoverage": {
+    "reviewedTokenCount": 333,
+    "expectedTokenCount": 333,
+    "complete": true,
+    "manuallyReviewedVisibleTraits": [
+      "Headwear",
+      "Mouth"
+    ]
+  },
+  "exactTraitClassification": "Headwear and mouth manually reviewed against every final PNG; fixed collection traits and cryptographic image binding verified"
+}

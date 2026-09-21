@@ -1,0 +1,179 @@
+{
+  "status": "pass",
+  "expectedMasters": 90,
+  "exportedMasters": 90,
+  "uniqueHashes": 90,
+  "dimensions": [
+    [
+      192,
+      192
+    ]
+  ],
+  "categoryCounts": {
+    "background": 18,
+    "body": 15,
+    "mouth": 11,
+    "eyes": 15,
+    "headgear": 13,
+    "light": 18
+  },
+  "previewGridColumns": {
+    "background": 6,
+    "body": 5,
+    "mouth": 4,
+    "eyes": 5,
+    "headgear": 5,
+    "light": 6
+  },
+  "pureGridDimensions": {
+    "background": [
+      1152,
+      576
+    ],
+    "body": [
+      960,
+      576
+    ],
+    "mouth": [
+      768,
+      576
+    ],
+    "eyes": [
+      960,
+      576
+    ],
+    "headgear": [
+      960,
+      576
+    ],
+    "light": [
+      1152,
+      576
+    ]
+  },
+  "sourceGridMeasurements": {
+    "background": {
+      "columns": 6,
+      "rows": 3,
+      "boundaryMode": "equal-authored-grid",
+      "cellWidths": [
+        296,
+        295,
+        296,
+        296,
+        295,
+        296
+      ],
+      "cellHeights": [
+        296,
+        295,
+        296
+      ]
+    },
+    "body": {
+      "columns": 5,
+      "rows": 3,
+      "boundaryMode": "equal-authored-grid",
+      "cellWidths": [
+        324,
+        324,
+        323,
+        324,
+        324
+      ],
+      "cellHeights": [
+        324,
+        323,
+        324
+      ]
+    },
+    "mouth": {
+      "columns": 4,
+      "rows": 3,
+      "boundaryMode": "equal-authored-grid",
+      "cellWidths": [
+        362,
+        362,
+        362,
+        362
+      ],
+      "cellHeights": [
+        362,
+        362,
+        362
+      ]
+    },
+    "eyes": {
+      "columns": 5,
+      "rows": 3,
+      "boundaryMode": "equal-authored-grid",
+      "cellWidths": [
+        324,
+        324,
+        323,
+        324,
+        324
+      ],
+      "cellHeights": [
+        324,
+        324,
+        324
+      ]
+    },
+    "headgear": {
+      "columns": 5,
+      "rows": 3,
+      "boundaryMode": "equal-authored-grid",
+      "cellWidths": [
+        324,
+        324,
+        323,
+        324,
+        324
+      ],
+      "cellHeights": [
+        324,
+        324,
+        324
+      ]
+    },
+    "light": {
+      "columns": 6,
+      "rows": 3,
+      "boundaryMode": "measured-dark-gutters",
+      "cellWidths": [
+        305,
+        296,
+        299,
+        292,
+        278,
+        238
+      ],
+      "cellHeights": [
+        295,
+        289,
+        283
+      ]
+    }
+  },
+  "nativeSquareLightReplacements": {
+    "source": "atlases/light-last-column-replacements.png",
+    "sourceGrid": [
+      3,
+      2
+    ],
+    "sourceCell": [
+      512,
+      512
+    ],
+    "items": [
+      "aurora",
+      "eclipse",
+      "constellation-sweep"
+    ]
+  },
+  "calibrationCellsExcluded": {
+    "mouth": 1,
+    "headgear": 2
+  }
+}

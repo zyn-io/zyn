@@ -1,0 +1,602 @@
+[
+  {
+    "canvas": 1,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Balanced Genesis",
+    "sourceWidth": 116,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Balanced Genesis",
+    "sourceWidth": 117,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Balanced Genesis",
+    "sourceWidth": 116,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Balanced Genesis",
+    "sourceWidth": 108,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Balanced Genesis",
+    "sourceWidth": 114,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Balanced Genesis",
+    "sourceWidth": 116,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Balanced Genesis",
+    "sourceWidth": 108,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Balanced Genesis",
+    "sourceWidth": 116,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Balanced Genesis",
+    "sourceWidth": 116,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 1,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Balanced Genesis",
+    "sourceWidth": 114,
+    "sourceHeight": 85,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 64,
+    "row": 8,
+    "column": 1,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 134,
+    "reason": "empty background; required Owl subject is absent"
+  },
+  {
+    "canvas": 4,
+    "cell": 73,
+    "row": 9,
+    "column": 1,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 74,
+    "row": 9,
+    "column": 2,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 75,
+    "row": 9,
+    "column": 3,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 76,
+    "row": 9,
+    "column": 4,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 77,
+    "row": 9,
+    "column": 5,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 78,
+    "row": 9,
+    "column": 6,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 79,
+    "row": 9,
+    "column": 7,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 80,
+    "row": 9,
+    "column": 8,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 4,
+    "cell": 81,
+    "row": 9,
+    "column": 9,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 130,
+    "sourceHeight": 118,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Nebula and Comet",
+    "sourceWidth": 116,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Nebula and Comet",
+    "sourceWidth": 112,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Nebula and Comet",
+    "sourceWidth": 115,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Nebula and Comet",
+    "sourceWidth": 115,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Nebula and Comet",
+    "sourceWidth": 128,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Nebula and Comet",
+    "sourceWidth": 123,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Nebula and Comet",
+    "sourceWidth": 118,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Nebula and Comet",
+    "sourceWidth": 116,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Nebula and Comet",
+    "sourceWidth": 118,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 9,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Nebula and Comet",
+    "sourceWidth": 118,
+    "sourceHeight": 107,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 120,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 118,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 119,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 118,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 117,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 119,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 119,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 119,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 118,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 10,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Lantern Gold and Voidlight",
+    "sourceWidth": 119,
+    "sourceHeight": 92,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 120,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 118,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 116,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 115,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 120,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 117,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 115,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 116,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 119,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 13,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Archivists and Moon Scribes",
+    "sourceWidth": 116,
+    "sourceHeight": 93,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 91,
+    "row": 10,
+    "column": 1,
+    "family": "Royal Vault",
+    "sourceWidth": 120,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 92,
+    "row": 10,
+    "column": 2,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 93,
+    "row": 10,
+    "column": 3,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 94,
+    "row": 10,
+    "column": 4,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 95,
+    "row": 10,
+    "column": 5,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 96,
+    "row": 10,
+    "column": 6,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 97,
+    "row": 10,
+    "column": 7,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 98,
+    "row": 10,
+    "column": 8,
+    "family": "Royal Vault",
+    "sourceWidth": 118,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 99,
+    "row": 10,
+    "column": 9,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  },
+  {
+    "canvas": 15,
+    "cell": 100,
+    "row": 10,
+    "column": 10,
+    "family": "Royal Vault",
+    "sourceWidth": 117,
+    "sourceHeight": 97,
+    "reason": "visually confirmed compressed final row"
+  }
+]

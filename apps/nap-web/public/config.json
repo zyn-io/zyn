@@ -1,0 +1,44 @@
+{
+  "network": "Zyn mainnet",
+  "zcash": "ZEC mainnet",
+  "zcashPrefix": "u1",
+  "chain": 26460,
+  "rpcUrl": "/rpc",
+  "claimUrl": "/claim",
+  "mediaGateway": "/media",
+  "networks": [
+    {
+      "id": "mainnet",
+      "network": "Zyn mainnet",
+      "zcash": "ZEC mainnet",
+      "zcashPrefix": "u1",
+      "chain": 26460,
+      "rpcUrl": "/rpc",
+      "claimUrl": "/claim",
+      "mediaGateway": "/media",
+      "collections": [
+        {
+          "name": "Cave Collection Z",
+          "id": "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e"
+        }
+      ]
+    },
+    {
+      "id": "testnet",
+      "network": "Zyn testnet",
+      "zcash": "ZEC testnet",
+      "zcashPrefix": "utest1",
+      "chain": 11,
+      "rpcUrl": "/rpc/testnet",
+      "claimUrl": "/claim",
+      "mediaGateway": "/media",
+      "collections": []
+    }
+  ],
+  "collections": [
+    {
+      "name": "Cave Collection Z",
+      "id": "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e"
+    }
+  ]
+}

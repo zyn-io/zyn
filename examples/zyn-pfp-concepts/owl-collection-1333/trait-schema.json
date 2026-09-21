@@ -1,0 +1,180 @@
+{
+  "version": "zyn-atomic-components/v1",
+  "species": "Owl",
+  "provenance": "Atomic portraits; component IDs describe visually reviewed categories, not composited source layers.",
+  "filterableNow": [
+    "Species",
+    "Visual Family",
+    "Interactive Light",
+    "Background",
+    "Body",
+    "Eyes",
+    "Beak",
+    "Headgear"
+  ],
+  "filterableAfterVisualReview": [],
+  "componentOptions": {
+    "background": [
+      "deep-black",
+      "tunnel-grid",
+      "shielded-pool",
+      "node-chamber",
+      "gold-vault",
+      "cyan-cavern",
+      "moon-blocks",
+      "aurora-garden",
+      "eclipse-gate",
+      "prism-archive",
+      "genesis-chamber",
+      "zero-field",
+      "midnight-observatory",
+      "shielded-forest",
+      "lunar-ruins",
+      "star-map-vault",
+      "solar-archive",
+      "nebula-tunnel"
+    ],
+    "body": [
+      "charcoal-sentinel",
+      "brown-scholar",
+      "ash-courier",
+      "silver-oracle",
+      "snow-watcher",
+      "cyan-circuit",
+      "gold-flecked",
+      "obsidian-armor",
+      "moon-robe",
+      "genesis-keeper",
+      "teal-navigator",
+      "bronze-cartographer",
+      "dusk-plum",
+      "eclipse-feather",
+      "shielded-white"
+    ],
+    "mouth": [
+      "calm-diamond-beak",
+      "short-beak",
+      "open-hooting-beak",
+      "sharp-hooked-beak",
+      "gold-beak",
+      "respirator",
+      "signal-whistle",
+      "crystal-beak",
+      "crescent-moon-beak",
+      "split-rune-beak",
+      "cipher-beak"
+    ],
+    "eyes": [
+      "round-cyan",
+      "narrowed-cyan",
+      "sleepy",
+      "moonlit",
+      "gold",
+      "constellation",
+      "monocle",
+      "dark-visor",
+      "eclipse",
+      "prism",
+      "aurora",
+      "void",
+      "star-map",
+      "shielded-scan",
+      "luminous-white"
+    ],
+    "headgear": [
+      "none",
+      "black-hood",
+      "miner-helmet",
+      "beanie",
+      "zyn-cap",
+      "node-headset",
+      "vault-crown",
+      "moon-halo",
+      "genesis-helm",
+      "archivist-circlet",
+      "solar-visor-helmet",
+      "cipher-cowl",
+      "night-watch-crest"
+    ],
+    "light": [
+      "neutral",
+      "sunlight",
+      "moonlight",
+      "starlight",
+      "bioluminescence",
+      "aurora",
+      "afterglow",
+      "caustics",
+      "prism",
+      "laser",
+      "veiled-light",
+      "eclipse",
+      "dawn-beam",
+      "nebula-glow",
+      "comet-trail",
+      "lantern-gold",
+      "voidlight",
+      "constellation-sweep"
+    ]
+  },
+  "viewer": {
+    "renderer": "zyn-light-v1",
+    "effects": [
+      {
+        "id": "laser",
+        "label": "Laser",
+        "rendererIndex": 0
+      },
+      {
+        "id": "sunlight",
+        "label": "Sunlight",
+        "rendererIndex": 1
+      },
+      {
+        "id": "moonlight",
+        "label": "Moonlight",
+        "rendererIndex": 2
+      },
+      {
+        "id": "eclipse",
+        "label": "Eclipse",
+        "rendererIndex": 3
+      },
+      {
+        "id": "starlight",
+        "label": "Starlight",
+        "rendererIndex": 4
+      },
+      {
+        "id": "veiled-light",
+        "label": "Veiled Light",
+        "rendererIndex": 5
+      },
+      {
+        "id": "prism",
+        "label": "Prism",
+        "rendererIndex": 6
+      },
+      {
+        "id": "aurora",
+        "label": "Aurora",
+        "rendererIndex": 7
+      },
+      {
+        "id": "bioluminescence",
+        "label": "Bioluminescence",
+        "rendererIndex": 8
+      },
+      {
+        "id": "afterglow",
+        "label": "Afterglow",
+        "rendererIndex": 9
+      },
+      {
+        "id": "caustics",
+        "label": "Caustics",
+        "rendererIndex": 10
+      }
+    ]
+  }
+}

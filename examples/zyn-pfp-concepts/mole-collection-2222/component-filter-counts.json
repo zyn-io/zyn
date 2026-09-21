@@ -1,0 +1,167 @@
+{
+  "status": "pass",
+  "supply": 2222,
+  "categories": {
+    "background": {
+      "counts": {
+        "ancient-rail": 76,
+        "aurora-garden": 47,
+        "biolume-fungus": 93,
+        "burrow-cross-section": 16,
+        "crystal-geode": 39,
+        "cyan-cavern": 211,
+        "deep-black": 316,
+        "dust-chamber": 391,
+        "eclipse-gate": 12,
+        "encrypted-mine": 6,
+        "genesis-chamber": 6,
+        "genesis-core": 27,
+        "gold-vault": 14,
+        "gold-vein": 14,
+        "lantern-gallery": 161,
+        "moon-blocks": 3,
+        "moonlit-shaft": 141,
+        "node-chamber": 24,
+        "node-reactor": 233,
+        "obsidian-cavern": 52,
+        "prism-archive": 79,
+        "prism-quarry": 89,
+        "quantum-tunnel": 3,
+        "root-network": 14,
+        "shielded-pool": 120,
+        "shielded-vault-door": 28,
+        "subterranean-lake": 1,
+        "zcash-archive": 2,
+        "zero-field": 4
+      },
+      "confidence": {
+        "high": 778,
+        "low": 556,
+        "medium": 888
+      }
+    },
+    "body": {
+      "counts": {
+        "albino-archivist": 68,
+        "ash-surveyor": 199,
+        "aurora-suit": 29,
+        "biolume-keeper": 7,
+        "brown-tunnel-scout": 282,
+        "charcoal-hoodie": 263,
+        "cream-geologist": 29,
+        "cyan-circuit": 14,
+        "earth-miner": 207,
+        "eclipse-miner": 8,
+        "genesis-robe": 18,
+        "gold-dust-keeper": 44,
+        "midnight-runner": 289,
+        "moonstone-scout": 224,
+        "moss-burrower": 24,
+        "obsidian-armor": 6,
+        "prism-prospector": 40,
+        "silver-node-technician": 58,
+        "solar-driller": 2,
+        "teal-excavator": 273,
+        "vault-warden": 115,
+        "violet-cipher": 23
+      },
+      "confidence": {
+        "high": 778,
+        "low": 557,
+        "medium": 887
+      }
+    },
+    "eyes": {
+      "counts": {
+        "alert": 6,
+        "aurora": 65,
+        "bioluminescent": 82,
+        "cipher-crosshair": 1,
+        "cyan": 259,
+        "dark-visor": 263,
+        "dust-goggles": 26,
+        "eclipse": 17,
+        "geode-lenses": 6,
+        "gold": 57,
+        "hidden": 238,
+        "infrared": 5,
+        "laser": 2,
+        "luminous-white": 68,
+        "monocle": 40,
+        "moonlit": 12,
+        "node-scan": 500,
+        "pixel-shades": 5,
+        "prism": 5,
+        "round-goggles": 182,
+        "scarred": 3,
+        "sleepy": 350,
+        "starlight": 1,
+        "suspicious": 17,
+        "void-eyes": 12
+      },
+      "confidence": {
+        "high": 774,
+        "human-reviewed": 4,
+        "low": 556,
+        "medium": 888
+      }
+    },
+    "mouth": {
+      "counts": {
+        "cipher-mouth": 18,
+        "compact-respirator": 3,
+        "crescent-mouth": 1,
+        "crystal-breather": 113,
+        "dust-mask": 16,
+        "friendly-smile": 1,
+        "glowing-grin": 1,
+        "gold-tooth": 36,
+        "neutral-dash": 50,
+        "short-pipe": 14,
+        "side-smirk": 683,
+        "signal-whistle": 61,
+        "small-open-o": 613,
+        "star-mouth": 21,
+        "surprised-ring": 591
+      },
+      "confidence": {
+        "high": 777,
+        "human-reviewed": 3,
+        "low": 556,
+        "medium": 886
+      }
+    },
+    "headgear": {
+      "counts": {
+        "archivist-hood": 22,
+        "aurora-helm": 145,
+        "beanie": 14,
+        "black-hood": 50,
+        "cipher-mining-rig": 42,
+        "drill-visor": 41,
+        "genesis-helm": 5,
+        "geode-crown": 64,
+        "lantern-helm": 202,
+        "miner-helmet": 294,
+        "moon-halo": 19,
+        "node-headset": 13,
+        "none": 90,
+        "prism-hardhat": 233,
+        "prospector-goggles": 225,
+        "rail-conductor-cap": 25,
+        "root-crown": 51,
+        "shielded-cowl": 32,
+        "tunnel-lamp": 481,
+        "vault-crown": 31,
+        "zero-field-halo": 2,
+        "zyn-cap": 141
+      },
+      "confidence": {
+        "high": 777,
+        "human-reviewed": 3,
+        "low": 555,
+        "medium": 887
+      }
+    }
+  }
+}

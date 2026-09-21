@@ -1,0 +1,614 @@
+[
+  {
+    "canvas": 33,
+    "cell": 10,
+    "row": 1,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 140
+  },
+  {
+    "canvas": 33,
+    "cell": 11,
+    "row": 1,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 140
+  },
+  {
+    "canvas": 33,
+    "cell": 12,
+    "row": 2,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 13,
+    "row": 2,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 14,
+    "row": 2,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 15,
+    "row": 2,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 16,
+    "row": 2,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 17,
+    "row": 2,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 18,
+    "row": 2,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 19,
+    "row": 2,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 20,
+    "row": 2,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 21,
+    "row": 2,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 22,
+    "row": 2,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 152
+  },
+  {
+    "canvas": 33,
+    "cell": 23,
+    "row": 3,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 24,
+    "row": 3,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 25,
+    "row": 3,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 26,
+    "row": 3,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 27,
+    "row": 3,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 28,
+    "row": 3,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 29,
+    "row": 3,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 30,
+    "row": 3,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 31,
+    "row": 3,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 32,
+    "row": 3,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 33,
+    "row": 3,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 146
+  },
+  {
+    "canvas": 33,
+    "cell": 34,
+    "row": 4,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 35,
+    "row": 4,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 36,
+    "row": 4,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 37,
+    "row": 4,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 38,
+    "row": 4,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 39,
+    "row": 4,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 40,
+    "row": 4,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 41,
+    "row": 4,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 42,
+    "row": 4,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 43,
+    "row": 4,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 44,
+    "row": 4,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 148
+  },
+  {
+    "canvas": 33,
+    "cell": 45,
+    "row": 5,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 46,
+    "row": 5,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 47,
+    "row": 5,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 48,
+    "row": 5,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 49,
+    "row": 5,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 50,
+    "row": 5,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 51,
+    "row": 5,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 52,
+    "row": 5,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 53,
+    "row": 5,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 54,
+    "row": 5,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 55,
+    "row": 5,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 144
+  },
+  {
+    "canvas": 33,
+    "cell": 56,
+    "row": 6,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 57,
+    "row": 6,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 58,
+    "row": 6,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 59,
+    "row": 6,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 60,
+    "row": 6,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 61,
+    "row": 6,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 62,
+    "row": 6,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 63,
+    "row": 6,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 64,
+    "row": 6,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 65,
+    "row": 6,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 66,
+    "row": 6,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 132
+  },
+  {
+    "canvas": 33,
+    "cell": 67,
+    "row": 7,
+    "column": 1,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 131,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 68,
+    "row": 7,
+    "column": 2,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 129,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 69,
+    "row": 7,
+    "column": 3,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 132,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 70,
+    "row": 7,
+    "column": 4,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 128,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 71,
+    "row": 7,
+    "column": 5,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 72,
+    "row": 7,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 73,
+    "row": 7,
+    "column": 7,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 74,
+    "row": 7,
+    "column": 8,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 126,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 75,
+    "row": 7,
+    "column": 9,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 124,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 76,
+    "row": 7,
+    "column": 10,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 131
+  },
+  {
+    "canvas": 33,
+    "cell": 77,
+    "row": 7,
+    "column": 11,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 131
+  }
+]
