@@ -6001,3 +6001,57 @@ browser extension by the RHEA Finance team — a wallet over Zcash rather than
 an execution layer, per its own SDK docs, and a peer of *Nap* rather than of
 Zyn. What its "swaps and lending" do concretely is not stated in its public
 docs and is not assumed here.
+
+## §135 — The deposit bridge derives its nonces (21 Sep 2026)
+
+A confirmed Zcash deposit becomes an object whose commitment includes a
+nonce. That nonce has two requirements that pull against each other, and the
+obvious implementation satisfies only one.
+
+**It must be unguessable.** Everything else about a deposit is public: the
+account comes from the memo, the amount from the Zcash transaction. If the
+nonce were predictable, a stranger would recompute the commitment and learn
+which object on the ledger is that deposit — which is the whole privacy claim.
+
+**It must be the same on every attempt.** A bridge can die between building an
+intent and learning whether it landed. This is not a hypothetical: it is the
+ordinary case of a process restart during a network call.
+
+Random satisfies the first and fails the second, and the failure is worse than
+a retry that doesn't work. The VM dedupes on the Zcash txid, so a second
+intent with a fresh nonce is refused as `AlreadyCredited` — correct, and
+useless: the object from the *first* attempt is already published, and the
+bridge has forgotten the nonce that made it. The holder's wallet scans for
+that commitment and finds nothing. The money is in the vault, the credit is on
+the ledger, and no party can connect them.
+
+So both secrets are derived (§A116):
+
+```text
+  nonce      HKDF(bridge_seed, "zyn.ingress.nonce.v1",     "nonce"     ‖ txid)
+  ephemeral  HKDF(bridge_seed, "zyn.ingress.ephemeral.v1", "ephemeral" ‖ txid)
+```
+
+Deterministic given the seed, unguessable without it. A restarted bridge
+rebuilds a byte-identical intent, which makes resubmitting free and makes
+`AlreadyCredited` a proof the work was done rather than a report of loss.
+
+**Keyed on the txid alone.** Adding the account or amount would let one
+deposit have two valid nonces if either were ever re-read differently — which
+is the failure this exists to prevent.
+
+**The bridge seed is not a wallet seed.** It cannot spend anything; spending
+needs the holder's key. It can recompute every deposit commitment the bridge
+has ever made and link each to its Zcash transaction, which undoes the privacy
+of every deposit at once. It belongs where the vault's other secrets are.
+
+### §135.1 — What this does not yet solve
+
+A deposit for an account that has never registered a viewing key cannot be
+credited: the object would be one nobody can open. It is reported as pending
+and the ZEC stays in the vault, which is right. But the watcher marks that
+height scanned and will not report the deposit again, so the pending list is
+the only record the vault owes it — and nothing persists that list. A116's
+test found this; A117 fixes it, and it gates opening deposits independently of
+the privacy ladder.
+

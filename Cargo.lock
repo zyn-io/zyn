@@ -6279,6 +6279,7 @@ dependencies = [
  "hkdf",
  "k256",
  "libc",
+ "objectvm",
  "orchard",
  "qrcode",
  "rand",

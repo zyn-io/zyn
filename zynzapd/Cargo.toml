@@ -25,6 +25,7 @@ zyn = { path = "../zyn" }
 zyn-vm = { path = "../zyn-vm" }
 swapvm = { path = "../swapvm" }
 zyn-custody = { path = "../zyn-custody" }
+objectvm = { path = "../objectvm" }
 # The allocation engine. This crate wires it to a chain and a clock; the engine
 # itself owns neither, which is what lets anyone replay an allocation offline.
 cave-randomness = { path = "../cave-randomness" }
