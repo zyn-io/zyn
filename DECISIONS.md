@@ -5959,3 +5959,20 @@ custodial designs. Under the object model it can stop being custodial at all.
 | # | Decision | |
 |---|---|---|
 | 132.8 | **The AMM waits, and does not gate Cave.** A market for items is an order book, not a pool: §132's encumbrance and claim need no batching, no hidden reserves and no circuit. The pool questions — what the coarsest publication is that still lets someone trade, and whether reserves move per trade or per batch — stay open and stop being on any critical path. Worth noting one finding so it is not re-proposed: **publishing slippage or APR publishes the reserves.** Under `x·y = k` the slippage on a known trade size solves for `x` in one step, and APR over a public fee rate gives the ratio directly. Hiding reserves while showing either is arithmetic, not an implementation detail; what works is coarser granularity — per batch, daily averages, banded slippage — which is batching reached from the trader's side rather than the cryptographer's | 🔒 deferred |
+
+---
+
+## 133. Cave launches on the object ledger (21 Sep 2026)
+
+§130.8a said Cave ships at tier 1 rather than waiting for tier 4, and that
+stands. What changes is *which VM it ships on*: `objectvm`, not swapvm — so
+items are objects from the first mint and nothing is ever re-minted.
+
+| # | Decision | |
+|---|---|---|
+| 133.1 | **Cave mints onto `objectvm`.** The alternative was shipping on the account ledger and moving 4,444 items later, which is a re-mint of real holdings with real owners. Doing it before anything is sold costs nothing; doing it after is the expensive version of the same change (§130.3 made this argument about certificates a day earlier and it holds here) | 🔒 |
+| 133.2 | **The sale machinery did not have to move.** `sale.rs` holds two references to swapvm and both are type imports; `draw.rs` and `cave-randomness` hold none. The draw, allocator, whitelist and settlement reconciliation were already VM-agnostic, which is why this decision is affordable at all | ✅ measured |
+| 133.3 | **`collection.rs` is not needed here, because objects are what it was invented to be.** It compresses items into a Merkle tree since "a distinct asset costs a token entry… a million-item collection is not survivable". An object *is* a leaf in a tree. On the object ledger an item is `asset = collection, amount = 1` and the compression is structural rather than bolted on | ✅ |
+| 133.4 | **This ships at tier 2, not tier 1** — better than §130.8a assumed, and still not tier 4. Nobody holding a mirror can build the owner map, because the published sections carry commitments and nullifiers and no owner. The operator still can. The sentence Cave may use is "private from the public; we can see them", and not one word more (§130.12) | 🔒 invariant |
+| 133.5 | **Nap must read the object ledger before deposits open.** A store whose buyers cannot see what they bought is not shippable. Today a wallet asks the node what an account holds; against an object ledger that query does not exist, and discovery becomes scan-and-trial-decrypt — the Zcash sync problem arriving inside Zyn | 🔒 gate |
+| 133.6 | **A ZEC deposit must create an object, not credit an account** — and that is what makes note encryption the keystone rather than a later nicety. The sequencer creates the note; the depositor has to be able to find it. Deriving the nonce publicly from the txid would let an observer confirm a guessed recipient by recomputing the commitment, so the note is encrypted to the recipient instead and discovered by trial decryption. The same mechanism serves 133.5, which is why A114 comes before the deposit path rather than after | 🔒 |

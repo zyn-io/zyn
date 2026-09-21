@@ -35,6 +35,7 @@ pub mod derive;
 pub mod eip712;
 pub mod fixed;
 pub mod manifest;
+pub mod note_enc;
 pub mod object;
 pub mod program;
 pub mod read;

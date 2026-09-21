@@ -6258,11 +6258,13 @@ dependencies = [
 name = "zyn-vm"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305",
  "curve25519-dalek",
  "ed25519-dalek",
  "k256",
  "sha2 0.10.9",
  "sha3",
+ "x25519-dalek",
 ]
 
 [[package]]
