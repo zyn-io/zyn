@@ -21,8 +21,13 @@
        `--operator` this key and the operator can see it — everything held on Zyn
        `--record`   anyone can verify it — anchors, roots, published records
      `--lead` is layout only: the panel that leads a tab. It must never borrow a
-     visibility colour, or emphasis starts reading as a privacy claim. */
-  --private: #eaf3f1; --operator: #a8813f; --record: #6b7385; --lead: #eaf3f1;
+     visibility colour, or emphasis starts reading as a privacy claim — so it is
+     a paper neutral, deliberately no hue. It was `--private`'s exact value
+     until 21 Sep, which meant every leading panel claimed privacy by tint,
+     including Zyn's, whose own prose says the operator reads it (A109).
+     A surface that is *not* private says so with `.seen`, in words and colour
+     together: colour alone is a claim a colour-blind reader cannot check. */
+  --private: #eaf3f1; --operator: #a8813f; --record: #6b7385; --lead: #f1eee4;
   --display: "Bricolage Grotesque", "Arial Rounded MT Bold", sans-serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -34,7 +39,7 @@
     --ink: #f7f4ea; --ink-2: #c7c8c2; --ink-3: #919694;
     --accent: #50bdb6; --accent-ink: #101214; --accent-soft: #193936;
     --gold: #e0a51b; --good: #62c46f; --warn: #e6934a; --bad: #f08a80;
-    --private: #1b2d2c; --operator: #d9ad63; --record: #abb0b2; --lead: #1b2d2c;
+    --private: #1b2d2c; --operator: #d9ad63; --record: #abb0b2; --lead: #2b2f33;
   }
 }
 :root[data-theme="dark"] {
@@ -42,7 +47,7 @@
   --ink: #f7f4ea; --ink-2: #c7c8c2; --ink-3: #919694;
   --accent: #50bdb6; --accent-ink: #101214; --accent-soft: #193936;
   --gold: #e0a51b; --good: #62c46f; --warn: #e6934a; --bad: #f08a80;
-  --private: #1b2d2c; --operator: #d9ad63; --record: #abb0b2; --lead: #1b2d2c;
+  --private: #1b2d2c; --operator: #d9ad63; --record: #abb0b2; --lead: #2b2f33;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; color: var(--ink); font: 15px/1.5 var(--sans); }
@@ -108,7 +113,7 @@ section h2 small { font-weight: 400; letter-spacing: 0; text-transform: none; co
 .nft-account-qr { display: grid; place-items: center; width: 116px; height: 116px; padding: 8px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
 .nft-account-qr svg { width: 100px; height: 100px; }
 .nft-actions { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-.nft-send-panel { margin-top: 14px; padding: 15px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 13px; background: color-mix(in srgb, var(--operator) 12%, var(--surface)); }
+.nft-send-panel { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; margin-top: 14px; padding: 15px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 13px; background: color-mix(in srgb, var(--operator) 12%, var(--surface)); }
 .nft-send-panel label { display: block; margin-bottom: 8px; color: var(--ink-2); font-size: 12.5px; }
 .detail { display: grid; grid-template-columns: minmax(140px, 240px) 1fr; gap: 18px; align-items: start; }
 @media (max-width: 560px) { .detail { grid-template-columns: 1fr; } }
@@ -121,6 +126,23 @@ section h2 small { font-weight: 400; letter-spacing: 0; text-transform: none; co
 /* The one panel that leads a tab. Everything else stays plain, so the page
    has a subject rather than six equal boxes. */
 section.lead { background: linear-gradient(145deg, var(--lead), var(--surface) 72%); border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+/* Who can see what is in this panel. The wallet's whole layout is about that
+   distinction, so where a surface is *not* private it says which of the three
+   it is — as a tint and as a sentence. The tint alone would be a claim a
+   colour-blind reader cannot check, and the sentence alone would leave the
+   surface looking like every other one (A109).
+   Private needs no marking: it is what the wallet is, and marking the default
+   would make the exceptions harder to spot, not easier. */
+section.seen-operator { background: color-mix(in srgb, var(--operator) 9%, var(--surface)); border-color: color-mix(in srgb, var(--operator) 32%, var(--line)); }
+section.seen-record { background: color-mix(in srgb, var(--record) 8%, var(--surface)); border-color: color-mix(in srgb, var(--record) 30%, var(--line)); }
+/* A leading panel that also carries a visibility category takes the category's
+   colour, not the lead tint: emphasis is layout and must not outrank a claim
+   about who is reading. */
+section.lead.seen-operator, section.lead.seen-record { background-image: none; }
+.seen { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 3px 9px; border-radius: 999px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.seen::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.seen-operator > .seen { color: var(--operator); background: color-mix(in srgb, var(--operator) 15%, transparent); }
+.seen-record > .seen { color: var(--record); background: color-mix(in srgb, var(--record) 15%, transparent); }
 section.lead > h2 { color: var(--accent); }
 /* The accent rides the panel's top edge rather than sitting inside the
    heading: `h2` is a space-between flex row, so a pseudo-element there
@@ -289,21 +311,24 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
     <h2>Zyn</h2>
     <div class="empty" id="zyn-why"></div>
   </section>
-  <section id="zyn-account" class="lead">
+  <section id="zyn-account" class="lead seen-operator">
     <h2>Zyn account <small id="epoch" class="record"></small></h2>
+    <span class="seen">You and the operator</span>
     <div class="addr"><code id="account"></code><button class="btn small" id="copy-acct">Copy</button></div>
     <div class="wrap"><table id="balances"><thead><tr><th>Asset</th><th class="r">Amount</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="hint">Only this key can read your balance over the RPC — a reader has to sign for it. The operator and its verifiers see activity in the journal. Zyn is anchored to Zcash testnet.</div>
     <div class="hint" id="zyn-exit"></div>
   </section>
-  <section id="zyn-market" class="lead" hidden>
+  <section id="zyn-market" class="lead seen-operator" hidden>
     <h2>ZYN market <small id="zm-state" class="record"></small></h2>
+    <span class="seen">You and the operator</span>
     <div id="zm-line"></div>
     <div class="bar" id="zm-bar" hidden><div></div></div>
     <div class="hint" id="zm-detail"></div>
   </section>
-  <section id="zyn-move">
+  <section id="zyn-move" class="seen-operator">
     <h2>Move ZEC in and out</h2>
+    <span class="seen">You and the operator</span>
     <div class="hint" id="dep-how"></div>
     <div class="addr"><code id="dep-addr"></code><button class="btn small" id="copy-dep">Copy</button></div>
     <div class="memo-warning" id="dep-memo-warning" hidden>
@@ -325,8 +350,9 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
     <div class="row"><button class="btn" id="bind">Bind this wallet as the exit destination</button></div>
     <div class="row"><input class="grow num" id="wd-amount" placeholder="amount" inputmode="decimal"><button class="btn primary" id="withdraw">Withdraw</button></div>
   </section>
-  <section id="zyn-send" class="full">
+  <section id="zyn-send" class="full seen-operator">
     <h2>Send on Zyn <small>instant, not private</small></h2>
+    <span class="seen">You and the operator</span>
     <div class="row"><input class="grow mono" id="zt-to" placeholder="recipient account id (64 hex)" spellcheck="false"></div>
     <div class="row"><select id="zt-asset" style="width:auto"></select><input class="grow num" id="zt-amount" placeholder="amount" inputmode="decimal"><button class="btn primary" id="zt-send">Send</button></div>
     <label class="hint"><input type="checkbox" id="zt-force"> Use Zcash recovery path — pays the vault 0.0001 with the signed intent in the memo; the node must apply it within 20 blocks or verifiers report censorship. Use it when the node ignores you.</label>
@@ -380,7 +406,8 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
         <div class="addr"><code id="it-content"></code><button class="btn small" id="copy-content">Copy</button></div>
         <div class="nft-actions">
           <div class="row"><button class="btn primary" id="it-send">Send this NFT</button><button class="btn" id="it-redeem">Redeem</button><span class="hint" id="it-redeem-hint"></span></div>
-          <div class="nft-send-panel" id="it-send-panel" hidden>
+          <div class="nft-send-panel seen-operator" id="it-send-panel" hidden>
+            <span class="seen">You and the operator</span>
             <label for="it-send-to">Recipient Zyn account ID (64 hex characters)</label>
             <div class="row"><input class="grow mono" id="it-send-to" placeholder="recipient account id" autocomplete="off" spellcheck="false"><button class="btn primary" id="it-send-review">Review transfer</button><button class="btn" id="it-send-cancel">Cancel</button></div>
             <label class="hint" style="margin-top:10px"><input type="checkbox" id="it-send-force" style="width:auto"> Use the Zcash recovery path if the Zyn node is censoring this transfer.</label>
