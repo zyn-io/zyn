@@ -39,6 +39,7 @@ pub mod note_enc;
 pub mod object;
 pub mod program;
 pub mod read;
+pub mod scan;
 pub mod session;
 pub mod spec;
 pub mod value;

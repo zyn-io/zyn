@@ -88,7 +88,26 @@ pub enum Op {
         program: ProgramId,
         /// `(commitment, nullifier)` for each object being consumed.
         inputs: Vec<(Hash, Hash)>,
-        outputs: Vec<Note>,
+        outputs: Vec<Output>,
+    },
+    /// Leave for Zcash: burn objects and record a payout for the vault.
+    ///
+    /// The mirror of a deposit, and the other rule that changes supply. A
+    /// deposit cannot mint more than the vault was paid; a withdrawal cannot
+    /// burn more than the holder owned, and the supply falls by exactly what
+    /// leaves — otherwise the chain would claim backing it no longer has.
+    Withdraw {
+        holder: AccountId,
+        program: ProgramId,
+        /// Objects consumed to fund it.
+        inputs: Vec<(Hash, Hash)>,
+        /// What leaves the system.
+        asset: Address,
+        amount: Fixed,
+        /// `H(zcash address ‖ salt)`.
+        destination: Hash,
+        /// Change back to the holder.
+        outputs: Vec<Output>,
     },
     /// ZEC confirmed in the vault becomes an object for its depositor.
     ///
@@ -136,7 +155,7 @@ pub enum Op {
         /// The buyer's own objects, funding the price.
         payment: Vec<(Hash, Hash)>,
         /// Price to the seller, item to the buyer, change to the buyer.
-        outputs: Vec<Note>,
+        outputs: Vec<Output>,
     },
     Seal,
 }
@@ -146,11 +165,46 @@ pub enum Receipt {
     Minted { commitment: Hash, position: u64 },
     Spent { spent: Vec<Hash>, created: Vec<Hash> },
     Deposited { commitment: Hash, position: u64 },
+    Withdrawing { amount: Fixed, destination: Hash },
     Listed { item: Hash },
     Delisted { item: Hash },
     Taken { item: Hash, created: Vec<Hash> },
     Refused(&'static str),
     Sealed(Checkpoint),
+}
+
+/// An exit the vault has been told to pay, and has not yet.
+///
+/// Recorded in state rather than inferred from intents, because the vault
+/// operator needs a list they can act on and a verifier needs the same list
+/// to check they acted on nothing else. The destination is a commitment, not
+/// an address: `H(address ‖ salt)`, so the chain never carries where anyone's
+/// money went — the holder reveals the preimage to the vault out of band.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PendingExit {
+    pub asset: Address,
+    pub amount: Fixed,
+    /// `H(zcash address ‖ salt)`.
+    pub destination: Hash,
+    /// The epoch it was requested in, so a stalled exit is visible.
+    pub since_epoch: u64,
+}
+
+/// An object being created, and how its owner will find it.
+///
+/// One type rather than two parallel vectors: a note and the ciphertext that
+/// locates it are the same fact, and a length mismatch between them would be
+/// a transfer the recipient never sees (DECISIONS §133.6).
+///
+/// The VM requires the ciphertext to be present and **cannot check that it
+/// opens** — it holds no viewing key. For a deposit the sequencer encrypts and
+/// the incentive is aligned; for a transfer a malicious sender can attach
+/// garbage and the payment lands where nobody can spend it. That is the
+/// sender's own loss to cause, and it is worth saying rather than implying.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Output {
+    pub note: Note,
+    pub enc: EncryptedNote,
 }
 
 /// A listing: terms attached to an object that has not moved.
@@ -194,6 +248,9 @@ pub struct ObjectVm {
     pub live: BTreeMap<Hash, Live>,
     /// Issued supply per asset, the quantity conservation is checked against.
     pub issued: BTreeMap<Address, Fixed>,
+    /// Exits the vault owes and has not paid. Ordered by the sequence they
+    /// were requested in, which is the order a settler must honour.
+    pub exits: Vec<PendingExit>,
     /// Zcash transactions already credited. One deposit, one object: without
     /// this, replaying the same intent mints the same ZEC twice.
     pub deposits: BTreeSet<Hash>,
@@ -225,6 +282,15 @@ impl ObjectVm {
         e.bytes(b"objectvm.supply.v1").u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        // What the vault owes is consensus, not bookkeeping: a settler pays
+        // from this list and a verifier checks they paid nothing else.
+        e.u32(self.exits.len() as u32);
+        for x in &self.exits {
+            e.bytes(&x.asset)
+                .fixed(x.amount)
+                .bytes(&x.destination)
+                .u64(x.since_epoch);
         }
         // Credited deposits belong in the root, not merely in memory: a
         // verifier replaying the chain has to reach the same conclusion about
@@ -272,7 +338,7 @@ impl ObjectVm {
         spender: &AccountId,
         program: &ProgramId,
         inputs: &[(Hash, Hash)],
-        outputs: &[Note],
+        outputs: &[Output],
     ) -> Vec<Receipt> {
         // An unknown rule is refused rather than ignored: a transaction that
         // otherwise verifies but names a law nobody checked is worse than one
@@ -321,13 +387,17 @@ impl ObjectVm {
 
         // Outputs must be committable at all.
         let mut created: Vec<(Hash, Note)> = Vec::with_capacity(outputs.len());
-        for note in outputs {
-            match commitment(note) {
+        for out in outputs {
+            // An output nobody can find is value destroyed in place.
+            if out.enc.ciphertext.is_empty() {
+                return vec![Receipt::Refused("an output needs an encrypted note")];
+            }
+            match commitment(&out.note) {
                 Ok(c) => {
                     if self.live.contains_key(&c) {
                         return vec![Receipt::Refused("output already exists")];
                     }
-                    created.push((c, *note))
+                    created.push((c, out.note))
                 }
                 Err(ObjectError::ZeroNonce) => {
                     return vec![Receipt::Refused("an output needs a nonce")]
@@ -398,7 +468,7 @@ impl ObjectVm {
         item: &Hash,
         item_nullifier: &Hash,
         payment: &[(Hash, Hash)],
-        outputs: &[Note],
+        outputs: &[Output],
     ) -> Vec<Receipt> {
         if *program != program::take_offer() {
             return vec![Receipt::Refused("wrong program for a claim")];
@@ -446,13 +516,16 @@ impl ObjectVm {
         }
 
         let mut created: Vec<(Hash, Note)> = Vec::with_capacity(outputs.len());
-        for note in outputs {
-            match commitment(note) {
+        for out in outputs {
+            if out.enc.ciphertext.is_empty() {
+                return vec![Receipt::Refused("an output needs an encrypted note")];
+            }
+            match commitment(&out.note) {
                 Ok(c) => {
                     if self.live.contains_key(&c) {
                         return vec![Receipt::Refused("output already exists")];
                     }
-                    created.push((c, *note))
+                    created.push((c, out.note))
                 }
                 Err(_) => return vec![Receipt::Refused("an output needs a nonce and a value")],
             }
@@ -518,6 +591,136 @@ impl ObjectVm {
     }
 }
 
+impl ObjectVm {
+    /// Burn objects and record what the vault owes.
+    ///
+    /// Supply falls by exactly what leaves. A deposit that minted more than
+    /// the vault received and a withdrawal that burned less than it paid out
+    /// are the same bug from opposite ends, and `conserved()` catches neither
+    /// on its own — it checks that live objects sum to *issued*, so issued has
+    /// to move in step or the books balance against the wrong number.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_withdraw(
+        &mut self,
+        holder: &AccountId,
+        program: &ProgramId,
+        inputs: &[(Hash, Hash)],
+        asset: &Address,
+        amount: &Fixed,
+        destination: &Hash,
+        outputs: &[Output],
+    ) -> Vec<Receipt> {
+        if *program != program::withdraw() {
+            return vec![Receipt::Refused("wrong program for a withdrawal")];
+        }
+        if *amount == Fixed::ZERO {
+            return vec![Receipt::Refused("a withdrawal of nothing")];
+        }
+        if *destination == [0u8; 32] {
+            return vec![Receipt::Refused("a withdrawal needs a destination")];
+        }
+        if inputs.is_empty() {
+            return vec![Receipt::Refused("a withdrawal consumes something")];
+        }
+        if inputs.len() as u32 > self.limits.max_io || outputs.len() as u32 > self.limits.max_io {
+            return vec![Receipt::Refused("too many objects in one withdrawal")];
+        }
+
+        let mut consumed: Vec<Note> = Vec::with_capacity(inputs.len());
+        let mut seen: Vec<Hash> = Vec::with_capacity(inputs.len());
+        for (c, n) in inputs {
+            if seen.contains(c) {
+                return vec![Receipt::Refused("the same object twice in one withdrawal")];
+            }
+            seen.push(*c);
+            let note = match self.live.get(c) {
+                Some(note) => *note,
+                None => return vec![Receipt::Refused("no such live object")],
+            };
+            if &note.owner != holder {
+                return vec![Receipt::Refused("not the holder's object")];
+            }
+            if self.offers.contains_key(c) {
+                return vec![Receipt::Refused("that object is listed")];
+            }
+            if self.nullifiers.contains(n) {
+                return vec![Receipt::Refused("already spent")];
+            }
+            consumed.push(note);
+        }
+
+        let mut created: Vec<(Hash, Note)> = Vec::with_capacity(outputs.len());
+        for out in outputs {
+            if out.enc.ciphertext.is_empty() {
+                return vec![Receipt::Refused("an output needs an encrypted note")];
+            }
+            match commitment(&out.note) {
+                Ok(c) => {
+                    if self.live.contains_key(&c) {
+                        return vec![Receipt::Refused("output already exists")];
+                    }
+                    created.push((c, out.note))
+                }
+                Err(_) => return vec![Receipt::Refused("an output needs a nonce and a value")],
+            }
+        }
+
+        // In equals out, plus what leaves. The leaving amount is the only
+        // place value may vanish, and only for the asset named.
+        let mut delta: BTreeMap<Address, i128> = BTreeMap::new();
+        for note in &consumed {
+            let e = delta.entry(note.asset).or_insert(0);
+            *e = match e.checked_add(note.amount.0) {
+                Some(v) => v,
+                None => return vec![Receipt::Refused("input overflow")],
+            };
+        }
+        for (_, note) in &created {
+            let e = delta.entry(note.asset).or_insert(0);
+            *e = match e.checked_sub(note.amount.0) {
+                Some(v) => v,
+                None => return vec![Receipt::Refused("output overflow")],
+            };
+        }
+        let leaving = delta.entry(*asset).or_insert(0);
+        *leaving = match leaving.checked_sub(amount.0) {
+            Some(v) => v,
+            None => return vec![Receipt::Refused("withdrawal overflow")],
+        };
+        if delta.values().any(|d| *d != 0) {
+            return vec![Receipt::Refused("value not conserved")];
+        }
+
+        // Supply must fall with it, or the chain claims backing it gave away.
+        let supply = self.issued.entry(*asset).or_insert(Fixed::ZERO);
+        *supply = match supply.0.checked_sub(amount.0) {
+            Some(v) if v >= 0 => Fixed(v),
+            _ => return vec![Receipt::Refused("withdrawal exceeds issued supply")],
+        };
+
+        for (c, n) in inputs {
+            self.live.remove(c);
+            self.nullifiers.insert(*n);
+        }
+        for (c, note) in created {
+            self.commitments.append(c);
+            self.live.insert(c, note);
+        }
+        self.exits.push(PendingExit {
+            asset: *asset,
+            amount: *amount,
+            destination: *destination,
+            since_epoch: self.epoch,
+        });
+        *self.accounts.entry(*holder).or_insert(0) += 1;
+
+        vec![Receipt::Withdrawing {
+            amount: *amount,
+            destination: *destination,
+        }]
+    }
+}
+
 impl MicrochainVm for ObjectVm {
     type Intent = Op;
     type Receipt = Receipt;
@@ -542,6 +745,7 @@ impl MicrochainVm for ObjectVm {
             issued: BTreeMap::new(),
             offers: BTreeMap::new(),
             deposits: BTreeSet::new(),
+            exits: Vec::new(),
         }
     }
 
@@ -609,6 +813,15 @@ impl MicrochainVm for ObjectVm {
                 inputs,
                 outputs,
             } => self.apply_spend(spender, program, inputs, outputs),
+            Op::Withdraw {
+                holder,
+                program,
+                inputs,
+                asset,
+                amount,
+                destination,
+                outputs,
+            } => self.apply_withdraw(holder, program, inputs, asset, amount, destination, outputs),
             Op::Deposit {
                 program,
                 asset,
@@ -799,6 +1012,7 @@ impl MicrochainVm for ObjectVm {
             // when they listed, and requiring it again would make every sale
             // need them online (§132.2).
             Op::TakeOffer { buyer, .. } => vec![*buyer],
+            Op::Withdraw { holder, .. } => vec![*holder],
             _ => Vec::new(),
         }
     }
@@ -833,10 +1047,13 @@ impl MicrochainVm for ObjectVm {
                     e.bytes(c).bytes(n);
                 }
                 for o in outputs {
-                    e.bytes(&o.asset)
-                        .fixed(o.amount)
-                        .bytes(&o.owner)
-                        .bytes(&o.nonce);
+                    e.bytes(&o.note.asset)
+                        .fixed(o.note.amount)
+                        .bytes(&o.note.owner)
+                        .bytes(&o.note.nonce)
+                        .bytes(&o.enc.epk)
+                        .u32(o.enc.ciphertext.len() as u32)
+                        .bytes(&o.enc.ciphertext);
                 }
             }
             Op::PlaceOffer {
@@ -881,10 +1098,13 @@ impl MicrochainVm for ObjectVm {
                     e.bytes(c).bytes(n);
                 }
                 for o in outputs {
-                    e.bytes(&o.asset)
-                        .fixed(o.amount)
-                        .bytes(&o.owner)
-                        .bytes(&o.nonce);
+                    e.bytes(&o.note.asset)
+                        .fixed(o.note.amount)
+                        .bytes(&o.note.owner)
+                        .bytes(&o.note.nonce)
+                        .bytes(&o.enc.epk)
+                        .u32(o.enc.ciphertext.len() as u32)
+                        .bytes(&o.enc.ciphertext);
                 }
             }
             Op::Deposit {
@@ -906,6 +1126,36 @@ impl MicrochainVm for ObjectVm {
                     .bytes(&enc.epk)
                     .u32(enc.ciphertext.len() as u32)
                     .bytes(&enc.ciphertext);
+            }
+            Op::Withdraw {
+                holder,
+                program,
+                inputs,
+                asset,
+                amount,
+                destination,
+                outputs,
+            } => {
+                e.u8(7)
+                    .bytes(holder)
+                    .bytes(&program.0)
+                    .bytes(asset)
+                    .fixed(*amount)
+                    .bytes(destination)
+                    .u32(inputs.len() as u32)
+                    .u32(outputs.len() as u32);
+                for (c, n) in inputs {
+                    e.bytes(c).bytes(n);
+                }
+                for o in outputs {
+                    e.bytes(&o.note.asset)
+                        .fixed(o.note.amount)
+                        .bytes(&o.note.owner)
+                        .bytes(&o.note.nonce)
+                        .bytes(&o.enc.epk)
+                        .u32(o.enc.ciphertext.len() as u32)
+                        .bytes(&o.enc.ciphertext);
+                }
             }
             Op::Seal => {
                 e.u8(0);
@@ -934,11 +1184,18 @@ impl MicrochainVm for ObjectVm {
                 }
                 let mut outputs = Vec::with_capacity(outs.min(1024));
                 for _ in 0..outs {
-                    outputs.push(Note {
+                    let note = Note {
                         asset: d.hash().ok()?,
                         amount: d.fixed().ok()?,
                         owner: d.account().ok()?,
                         nonce: d.hash().ok()?,
+                    };
+                    let epk = d.hash().ok()?;
+                    let n = d.u32().ok()? as usize;
+                    let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                    outputs.push(Output {
+                        note,
+                        enc: EncryptedNote { epk, ciphertext },
                     });
                 }
                 Some(Op::Spend {
@@ -974,11 +1231,18 @@ impl MicrochainVm for ObjectVm {
                 }
                 let mut outputs = Vec::with_capacity(outs.min(1024));
                 for _ in 0..outs {
-                    outputs.push(Note {
+                    let note = Note {
                         asset: d.hash().ok()?,
                         amount: d.fixed().ok()?,
                         owner: d.account().ok()?,
                         nonce: d.hash().ok()?,
+                    };
+                    let epk = d.hash().ok()?;
+                    let n = d.u32().ok()? as usize;
+                    let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                    outputs.push(Output {
+                        note,
+                        enc: EncryptedNote { epk, ciphertext },
                     });
                 }
                 Some(Op::TakeOffer {
@@ -1008,6 +1272,41 @@ impl MicrochainVm for ObjectVm {
                     nonce,
                     enc: EncryptedNote { epk, ciphertext },
                     external_ref,
+                })
+            }
+            7 => {
+                let holder = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let asset = d.hash().ok()?;
+                let amount = d.fixed().ok()?;
+                let destination = d.hash().ok()?;
+                let ins = d.u32().ok()? as usize;
+                let outs = d.u32().ok()? as usize;
+                let mut inputs = Vec::with_capacity(ins.min(1024));
+                for _ in 0..ins {
+                    inputs.push((d.hash().ok()?, d.hash().ok()?));
+                }
+                let mut outputs = Vec::with_capacity(outs.min(1024));
+                for _ in 0..outs {
+                    let note = Note {
+                        asset: d.hash().ok()?,
+                        amount: d.fixed().ok()?,
+                        owner: d.account().ok()?,
+                        nonce: d.hash().ok()?,
+                    };
+                    let epk = d.hash().ok()?;
+                    let n = d.u32().ok()? as usize;
+                    let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                    outputs.push(Output { note, enc: EncryptedNote { epk, ciphertext } });
+                }
+                Some(Op::Withdraw {
+                    holder,
+                    program,
+                    inputs,
+                    asset,
+                    amount,
+                    destination,
+                    outputs,
                 })
             }
             _ => None,
@@ -1051,6 +1350,13 @@ impl MicrochainVm for ObjectVm {
         e.u32(self.deposits.len() as u32);
         for r in &self.deposits {
             e.bytes(r);
+        }
+        e.u32(self.exits.len() as u32);
+        for x in &self.exits {
+            e.bytes(&x.asset)
+                .fixed(x.amount)
+                .bytes(&x.destination)
+                .u64(x.since_epoch);
         }
         e.u32(self.offers.len() as u32);
         for (item, o) in &self.offers {
@@ -1109,6 +1415,15 @@ impl MicrochainVm for ObjectVm {
         for _ in 0..d.u32().ok()? {
             deposits.insert(d.hash().ok()?);
         }
+        let mut exits = Vec::new();
+        for _ in 0..d.u32().ok()? {
+            exits.push(PendingExit {
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                destination: d.hash().ok()?,
+                since_epoch: d.u64().ok()?,
+            });
+        }
         let mut offers = BTreeMap::new();
         for _ in 0..d.u32().ok()? {
             let item = d.hash().ok()?;
@@ -1137,6 +1452,7 @@ impl MicrochainVm for ObjectVm {
             issued,
             offers,
             deposits,
+            exits,
         })
     }
 

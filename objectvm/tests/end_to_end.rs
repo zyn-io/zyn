@@ -8,8 +8,9 @@
 //! sections at all — not because they are hashed somewhere a determined reader
 //! could grind.
 
-use objectvm::{Limits, ObjectVm, Op, Receipt};
+use objectvm::{Limits, ObjectVm, Op, Output, Receipt};
 use zyn_vm::conformance::{check, Fixture};
+use zyn_vm::note_enc::{seal, viewing_public, StaticSecret};
 use zyn_vm::object::{commitment, nullifier, Note};
 use zyn_vm::program;
 use zyn_vm::spec::{AccountId, MicrochainVm, SECTION_ACCOUNTS};
@@ -19,6 +20,20 @@ const ZEC: [u8; 32] = [0x7a; 32];
 const ALICE: AccountId = [0xAA; 32];
 const BOB: AccountId = [0xBB; 32];
 const ALICE_KEY: [u8; 32] = [0xA1; 32];
+
+/// Wrap a note with the ciphertext its owner will find it by. Tests use a
+/// fixed viewing key per holder; a wallet uses its own.
+fn out(note: Note) -> Output {
+    let mut plain = Vec::new();
+    plain.extend_from_slice(&note.asset);
+    plain.extend_from_slice(&note.amount.0.to_be_bytes());
+    plain.extend_from_slice(&note.nonce);
+    let to = viewing_public(&StaticSecret::from([note.owner[0]; 32]));
+    Output {
+        note,
+        enc: seal(&to, StaticSecret::from([note.nonce[0]; 32]), &plain).unwrap(),
+    }
+}
 
 fn note(amount: i64, owner: AccountId, nonce: u8) -> Note {
     Note {
@@ -69,7 +84,7 @@ fn an_object_is_minted_spent_and_conserved() {
             spender: ALICE,
             program: program::private_transfer(),
             inputs: vec![(input, n)],
-            outputs: vec![to_bob, change],
+            outputs: vec![out(to_bob), out(change)],
         },
     );
 
@@ -98,7 +113,7 @@ fn the_same_object_cannot_be_spent_twice() {
         spender: ALICE,
         program: program::private_transfer(),
         inputs: vec![(input, n)],
-        outputs: vec![note(17, BOB, 9)],
+        outputs: vec![out(note(17, BOB, 9))],
     };
     assert!(matches!(vm.apply(2, &spend)[0], Receipt::Spent { .. }));
 
@@ -120,7 +135,7 @@ fn a_spend_cannot_mint_value() {
             spender: ALICE,
             program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(18, ALICE, 4)], // one more than existed
+            outputs: vec![out(note(18, ALICE, 4))], // one more than existed
         },
     );
     assert_eq!(r[0], Receipt::Refused("value not conserved"));
@@ -146,7 +161,7 @@ fn a_refused_spend_moves_no_committed_leaf() {
             spender: BOB,
             program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(17, BOB, 5)],
+            outputs: vec![out(note(17, BOB, 5))],
         },
     );
     assert_eq!(r[0], Receipt::Refused("not the spender's object"));
@@ -202,7 +217,7 @@ fn a_published_nullifier_does_not_name_its_commitment() {
             spender: ALICE,
             program: program::private_transfer(),
             inputs: vec![(input, n)],
-            outputs: vec![note(17, BOB, 6)],
+            outputs: vec![out(note(17, BOB, 6))],
         },
     );
 
@@ -233,14 +248,14 @@ fn objectvm_satisfies_the_conformance_suite() {
             spender: ALICE,
             program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(5, BOB, 7), note(12, ALICE, 8)],
+            outputs: vec![out(note(5, BOB, 7)), out(note(12, ALICE, 8))],
         },
         // Bob spending Alice's object: refused, and must move nothing.
         rejected: Op::Spend {
             spender: BOB,
             program: program::private_transfer(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(17, BOB, 10)],
+            outputs: vec![out(note(17, BOB, 10))],
         },
         sequence: vec![
             mint(3, BOB, 11),
@@ -270,7 +285,7 @@ fn a_transaction_naming_an_unknown_program_is_refused() {
             spender: ALICE,
             program: zyn_vm::program::ProgramId([0x5A; 32]),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(17, BOB, 20)],
+            outputs: vec![out(note(17, BOB, 20))],
         },
     );
     assert_eq!(r[0], Receipt::Refused("unknown program"));
@@ -290,7 +305,7 @@ fn a_named_rule_this_vm_does_not_implement_is_refused() {
             spender: ALICE,
             program: zyn_vm::program::amm_swap(),
             inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
-            outputs: vec![note(17, BOB, 21)],
+            outputs: vec![out(note(17, BOB, 21))],
         },
     );
     assert_eq!(
@@ -308,7 +323,7 @@ fn the_program_id_survives_the_wire() {
         spender: ALICE,
         program: program::private_transfer(),
         inputs: vec![([1u8; 32], [2u8; 32])],
-        outputs: vec![note(5, BOB, 22)],
+        outputs: vec![out(note(5, BOB, 22))],
     };
     let bytes = ObjectVm::encode_intent(&spend);
     let mut d = zyn_vm::read::Decoder::new(&bytes);
@@ -320,7 +335,7 @@ fn the_program_id_survives_the_wire() {
         spender: ALICE,
         program: program::amm_swap(),
         inputs: vec![([1u8; 32], [2u8; 32])],
-        outputs: vec![note(5, BOB, 22)],
+        outputs: vec![out(note(5, BOB, 22))],
     };
     assert_ne!(ObjectVm::encode_intent(&swapish), bytes);
 }
@@ -405,7 +420,7 @@ fn a_listed_object_cannot_be_spent_out_from_under_the_buyer() {
             spender: ALICE,
             program: program::private_transfer(),
             inputs: vec![(listed, nullifier(&SELLER_KEY, &listed))],
-            outputs: vec![item(BOB, 0x73)],
+            outputs: vec![out(item(BOB, 0x73))],
         },
     );
     assert_eq!(r[0], Receipt::Refused("that object is listed"));
@@ -428,9 +443,9 @@ fn the_buyer_claims_and_both_sides_settle_at_once() {
             item_nullifier: nullifier(&SELLER_KEY, &listed),
             payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
             outputs: vec![
-                note(4, ALICE, 0x74),  // the price, to the seller
-                item(BOB, 0x75),       // the item, to the buyer
-                note(16, BOB, 0x76),   // change
+                out(note(4, ALICE, 0x74)),  // the price, to the seller
+                out(item(BOB, 0x75)),       // the item, to the buyer
+                out(note(16, BOB, 0x76)),   // change
             ],
         },
     );
@@ -461,9 +476,9 @@ fn a_claim_that_underpays_is_refused() {
             item_nullifier: nullifier(&SELLER_KEY, &listed),
             payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
             outputs: vec![
-                note(3, ALICE, 0x77), // one short
-                item(BOB, 0x78),
-                note(17, BOB, 0x79),
+                out(note(3, ALICE, 0x77)), // one short
+                out(item(BOB, 0x78)),
+                out(note(17, BOB, 0x79)),
             ],
         },
     );
@@ -487,9 +502,9 @@ fn a_claim_that_does_not_deliver_the_item_is_refused() {
             item_nullifier: nullifier(&SELLER_KEY, &listed),
             payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
             outputs: vec![
-                note(4, ALICE, 0x7A),
-                item(ALICE, 0x7B), // back to the seller, not the buyer
-                note(16, BOB, 0x7C),
+                out(note(4, ALICE, 0x7A)),
+                out(item(ALICE, 0x7B)), // back to the seller, not the buyer
+                out(note(16, BOB, 0x7C)),
             ],
         },
     );
@@ -526,7 +541,7 @@ fn cancelling_a_listing_moves_no_value() {
                 spender: ALICE,
                 program: program::private_transfer(),
                 inputs: vec![(listed, nullifier(&SELLER_KEY, &listed))],
-                outputs: vec![item(BOB, 0x7D)],
+                outputs: vec![out(item(BOB, 0x7D))],
             }
         )[0],
         Receipt::Spent { .. }
@@ -553,7 +568,7 @@ fn a_stranger_cannot_cancel_someone_elses_listing() {
 
 // ---------------------------------------------------------------- deposits
 
-use zyn_vm::note_enc::{open, seal, viewing_public, EncryptedNote, StaticSecret};
+use zyn_vm::note_enc::{open, EncryptedNote};
 
 const TXID: [u8; 32] = [0xD1; 32];
 
@@ -681,4 +696,139 @@ fn the_encrypted_note_survives_the_wire_and_is_committed() {
     // after the fact without changing the accumulator.
     let other = deposit_of(4, ALICE, 0x37, &view, TXID);
     assert_ne!(ObjectVm::encode_intent(&other), bytes);
+}
+
+// -------------------------------------------------- the full round trip
+
+use zyn_vm::scan::{PublishedOutput, Scanner};
+
+/// ZEC in, a private transfer, the recipient *finding* it, and ZEC out.
+///
+/// The loop the whole design exists for, and the one that cannot be tested in
+/// pieces: a transfer whose recipient cannot discover it is not a transfer,
+/// and an exit that does not reduce supply is a chain claiming backing it gave
+/// away.
+#[test]
+fn zec_enters_moves_privately_is_discovered_and_leaves() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let alice_view = StaticSecret::from([ALICE[0]; 32]);
+    let bob_view = StaticSecret::from([BOB[0]; 32]);
+    let bob_nk: [u8; 32] = [0xB9; 32];
+
+    // 1. ZEC arrives and becomes Alice's object.
+    let dep = deposit_of(20, ALICE, 0x41, &alice_view, [0xE1; 32]);
+    let alice_c = match &vm.apply(1, &dep)[0] {
+        Receipt::Deposited { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    assert_eq!(vm.issued[&ZEC], Fixed::whole(20));
+
+    // 2. Alice sends 8 to Bob, keeping 12. Bob is never named on the chain.
+    let to_bob = out(note(8, BOB, 0x42));
+    let change = out(note(12, ALICE, 0x43));
+    let bob_commitment = commitment(&to_bob.note).unwrap();
+    let r = vm.apply(
+        2,
+        &Op::Spend {
+            spender: ALICE,
+            program: program::private_transfer(),
+            inputs: vec![(alice_c, nullifier(&[0xA9; 32], &alice_c))],
+            outputs: vec![to_bob.clone(), change.clone()],
+        },
+    );
+    assert!(matches!(r[0], Receipt::Spent { .. }), "{:?}", r[0]);
+    assert_eq!(vm.conserved(), Ok(()));
+
+    // 3. Bob scans what the chain published and finds it — without asking
+    //    anyone what he owns, because there is nobody to ask.
+    let published = vec![
+        PublishedOutput { commitment: bob_commitment, enc: to_bob.enc.clone() },
+        PublishedOutput {
+            commitment: commitment(&change.note).unwrap(),
+            enc: change.enc.clone(),
+        },
+    ];
+    let w = Scanner::new(bob_view, bob_nk).scan(&BOB, &published, 1, &[]);
+    assert_eq!(w.live.len(), 1, "Bob finds exactly his own");
+    assert_eq!(w.balance(&ZEC), Fixed::whole(8).0);
+    assert_eq!(w.live[0].note.nonce, [0x42; 32], "and the nonce he needs to spend it");
+
+    // 4. Bob leaves for Zcash with all of it.
+    let r = vm.apply(
+        3,
+        &Op::Withdraw {
+            holder: BOB,
+            program: program::withdraw(),
+            inputs: vec![(bob_commitment, nullifier(&bob_nk, &bob_commitment))],
+            asset: ZEC,
+            amount: Fixed::whole(8),
+            destination: [0xDE; 32],
+            outputs: vec![],
+        },
+    );
+    assert_eq!(
+        r[0],
+        Receipt::Withdrawing { amount: Fixed::whole(8), destination: [0xDE; 32] }
+    );
+
+    // Supply fell with it, and the vault owes exactly one payout.
+    assert_eq!(vm.issued[&ZEC], Fixed::whole(12), "20 in, 8 out");
+    assert_eq!(vm.conserved(), Ok(()), "and the books still balance");
+    assert_eq!(vm.exits.len(), 1);
+    assert_eq!(vm.exits[0].amount, Fixed::whole(8));
+
+    // And Bob's note is gone, which his next scan will tell him.
+    let spent: Vec<[u8; 32]> = vm.nullifiers.spent().to_vec();
+    let after = Scanner::new(StaticSecret::from([BOB[0]; 32]), bob_nk)
+        .scan(&BOB, &published, 1, &spent);
+    assert!(after.live.is_empty());
+    assert_eq!(after.spent.len(), 1);
+}
+
+/// A withdrawal that burns less than it pays out is a chain claiming backing
+/// it gave away. Supply has to move with the money.
+#[test]
+fn a_withdrawal_cannot_exceed_what_was_issued() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([ALICE[0]; 32]);
+    let c = match &vm.apply(1, &deposit_of(5, ALICE, 0x51, &view, [0xE2; 32]))[0] {
+        Receipt::Deposited { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    let r = vm.apply(
+        2,
+        &Op::Withdraw {
+            holder: ALICE,
+            program: program::withdraw(),
+            inputs: vec![(c, nullifier(&[0xA9; 32], &c))],
+            asset: ZEC,
+            amount: Fixed::whole(6), // more than the object held
+            destination: [0xDE; 32],
+            outputs: vec![],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("value not conserved"));
+    assert_eq!(vm.issued[&ZEC], Fixed::whole(5), "supply untouched");
+    assert!(vm.exits.is_empty(), "and the vault owes nothing");
+}
+
+/// An output nobody can open is value destroyed in place. The VM cannot check
+/// that a ciphertext *opens* — it holds no viewing key — but it can refuse one
+/// that is not there.
+#[test]
+fn a_transfer_output_without_a_ciphertext_is_refused() {
+    let (mut vm, input) = funded();
+    let r = vm.apply(
+        2,
+        &Op::Spend {
+            spender: ALICE,
+            program: program::private_transfer(),
+            inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
+            outputs: vec![Output {
+                note: note(17, BOB, 0x52),
+                enc: EncryptedNote { epk: [0u8; 32], ciphertext: Vec::new() },
+            }],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("an output needs an encrypted note"));
 }
