@@ -324,3 +324,229 @@ fn the_program_id_survives_the_wire() {
     };
     assert_ne!(ObjectVm::encode_intent(&swapish), bytes);
 }
+
+// ---------------------------------------------------------------- listings
+
+const CAVE: [u8; 32] = [0xC0; 32];
+const SELLER_KEY: [u8; 32] = [0x51; 32];
+
+fn item(owner: AccountId, nonce: u8) -> Note {
+    Note {
+        asset: CAVE,
+        amount: Fixed::whole(1),
+        owner,
+        nonce: [nonce; 32],
+    }
+}
+
+/// Alice owns item #1177 and 20 ZEC of spending money sits with Bob.
+fn market() -> (ObjectVm, [u8; 32], [u8; 32]) {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let listed = match &vm.apply(
+        1,
+        &Op::Mint {
+            asset: CAVE,
+            amount: Fixed::whole(1),
+            owner: ALICE,
+            nonce: [0x71; 32],
+        },
+    )[0]
+    {
+        Receipt::Minted { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    let funds = match &vm.apply(2, &mint(20, BOB, 0x72))[0] {
+        Receipt::Minted { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    (vm, listed, funds)
+}
+
+fn list_it(vm: &mut ObjectVm, seq: u64, listed: [u8; 32], price: i64) -> Vec<Receipt> {
+    vm.apply(
+        seq,
+        &Op::PlaceOffer {
+            seller: ALICE,
+            program: program::place_offer(),
+            item: listed,
+            price_asset: ZEC,
+            price_amount: Fixed::whole(price),
+            expires_at_epoch: u64::MAX,
+        },
+    )
+}
+
+/// A listing does not move the object. That is the whole difference from
+/// escrow: no custody, nothing to return on a cancel, and the seller can still
+/// prove ownership while it rests.
+#[test]
+fn listing_encumbers_without_moving_anything() {
+    let (mut vm, listed, _) = market();
+    let owner_before = vm.live[&listed].owner;
+
+    assert_eq!(list_it(&mut vm, 3, listed, 4)[0], Receipt::Listed { item: listed });
+
+    assert_eq!(vm.live[&listed].owner, owner_before, "still the seller's");
+    assert!(vm.live.contains_key(&listed), "still live, not escrowed");
+    assert!(vm.offers.contains_key(&listed), "and now encumbered");
+    assert_eq!(vm.conserved(), Ok(()));
+}
+
+/// The encumbrance: still yours, still unspendable, because otherwise a seller
+/// could take the money and move the item out from under the buyer.
+#[test]
+fn a_listed_object_cannot_be_spent_out_from_under_the_buyer() {
+    let (mut vm, listed, _) = market();
+    list_it(&mut vm, 3, listed, 4);
+
+    let r = vm.apply(
+        4,
+        &Op::Spend {
+            spender: ALICE,
+            program: program::private_transfer(),
+            inputs: vec![(listed, nullifier(&SELLER_KEY, &listed))],
+            outputs: vec![item(BOB, 0x73)],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("that object is listed"));
+    assert!(vm.live.contains_key(&listed), "and it is still there");
+}
+
+/// The claim: one transaction, both sides. The buyer cannot pay without
+/// receiving, and the seller cannot be paid without parting with the item.
+#[test]
+fn the_buyer_claims_and_both_sides_settle_at_once() {
+    let (mut vm, listed, funds) = market();
+    list_it(&mut vm, 3, listed, 4);
+
+    let receipts = vm.apply(
+        4,
+        &Op::TakeOffer {
+            buyer: BOB,
+            program: program::take_offer(),
+            item: listed,
+            item_nullifier: nullifier(&SELLER_KEY, &listed),
+            payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
+            outputs: vec![
+                note(4, ALICE, 0x74),  // the price, to the seller
+                item(BOB, 0x75),       // the item, to the buyer
+                note(16, BOB, 0x76),   // change
+            ],
+        },
+    );
+    assert_eq!(receipts[0], Receipt::Taken { item: listed, created: match &receipts[0] {
+        Receipt::Taken { created, .. } => created.clone(),
+        _ => unreachable!(),
+    }});
+
+    assert_eq!(vm.conserved(), Ok(()), "a sale conserves value");
+    assert!(!vm.live.contains_key(&listed), "the listed object is consumed");
+    assert!(!vm.offers.contains_key(&listed), "and the listing is gone");
+    assert!(vm.live.contains_key(&commitment(&item(BOB, 0x75)).unwrap()));
+    assert_eq!(vm.nullifiers.len(), 2, "item and payment both retired");
+}
+
+/// Paying less than the asking price is not a sale.
+#[test]
+fn a_claim_that_underpays_is_refused() {
+    let (mut vm, listed, funds) = market();
+    list_it(&mut vm, 3, listed, 4);
+
+    let r = vm.apply(
+        4,
+        &Op::TakeOffer {
+            buyer: BOB,
+            program: program::take_offer(),
+            item: listed,
+            item_nullifier: nullifier(&SELLER_KEY, &listed),
+            payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
+            outputs: vec![
+                note(3, ALICE, 0x77), // one short
+                item(BOB, 0x78),
+                note(17, BOB, 0x79),
+            ],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("the seller was not paid the asking price"));
+    assert!(vm.live.contains_key(&listed), "and nothing settled");
+    assert!(vm.offers.contains_key(&listed));
+}
+
+/// Paying the price but routing the item elsewhere is not a sale either.
+#[test]
+fn a_claim_that_does_not_deliver_the_item_is_refused() {
+    let (mut vm, listed, funds) = market();
+    list_it(&mut vm, 3, listed, 4);
+
+    let r = vm.apply(
+        4,
+        &Op::TakeOffer {
+            buyer: BOB,
+            program: program::take_offer(),
+            item: listed,
+            item_nullifier: nullifier(&SELLER_KEY, &listed),
+            payment: vec![(funds, nullifier(&[0xB1; 32], &funds))],
+            outputs: vec![
+                note(4, ALICE, 0x7A),
+                item(ALICE, 0x7B), // back to the seller, not the buyer
+                note(16, BOB, 0x7C),
+            ],
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("the buyer does not receive the object"));
+}
+
+/// Cancelling transfers nothing back, because nothing was transferred.
+#[test]
+fn cancelling_a_listing_moves_no_value() {
+    let (mut vm, listed, _) = market();
+    list_it(&mut vm, 3, listed, 4);
+    let root_before = vm.commitments.root();
+
+    assert_eq!(
+        vm.apply(
+            4,
+            &Op::CancelOffer {
+                seller: ALICE,
+                program: program::cancel_offer(),
+                item: listed,
+            }
+        )[0],
+        Receipt::Delisted { item: listed }
+    );
+    assert!(!vm.offers.contains_key(&listed));
+    assert_eq!(vm.commitments.root(), root_before, "no object moved");
+    assert_eq!(vm.live[&listed].owner, ALICE, "it was never anywhere else");
+
+    // And now it is spendable again.
+    assert!(matches!(
+        vm.apply(
+            5,
+            &Op::Spend {
+                spender: ALICE,
+                program: program::private_transfer(),
+                inputs: vec![(listed, nullifier(&SELLER_KEY, &listed))],
+                outputs: vec![item(BOB, 0x7D)],
+            }
+        )[0],
+        Receipt::Spent { .. }
+    ));
+}
+
+/// Only the seller may delist. Otherwise anyone could strip a listing and buy
+/// the item elsewhere, or simply grief the market.
+#[test]
+fn a_stranger_cannot_cancel_someone_elses_listing() {
+    let (mut vm, listed, _) = market();
+    list_it(&mut vm, 3, listed, 4);
+    let r = vm.apply(
+        4,
+        &Op::CancelOffer {
+            seller: BOB,
+            program: program::cancel_offer(),
+            item: listed,
+        },
+    );
+    assert_eq!(r[0], Receipt::Refused("not the seller's listing"));
+    assert!(vm.offers.contains_key(&listed));
+}

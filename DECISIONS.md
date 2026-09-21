@@ -5937,3 +5937,21 @@ brief itself claims.
 | 131.7 | **Keep the tier-4 path open in every dependency decision.** `curve25519-dalek` was added for §130's value commitments only after checking `zyn-vm` still builds for `riscv32im-unknown-none-elf --no-default-features`. Anything that breaks that target forecloses proving later, and the check is one command | 🔒 invariant |
 | 131.8 | **The demand thesis, stated as a thesis.** The bet is that a collectible whose ownership is *verifiably* committed to Zcash — and private — is worth more than one that is not, and that the object layer is what makes both true at once. It is a bet, not an observation: the register holds four whitelist registrations, and nothing is sold. Claims about whether *other* projects are genuinely on-chain were looked at in September and **not established either way**; they are not evidence for this and must not be cited as though they were | ⏳ unproven |
 | 131.9 | **So the order stands: Cave ships on tier 1, the object layer matures behind it.** §130.8a already scoped Cave to the operator-trusted tier. 131.8 is the reason not to invert that — gating the only revenue on a proof system would spend a year answering a question four registrations cannot yet ask | 🔒 |
+
+---
+
+## 132. Listings are encumbrances, and the buyer claims (21 Sep 2026)
+
+Today `PlaceOffer` moves the offered asset into `POT_OFFERS` (`state.rs:75`) —
+escrow, protocol-held rather than operator-held, which is the safer of the two
+custodial designs. Under the object model it can stop being custodial at all.
+
+| # | Decision | |
+|---|---|---|
+| 132.1 | **A listing encumbers an object; it does not move it.** The item stays the seller's, and the VM refuses any spend of it except the offer's settlement. Strictly better than escrow on three counts: nobody takes custody, the seller can prove ownership throughout, and cancelling transfers nothing back because nothing was transferred | 🔒 direction |
+| 132.2 | **The claim is one atomic transaction.** Buyer's payment objects and the encumbered item go in; payment to the seller and the item to the buyer come out. Nothing is staged, so a buyer cannot pay without receiving, and a cancel that lands first makes the claim fail with the payment still the buyer's. The sequencer's ordering settles the race and no lock is needed for it | 🔒 |
+| 132.3 | **The store lights a button; the VM decides a sale.** The store watches for the buyer's credit and enables the claim in the frontend. That is convenience, not authority: it never holds the item, cannot fabricate a sale the VM would reject, and cannot permanently censor one — a buyer able to construct the transaction claims without the button, with forced inclusion (§33) behind that | 🔒 invariant |
+| 132.4 | **Listings are attributed to the store, which is the privacy gain.** Every listing reads as the store's, so sellers are indistinguishable from one another; the anonymity set is the number of concurrent sellers. The item id being public costs nothing, because under the object model nobody ever knew who owned it. **This is store-trusted, not anonymous** — the store knows every seller, and that does not improve at tier 3. It improves at tier 4. Nobody may describe it as anonymous before then | 🔒 scope |
+| 132.5 | **An encumbered object's commitment-to-nullifier link becomes public at settlement**, because the claim must name the commitment it is entitled to spend. That is the one thing the object model otherwise hides, and it is accepted here precisely scoped: the item was publicly listed and publicly sold, so its trade being traceable is expected. The seller's *other* objects keep unlinkable nullifiers. Wherever "commitments are unlinkable" is written down, this exception belongs beside it | 🔒 invariant |
+| 132.6 | **A public listing is first-come.** Anyone who pays the asked price may claim. That is what a listing *is*; a sale to a named buyer is a different instrument and is not this one | 🔒 |
+| 132.7 | **The claim hangs on `program_id` (§131.4).** Settlement is a transaction naming `take-offer` as its rule, not a transfer with special-case logic. The VM refuses unknown rules and refuses known rules it does not implement, so supporting this is an act someone takes in a diff | ✅ mechanism exists |

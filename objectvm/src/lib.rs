@@ -44,6 +44,7 @@
 //! container change and the hiding change as two steps rather than one.
 
 use std::collections::BTreeMap;
+use std::vec as alloc_vec;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
@@ -88,6 +89,35 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         outputs: Vec<Note>,
     },
+    /// Encumber an object against a price. It does not move.
+    PlaceOffer {
+        seller: AccountId,
+        program: ProgramId,
+        item: Hash,
+        price_asset: Address,
+        price_amount: Fixed,
+        expires_at_epoch: u64,
+    },
+    /// Lift an encumbrance. Transfers nothing.
+    CancelOffer {
+        seller: AccountId,
+        program: ProgramId,
+        item: Hash,
+    },
+    /// Pay the price and take the object, atomically (§132.2).
+    TakeOffer {
+        buyer: AccountId,
+        program: ProgramId,
+        item: Hash,
+        /// The item's nullifier. Supplied by the taker, who cannot compute the
+        /// seller's — so a listing publishes it, which is the disclosure
+        /// §132.5 accepts and scopes.
+        item_nullifier: Hash,
+        /// The buyer's own objects, funding the price.
+        payment: Vec<(Hash, Hash)>,
+        /// Price to the seller, item to the buyer, change to the buyer.
+        outputs: Vec<Note>,
+    },
     Seal,
 }
 
@@ -95,8 +125,25 @@ pub enum Op {
 pub enum Receipt {
     Minted { commitment: Hash, position: u64 },
     Spent { spent: Vec<Hash>, created: Vec<Hash> },
+    Listed { item: Hash },
+    Delisted { item: Hash },
+    Taken { item: Hash, created: Vec<Hash> },
     Refused(&'static str),
     Sealed(Checkpoint),
+}
+
+/// A listing: terms attached to an object that has not moved.
+///
+/// The object stays the seller's and stays in `live`. What this adds is a
+/// refusal — no ordinary spend may consume it — and an entitlement: whoever
+/// pays `price` may (DECISIONS §132.1).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Offer {
+    pub seller: AccountId,
+    pub price_asset: Address,
+    pub price_amount: Fixed,
+    /// Last epoch in which this may be taken, inclusive.
+    pub expires_at_epoch: u64,
 }
 
 /// One live object as the operator sees it.
@@ -126,6 +173,10 @@ pub struct ObjectVm {
     pub live: BTreeMap<Hash, Live>,
     /// Issued supply per asset, the quantity conservation is checked against.
     pub issued: BTreeMap<Address, Fixed>,
+    /// Encumbered commitment → its terms. Public, and deliberately so: a
+    /// listing nobody can see is not a listing (§132.4). It names the object,
+    /// never the owner.
+    pub offers: BTreeMap<Hash, Offer>,
 }
 
 impl ObjectVm {
@@ -150,6 +201,20 @@ impl ObjectVm {
         e.bytes(b"objectvm.supply.v1").u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        e.leaf()
+    }
+
+    /// The listings section. Public by necessity: a market needs strangers to
+    /// find the offer. It names the object and the price, never the seller.
+    fn offers_leaf(&self) -> Hash {
+        let mut e = Encoder::new();
+        e.bytes(b"objectvm.offers.v1").u32(self.offers.len() as u32);
+        for (item, o) in &self.offers {
+            e.bytes(item)
+                .bytes(&o.price_asset)
+                .fixed(o.price_amount)
+                .u64(o.expires_at_epoch);
         }
         e.leaf()
     }
@@ -215,6 +280,11 @@ impl ObjectVm {
             if self.nullifiers.contains(n) {
                 return vec![Receipt::Refused("already spent")];
             }
+            // The encumbrance in one line: it is still yours, and you still
+            // cannot spend it while it is listed (§132.1).
+            if self.offers.contains_key(c) {
+                return vec![Receipt::Refused("that object is listed")];
+            }
             consumed.push(note);
         }
 
@@ -279,6 +349,144 @@ impl ObjectVm {
     }
 }
 
+impl ObjectVm {
+    /// Pay the price and take the object, in one step.
+    ///
+    /// Atomicity is the whole design (§132.2): the payment and the transfer
+    /// are the same transaction, so a buyer cannot pay without receiving, and
+    /// a cancel that the sequencer ordered first simply makes this fail with
+    /// the payment still the buyer's. No lock, no staging, no refund path.
+    ///
+    /// This is the one rule permitted to consume an object it does not own.
+    /// The entitlement comes from the encumbrance, and the price is what
+    /// converts it into a right.
+    fn apply_take(
+        &mut self,
+        buyer: &AccountId,
+        program: &ProgramId,
+        item: &Hash,
+        item_nullifier: &Hash,
+        payment: &[(Hash, Hash)],
+        outputs: &[Note],
+    ) -> Vec<Receipt> {
+        if *program != program::take_offer() {
+            return vec![Receipt::Refused("wrong program for a claim")];
+        }
+        let offer = match self.offers.get(item) {
+            Some(o) => *o,
+            None => return vec![Receipt::Refused("no such listing")],
+        };
+        if self.epoch > offer.expires_at_epoch {
+            return vec![Receipt::Refused("the listing expired")];
+        }
+        let item_note = match self.live.get(item) {
+            Some(n) => *n,
+            None => return vec![Receipt::Refused("the listed object is gone")],
+        };
+        if self.nullifiers.contains(item_nullifier) {
+            return vec![Receipt::Refused("already spent")];
+        }
+        if payment.len() as u32 > self.limits.max_io || outputs.len() as u32 > self.limits.max_io {
+            return vec![Receipt::Refused("too many objects in one claim")];
+        }
+
+        // The buyer funds it with objects that are theirs, live, unlisted.
+        let mut consumed: Vec<Note> = alloc_vec![item_note];
+        let mut seen: Vec<Hash> = alloc_vec![*item];
+        for (c, n) in payment {
+            if seen.contains(c) {
+                return vec![Receipt::Refused("the same object twice in one claim")];
+            }
+            seen.push(*c);
+            let note = match self.live.get(c) {
+                Some(note) => *note,
+                None => return vec![Receipt::Refused("no such live object")],
+            };
+            if &note.owner != buyer {
+                return vec![Receipt::Refused("not the buyer's object")];
+            }
+            if self.offers.contains_key(c) {
+                return vec![Receipt::Refused("that object is listed")];
+            }
+            if self.nullifiers.contains(n) {
+                return vec![Receipt::Refused("already spent")];
+            }
+            consumed.push(note);
+        }
+
+        let mut created: Vec<(Hash, Note)> = Vec::with_capacity(outputs.len());
+        for note in outputs {
+            match commitment(note) {
+                Ok(c) => {
+                    if self.live.contains_key(&c) {
+                        return vec![Receipt::Refused("output already exists")];
+                    }
+                    created.push((c, *note))
+                }
+                Err(_) => return vec![Receipt::Refused("an output needs a nonce and a value")],
+            }
+        }
+
+        // The seller is paid at least what was asked, and the buyer receives
+        // the object itself rather than something merely similar.
+        let paid: i128 = created
+            .iter()
+            .filter(|(_, n)| n.owner == offer.seller && n.asset == offer.price_asset)
+            .map(|(_, n)| n.amount.0)
+            .sum();
+        if paid < offer.price_amount.0 {
+            return vec![Receipt::Refused("the seller was not paid the asking price")];
+        }
+        if !created.iter().any(|(_, n)| {
+            n.owner == *buyer && n.asset == item_note.asset && n.amount == item_note.amount
+        }) {
+            return vec![Receipt::Refused("the buyer does not receive the object")];
+        }
+
+        // And nothing was created from nothing.
+        let mut delta: BTreeMap<Address, i128> = BTreeMap::new();
+        for note in &consumed {
+            let e = delta.entry(note.asset).or_insert(0);
+            *e = match e.checked_add(note.amount.0) {
+                Some(v) => v,
+                None => return vec![Receipt::Refused("input overflow")],
+            };
+        }
+        for (_, note) in &created {
+            let e = delta.entry(note.asset).or_insert(0);
+            *e = match e.checked_sub(note.amount.0) {
+                Some(v) => v,
+                None => return vec![Receipt::Refused("output overflow")],
+            };
+        }
+        if delta.values().any(|d| *d != 0) {
+            return vec![Receipt::Refused("value not conserved")];
+        }
+
+        // Only now.
+        self.offers.remove(item);
+        self.live.remove(item);
+        self.nullifiers.insert(*item_nullifier);
+        for (c, n) in payment {
+            self.live.remove(c);
+            self.nullifiers.insert(*n);
+        }
+        let mut made = Vec::with_capacity(created.len());
+        for (c, note) in created {
+            self.commitments.append(c);
+            self.live.insert(c, note);
+            made.push(c);
+        }
+        *self.accounts.entry(*buyer).or_insert(0) += 1;
+        self.accounts.entry(offer.seller).or_insert(0);
+
+        vec![Receipt::Taken {
+            item: *item,
+            created: made,
+        }]
+    }
+}
+
 impl MicrochainVm for ObjectVm {
     type Intent = Op;
     type Receipt = Receipt;
@@ -301,6 +509,7 @@ impl MicrochainVm for ObjectVm {
             nullifiers: Nullifiers::new(),
             live: BTreeMap::new(),
             issued: BTreeMap::new(),
+            offers: BTreeMap::new(),
         }
     }
 
@@ -368,6 +577,69 @@ impl MicrochainVm for ObjectVm {
                 inputs,
                 outputs,
             } => self.apply_spend(spender, program, inputs, outputs),
+            Op::PlaceOffer {
+                seller,
+                program,
+                item,
+                price_asset,
+                price_amount,
+                expires_at_epoch,
+            } => {
+                if *program != program::place_offer() {
+                    return vec![Receipt::Refused("wrong program for a listing")];
+                }
+                let note = match self.live.get(item) {
+                    Some(n) => *n,
+                    None => return vec![Receipt::Refused("no such live object")],
+                };
+                if &note.owner != seller {
+                    return vec![Receipt::Refused("not the seller's object")];
+                }
+                if self.offers.contains_key(item) {
+                    return vec![Receipt::Refused("already listed")];
+                }
+                if *price_amount == Fixed::ZERO {
+                    return vec![Receipt::Refused("a listing needs a price")];
+                }
+                if *expires_at_epoch < self.epoch {
+                    return vec![Receipt::Refused("already expired")];
+                }
+                self.offers.insert(
+                    *item,
+                    Offer {
+                        seller: *seller,
+                        price_asset: *price_asset,
+                        price_amount: *price_amount,
+                        expires_at_epoch: *expires_at_epoch,
+                    },
+                );
+                vec![Receipt::Listed { item: *item }]
+            }
+            Op::CancelOffer {
+                seller,
+                program,
+                item,
+            } => {
+                if *program != program::cancel_offer() {
+                    return vec![Receipt::Refused("wrong program for a cancel")];
+                }
+                match self.offers.get(item) {
+                    Some(o) if &o.seller == seller => {
+                        self.offers.remove(item);
+                        vec![Receipt::Delisted { item: *item }]
+                    }
+                    Some(_) => vec![Receipt::Refused("not the seller's listing")],
+                    None => vec![Receipt::Refused("no such listing")],
+                }
+            }
+            Op::TakeOffer {
+                buyer,
+                program,
+                item,
+                item_nullifier,
+                payment,
+                outputs,
+            } => self.apply_take(buyer, program, item, item_nullifier, payment, outputs),
             Op::Seal => {
                 let state_root = self.state_root();
                 let cp = Checkpoint {
@@ -400,6 +672,7 @@ impl MicrochainVm for ObjectVm {
             self.commitments.root(),
             self.nullifiers.root(),
             self.supply_leaf(),
+            self.offers_leaf(),
         ]
     }
 
@@ -438,6 +711,11 @@ impl MicrochainVm for ObjectVm {
     fn intent_authorities(intent: &Op) -> Vec<AccountId> {
         match intent {
             Op::Spend { spender, .. } => vec![*spender],
+            Op::PlaceOffer { seller, .. } | Op::CancelOffer { seller, .. } => vec![*seller],
+            // Only the buyer signs a claim. The seller's consent was given
+            // when they listed, and requiring it again would make every sale
+            // need them online (§132.2).
+            Op::TakeOffer { buyer, .. } => vec![*buyer],
             _ => Vec::new(),
         }
     }
@@ -469,6 +747,54 @@ impl MicrochainVm for ObjectVm {
                     .u32(inputs.len() as u32)
                     .u32(outputs.len() as u32);
                 for (c, n) in inputs {
+                    e.bytes(c).bytes(n);
+                }
+                for o in outputs {
+                    e.bytes(&o.asset)
+                        .fixed(o.amount)
+                        .bytes(&o.owner)
+                        .bytes(&o.nonce);
+                }
+            }
+            Op::PlaceOffer {
+                seller,
+                program,
+                item,
+                price_asset,
+                price_amount,
+                expires_at_epoch,
+            } => {
+                e.u8(3)
+                    .bytes(seller)
+                    .bytes(&program.0)
+                    .bytes(item)
+                    .bytes(price_asset)
+                    .fixed(*price_amount)
+                    .u64(*expires_at_epoch);
+            }
+            Op::CancelOffer {
+                seller,
+                program,
+                item,
+            } => {
+                e.u8(4).bytes(seller).bytes(&program.0).bytes(item);
+            }
+            Op::TakeOffer {
+                buyer,
+                program,
+                item,
+                item_nullifier,
+                payment,
+                outputs,
+            } => {
+                e.u8(5)
+                    .bytes(buyer)
+                    .bytes(&program.0)
+                    .bytes(item)
+                    .bytes(item_nullifier)
+                    .u32(payment.len() as u32)
+                    .u32(outputs.len() as u32);
+                for (c, n) in payment {
                     e.bytes(c).bytes(n);
                 }
                 for o in outputs {
@@ -519,6 +845,48 @@ impl MicrochainVm for ObjectVm {
                     outputs,
                 })
             }
+            3 => Some(Op::PlaceOffer {
+                seller: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                item: d.hash().ok()?,
+                price_asset: d.hash().ok()?,
+                price_amount: d.fixed().ok()?,
+                expires_at_epoch: d.u64().ok()?,
+            }),
+            4 => Some(Op::CancelOffer {
+                seller: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                item: d.hash().ok()?,
+            }),
+            5 => {
+                let buyer = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let item = d.hash().ok()?;
+                let item_nullifier = d.hash().ok()?;
+                let pays = d.u32().ok()? as usize;
+                let outs = d.u32().ok()? as usize;
+                let mut payment = Vec::with_capacity(pays.min(1024));
+                for _ in 0..pays {
+                    payment.push((d.hash().ok()?, d.hash().ok()?));
+                }
+                let mut outputs = Vec::with_capacity(outs.min(1024));
+                for _ in 0..outs {
+                    outputs.push(Note {
+                        asset: d.hash().ok()?,
+                        amount: d.fixed().ok()?,
+                        owner: d.account().ok()?,
+                        nonce: d.hash().ok()?,
+                    });
+                }
+                Some(Op::TakeOffer {
+                    buyer,
+                    program,
+                    item,
+                    item_nullifier,
+                    payment,
+                    outputs,
+                })
+            }
             _ => None,
         }
     }
@@ -556,6 +924,14 @@ impl MicrochainVm for ObjectVm {
         e.u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        e.u32(self.offers.len() as u32);
+        for (item, o) in &self.offers {
+            e.bytes(item)
+                .bytes(&o.seller)
+                .bytes(&o.price_asset)
+                .fixed(o.price_amount)
+                .u64(o.expires_at_epoch);
         }
         e.finish().to_vec()
     }
@@ -602,6 +978,19 @@ impl MicrochainVm for ObjectVm {
         for _ in 0..d.u32().ok()? {
             issued.insert(d.hash().ok()?, d.fixed().ok()?);
         }
+        let mut offers = BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            let item = d.hash().ok()?;
+            offers.insert(
+                item,
+                Offer {
+                    seller: d.account().ok()?,
+                    price_asset: d.hash().ok()?,
+                    price_amount: d.fixed().ok()?,
+                    expires_at_epoch: d.u64().ok()?,
+                },
+            );
+        }
         Some(ObjectVm {
             chain_id,
             epoch,
@@ -615,6 +1004,7 @@ impl MicrochainVm for ObjectVm {
             nullifiers,
             live,
             issued,
+            offers,
         })
     }
 

@@ -77,6 +77,23 @@ pub fn withdraw() -> ProgramId {
     named(b"withdraw")
 }
 
+/// Encumber an object against a price, without moving it (DECISIONS §132.1).
+pub fn place_offer() -> ProgramId {
+    named(b"place-offer")
+}
+
+/// Lift an encumbrance. Transfers nothing, because nothing was transferred.
+pub fn cancel_offer() -> ProgramId {
+    named(b"cancel-offer")
+}
+
+/// Pay the asked price and take the encumbered object, atomically
+/// (DECISIONS §132.2). The only rule permitted to spend an object it does not
+/// own — the entitlement comes from the encumbrance, not from a signature.
+pub fn take_offer() -> ProgramId {
+    named(b"take-offer")
+}
+
 /// A program named by its code rather than by a rule the VM knows.
 ///
 /// `code` is the hash of the program as shipped — an rv32im ELF, per §2.5's
@@ -101,6 +118,9 @@ pub fn is_named(id: &ProgramId) -> bool {
         add_liquidity(),
         remove_liquidity(),
         withdraw(),
+        place_offer(),
+        cancel_offer(),
+        take_offer(),
     ]
     .contains(id)
 }
@@ -119,6 +139,9 @@ mod tests {
             add_liquidity(),
             remove_liquidity(),
             withdraw(),
+            place_offer(),
+            cancel_offer(),
+            take_offer(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {
