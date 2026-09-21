@@ -832,3 +832,106 @@ fn a_transfer_output_without_a_ciphertext_is_refused() {
     );
     assert_eq!(r[0], Receipt::Refused("an output needs an encrypted note"));
 }
+
+// ------------------------------------------------- deposits from the bridge
+
+use objectvm::ingress::{credit, IngressError};
+
+fn register(vm: &mut ObjectVm, seq: u64, who: AccountId, view: &StaticSecret) {
+    let r = vm.apply(
+        seq,
+        &Op::Register {
+            account: who,
+            program: program::register_viewing_key(),
+            viewing: viewing_public(view),
+        },
+    );
+    assert_eq!(r[0], Receipt::Registered { account: who });
+}
+
+/// The bridge's whole job, end to end: a confirmed Zcash transaction becomes
+/// an object its depositor can find, and nobody had to hand the sequencer a
+/// secret to make it happen.
+#[test]
+fn a_confirmed_deposit_becomes_a_findable_object() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([0x0A; 32]);
+    register(&mut vm, 1, ALICE, &view);
+
+    let op = credit(
+        &vm, ZEC, Fixed::whole(12), ALICE, [0xF1; 32], [0x61; 32],
+        StaticSecret::from([0x62; 32]),
+    )
+    .expect("a registered account is creditable");
+
+    let enc = match &op {
+        Op::Deposit { enc, .. } => enc.clone(),
+        _ => unreachable!(),
+    };
+    assert!(matches!(vm.apply(2, &op)[0], Receipt::Deposited { .. }));
+    assert_eq!(vm.conserved(), Ok(()));
+
+    // Alice opens it with the key she registered, and learns what she needs.
+    let plain = open(&view, &enc).expect("the depositor can open her own");
+    assert_eq!(&plain[48..80], &[0x61u8; 32], "the nonce to spend it");
+    assert!(open(&StaticSecret::from([0xBB; 32]), &enc).is_err());
+}
+
+/// An account nobody can pay is not creditable, and saying so is better than
+/// minting an object that exists and cannot be found.
+#[test]
+fn a_deposit_to_an_unregistered_account_is_refused_before_it_is_minted() {
+    let vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    assert_eq!(
+        credit(&vm, ZEC, Fixed::whole(1), ALICE, [0xF2; 32], [0x63; 32],
+               StaticSecret::from([0x64; 32])),
+        Err(IngressError::NoViewingKey)
+    );
+}
+
+/// The replay guard has to bite before the intent is built, not only when the
+/// VM refuses it — a bridge that keeps re-crediting a txid would keep
+/// producing intents the chain rejects and never notice it was looping.
+#[test]
+fn the_bridge_will_not_rebuild_a_credit_it_already_made() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([0x0A; 32]);
+    register(&mut vm, 1, ALICE, &view);
+
+    let op = credit(&vm, ZEC, Fixed::whole(4), ALICE, [0xF3; 32], [0x65; 32],
+                    StaticSecret::from([0x66; 32])).unwrap();
+    vm.apply(2, &op);
+
+    assert_eq!(
+        credit(&vm, ZEC, Fixed::whole(4), ALICE, [0xF3; 32], [0x67; 32],
+               StaticSecret::from([0x68; 32])),
+        Err(IngressError::AlreadyCredited)
+    );
+}
+
+/// A holder who loses a viewing key can publish another and be paid again.
+/// It cannot reach anything already received — a viewing key only ever found
+/// notes, it never spent them.
+#[test]
+fn re_registering_changes_where_future_deposits_go_and_nothing_else() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let first = StaticSecret::from([0x0A; 32]);
+    let second = StaticSecret::from([0x0B; 32]);
+
+    register(&mut vm, 1, ALICE, &first);
+    let old = credit(&vm, ZEC, Fixed::whole(5), ALICE, [0xF4; 32], [0x69; 32],
+                     StaticSecret::from([0x6A; 32])).unwrap();
+    let old_enc = match &old { Op::Deposit { enc, .. } => enc.clone(), _ => unreachable!() };
+    vm.apply(2, &old);
+
+    register(&mut vm, 3, ALICE, &second);
+    let new = credit(&vm, ZEC, Fixed::whole(7), ALICE, [0xF5; 32], [0x6B; 32],
+                     StaticSecret::from([0x6C; 32])).unwrap();
+    let new_enc = match &new { Op::Deposit { enc, .. } => enc.clone(), _ => unreachable!() };
+    vm.apply(4, &new);
+
+    assert!(open(&first, &old_enc).is_ok(), "the old key still opens the old note");
+    assert!(open(&second, &old_enc).is_err(), "and the new one does not");
+    assert!(open(&second, &new_enc).is_ok(), "future deposits go to the new key");
+    assert_eq!(vm.conserved(), Ok(()));
+}

@@ -48,7 +48,7 @@ use std::vec as alloc_vec;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
-use zyn_vm::note_enc::EncryptedNote;
+use zyn_vm::note_enc::{EncryptedNote, ViewingKey};
 use zyn_vm::object::{commitment, Commitments, Note, Nullifiers, ObjectError};
 use zyn_vm::program::{self, ProgramId};
 use zyn_vm::read::Decoder;
@@ -89,6 +89,17 @@ pub enum Op {
         /// `(commitment, nullifier)` for each object being consumed.
         inputs: Vec<(Hash, Hash)>,
         outputs: Vec<Output>,
+    },
+    /// Publish where to pay this account.
+    ///
+    /// Re-registering replaces the key, because a holder who loses one needs
+    /// a way to be paid again and the old key cannot spend anything — it only
+    /// ever found notes. What it costs is that anyone able to submit as this
+    /// account can redirect *future* discoverability, not any existing note.
+    Register {
+        account: AccountId,
+        program: ProgramId,
+        viewing: ViewingKey,
     },
     /// Leave for Zcash: burn objects and record a payout for the vault.
     ///
@@ -166,6 +177,7 @@ pub enum Receipt {
     Spent { spent: Vec<Hash>, created: Vec<Hash> },
     Deposited { commitment: Hash, position: u64 },
     Withdrawing { amount: Fixed, destination: Hash },
+    Registered { account: AccountId },
     Listed { item: Hash },
     Delisted { item: Hash },
     Taken { item: Hash, created: Vec<Hash> },
@@ -248,6 +260,9 @@ pub struct ObjectVm {
     pub live: BTreeMap<Hash, Live>,
     /// Issued supply per asset, the quantity conservation is checked against.
     pub issued: BTreeMap<Address, Fixed>,
+    /// Where to pay each account. Public: an address is not a secret, and a
+    /// payer who cannot read it cannot pay.
+    pub viewing: BTreeMap<AccountId, ViewingKey>,
     /// Exits the vault owes and has not paid. Ordered by the sequence they
     /// were requested in, which is the order a settler must honour.
     pub exits: Vec<PendingExit>,
@@ -282,6 +297,12 @@ impl ObjectVm {
         e.bytes(b"objectvm.supply.v1").u32(self.issued.len() as u32);
         for (asset, amount) in &self.issued {
             e.bytes(asset).fixed(*amount);
+        }
+        // Where to pay an account is consensus too: a replica that disagreed
+        // would build deposits nobody could find.
+        e.u32(self.viewing.len() as u32);
+        for (a, v) in &self.viewing {
+            e.bytes(a).bytes(v);
         }
         // What the vault owes is consensus, not bookkeeping: a settler pays
         // from this list and a verifier checks they paid nothing else.
@@ -746,6 +767,7 @@ impl MicrochainVm for ObjectVm {
             offers: BTreeMap::new(),
             deposits: BTreeSet::new(),
             exits: Vec::new(),
+            viewing: BTreeMap::new(),
         }
     }
 
@@ -813,6 +835,21 @@ impl MicrochainVm for ObjectVm {
                 inputs,
                 outputs,
             } => self.apply_spend(spender, program, inputs, outputs),
+            Op::Register {
+                account,
+                program,
+                viewing,
+            } => {
+                if *program != program::register_viewing_key() {
+                    return vec![Receipt::Refused("wrong program for a registration")];
+                }
+                if *viewing == [0u8; 32] {
+                    return vec![Receipt::Refused("not a viewing key")];
+                }
+                self.viewing.insert(*account, *viewing);
+                self.accounts.entry(*account).or_insert(0);
+                vec![Receipt::Registered { account: *account }]
+            }
             Op::Withdraw {
                 holder,
                 program,
@@ -1013,6 +1050,7 @@ impl MicrochainVm for ObjectVm {
             // need them online (§132.2).
             Op::TakeOffer { buyer, .. } => vec![*buyer],
             Op::Withdraw { holder, .. } => vec![*holder],
+            Op::Register { account, .. } => vec![*account],
             _ => Vec::new(),
         }
     }
@@ -1156,6 +1194,13 @@ impl MicrochainVm for ObjectVm {
                         .u32(o.enc.ciphertext.len() as u32)
                         .bytes(&o.enc.ciphertext);
                 }
+            }
+            Op::Register {
+                account,
+                program,
+                viewing,
+            } => {
+                e.u8(8).bytes(account).bytes(&program.0).bytes(viewing);
             }
             Op::Seal => {
                 e.u8(0);
@@ -1309,6 +1354,11 @@ impl MicrochainVm for ObjectVm {
                     outputs,
                 })
             }
+            8 => Some(Op::Register {
+                account: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                viewing: d.hash().ok()?,
+            }),
             _ => None,
         }
     }
@@ -1357,6 +1407,10 @@ impl MicrochainVm for ObjectVm {
                 .fixed(x.amount)
                 .bytes(&x.destination)
                 .u64(x.since_epoch);
+        }
+        e.u32(self.viewing.len() as u32);
+        for (a, v) in &self.viewing {
+            e.bytes(a).bytes(v);
         }
         e.u32(self.offers.len() as u32);
         for (item, o) in &self.offers {
@@ -1424,6 +1478,10 @@ impl MicrochainVm for ObjectVm {
                 since_epoch: d.u64().ok()?,
             });
         }
+        let mut viewing = BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            viewing.insert(d.account().ok()?, d.hash().ok()?);
+        }
         let mut offers = BTreeMap::new();
         for _ in 0..d.u32().ok()? {
             let item = d.hash().ok()?;
@@ -1453,6 +1511,7 @@ impl MicrochainVm for ObjectVm {
             offers,
             deposits,
             exits,
+            viewing,
         })
     }
 
@@ -1494,5 +1553,76 @@ impl MicrochainVm for ObjectVm {
             }
         }
         Ok(())
+    }
+}
+
+/// Turning a confirmed Zcash deposit into an object.
+///
+/// The bridge watches Zcash and produces "this txid paid this much to this
+/// account". The object ledger needs more than that: a nonce, so the
+/// commitment hides, and a ciphertext, so the depositor can find what was
+/// made for them. Neither can come from the deposit itself.
+pub mod ingress {
+    use super::*;
+    use zyn_vm::note_enc::{seal, StaticSecret};
+
+    /// Why a confirmed deposit could not be turned into an object.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum IngressError {
+        /// Nobody has said where to pay this account (§register_viewing_key).
+        /// The ZEC is in the vault and the credit waits — it is not lost, and
+        /// it is not creditable either, because an object nobody can open is
+        /// worse than one that has not been made yet.
+        NoViewingKey,
+        /// The same Zcash transaction has already been credited.
+        AlreadyCredited,
+        AmountNotPositive,
+    }
+
+    /// Build the intent that credits one confirmed deposit.
+    ///
+    /// `nonce` and `ephemeral` must be fresh and unpredictable. A nonce a
+    /// third party can guess makes the commitment openable by trying
+    /// plausible amounts against a known account; a reused ephemeral key
+    /// links two deposits to the same recipient.
+    pub fn credit(
+        vm: &ObjectVm,
+        asset: Address,
+        amount: Fixed,
+        account: AccountId,
+        txid: Hash,
+        nonce: Hash,
+        ephemeral: StaticSecret,
+    ) -> Result<Op, IngressError> {
+        if amount.0 <= 0 {
+            return Err(IngressError::AmountNotPositive);
+        }
+        if vm.deposits.contains(&txid) {
+            return Err(IngressError::AlreadyCredited);
+        }
+        let to = vm
+            .viewing
+            .get(&account)
+            .copied()
+            .ok_or(IngressError::NoViewingKey)?;
+
+        // What the holder needs to spend it: the asset, the amount, and the
+        // nonce. Not the owner — they know who they are, and a ciphertext
+        // that names its recipient would say so to anyone who cracked one.
+        let mut plain = Vec::with_capacity(80);
+        plain.extend_from_slice(&asset);
+        plain.extend_from_slice(&amount.0.to_be_bytes());
+        plain.extend_from_slice(&nonce);
+        let enc = seal(&to, ephemeral, &plain).map_err(|_| IngressError::AmountNotPositive)?;
+
+        Ok(Op::Deposit {
+            program: program::deposit(),
+            asset,
+            amount,
+            owner: account,
+            nonce,
+            enc,
+            external_ref: txid,
+        })
     }
 }

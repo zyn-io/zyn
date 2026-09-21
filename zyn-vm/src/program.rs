@@ -77,6 +77,16 @@ pub fn withdraw() -> ProgramId {
     named(b"withdraw")
 }
 
+/// Publish where to pay an account: bind it to a viewing key.
+///
+/// An account id is `H(domain ‖ scheme ‖ len ‖ key)` and one-way, so nobody —
+/// including the sequencer crediting a deposit — can recover a viewing key
+/// from it. Somebody paying you has to be told, and this is the telling. It
+/// is the object ledger's equivalent of having an address at all.
+pub fn register_viewing_key() -> ProgramId {
+    named(b"register-viewing-key")
+}
+
 /// Create an object against ZEC confirmed in the vault. The one rule that
 /// makes value rather than moving it, which is why it names an external
 /// reference the backing signers can check (DECISIONS §130.13).
@@ -129,6 +139,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         cancel_offer(),
         take_offer(),
         deposit(),
+        register_viewing_key(),
     ]
     .contains(id)
 }
@@ -151,6 +162,7 @@ mod tests {
             cancel_offer(),
             take_offer(),
             deposit(),
+            register_viewing_key(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {
