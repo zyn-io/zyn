@@ -65,6 +65,49 @@ fn save(dir: &str, chain: u32, vm: &ObjectVm) {
     }
 }
 
+fn published_path(dir: &str, chain: u32) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(format!("chain-{}.published", chain))
+}
+
+/// One record per line: `o commitment epk ciphertext` or `n nullifier`. A
+/// text format on purpose — this is the file a wallet author debugs against,
+/// and being able to read it with `cat` is worth more than the bytes it costs.
+fn save_published(dir: &str, chain: u32, p: &Published) {
+    let mut out = String::new();
+    for (c, e, x) in &p.outputs {
+        out.push_str(&format!("o {} {} {}\n", c, e, x));
+    }
+    for n in &p.nullifiers {
+        out.push_str(&format!("n {}\n", n));
+    }
+    let path = published_path(dir, chain);
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, out)
+        .and_then(|_| std::fs::rename(&tmp, &path))
+        .is_err()
+    {
+        eprintln!("zyn-object-node: could not save the published log");
+    }
+}
+
+fn load_published(dir: &str, chain: u32) -> Published {
+    let mut p = Published::default();
+    let Ok(text) = std::fs::read_to_string(published_path(dir, chain)) else {
+        return p;
+    };
+    for line in text.lines() {
+        let mut f = line.split_whitespace();
+        match (f.next(), f.next(), f.next(), f.next()) {
+            (Some("o"), Some(c), Some(e), Some(x)) => {
+                p.outputs.push((c.into(), e.into(), x.into()))
+            }
+            (Some("n"), Some(n), None, None) => p.nullifiers.push(n.into()),
+            _ => {} // a damaged line loses one record, not the file
+        }
+    }
+    p
+}
+
 fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
     let bytes = std::fs::read(state_path(dir, chain)).ok()?;
     let vm = ObjectVm::decode(&bytes)?;
@@ -109,10 +152,11 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 /// Everything published since genesis, so a wallet can scan without being
 /// given anything privileged.
 ///
-/// A real deployment serves this from the data-availability bundles; keeping
-/// it in memory here is the one shortcut this node takes, and it is why it is
-/// a devnet. It is also why the node saves on every seal: losing it would mean
-/// every wallet has to be told to start over.
+/// A real deployment serves this from the data-availability bundles. This
+/// node keeps its own copy and **persists it**, because a wallet that cannot
+/// rebuild after the node restarts is not a wallet — the whole point is that
+/// discovery needs nothing but published data and a key, and published data
+/// that evaporates is not published.
 #[derive(Default)]
 struct Published {
     outputs: Vec<(String, String, String)>, // commitment, epk, ciphertext
@@ -235,7 +279,9 @@ fn handle(
                 );
             }
             if !step.receipts.iter().any(ObjectVm::rejected) {
-                record(&mut pub_log.lock().unwrap(), &op);
+                let mut p = pub_log.lock().unwrap();
+                record(&mut p, &op);
+                save_published(dir, chain, &p);
             }
             save(dir, chain, n.state());
             format!(
@@ -343,7 +389,17 @@ fn main() {
         }
     };
     let node = Arc::new(Mutex::new(vm.with_manual_anchoring()));
-    let pub_log = Arc::new(Mutex::new(Published::default()));
+    let pub_log = Arc::new(Mutex::new(load_published(&dir, chain)));
+    {
+        let p = pub_log.lock().unwrap();
+        if !p.outputs.is_empty() {
+            eprintln!(
+                "zyn-object-node: {} published output(s) and {} nullifier(s) restored",
+                p.outputs.len(),
+                p.nullifiers.len()
+            );
+        }
+    }
 
     eprintln!(
         "zyn-object-node: chain {} listening on {} — DEVNET, objects are unbacked",
