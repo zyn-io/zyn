@@ -5976,3 +5976,28 @@ items are objects from the first mint and nothing is ever re-minted.
 | 133.4 | **This ships at tier 2, not tier 1** — better than §130.8a assumed, and still not tier 4. Nobody holding a mirror can build the owner map, because the published sections carry commitments and nullifiers and no owner. The operator still can. The sentence Cave may use is "private from the public; we can see them", and not one word more (§130.12) | 🔒 invariant |
 | 133.5 | **Nap must read the object ledger before deposits open.** A store whose buyers cannot see what they bought is not shippable. Today a wallet asks the node what an account holds; against an object ledger that query does not exist, and discovery becomes scan-and-trial-decrypt — the Zcash sync problem arriving inside Zyn | 🔒 gate |
 | 133.6 | **A ZEC deposit must create an object, not credit an account** — and that is what makes note encryption the keystone rather than a later nicety. The sequencer creates the note; the depositor has to be able to find it. Deriving the nonce publicly from the txid would let an observer confirm a guessed recipient by recomputing the commitment, so the note is encrypted to the recipient instead and discovered by trial decryption. The same mechanism serves 133.5, which is why A114 comes before the deposit path rather than after | 🔒 |
+
+---
+
+## 134. Tiers 3 and 4 are one step, and the range check is a circuit constraint (21 Sep 2026)
+
+§130 split hiding *amounts* from hiding *which object was spent*, on the
+grounds that the first needed no circuit. Attempting it showed that it does.
+
+| # | Decision | |
+|---|---|---|
+| 134.1 | **Pedersen commitments hide amounts and do not constrain them.** An amount is a scalar modulo the group order, so a negative one is an enormous positive one and a spender may balance `10 = 11 + (−1)` and mint value. `value.rs` carries a test that does exactly that and passes the balance check. The fix is a range proof, and without one tier 3 is not a weaker privacy tier — it is unsound | ✅ demonstrated |
+| 134.2 | **The obvious library does not build for the target.** `bulletproofs 5.0.0` depends directly on `clear_on_drop`, whose build script fails on `riscv32im-unknown-none-elf`. Structural to the crate, not a feature flag, and found by running §131.7's check before wiring anything in rather than after | ✅ measured |
+| 134.3 | **Zcash does not attach range proofs; it constrains values inside its circuit.** Orchard's Halo 2 circuit checks that a note's value is in range as part of the same proof that checks everything else. Aztec's Noir does the same — a `u64` cast *induces* a range constraint. Range is a constraint, not a proof, and Bulletproofs exist for the case where you have commitments and no circuit | ✅ |
+| 134.4 | **So tier 3 folds into tier 4.** Hiding amounts safely needs the circuit that hiding the spend needs, and once that circuit exists the range check is inside it at no extra cost. There is no cheap intermediate rung, and pretending there was cost a day to discover | 🔒 |
+| 134.5 | **Build it on Halo 2, which is already vendored.** `halo2_proofs 0.3.5`, `halo2_gadgets 0.5.0` and `pasta_curves` arrive through `orchard` via `zcash_primitives` — the same construction Zcash ships and has had audited. The alternative was hand-writing a verifier, which §131.5 warns is the failure mode that is silent when wrong, and which the circuit would have made redundant within months | 🔒 direction |
+| 134.6 | **`value.rs` stays, and so does its refusing verifier.** Pedersen conservation is correct and will be used; only the claim that it is *sufficient* was wrong. `RangeProof::verify` returning `RangeProofsNotImplemented` remains the honest state, and it is what stops a VM wiring this in and quietly accepting spends that mint value | 🔒 invariant |
+| 134.7 | **I overstated §131.7 while finding this.** A std-only dependency does not foreclose tier 4 — §131.1 chose fixed circuits, so the `riscv32im` target belongs to the *zkVM* path that v1 defers. Keeping it building preserves an option; it is not a hard gate. The rule is good and was applied as a harder constraint than it is | ✅ corrected |
+| 134.8 | **Nothing below this moves.** The object ledger — deposits, transfers, listings, claims, exits, the registry, the wallet — is the layer underneath and is unaffected. Cave still ships at tier 2 (§133.4), where nobody holding a mirror can build the owner map | 🔒 |
+
+**A note on the name.** Two unrelated things are called Noir. Aztec's Noir is
+the ZK language referenced in 134.3. **Noir Wallet** (`zknoir.com`) is a Zcash
+browser extension by the RHEA Finance team — a wallet over Zcash rather than
+an execution layer, per its own SDK docs, and a peer of *Nap* rather than of
+Zyn. What its "swaps and lending" do concretely is not stated in its public
+docs and is not assumed here.

@@ -23,8 +23,9 @@
 //! freely can balance `10 = 11 + (−1)` and mint value out of nothing. Pedersen
 //! commitments hide, they do not constrain.
 //!
-//! The fix is a **range proof** on every output, and it is not implemented
-//! yet. Rather than leave that as a comment someone might miss,
+//! The fix is a **range proof** on every output, and it needs the circuit
+//! rather than a library of its own (§134). Rather than leave that as a
+//! comment someone might miss,
 //! [`RangeProof::verify`] returns [`ValueError::RangeProofsNotImplemented`] —
 //! so a VM that wires this in refuses every spend rather than accepting
 //! unsound ones. Tier 3 is not finished until that function does real work.
@@ -123,10 +124,17 @@ pub fn balances(
 /// shape it will have — and so that no VM can wire value commitments in and
 /// quietly accept spends that mint value.
 ///
-/// The intended construction is Bulletproofs: logarithmic size, no trusted
-/// setup, and an aggregated proof over all of a transaction's outputs rather
-/// than one each. The `bulletproofs` crate resolves against the
-/// `curve25519-dalek` already in this tree.
+/// **The intended construction changed on 21 Sep (DECISIONS §134).** It is
+/// not Bulletproofs: that crate depends on `clear_on_drop`, which does not
+/// build for `riscv32im-unknown-none-elf`. More to the point, Zcash does not
+/// attach range proofs at all — Orchard constrains a note's value *inside*
+/// its Halo 2 circuit, as part of the same proof that checks everything else.
+///
+/// So this type will not be filled in on its own. The range check arrives
+/// with the membership circuit, built on the `halo2_proofs` and
+/// `halo2_gadgets` already vendored through `orchard`, and until then this
+/// verifier refuses — which is what keeps a VM from wiring value commitments
+/// in and quietly accepting spends that mint value.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct RangeProof {
     pub bytes: Vec<u8>,
