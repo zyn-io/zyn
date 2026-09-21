@@ -935,3 +935,97 @@ fn re_registering_changes_where_future_deposits_go_and_nothing_else() {
     assert!(open(&second, &new_enc).is_ok(), "future deposits go to the new key");
     assert_eq!(vm.conserved(), Ok(()));
 }
+
+// --------------------------------------------------------- settling exits
+
+use objectvm::egress;
+
+fn exiting(vm: &mut ObjectVm, seq: u64, c: [u8; 32], amount: i64, dest: u8) {
+    let r = vm.apply(
+        seq,
+        &Op::Withdraw {
+            holder: ALICE,
+            program: program::withdraw(),
+            inputs: vec![(c, nullifier(&ALICE_KEY, &c))],
+            asset: ZEC,
+            amount: Fixed::whole(amount),
+            destination: [dest; 32],
+            outputs: vec![],
+        },
+    );
+    assert!(matches!(r[0], Receipt::Withdrawing { .. }), "{:?}", r[0]);
+}
+
+/// The operator's loop: read what is owed, pay it on Zcash, say so.
+#[test]
+fn the_vault_learns_what_it_owes_and_records_paying_it() {
+    let (mut vm, c) = funded();
+    exiting(&mut vm, 2, c, 17, 0xD1);
+
+    let debts = egress::owed(&vm);
+    assert_eq!(debts.len(), 1);
+    assert_eq!(debts[0].amount, Fixed::whole(17));
+    assert_eq!(debts[0].destination, [0xD1; 32]);
+    assert_eq!(egress::outstanding(&vm, &ZEC), Fixed::whole(17));
+
+    // Paid on Zcash, then recorded — in that order.
+    let r = vm.apply(3, &egress::settle(debts[0].index, [0xAB; 32]));
+    assert_eq!(r[0], Receipt::Settled { index: 0, txid: [0xAB; 32] });
+
+    assert!(egress::owed(&vm).is_empty(), "nothing left owed");
+    assert_eq!(egress::outstanding(&vm, &ZEC), Fixed::ZERO);
+    assert_eq!(vm.exits[0].paid_by, Some([0xAB; 32]));
+}
+
+/// Settling twice would let one transaction answer two debts and leave the
+/// vault looking square while a holder was never paid.
+#[test]
+fn an_exit_cannot_be_settled_twice() {
+    let (mut vm, c) = funded();
+    exiting(&mut vm, 2, c, 17, 0xD2);
+    vm.apply(3, &egress::settle(0, [0xAC; 32]));
+
+    let r = vm.apply(4, &egress::settle(0, [0xAD; 32]));
+    assert_eq!(r[0], Receipt::Refused("that exit was already settled"));
+    assert_eq!(vm.exits[0].paid_by, Some([0xAC; 32]), "the first stands");
+}
+
+/// A settlement that names no transaction is an assertion, not evidence.
+#[test]
+fn a_settlement_must_name_its_transaction() {
+    let (mut vm, c) = funded();
+    exiting(&mut vm, 2, c, 17, 0xD3);
+    assert_eq!(
+        vm.apply(3, &egress::settle(0, [0u8; 32]))[0],
+        Receipt::Refused("a settlement names its transaction")
+    );
+    assert_eq!(egress::owed(&vm).len(), 1, "still owed");
+}
+
+/// An exit nobody paid is invisible unless something counts how long it has
+/// waited. Oldest first, so the most overdue is the one you see.
+#[test]
+fn the_oldest_unpaid_exit_is_the_one_reported_first() {
+    let mut vm = ObjectVm::genesis(212, Limits { max_io: 8 });
+    let view = StaticSecret::from([0x0A; 32]);
+    register(&mut vm, 1, ALICE, &view);
+    let a = match &vm.apply(2, &deposit_of(9, ALICE, 0x71, &view, [0xF7; 32]))[0] {
+        Receipt::Deposited { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    exiting(&mut vm, 3, a, 9, 0xD4);
+    vm.apply(4, &Op::Seal);
+    vm.apply(5, &Op::Seal);
+
+    let b = match &vm.apply(6, &deposit_of(4, ALICE, 0x72, &view, [0xF8; 32]))[0] {
+        Receipt::Deposited { commitment, .. } => *commitment,
+        o => panic!("{o:?}"),
+    };
+    exiting(&mut vm, 7, b, 4, 0xD5);
+
+    let debts = egress::owed(&vm);
+    assert_eq!(debts.len(), 2);
+    assert!(debts[0].waiting > debts[1].waiting, "oldest first");
+    assert_eq!(debts[0].destination, [0xD4; 32]);
+    assert_eq!(egress::outstanding(&vm, &ZEC), Fixed::whole(13));
+}

@@ -77,6 +77,17 @@ pub fn withdraw() -> ProgramId {
     named(b"withdraw")
 }
 
+/// Record that the vault paid an exit it owed.
+///
+/// Separate from [`withdraw`] because they are different claims made by
+/// different parties: a holder says "I am leaving", and later the operator
+/// says "I paid them, here is the transaction". Collapsing the two would mean
+/// the chain forgot the debt at the moment it was incurred, and nobody could
+/// see an exit that was owed and never honoured.
+pub fn settle_exit() -> ProgramId {
+    named(b"settle-exit")
+}
+
 /// Publish where to pay an account: bind it to a viewing key.
 ///
 /// An account id is `H(domain ‖ scheme ‖ len ‖ key)` and one-way, so nobody —
@@ -140,6 +151,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         take_offer(),
         deposit(),
         register_viewing_key(),
+        settle_exit(),
     ]
     .contains(id)
 }
@@ -163,6 +175,7 @@ mod tests {
             take_offer(),
             deposit(),
             register_viewing_key(),
+            settle_exit(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

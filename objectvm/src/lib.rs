@@ -90,6 +90,14 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         outputs: Vec<Output>,
     },
+    /// The vault paid an exit. Names the Zcash transaction, so the claim can
+    /// be checked against the chain rather than believed.
+    SettleExit {
+        program: ProgramId,
+        /// Index into `exits`, which is append-only, so an index is stable.
+        index: u32,
+        txid: Hash,
+    },
     /// Publish where to pay this account.
     ///
     /// Re-registering replaces the key, because a holder who loses one needs
@@ -178,6 +186,7 @@ pub enum Receipt {
     Deposited { commitment: Hash, position: u64 },
     Withdrawing { amount: Fixed, destination: Hash },
     Registered { account: AccountId },
+    Settled { index: u32, txid: Hash },
     Listed { item: Hash },
     Delisted { item: Hash },
     Taken { item: Hash, created: Vec<Hash> },
@@ -200,6 +209,8 @@ pub struct PendingExit {
     pub destination: Hash,
     /// The epoch it was requested in, so a stalled exit is visible.
     pub since_epoch: u64,
+    /// The Zcash transaction that paid it, once one has. `None` is a debt.
+    pub paid_by: Option<Hash>,
 }
 
 /// An object being created, and how its owner will find it.
@@ -311,7 +322,8 @@ impl ObjectVm {
             e.bytes(&x.asset)
                 .fixed(x.amount)
                 .bytes(&x.destination)
-                .u64(x.since_epoch);
+                .u64(x.since_epoch)
+                .opt_hash(x.paid_by);
         }
         // Credited deposits belong in the root, not merely in memory: a
         // verifier replaying the chain has to reach the same conclusion about
@@ -732,6 +744,7 @@ impl ObjectVm {
             amount: *amount,
             destination: *destination,
             since_epoch: self.epoch,
+            paid_by: None,
         });
         *self.accounts.entry(*holder).or_insert(0) += 1;
 
@@ -835,6 +848,31 @@ impl MicrochainVm for ObjectVm {
                 inputs,
                 outputs,
             } => self.apply_spend(spender, program, inputs, outputs),
+            Op::SettleExit {
+                program,
+                index,
+                txid,
+            } => {
+                if *program != program::settle_exit() {
+                    return vec![Receipt::Refused("wrong program for a settlement")];
+                }
+                if *txid == [0u8; 32] {
+                    return vec![Receipt::Refused("a settlement names its transaction")];
+                }
+                let Some(exit) = self.exits.get_mut(*index as usize) else {
+                    return vec![Receipt::Refused("no such exit")];
+                };
+                // Marking a debt paid twice would let an operator answer two
+                // obligations with one transaction and appear square.
+                if exit.paid_by.is_some() {
+                    return vec![Receipt::Refused("that exit was already settled")];
+                }
+                exit.paid_by = Some(*txid);
+                vec![Receipt::Settled {
+                    index: *index,
+                    txid: *txid,
+                }]
+            }
             Op::Register {
                 account,
                 program,
@@ -1202,6 +1240,13 @@ impl MicrochainVm for ObjectVm {
             } => {
                 e.u8(8).bytes(account).bytes(&program.0).bytes(viewing);
             }
+            Op::SettleExit {
+                program,
+                index,
+                txid,
+            } => {
+                e.u8(9).bytes(&program.0).u32(*index).bytes(txid);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -1359,6 +1404,11 @@ impl MicrochainVm for ObjectVm {
                 program: ProgramId(d.hash().ok()?),
                 viewing: d.hash().ok()?,
             }),
+            9 => Some(Op::SettleExit {
+                program: ProgramId(d.hash().ok()?),
+                index: d.u32().ok()?,
+                txid: d.hash().ok()?,
+            }),
             _ => None,
         }
     }
@@ -1406,7 +1456,8 @@ impl MicrochainVm for ObjectVm {
             e.bytes(&x.asset)
                 .fixed(x.amount)
                 .bytes(&x.destination)
-                .u64(x.since_epoch);
+                .u64(x.since_epoch)
+                .opt_hash(x.paid_by);
         }
         e.u32(self.viewing.len() as u32);
         for (a, v) in &self.viewing {
@@ -1476,6 +1527,11 @@ impl MicrochainVm for ObjectVm {
                 amount: d.fixed().ok()?,
                 destination: d.hash().ok()?,
                 since_epoch: d.u64().ok()?,
+                paid_by: {
+                    let present = d.u8().ok()?;
+                    let h = d.hash().ok()?;
+                    (present == 1).then_some(h)
+                },
             });
         }
         let mut viewing = BTreeMap::new();
@@ -1624,5 +1680,73 @@ pub mod ingress {
             enc,
             external_ref: txid,
         })
+    }
+}
+
+/// What the vault operator has to do, and what anyone can check they did.
+pub mod egress {
+    use super::*;
+
+    /// One debt the vault owes.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub struct Owed {
+        pub index: u32,
+        pub asset: Address,
+        pub amount: Fixed,
+        /// `H(zcash address ‖ salt)`. The operator learns the preimage from
+        /// the holder out of band; the chain never carries it, so a reader of
+        /// the chain cannot tell where anyone's money went.
+        pub destination: Hash,
+        /// How long it has been owed, in epochs. The number that matters: an
+        /// exit nobody paid is invisible unless someone is counting.
+        pub waiting: u64,
+    }
+
+    /// Everything unpaid, oldest first.
+    ///
+    /// Oldest first because it is the order a settler should honour and the
+    /// order a reviewer will check, and because "which exit is most overdue"
+    /// should not require sorting a list yourself.
+    pub fn owed(vm: &ObjectVm) -> Vec<Owed> {
+        let mut out: Vec<Owed> = vm
+            .exits
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.paid_by.is_none())
+            .map(|(i, x)| Owed {
+                index: i as u32,
+                asset: x.asset,
+                amount: x.amount,
+                destination: x.destination,
+                waiting: vm.epoch.saturating_sub(x.since_epoch),
+            })
+            .collect();
+        out.sort_by_key(|o| core::cmp::Reverse(o.waiting));
+        out
+    }
+
+    /// The intent that records a payment.
+    ///
+    /// Deliberately separate from making the payment. The vault spends on
+    /// Zcash first and says so afterwards: an operator that recorded a
+    /// settlement it had not made would be claiming a transaction anyone can
+    /// look up and fail to find.
+    pub fn settle(index: u32, txid: Hash) -> Op {
+        Op::SettleExit {
+            program: program::settle_exit(),
+            index,
+            txid,
+        }
+    }
+
+    /// What the vault still owes, per asset. The number to compare against
+    /// what it actually holds on Zcash before believing it is solvent.
+    pub fn outstanding(vm: &ObjectVm, asset: &Address) -> Fixed {
+        Fixed(
+            vm.exits
+                .iter()
+                .filter(|x| x.paid_by.is_none() && &x.asset == asset)
+                .fold(0i128, |a, x| a.saturating_add(x.amount.0)),
+        )
     }
 }
