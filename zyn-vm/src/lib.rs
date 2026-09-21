@@ -39,6 +39,7 @@ pub mod object;
 pub mod read;
 pub mod session;
 pub mod spec;
+pub mod value;
 pub mod verify;
 pub mod zvm;
 
