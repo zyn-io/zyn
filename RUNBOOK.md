@@ -2549,6 +2549,33 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-bis. The object-ledger devnet (21 Sep 2026)
+
+DECISIONS §133. Chain 212, the object ledger, running so that Cave's mint,
+listings and claims can be exercised against something real before they are
+exercised against money.
+
+- **On Contabo**, `zyn-object-node.service`, `127.0.0.1:8499`, state in
+  `/var/lib/zyn-object`. Public at `https://zyn-rpc.cavebro.win/object`
+  alongside `/` (mainnet 26460) and `/testnet` (chain 11).
+- **It holds no key and can spend nothing.** No vault, no custodians, no
+  signer set, no bridge, and anchoring is off: roots are sealed and served and
+  reach no chain. The status output says so in words — `"anchoring": "none —
+  devnet, roots reach no chain"` — so nobody reads a devnet root as a settled
+  one. It shares a box with the mainnet sequencer, which is why the unit also
+  carries `ProtectSystem=strict` and a single `ReadWritePaths`.
+- **Methods**: `zyn_status`, `zyn_submit` (a hex intent from
+  `ObjectVm::encode_intent`), and `zyn_published` — commitments, ephemeral
+  keys and ciphertexts, which is everything a wallet needs to rebuild itself
+  and nothing privileged.
+- **To reset it**: `systemctl stop zyn-object-node; rm -rf
+  /var/lib/zyn-object/*; systemctl start zyn-object-node`. Wallets that had
+  scanned it will report zero afterwards, correctly, because the chain they
+  scanned no longer exists.
+- **Rate limiting is shared** with the other two routes (`limit_req zone=zynrpc
+  burst=20`). Hammering `/object` in a loop returns nothing and looks like an
+  outage; space the requests before concluding anything is broken.
+
 ## 5g. The doormat: transparent receive and shielding (10 Sep 2026)
 
 DECISIONS §45. Every exchange pays out transparent, so a wallet that cannot
