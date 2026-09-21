@@ -19,6 +19,10 @@ use zyn_vm::object::{commitment, nullifier, Note};
 use zyn_vm::spec::{AccountId, MicrochainVm};
 use zyn_vm::{program, Fixed};
 
+/// A nullifier key for tests. Real ones are derived from a wallet seed.
+const NKEY: [u8; 32] = [0x31; 32];
+
+
 /// The real collection size.
 const COLLECTION: usize = 4_444;
 
@@ -76,6 +80,7 @@ fn collection_z_mints_and_sells_at_full_size() {
             &Op::Register {
                 account: who,
                 program: program::register_viewing_key(),
+                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(view),
             },
         );

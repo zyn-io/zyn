@@ -204,6 +204,8 @@ mod tests {
     use zyn_vm::spec::MicrochainVm;
 
     const SEED: &[u8] = b"the bridge's seed, which is not a wallet seed";
+    /// A nullifier key for tests. Real ones come from `object_keys`.
+    const NKEY: [u8; 32] = [0x31; 32];
     const ZEC: AssetId = [0x7a; 32];
     const ALICE: AccountId = [0xA1; 32];
 
@@ -218,6 +220,7 @@ mod tests {
             &Op::Register {
                 account: ALICE,
                 program: program::register_viewing_key(),
+                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
             },
         );
@@ -322,6 +325,7 @@ mod tests {
             &Op::Register {
                 account: ALICE,
                 program: program::register_viewing_key(),
+                nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
                 viewing: viewing_public(&alice_view()),
             },
         );

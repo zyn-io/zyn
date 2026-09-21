@@ -75,7 +75,8 @@ fn registered_vm() -> ObjectVm {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            viewing: viewing_public(&alice_view()),
+            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
+                viewing: viewing_public(&alice_view()),
         },
     );
     vm
@@ -244,7 +245,8 @@ fn a_deposit_for_an_unregistered_holder_stays_pending_across_polls() {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            viewing: viewing_public(&alice_view()),
+            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
+                viewing: viewing_public(&alice_view()),
         },
     );
     // Replaying the pending deposit from its txid alone rebuilds the same
@@ -272,6 +274,10 @@ fn a_deposit_for_an_unregistered_holder_stays_pending_across_polls() {
 // ---------------------------------------------------------------------------
 
 use zynzapd::object_ingress::pending::{Debt, Pending};
+
+/// A nullifier key for tests. Real ones are derived from a wallet seed.
+const NKEY: [u8; 32] = [0x31; 32];
+
 
 /// The failure A116's test exposed. A deposit arrives for someone who has not
 /// registered, the watcher marks the height scanned and will never report it
@@ -312,7 +318,8 @@ fn a_pending_deposit_survives_the_restart_that_used_to_lose_it() {
         &Op::Register {
             account: ALICE,
             program: program::register_viewing_key(),
-            viewing: viewing_public(&alice_view()),
+            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
+                viewing: viewing_public(&alice_view()),
         },
     );
     let retry = owed.replayable(&vm);

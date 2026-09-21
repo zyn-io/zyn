@@ -108,6 +108,15 @@ pub enum Op {
         account: AccountId,
         program: ProgramId,
         viewing: ViewingKey,
+        /// `H(nullifier key)`, not the key.
+        ///
+        /// Binding the key to the account is what makes an exit proof sound:
+        /// without it a holder could present *any* key, derive a nullifier
+        /// that happens to be absent from the spent set, and claim a note
+        /// they had already spent (§136). Registering the commitment rather
+        /// than the key keeps the key secret until its holder chooses to
+        /// reveal it, which is the moment they exit and not before.
+        nullifier_commitment: Hash,
     },
     /// Leave for Zcash: burn objects and record a payout for the vault.
     ///
@@ -274,6 +283,8 @@ pub struct ObjectVm {
     /// Where to pay each account. Public: an address is not a secret, and a
     /// payer who cannot read it cannot pay.
     pub viewing: BTreeMap<AccountId, ViewingKey>,
+    /// `H(nullifier key)` per account. See `Op::Register`.
+    pub nullifier_commitments: BTreeMap<AccountId, Hash>,
     /// Exits the vault owes and has not paid. Ordered by the sequence they
     /// were requested in, which is the order a settler must honour.
     pub exits: Vec<PendingExit>,
@@ -315,6 +326,10 @@ impl ObjectVm {
         for (a, v) in &self.viewing {
             e.bytes(a).bytes(v);
         }
+        e.u32(self.nullifier_commitments.len() as u32);
+        for (a, c) in &self.nullifier_commitments {
+            e.bytes(a).bytes(c);
+        }
         // What the vault owes is consensus, not bookkeeping: a settler pays
         // from this list and a verifier checks they paid nothing else.
         e.u32(self.exits.len() as u32);
@@ -349,9 +364,51 @@ impl ObjectVm {
         e.leaf()
     }
 
-    fn account_leaf(id: &AccountId, spends: u64) -> Hash {
+    /// One account, as the state root sees it.
+    ///
+    /// Commits the registered keys as well as the spend counter. The exit
+    /// proof reads this leaf to check that the nullifier key a claimant
+    /// presents is the one this account registered, so a leaf that omitted
+    /// them would leave that check with nothing to check against.
+    /// The bytes an account leaf commits to.
+    ///
+    /// `account_leaf` hashes exactly this and `account_record` serves exactly
+    /// this, so the two cannot disagree. They did once: the leaf grew the
+    /// registered keys and the record did not, and the conformance suite
+    /// caught it (rule S6). One encoding, two callers.
+    pub fn account_record_bytes(
+        id: &AccountId,
+        spends: u64,
+        viewing: Option<&ViewingKey>,
+        nullifier_commitment: Option<&Hash>,
+    ) -> Vec<u8> {
         let mut e = Encoder::new();
-        e.bytes(b"objectvm.account.v1").bytes(id).u64(spends);
+        e.bytes(b"objectvm.account.v2")
+            .bytes(id)
+            .u64(spends)
+            .bytes(viewing.unwrap_or(&[0u8; 32]))
+            .bytes(nullifier_commitment.unwrap_or(&[0u8; 32]));
+        e.finish().to_vec()
+    }
+
+    fn account_leaf(
+        id: &AccountId,
+        spends: u64,
+        viewing: Option<&ViewingKey>,
+        nullifier_commitment: Option<&Hash>,
+    ) -> Hash {
+        zyn_vm::commit::hash_leaf(&Self::account_record_bytes(
+            id,
+            spends,
+            viewing,
+            nullifier_commitment,
+        ))
+    }
+
+    /// What an account registers so its spends can be recognised later.
+    pub fn nullifier_commitment(key: &zyn_vm::object::NullifierKey) -> Hash {
+        let mut e = Encoder::new();
+        e.bytes(b"objectvm.nullifier.key.v1").bytes(key);
         e.leaf()
     }
 
@@ -781,6 +838,7 @@ impl MicrochainVm for ObjectVm {
             deposits: BTreeSet::new(),
             exits: Vec::new(),
             viewing: BTreeMap::new(),
+            nullifier_commitments: BTreeMap::new(),
         }
     }
 
@@ -877,6 +935,7 @@ impl MicrochainVm for ObjectVm {
                 account,
                 program,
                 viewing,
+                nullifier_commitment,
             } => {
                 if *program != program::register_viewing_key() {
                     return vec![Receipt::Refused("wrong program for a registration")];
@@ -884,7 +943,15 @@ impl MicrochainVm for ObjectVm {
                 if *viewing == [0u8; 32] {
                     return vec![Receipt::Refused("not a viewing key")];
                 }
+                // An all-zero commitment is what an unset field looks like,
+                // and accepting it would register an account whose exit proof
+                // can never be checked against anything.
+                if *nullifier_commitment == [0u8; 32] {
+                    return vec![Receipt::Refused("not a nullifier-key commitment")];
+                }
                 self.viewing.insert(*account, *viewing);
+                self.nullifier_commitments
+                    .insert(*account, *nullifier_commitment);
                 self.accounts.entry(*account).or_insert(0);
                 vec![Receipt::Registered { account: *account }]
             }
@@ -1237,8 +1304,13 @@ impl MicrochainVm for ObjectVm {
                 account,
                 program,
                 viewing,
+                nullifier_commitment,
             } => {
-                e.u8(8).bytes(account).bytes(&program.0).bytes(viewing);
+                e.u8(8)
+                    .bytes(account)
+                    .bytes(&program.0)
+                    .bytes(viewing)
+                    .bytes(nullifier_commitment);
             }
             Op::SettleExit {
                 program,
@@ -1403,6 +1475,7 @@ impl MicrochainVm for ObjectVm {
                 account: d.account().ok()?,
                 program: ProgramId(d.hash().ok()?),
                 viewing: d.hash().ok()?,
+                nullifier_commitment: d.hash().ok()?,
             }),
             9 => Some(Op::SettleExit {
                 program: ProgramId(d.hash().ok()?),
@@ -1462,6 +1535,10 @@ impl MicrochainVm for ObjectVm {
         e.u32(self.viewing.len() as u32);
         for (a, v) in &self.viewing {
             e.bytes(a).bytes(v);
+        }
+        e.u32(self.nullifier_commitments.len() as u32);
+        for (a, c) in &self.nullifier_commitments {
+            e.bytes(a).bytes(c);
         }
         e.u32(self.offers.len() as u32);
         for (item, o) in &self.offers {
@@ -1538,6 +1615,10 @@ impl MicrochainVm for ObjectVm {
         for _ in 0..d.u32().ok()? {
             viewing.insert(d.account().ok()?, d.hash().ok()?);
         }
+        let mut nullifier_commitments = BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            nullifier_commitments.insert(d.account().ok()?, d.hash().ok()?);
+        }
         let mut offers = BTreeMap::new();
         for _ in 0..d.u32().ok()? {
             let item = d.hash().ok()?;
@@ -1552,6 +1633,7 @@ impl MicrochainVm for ObjectVm {
             );
         }
         Some(ObjectVm {
+            nullifier_commitments,
             chain_id,
             epoch,
             seq,
@@ -1578,15 +1660,25 @@ impl MicrochainVm for ObjectVm {
     fn account_leaves(&self) -> Vec<Hash> {
         self.accounts
             .iter()
-            .map(|(id, spends)| Self::account_leaf(id, *spends))
+            .map(|(id, spends)| {
+                Self::account_leaf(
+                    id,
+                    *spends,
+                    self.viewing.get(id),
+                    self.nullifier_commitments.get(id),
+                )
+            })
             .collect()
     }
 
     fn account_record(&self, id: &AccountId) -> Option<Vec<u8>> {
-        let spends = self.accounts.get(id)?;
-        let mut e = Encoder::new();
-        e.bytes(b"objectvm.account.v1").bytes(id).u64(*spends);
-        Some(e.finish().to_vec())
+        let spends = *self.accounts.get(id)?;
+        Some(Self::account_record_bytes(
+            id,
+            spends,
+            self.viewing.get(id),
+            self.nullifier_commitments.get(id),
+        ))
     }
 
     fn leaf_of_record(record: &[u8]) -> Hash {
@@ -1618,6 +1710,246 @@ impl MicrochainVm for ObjectVm {
 /// account". The object ledger needs more than that: a nonce, so the
 /// commitment hides, and a ciphertext, so the depositor can find what was
 /// made for them. Neither can come from the deposit itself.
+/// Which section of the state root holds what.
+///
+/// `sections()` returns these in order and the state root is their Merkle
+/// root, so an exit proof has to name the index it opens. Positional literals
+/// in a proof verifier are how a reader ends up checking a commitment path
+/// against the supply root and finding that it fails for the wrong reason.
+pub const SECTION_ACCOUNTS: usize = 1;
+pub const SECTION_COMMITMENTS: usize = 2;
+pub const SECTION_NULLIFIERS: usize = 3;
+
+/// Getting out when nobody is left to ask.
+///
+/// The account ledger's escape hatch enumerates every balance and proves the
+/// list hashes into the root a Zcash transaction anchored (`zyn-cli record` /
+/// `verify-exit`). An object ledger has no enumerable balance to point at, so
+/// that proof has no object-model translation and a holder would have nothing
+/// to show a custodian if the sequencer went away. Designing the replacement
+/// is a precondition of the switch, not a follow-up (A106).
+///
+/// What a holder must establish is two things, and the second is the hard one:
+///
+/// 1. **This note existed.** Its commitment is a leaf of the commitments tree,
+///    and that tree's root is a section of a root anchored on Zcash.
+/// 2. **It was not already spent.** Its nullifier is absent from the spent set
+///    at that same root.
+///
+/// # Why the nullifier key is revealed
+///
+/// A nullifier is `H(nullifier_key, commitment)`, and the key is the holder's.
+/// If the proof merely *stated* its nullifier, a holder could state one that
+/// happens to be absent while the note's real nullifier sat in the set —
+/// claiming a note they had already spent. The verifier has to derive the
+/// nullifier itself, which means it needs the key.
+///
+/// Revealing it costs privacy and not money: the nullifier key recognises
+/// spends, it cannot authorise one. Anyone holding it can link that account's
+/// spends to each other, and still cannot move a coin. This is the recovery
+/// path — the sequencer is gone and the holder is proving a claim in public —
+/// so linkability is already the situation rather than a new loss.
+///
+/// # Why the whole spent set travels with the proof
+///
+/// Absence is not provable from a root alone. The verifier recomputes the
+/// nullifier root from the set it is given and checks the note's nullifier is
+/// not in it, which is unconditional: a forged set produces a different root
+/// and fails against the anchor.
+///
+/// The cost is a proof linear in total spends rather than logarithmic. That is
+/// the same trade the account model already makes — its proof carries every
+/// record — and it is the right one while the alternative is a compact
+/// exclusion proof whose soundness rests on the set being sorted, which a
+/// verifier holding only two neighbours cannot check. When the set outgrows
+/// this, the fix is to bind each leaf's index into its hash so adjacency
+/// becomes provable; until then, carrying the set is honest and small.
+pub mod exit {
+    use super::*;
+    use zyn_vm::commit::{merkle_proof, merkle_root, verify_proof, ProofStep};
+    use zyn_vm::object::{commitment, nullifier, Note, NullifierKey};
+
+    /// Why a claim was not believed.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum ExitError {
+        /// The note does not hash to the commitment the path opens.
+        NoteDoesNotOpenCommitment,
+        /// The commitment is not in the tree this root committed to.
+        NotInCommitmentTree,
+        /// The spent set given does not hash to the nullifier root.
+        SpentSetDoesNotMatchRoot,
+        /// The set is not a set: unsorted, or carrying a duplicate.
+        SpentSetMalformed,
+        /// The note's nullifier is in the spent set. It is already spent.
+        AlreadySpent,
+        /// The sections do not hash to the root that was anchored.
+        SectionsDoNotOpenAnchor,
+        /// Too few sections to contain the ones this proof reads.
+        MalformedSections,
+        /// A note of no value, or with a zero nonce, is not claimable.
+        UnclaimableNote,
+        /// The account leaf is not in the accounts tree this root committed
+        /// to — the registration being claimed was never made.
+        AccountNotRegistered,
+        /// The nullifier key presented is not the one this account
+        /// registered. Without this check a claimant could present any key,
+        /// derive a nullifier absent from the spent set, and be paid for a
+        /// note they had already spent.
+        NullifierKeyNotThisAccount,
+    }
+
+    /// One holder's claim on the vault, checkable by anyone.
+    #[derive(Clone, PartialEq, Eq, Debug)]
+    pub struct ExitProof {
+        /// Opened in full, so the verifier can recompute the commitment
+        /// rather than take one on trust.
+        pub note: Note,
+        /// Recognises this note's spend. Cannot authorise one.
+        pub nullifier_key: NullifierKey,
+        /// Where the commitment sits in the tree. Kept because the tree
+        /// appends and never sorts, so a position is permanent.
+        pub position: u64,
+        /// Commitment to commitments root.
+        pub commitment_path: Vec<ProofStep>,
+        /// The note owner's registration, as the accounts tree holds it.
+        /// The verifier rebuilds the leaf from these and checks the path, so
+        /// none of it is taken on trust.
+        pub spends: u64,
+        pub viewing: ViewingKey,
+        /// Account leaf to accounts root.
+        pub account_path: Vec<ProofStep>,
+        /// Every nullifier published as of this root.
+        pub spent: Vec<Hash>,
+        /// The sections whose Merkle root is the state root.
+        pub sections: Vec<Hash>,
+        /// The root a Zcash transaction committed to.
+        pub anchored: Hash,
+    }
+
+    impl ExitProof {
+        /// The nullifier this note publishes when spent, derived rather than
+        /// asserted.
+        pub fn nullifier(&self) -> Result<Hash, ExitError> {
+            let c = commitment(&self.note).map_err(|_| ExitError::UnclaimableNote)?;
+            Ok(nullifier(&self.nullifier_key, &c))
+        }
+
+        /// What the vault owes this holder, if the proof stands.
+        pub fn claim(&self) -> Result<(Address, Fixed), ExitError> {
+            self.verify()?;
+            Ok((self.note.asset, self.note.amount))
+        }
+
+        /// Check the whole claim. Returns `Ok` only if every step holds.
+        pub fn verify(&self) -> Result<(), ExitError> {
+            if self.sections.len() <= SECTION_NULLIFIERS {
+                return Err(ExitError::MalformedSections);
+            }
+            // The note must open its own commitment. `commitment` refuses a
+            // zero amount and a zero nonce, so an unclaimable note is
+            // rejected here rather than producing a claim for nothing.
+            let c = commitment(&self.note).map_err(|_| ExitError::UnclaimableNote)?;
+
+            if !verify_proof(c, &self.commitment_path, self.sections[SECTION_COMMITMENTS]) {
+                return Err(ExitError::NotInCommitmentTree);
+            }
+
+            // A set that is not sorted and unique is not the structure the
+            // absence check reasons about, and accepting one would let a
+            // forged set hide an entry in plain sight.
+            if self.spent.windows(2).any(|w| w[0] >= w[1]) {
+                return Err(ExitError::SpentSetMalformed);
+            }
+            if merkle_root(&self.spent) != self.sections[SECTION_NULLIFIERS] {
+                return Err(ExitError::SpentSetDoesNotMatchRoot);
+            }
+
+            // The claimant's key must be the one their account registered.
+            // Everything below derives from this key, so an unbound key would
+            // let a spent note be claimed by choosing a key whose nullifier
+            // happens to be absent.
+            let registered = ObjectVm::nullifier_commitment(&self.nullifier_key);
+            let leaf = ObjectVm::account_leaf(
+                &self.note.owner,
+                self.spends,
+                Some(&self.viewing),
+                Some(&registered),
+            );
+            if !verify_proof(leaf, &self.account_path, self.sections[SECTION_ACCOUNTS]) {
+                // Either the account never registered this key, or it never
+                // registered at all. Both mean the same to a verifier: there
+                // is nothing here binding this key to this note's owner.
+                return Err(ExitError::NullifierKeyNotThisAccount);
+            }
+
+            let n = nullifier(&self.nullifier_key, &c);
+            if self.spent.binary_search(&n).is_ok() {
+                return Err(ExitError::AlreadySpent);
+            }
+
+            // And all of it has to hang off the root Zcash saw. Without this
+            // the proof is internally consistent and describes a chain nobody
+            // else agreed to.
+            if merkle_root(&self.sections) != self.anchored {
+                return Err(ExitError::SectionsDoNotOpenAnchor);
+            }
+            Ok(())
+        }
+    }
+
+    /// Build a holder's proof against the current state.
+    ///
+    /// `anchored` is the root a Zcash transaction committed. It is passed in
+    /// rather than read from the VM so that a proof is always built against a
+    /// root that settled, never against whatever the sequencer happens to
+    /// hold right now — which is the root a failing sequencer would be most
+    /// willing to produce.
+    pub fn prove(
+        vm: &ObjectVm,
+        note: &Note,
+        nullifier_key: NullifierKey,
+        anchored: Hash,
+    ) -> Result<ExitProof, ExitError> {
+        let c = commitment(note).map_err(|_| ExitError::UnclaimableNote)?;
+        let leaves = vm.commitments.leaves();
+        let position = leaves
+            .iter()
+            .position(|l| *l == c)
+            .ok_or(ExitError::NotInCommitmentTree)?;
+
+        // The owner's registration, and where it sits among the accounts.
+        // A note whose owner never registered cannot be exited: there is
+        // nothing on chain binding a nullifier key to them, so no verifier
+        // could tell a real claim from an invented one.
+        let spends = *vm
+            .accounts
+            .get(&note.owner)
+            .ok_or(ExitError::AccountNotRegistered)?;
+        let viewing = *vm
+            .viewing
+            .get(&note.owner)
+            .ok_or(ExitError::AccountNotRegistered)?;
+        let account_index = vm
+            .accounts
+            .keys()
+            .position(|k| k == &note.owner)
+            .ok_or(ExitError::AccountNotRegistered)?;
+
+        Ok(ExitProof {
+            note: *note,
+            nullifier_key,
+            position: position as u64,
+            commitment_path: merkle_proof(leaves, position),
+            spends,
+            viewing,
+            account_path: merkle_proof(&vm.account_leaves(), account_index),
+            spent: vm.nullifiers.spent().to_vec(),
+            sections: vm.sections(),
+            anchored,
+        })
+    }
+}
+
 pub mod ingress {
     use super::*;
     use zyn_vm::note_enc::{seal, StaticSecret};

@@ -843,7 +843,8 @@ fn register(vm: &mut ObjectVm, seq: u64, who: AccountId, view: &StaticSecret) {
         &Op::Register {
             account: who,
             program: program::register_viewing_key(),
-            viewing: viewing_public(view),
+            nullifier_commitment: ObjectVm::nullifier_commitment(&NKEY),
+                viewing: viewing_public(view),
         },
     );
     assert_eq!(r[0], Receipt::Registered { account: who });
@@ -939,6 +940,10 @@ fn re_registering_changes_where_future_deposits_go_and_nothing_else() {
 // --------------------------------------------------------- settling exits
 
 use objectvm::egress;
+
+/// A nullifier key for tests. Real ones are derived from a wallet seed.
+const NKEY: [u8; 32] = [0x31; 32];
+
 
 fn exiting(vm: &mut ObjectVm, seq: u64, c: [u8; 32], amount: i64, dest: u8) {
     let r = vm.apply(

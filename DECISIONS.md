@@ -6055,3 +6055,70 @@ the only record the vault owes it — and nothing persists that list. A116's
 test found this; A117 fixes it, and it gates opening deposits independently of
 the privacy ladder.
 
+## §136 — Getting out of an object ledger (22 Sep 2026)
+
+The account ledger's escape hatch enumerates every balance and proves the list
+hashes into a root anchored on Zcash. An object ledger has no enumerable
+balance, so that proof has no translation, and a holder would have nothing to
+show a custodian if the sequencer went away. A106 makes designing the
+replacement a precondition of switching chain 26460 over, not a follow-up.
+
+A holder must establish two things:
+
+1. **The note existed** — its commitment is a leaf of the commitments tree,
+   whose root is a section of an anchored root.
+2. **It was not spent** — its nullifier is absent from the spent set at that
+   same root.
+
+### §136.1 — Why the nullifier key is revealed, and why that is not enough
+
+A nullifier is `H(nullifier_key, commitment)`. If a proof merely *stated* its
+nullifier, a claimant could state one that happens to be absent while the
+note's real nullifier sat in the set — being paid for a note they had already
+spent. So the verifier derives the nullifier itself, which means the proof
+carries the key.
+
+Revealing it costs privacy, not money: a nullifier key recognises spends and
+cannot authorise one. This is the recovery path, where the holder is already
+claiming in public.
+
+**Revealing the key alone is still unsound**, and this was a real hole in the
+first version of this design. If the key is not bound to the account, a
+claimant presents *any* key, the derived nullifier is absent because nobody
+ever published it, and a spent note is paid twice. The fix is that
+`Op::Register` now carries `H(nullifier key)`, the accounts section commits to
+it alongside the viewing key, and an exit proof opens that leaf. A key that
+the account did not register is refused before it is used to derive anything.
+
+Registering the *commitment* rather than the key keeps the key secret until
+its holder chooses to reveal it, which is the moment they exit and not before.
+
+### §136.2 — Why the whole spent set travels with the proof
+
+Absence is not provable from a root alone. The verifier recomputes the
+nullifier root from the set it is given, which makes a forged set fail against
+the anchor, and checks the set is sorted and unique — the structure the
+absence check reasons about.
+
+The cost is a proof linear in total spends rather than logarithmic. That is
+the trade the account model already makes, and it is preferable to a compact
+exclusion proof whose soundness rests on sortedness that a verifier holding
+two neighbours cannot check. When the set outgrows it, the fix is to bind each
+leaf's index into its hash so adjacency becomes provable.
+
+### §136.3 — One encoding for the account leaf
+
+`account_record` and `account_leaf` encoded the same thing separately, and
+when the leaf grew the registered keys the record did not follow. The
+conformance suite caught it (rule S6). They now share one function. Two
+encodings of one fact is a drift waiting to happen.
+
+### §136.4 — What this does not cover
+
+A note whose owner never registered cannot be exited: nothing on chain binds a
+nullifier key to them. `ingress::credit` already refuses to credit an
+unregistered account, so no deposit lands in that state — but a `Spend` output
+addressed to an unregistered owner would. Either registration becomes a
+precondition of receiving, or such an output is refused at apply time. Filed
+as A119, and it gates the mainnet switch.
+
