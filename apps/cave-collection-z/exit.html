@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="Take ZEC back out of the cave, to a Zcash address bound to your own key." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/exit" />
+    <meta property="og:title" content="Cave — take ZEC out" />
+    <meta property="og:description" content="The door works both ways. Exits go to an address you bound, and nowhere else." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave — take ZEC out" />
+    <meta name="twitter:description" content="The door works both ways. Exits go to an address you bound, and nowhere else." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave — take ZEC out</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>
+      /* The tunnel mouth again, facing the other way. Cooler than the deposit
+         page on purpose: leaving should not feel like being sold to. */
+      .register { max-width: 780px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% -30% auto; height: 70%; background: radial-gradient(ellipse 46% 60% at 30% 0%, rgba(240, 238, 230, 0.045), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--ink); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
+      .lede strong { color: var(--ink); font-weight: 400; }
+
+      .ledger { margin: 52px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: #62665f; text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--ink); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 400; }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--ink); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      .balance { border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); padding: 18px; display: grid; gap: 6px; }
+      .balance .n { font-family: var(--mono); font-size: clamp(26px, 4vw, 40px); color: var(--zec); }
+      .balance .l { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #62665f; }
+
+      .amount { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .amount input { font-family: var(--mono); font-size: 13px; padding: 12px 14px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); color: var(--ink); width: 12ch; }
+      .amount input:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+      .amount .unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+      .warn { border-left: 2px solid var(--zec); padding: 12px 16px; background: rgba(244, 183, 40, 0.06); }
+      .out { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+      .out.bad { color: #e88; }
+      .out.ok { color: var(--acid); }
+      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <main class="register">
+      <h1><span>Take ZEC</span><span>back out</span></h1>
+
+      <p class="lede">
+        The door works both ways. An exit sends ZEC to a Zcash address you have
+        <strong>bound to your own key</strong> — not one typed into this page, because an
+        address typed into a page is an address someone else can change.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>Tunnel mouth</span>
+          <span>Exit · <b id="net">ZEC.zy → ZEC</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <section class="state" id="s-looking">
+            <p class="say">Looking for a wallet…</p>
+          </section>
+
+          <section class="state" id="s-nowallet" hidden>
+            <p class="say">
+              <strong>An exit needs somewhere to go.</strong> The destination is bound to your
+              key, which is what stops this page — or anyone reading it — from sending your
+              ZEC somewhere else.
+            </p>
+            <a class="act" href="/#wallet">Get Nap Wallet</a>
+          </section>
+
+          <section class="state" id="s-ready" hidden>
+            <p class="say">Read what you are holding.</p>
+            <button class="act" id="ask" type="button">Read my balance</button>
+          </section>
+
+          <section class="state" id="s-out" hidden>
+            <div class="balance">
+              <span class="n" id="bal">—</span>
+              <span class="l">ZEC.zy held</span>
+            </div>
+
+            <p class="say" id="exiting" hidden><strong id="exiting-n"></strong> — an exit already asked for, settling when Zcash does.</p>
+
+            <p class="say warn" id="rebind" hidden>
+              <strong>Exits are bound somewhere else.</strong> This wallet is not the
+              destination, so ZEC would leave to an address held by whoever bound it. Rebind
+              in your wallet before sending anything out.
+            </p>
+
+            <div id="needs-bind" hidden>
+              <p class="say">
+                <strong>Nowhere to send it yet.</strong> Bind this wallet once and exits go to
+                it from then on. Binding names the destination in your wallet, not here.
+              </p>
+              <button class="act" id="bind" type="button">Bind this wallet</button>
+            </div>
+
+            <div id="can-exit" hidden>
+              <p class="say">How much should leave?</p>
+              <div class="amount">
+                <input id="amount" inputmode="decimal" placeholder="0.00" aria-label="Amount to withdraw, in ZEC.zy" />
+                <span class="unit">ZEC.zy</span>
+                <button class="act" id="withdraw" type="button">Send it out</button>
+              </div>
+              <p class="say warn">
+                An exit is a <strong>Zcash transaction the vault makes on your behalf</strong>, so
+                it settles when Zcash settles rather than instantly. It is recorded as owed
+                the moment you ask, and the vault is short until it is paid.
+              </p>
+            </div>
+
+            <p class="out" id="out"></p>
+            <button class="act ghost" id="again" type="button">Read again</button>
+          </section>
+
+          <section class="state" id="s-broke" hidden>
+            <p class="say">The wallet could not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
+          </section>
+
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/items">My shelf</a>
+        <a href="/market">The market</a>
+      </nav>
+    </main>
+
+    <script type="module">
+      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
+
+      const states = ['looking', 'nowallet', 'ready', 'out', 'broke'];
+      const el = (id) => document.getElementById(id);
+      const show = (name) => {
+        for (const s of states) el('s-' + s).hidden = s !== name;
+      };
+      const say = (node, message, ok) => {
+        node.textContent = message;
+        node.className = 'out' + (message ? (ok ? ' ok' : ' bad') : '');
+      };
+
+      function look() {
+        if (provider()) show('ready');
+        else show('nowallet');
+      }
+
+      // The overview reports spendable balances as {asset, symbol, amount}.
+      // ZEC.zy is the bridged asset and the only thing this door moves; a
+      // key's other holdings are items and curve tokens, which leave by
+      // other routes or not at all.
+      const ZEC = (rows) =>
+        (rows || []).find((r) => String((r && r.symbol) || '').toUpperCase() === 'ZEC.ZY');
+
+      async function read() {
+        const p = provider();
+        if (!p) return look();
+        for (const b of ['ask', 'again']) el(b).disabled = true;
+        say(el('out'), '');
+        try {
+          const record = await p.request({ method: 'zyn_balances', params: {} });
+          // `known: false` means the chain could not be read, which is not
+          // the same as a zero balance. Showing "0.00" there would tell
+          // somebody their money is gone.
+          if (!record || record.known === false) {
+            throw new Error(record && record.error ? record.error : 'the chain did not answer');
+          }
+          const held = ZEC(record.spendable);
+          el('bal').textContent = held ? held.amount : '0';
+
+          // Already on the way out. Worth showing because an exit settles on
+          // Zcash's schedule, and a holder who cannot see a pending exit will
+          // reasonably conclude nothing happened and ask again.
+          const leaving = ZEC(record.exiting);
+          el('exiting').hidden = !leaving;
+          if (leaving) el('exiting-n').textContent = `${leaving.amount} ZEC.zy already leaving`;
+
+          // The chain says whether a destination is bound, so the page does
+          // not have to provoke a refusal to find out. `bound_here` is the
+          // stricter question: bound to *this* wallet, rather than to some
+          // address bound earlier from somewhere else.
+          el('needs-bind').hidden = !!record.bound;
+          el('rebind').hidden = !(record.bound && !record.bound_here);
+          el('can-exit').hidden = !record.bound;
+          show('out');
+        } catch (e) {
+          el('broke').textContent = e.message || String(e);
+          show('broke');
+        } finally {
+          for (const b of ['ask', 'again']) el(b).disabled = false;
+        }
+      }
+
+      async function act(button, method, params, done) {
+        const p = provider();
+        if (!p) return look();
+        const b = el(button);
+        b.disabled = true;
+        say(el('out'), '');
+        try {
+          await p.request({ method, params });
+          say(el('out'), done, true);
+          await read();
+        } catch (e) {
+          say(el('out'), e.message || String(e), false);
+        } finally {
+          b.disabled = false;
+        }
+      }
+
+      el('ask').addEventListener('click', read);
+      el('again').addEventListener('click', read);
+      el('retry').addEventListener('click', look);
+
+      el('bind').addEventListener('click', () => {
+        act('bind', 'zyn_bind', {}, 'Bound. Exits go to this wallet from now on.');
+      });
+
+      el('withdraw').addEventListener('click', () => {
+        const amount = el('amount').value.trim();
+        if (!/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+          return say(el('out'), 'Name an amount above zero, in ZEC.zy.', false);
+        }
+        act('withdraw', 'zyn_withdraw', { amount }, 'Asked. It is recorded as owed and settles when Zcash does.');
+      });
+
+      look();
+      window.addEventListener('zyn#initialized', look, { once: true });
+    </script>
+  </body>
+</html>

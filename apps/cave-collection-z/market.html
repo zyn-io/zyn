@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="Every object resting on the cave's order book, and what it costs to take one." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/market" />
+    <meta property="og:title" content="Cave — the market" />
+    <meta property="og:description" content="Everything resting on the order book. Prices are public; holders are not." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave — the market" />
+    <meta name="twitter:description" content="Everything resting on the order book. Prices are public; holders are not." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave — the market</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>
+      .register { max-width: 980px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% -30% auto; height: 70%; background: radial-gradient(ellipse 46% 60% at 30% 0%, rgba(244, 183, 40, 0.07), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 56ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
+      .lede strong { color: var(--ink); font-weight: 400; }
+
+      .ledger { margin: 52px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: #62665f; text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 400; }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--zec); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act.small { padding: 9px 14px; font-size: 9.5px; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      /* The book. One row per resting offer: what it is, what it costs, and
+         the one thing you can do about it. The price column is the reason
+         anyone is here, so it is the only figure that carries colour. */
+      .book { border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; min-width: 520px; }
+      th { text-align: left; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #62665f; font-weight: 400; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+      td { padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; font-family: var(--mono); font-size: 11px; color: var(--ink); }
+      tr:last-child td { border-bottom: 0; }
+      th.r, td.r { text-align: right; }
+      td.ask { color: var(--zec); font-size: 13px; white-space: nowrap; }
+      td .sym { display: block; }
+      td .id { display: block; margin-top: 5px; font-size: 8.5px; color: #62665f; word-break: break-all; }
+      td a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+      td a:hover { color: var(--zec); }
+      .yours { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--acid); }
+
+      .out { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+      .out.bad { color: #e88; }
+      .out.ok { color: var(--acid); }
+      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <main class="register">
+      <h1><span>The</span><span>market</span></h1>
+
+      <p class="lede">
+        Everything resting on the order book. A listing says <strong>what is for sale and what
+        it costs</strong> — it does not say who is selling, because the account holding an item
+        is not a name and never becomes one.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>Order book</span>
+          <span>Resting · <b id="count">—</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <section class="state" id="s-looking">
+            <p class="say">Looking for a wallet…</p>
+          </section>
+
+          <section class="state" id="s-nowallet" hidden>
+            <p class="say">
+              <strong>The book is read through a wallet.</strong> Prices here are public, but
+              reading them still goes through your own node rather than this site's — the
+              site never sits between you and the market.
+            </p>
+            <a class="act" href="/#wallet">Get Nap Wallet</a>
+          </section>
+
+          <section class="state" id="s-ready" hidden>
+            <p class="say">Read what is resting on the book.</p>
+            <button class="act" id="ask" type="button">Open the book</button>
+          </section>
+
+          <section class="state" id="s-empty" hidden>
+            <p class="say">
+              <strong>Nothing is resting.</strong> The book is empty until a holder lists
+              something — if you hold an item, yours could be the first.
+            </p>
+            <a class="act" href="/items">List one of mine</a>
+          </section>
+
+          <section class="state" id="s-book" hidden>
+            <div class="book">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Object</th>
+                    <th class="r">Asking</th>
+                    <th class="r">Offer</th>
+                    <th class="r"></th>
+                  </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+            <p class="out" id="out"></p>
+            <button class="act ghost" id="again" type="button">Read again</button>
+          </section>
+
+          <section class="state" id="s-broke" hidden>
+            <p class="say">The wallet could not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
+          </section>
+
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="/items">My shelf</a>
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/exit">Take ZEC out</a>
+        <a href="/mint">Take a place</a>
+      </nav>
+    </main>
+
+    <script type="module">
+      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
+
+      const states = ['looking', 'nowallet', 'ready', 'empty', 'book', 'broke'];
+      const el = (id) => document.getElementById(id);
+      const show = (name) => {
+        for (const s of states) el('s-' + s).hidden = s !== name;
+      };
+      const say = (node, message, ok) => {
+        node.textContent = message;
+        node.className = 'out' + (message ? (ok ? ' ok' : ' bad') : '');
+      };
+
+      function look() {
+        if (provider()) show('ready');
+        else show('nowallet');
+      }
+
+      // Cheapest first. A book sorted by id is sorted by nothing a buyer
+      // cares about, and the first row is the one most people act on.
+      const byPrice = (a, b) => {
+        const n = (x) => Number(x && x.want_amount);
+        const x = n(a);
+        const y = n(b);
+        if (Number.isFinite(x) && Number.isFinite(y) && x !== y) return x - y;
+        return Number(a.id) - Number(b.id);
+      };
+
+      function symbolsOf(assets) {
+        const m = new Map();
+        for (const a of assets || []) if (a && a.id) m.set(String(a.id), a.symbol || '');
+        return m;
+      }
+
+      function render(offers, names) {
+        el('count').textContent = String(offers.length);
+        if (!offers.length) return show('empty');
+        const rows = el('rows');
+        rows.replaceChildren();
+        for (const o of offers) {
+          const id = String(o.offer_asset || '');
+          const tr = document.createElement('tr');
+
+          const what = document.createElement('td');
+          const link = document.createElement('a');
+          link.href = `/item?id=${encodeURIComponent(id)}`;
+          const sym = document.createElement('span');
+          sym.className = 'sym';
+          sym.textContent = names.get(id) || 'unnamed object';
+          link.append(sym);
+          const idn = document.createElement('span');
+          idn.className = 'id';
+          idn.textContent = id;
+          what.append(link, idn);
+
+          const ask = document.createElement('td');
+          ask.className = 'ask r';
+          ask.textContent = `${o.want_amount} ZEC.zy`;
+
+          const num = document.createElement('td');
+          num.className = 'r';
+          num.textContent = `#${o.id}`;
+
+          const act = document.createElement('td');
+          act.className = 'r';
+          if (o.mine) {
+            // Never offer someone their own item. The chain would refuse it,
+            // but a button that exists to fail is a button that lies.
+            const tag = document.createElement('span');
+            tag.className = 'yours';
+            tag.textContent = 'Yours';
+            act.append(tag);
+          } else {
+            const b = document.createElement('button');
+            b.className = 'act small';
+            b.type = 'button';
+            b.textContent = 'Take';
+            b.addEventListener('click', () => take(o.id, b));
+            act.append(b);
+          }
+
+          tr.append(what, ask, num, act);
+          rows.append(tr);
+        }
+        show('book');
+      }
+
+      async function read() {
+        const p = provider();
+        if (!p) return look();
+        for (const b of ['ask', 'again']) el(b).disabled = true;
+        say(el('out'), '');
+        try {
+          const book = await p.request({ method: 'zyn_offers', params: {} });
+          const offers = ((book && book.offers) || []).slice().sort(byPrice);
+          // Names are a convenience, not the offer. A failed asset read must
+          // not hide the book — a row with an id and a price is still a row
+          // somebody can act on.
+          let names = new Map();
+          try {
+            names = symbolsOf(await p.request({ method: 'zyn_assets', params: {} }));
+          } catch {
+            say(el('out'), 'Could not read names — objects are shown by id.', false);
+          }
+          render(offers, names);
+        } catch (e) {
+          el('broke').textContent = e.message || String(e);
+          show('broke');
+        } finally {
+          for (const b of ['ask', 'again']) el(b).disabled = false;
+        }
+      }
+
+      async function take(offer, button) {
+        const p = provider();
+        if (!p) return look();
+        button.disabled = true;
+        say(el('out'), '');
+        try {
+          await p.request({ method: 'zyn_takeOffer', params: { offer } });
+          say(el('out'), `Took offer #${offer}. The object is yours.`, true);
+          // Re-read rather than removing the row: whether it is gone is the
+          // chain's answer, not this page's guess.
+          await read();
+        } catch (e) {
+          say(el('out'), e.message || String(e), false);
+          button.disabled = false;
+        }
+      }
+
+      el('ask').addEventListener('click', read);
+      el('again').addEventListener('click', read);
+      el('retry').addEventListener('click', look);
+
+      look();
+      window.addEventListener('zyn#initialized', look, { once: true });
+    </script>
+  </body>
+</html>

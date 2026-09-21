@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="One object in the cave: what it is, whether it rests on the market, and what it costs to take." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/item" />
+    <meta property="og:title" content="Cave — one object" />
+    <meta property="og:description" content="What it is, whether it rests on the market, and what it costs to take." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave — one object" />
+    <meta name="twitter:description" content="What it is, whether it rests on the market, and what it costs to take." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave — one object</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>
+      .register { max-width: 820px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% -30% auto; height: 70%; background: radial-gradient(ellipse 46% 60% at 30% 0%, rgba(244, 183, 40, 0.06), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(40px, 6vw, 76px); line-height: 0.95; word-break: break-word; }
+      .register h1 > span:nth-child(2) { font-size: clamp(30px, 4.4vw, 56px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
+      .lede strong { color: var(--ink); font-weight: 400; }
+
+      .ledger { margin: 46px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: #62665f; text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 400; }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--zec); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      .facts { display: grid; gap: 0; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); }
+      .fact { display: flex; flex-wrap: wrap; gap: 10px 18px; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+      .fact:last-child { border-bottom: 0; }
+      .fact dt { margin: 0; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #62665f; }
+      .fact dd { margin: 0; font-family: var(--mono); font-size: 11px; color: var(--ink); word-break: break-all; text-align: right; }
+      .fact dd.zec { color: var(--zec); }
+
+      .price { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .price input { font-family: var(--mono); font-size: 13px; padding: 12px 14px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); color: var(--ink); width: 10ch; }
+      .price input:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+      .price .unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+      .warn { border-left: 2px solid var(--zec); padding: 12px 16px; background: rgba(244, 183, 40, 0.06); }
+      .out { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+      .out.bad { color: #e88; }
+      .out.ok { color: var(--acid); }
+      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <main class="register">
+      <h1><span id="name">One object</span><span id="sub">in the cave</span></h1>
+
+      <p class="lede" id="lede">
+        Every object here is an asset the chain can move exactly once at a time. This page
+        reads it from <strong>your wallet</strong>, so what you see depends on what you hold.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>The object</span>
+          <span>State · <b id="state-tag">—</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <section class="state" id="s-noid" hidden>
+            <p class="say">
+              <strong>No object named.</strong> This page needs an item id in the address —
+              open it from your shelf, where every card links to its own.
+            </p>
+            <a class="act" href="/items">Go to my shelf</a>
+          </section>
+
+          <section class="state" id="s-looking" hidden>
+            <p class="say">Looking for a wallet…</p>
+          </section>
+
+          <section class="state" id="s-nowallet" hidden>
+            <p class="say">
+              <strong>An object is read through a key.</strong> The chain will not say who
+              holds what to anyone who asks, so this page needs a wallet before it can show
+              you anything about this one.
+            </p>
+            <a class="act" href="/#wallet">Get Nap Wallet</a>
+          </section>
+
+          <section class="state" id="s-ready" hidden>
+            <p class="say">Read this object from your wallet.</p>
+            <button class="act" id="ask" type="button">Read it</button>
+          </section>
+
+          <section class="state" id="s-object" hidden>
+            <dl class="facts" id="facts"></dl>
+
+            <!-- Listing: only when it is yours and not already resting. -->
+            <div id="sell" hidden>
+              <p class="say">
+                <strong>Rest it on the market.</strong> Name a price in ZEC.zy and it waits
+                there until someone takes it or you cancel.
+              </p>
+              <div class="price">
+                <input id="price" inputmode="decimal" placeholder="0.00" aria-label="Asking price in ZEC.zy" />
+                <span class="unit">ZEC.zy</span>
+                <button class="act" id="list" type="button">List it</button>
+              </div>
+              <p class="say warn">
+                A listing is public. Anyone reading the order book learns that
+                <strong>the account holding this item</strong> wants this price for it — which is
+                what an order book has to say to work. It does not say who that account is.
+              </p>
+            </div>
+
+            <!-- Cancelling: only when it is yours and resting. -->
+            <div id="unsell" hidden>
+              <p class="say">
+                <strong>It is resting on the market</strong> at the price above. Cancelling takes
+                it back; nobody can take it after that until you list it again.
+              </p>
+              <button class="act ghost" id="cancel" type="button">Take it back</button>
+            </div>
+
+            <!-- Someone else's, and for sale. -->
+            <div id="buy" hidden>
+              <p class="say">
+                <strong>This one is for sale.</strong> Taking it pays the asking price from your
+                ZEC.zy and moves the object to you in the same step — neither half can happen
+                without the other.
+              </p>
+              <button class="act" id="take" type="button">Take it</button>
+            </div>
+
+            <p class="out" id="out"></p>
+            <button class="act ghost" id="again" type="button">Read again</button>
+          </section>
+
+          <section class="state" id="s-broke" hidden>
+            <p class="say">The wallet could not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
+          </section>
+
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="/items">My shelf</a>
+        <a href="/market">The market</a>
+        <a href="/deposit">Bring ZEC in</a>
+      </nav>
+    </main>
+
+    <script type="module">
+      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
+
+      const states = ['noid', 'looking', 'nowallet', 'ready', 'object', 'broke'];
+      const el = (id) => document.getElementById(id);
+      const show = (name) => {
+        for (const s of states) el('s-' + s).hidden = s !== name;
+      };
+      const say = (node, message, ok) => {
+        node.textContent = message;
+        node.className = 'out' + (message ? (ok ? ' ok' : ' bad') : '');
+      };
+
+      // The id comes from the address bar, so it is attacker-supplied text
+      // until proven otherwise. An asset id is 32 bytes of hex and nothing
+      // else; anything that is not exactly that is not an object here.
+      const wanted = (() => {
+        const raw = new URLSearchParams(location.search).get('id') || '';
+        return /^[0-9a-f]{64}$/i.test(raw) ? raw.toLowerCase() : null;
+      })();
+
+      let current = null; // {asset, offer}
+
+      function look() {
+        if (!wanted) return show('noid');
+        if (provider()) show('ready');
+        else show('nowallet');
+      }
+
+      function fact(dl, label, value, cls) {
+        const row = document.createElement('div');
+        row.className = 'fact';
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.textContent = value;
+        if (cls) dd.className = cls;
+        row.append(dt, dd);
+        dl.append(row);
+      }
+
+      function render(asset, offer, mine) {
+        el('name').textContent = (asset && asset.symbol) || 'Unnamed object';
+        el('sub').textContent = mine ? 'yours' : 'in the cave';
+        el('state-tag').textContent = offer ? 'Listed' : mine ? 'Held' : 'Not for sale';
+
+        const dl = el('facts');
+        dl.replaceChildren();
+        fact(dl, 'Item id', wanted);
+        if (asset && asset.collection) fact(dl, 'Collection', String(asset.collection));
+        if (asset && asset.content) fact(dl, 'Content hash', String(asset.content));
+        fact(dl, 'Held by you', mine ? 'yes' : 'no');
+        if (offer) {
+          fact(dl, 'Asking', `${offer.want_amount} ZEC.zy`, 'zec');
+          fact(dl, 'Offer', `#${offer.id}`);
+        }
+        // Three mutually exclusive postures. Showing two at once would offer
+        // the holder a way to buy their own item.
+        el('sell').hidden = !(mine && !offer);
+        el('unsell').hidden = !(mine && offer);
+        el('buy').hidden = !(!mine && offer);
+        show('object');
+      }
+
+      async function read() {
+        const p = provider();
+        if (!p) return look();
+        for (const b of ['ask', 'again']) el(b).disabled = true;
+        say(el('out'), '');
+        try {
+          const [assets, book] = await Promise.all([
+            p.request({ method: 'zyn_assets', params: {} }),
+            p.request({ method: 'zyn_offers', params: {} }),
+          ]);
+          const asset = (assets || []).find((a) => a && String(a.id) === wanted) || null;
+          const offer = ((book && book.offers) || []).find(
+            (o) => o && String(o.offer_asset) === wanted,
+          ) || null;
+          // "Mine" is the order book's own word where it has one, because it
+          // is the side that knows. Falling back to the asset list alone
+          // would call an item mine merely because the chain lists it.
+          const mine = offer ? !!offer.mine : !!asset;
+          current = { asset, offer };
+          render(asset, offer, mine);
+        } catch (e) {
+          el('broke').textContent = e.message || String(e);
+          show('broke');
+        } finally {
+          for (const b of ['ask', 'again']) el(b).disabled = false;
+        }
+      }
+
+      // Every write follows the same shape: disable, ask the wallet, say what
+      // happened, then re-read rather than guessing the new state. Guessing is
+      // how a page shows an item as sold that the chain refused.
+      async function write(button, method, params, done) {
+        const p = provider();
+        if (!p) return look();
+        const b = el(button);
+        b.disabled = true;
+        say(el('out'), '');
+        try {
+          await p.request({ method, params });
+          say(el('out'), done, true);
+          await read();
+        } catch (e) {
+          say(el('out'), e.message || String(e), false);
+        } finally {
+          b.disabled = false;
+        }
+      }
+
+      el('ask').addEventListener('click', read);
+      el('again').addEventListener('click', read);
+      el('retry').addEventListener('click', look);
+
+      el('list').addEventListener('click', () => {
+        const price = el('price').value.trim();
+        // Checked here so the refusal is instant and readable, and checked
+        // again by the chain, which is the one that matters.
+        if (!/^\d+(\.\d+)?$/.test(price) || Number(price) <= 0) {
+          return say(el('out'), 'Name a price above zero, in ZEC.zy.', false);
+        }
+        write('list', 'zyn_placeOffer', { asset: wanted, price }, 'Listed. It rests until taken or cancelled.');
+      });
+
+      el('cancel').addEventListener('click', () => {
+        if (!current || !current.offer) return say(el('out'), 'Nothing to cancel — read it again.', false);
+        write('cancel', 'zyn_cancelOffer', { offer: current.offer.id }, 'Taken back. It is yours and nobody can take it.');
+      });
+
+      el('take').addEventListener('click', () => {
+        if (!current || !current.offer) return say(el('out'), 'Nothing to take — read it again.', false);
+        write('take', 'zyn_takeOffer', { offer: current.offer.id }, 'Taken. The object is yours.');
+      });
+
+      look();
+      window.addEventListener('zyn#initialized', look, { once: true });
+    </script>
+  </body>
+</html>

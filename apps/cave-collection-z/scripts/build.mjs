@@ -43,6 +43,14 @@ await cp(new URL('terms.hex', root), new URL('cave-sale-terms-v1.hex', output));
 await mkdir(new URL('mint/', output), { recursive: true });
 await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 
+// The second half of the journey. Everything above gets a buyer as far as
+// owning an item; these are what they do next — see it, price it, sell it,
+// buy another, and leave. Same directory shape, so every one is a clean URL.
+for (const page of ['items', 'item', 'market', 'exit']) {
+  await mkdir(new URL(`${page}/`, output), { recursive: true });
+  await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
+}
+
 // The QR encoder is shared with the wallets rather than copied into each one.
 // This site has no bundler, so "shared" means staged here as a plain module.
 await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));

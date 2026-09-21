@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="What you hold in the cave. Read from your own key — the site is told nothing." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/items" />
+    <meta property="og:title" content="Cave — what you hold" />
+    <meta property="og:description" content="Your shelf. Read from your own key; the site is told nothing." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave — what you hold" />
+    <meta name="twitter:description" content="Your shelf. Read from your own key; the site is told nothing." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave — what you hold</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <style>
+      /* The shelf. Deeper in the cave than the tunnel mouth, so it is lit by
+         what is on it rather than by a torch at the entrance. */
+      .register { max-width: 940px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% -30% auto; height: 70%; background: radial-gradient(ellipse 46% 60% at 30% 0%, rgba(199, 240, 75, 0.05), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--acid); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
+      .lede strong { color: var(--ink); font-weight: 400; }
+
+      .ledger { margin: 52px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: #62665f; text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--acid); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 400; }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--acid); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--zec); outline-offset: 3px; }
+
+      /* One card per item. A fixed column count would leave a single item
+         stretched across the shelf or stranded alone in a row, so the track
+         is sized to the card and the row fills with whatever there is. */
+      .shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 14px; }
+      .item { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); color: inherit; text-decoration: none; }
+      .item:hover { border-color: rgba(199, 240, 75, 0.45); }
+      .item:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+      .item .sym { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-word; }
+      .item .id { font-family: var(--mono); font-size: 9px; color: #62665f; word-break: break-all; line-height: 1.6; }
+      /* The listing state is the one fact on this card that changes what the
+         holder can do next, so it is the only thing here that carries colour. */
+      .tag { justify-self: start; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; padding: 4px 8px; border: 1px solid var(--line); color: var(--muted); }
+      .tag.listed { color: var(--zec); border-color: rgba(244, 183, 40, 0.5); }
+      .out { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+      .out.bad { color: #e88; }
+      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <main class="register">
+      <h1><span>What you</span><span>hold</span></h1>
+
+      <p class="lede">
+        Your shelf, read from <strong>your own key</strong>. This page asks the wallet and the
+        wallet asks the chain — the site is never told what is here, which is the
+        difference between a gallery of your things and a gallery of everyone's.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>The shelf</span>
+          <span>Held · <b id="count">—</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <section class="state" id="s-looking">
+            <p class="say">Looking for a wallet…</p>
+          </section>
+
+          <section class="state" id="s-nowallet" hidden>
+            <p class="say">
+              <strong>Only a key can say what it holds.</strong> There is no address to type in
+              and no account to look up: what you own is derived from a key you hold, so this
+              page has nothing to show until a wallet is here to answer.
+            </p>
+            <a class="act" href="/#wallet">Get Nap Wallet</a>
+          </section>
+
+          <section class="state" id="s-ready" hidden>
+            <p class="say">Ask your wallet what it is holding.</p>
+            <button class="act" id="ask" type="button">Read my shelf</button>
+          </section>
+
+          <section class="state" id="s-empty" hidden>
+            <p class="say">
+              <strong>Nothing on the shelf yet.</strong> Items arrive when a place in a
+              collection is drawn and claimed, or when someone sends you one.
+            </p>
+            <a class="act" href="/mint">Take a place</a>
+          </section>
+
+          <section class="state" id="s-shelf" hidden>
+            <div class="shelf" id="shelf"></div>
+            <p class="out" id="out"></p>
+            <button class="act ghost" id="again" type="button">Read again</button>
+          </section>
+
+          <section class="state" id="s-broke" hidden>
+            <p class="say">The wallet could not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
+          </section>
+
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="/market">The market</a>
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/exit">Take ZEC out</a>
+        <a href="/mint">Take a place</a>
+      </nav>
+    </main>
+
+    <script type="module">
+      // The provider is injected by the Nap Wallet extension. It may arrive
+      // after this script runs, so the page waits for the event as well as
+      // checking — a wallet that loads a beat late must not read as absent.
+      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
+
+      const states = ['looking', 'nowallet', 'ready', 'empty', 'shelf', 'broke'];
+      const el = (id) => document.getElementById(id);
+      const show = (name) => {
+        for (const s of states) el('s-' + s).hidden = s !== name;
+      };
+
+      function look() {
+        if (provider()) show('ready');
+        else show('nowallet');
+      }
+
+      // An item is an asset the chain marks as one. Everything else a key
+      // holds — ZEC.zy, a curve token, a pool share — is money, and money on
+      // a shelf of things would be a category error the holder has to undo
+      // by reading ids.
+      const itemsOf = (assets) => (assets || []).filter((a) => a && a.item);
+
+      function render(items, listedIds) {
+        el('count').textContent = String(items.length);
+        if (!items.length) return show('empty');
+        const shelf = el('shelf');
+        shelf.replaceChildren();
+        for (const it of items) {
+          const id = String(it.id || '');
+          const card = document.createElement('a');
+          card.className = 'item';
+          card.href = `/item?id=${encodeURIComponent(id)}`;
+          const sym = document.createElement('div');
+          sym.className = 'sym';
+          sym.textContent = it.symbol || 'unnamed';
+          const tag = document.createElement('span');
+          const listed = listedIds.has(id);
+          tag.className = listed ? 'tag listed' : 'tag';
+          tag.textContent = listed ? 'Listed' : 'Held';
+          const idn = document.createElement('div');
+          idn.className = 'id';
+          // The whole id, not a prefix. A truncated id that looks complete is
+          // how somebody lists the wrong item.
+          idn.textContent = id;
+          card.append(sym, tag, idn);
+          shelf.append(card);
+        }
+        show('shelf');
+      }
+
+      async function ask() {
+        const p = provider();
+        if (!p) return look();
+        for (const b of ['ask', 'again']) el(b).disabled = true;
+        try {
+          const assets = await p.request({ method: 'zyn_assets', params: {} });
+          // Which of them are already resting on the market. Asked for
+          // separately because a listing lives on the order book, not on the
+          // item — the item does not know it is for sale.
+          let listedIds = new Set();
+          try {
+            const r = await p.request({ method: 'zyn_offers', params: {} });
+            for (const o of (r && r.offers) || []) {
+              if (o && o.mine) listedIds.add(String(o.offer_asset || ''));
+            }
+          } catch {
+            // A failed order-book read is not a failed shelf. Show what is
+            // held and say the listing state is unknown rather than showing
+            // everything as unlisted, which would be a wrong answer.
+            el('out').textContent = 'Could not read the order book — listing state below may be out of date.';
+          }
+          render(itemsOf(assets), listedIds);
+        } catch (e) {
+          el('broke').textContent = e.message || String(e);
+          show('broke');
+        } finally {
+          for (const b of ['ask', 'again']) el(b).disabled = false;
+        }
+      }
+
+      el('ask').addEventListener('click', ask);
+      el('again').addEventListener('click', ask);
+      el('retry').addEventListener('click', () => { look(); });
+
+      look();
+      window.addEventListener('zyn#initialized', look, { once: true });
+    </script>
+  </body>
+</html>
