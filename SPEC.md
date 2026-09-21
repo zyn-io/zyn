@@ -371,6 +371,13 @@ which are true of every VM.
   signatures. The spec is written so that swapping one for the other does not
   touch an application.
 
+  **And when it comes, it is a circuit rather than a zkVM** (DECISIONS §131).
+  Conservation and range are group operations needing no circuit at all;
+  transfer, split, merge, deposit and withdrawal are one membership proof
+  wearing five names. A zkVM is what buys *permissionless* programmability and
+  belongs above this layer, not under it — so keep `riscv32im` building, and
+  put the `program_id` in the transaction before a format ships without one.
+
 ---
 
 ## 6. Open questions
