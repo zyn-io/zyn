@@ -205,6 +205,11 @@ impl Nullifiers {
     pub fn root(&self) -> Hash {
         merkle_root(&self.spent)
     }
+
+    /// The spent set in sorted order, for a VM that must encode its state.
+    pub fn spent(&self) -> &[Hash] {
+        &self.spent
+    }
 }
 
 #[cfg(test)]

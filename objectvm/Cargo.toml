@@ -1,0 +1,10 @@
+[package]
+name = "objectvm"
+version = "0.1.0"
+edition = "2021"
+
+# The object ledger as a Zyn application, so the model can be proven end to end
+# without touching swapvm. swapvm keeps chains 11 and 26460; this runs on the
+# devnet chain and is free to break.
+[dependencies]
+zyn-vm = { path = "../zyn-vm" }
