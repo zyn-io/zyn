@@ -11,6 +11,8 @@
 //!   ZYN_CHAIN_ID       the chain                       (212)
 //!   ZYN_DA_MIRRORS     url[|token],… to PUT bundles to (none)
 //!   ZYN_BRIDGE_SEED    hex, ≥32 bytes; turns deposits on (off)
+//!   ZYN_BRIDGE_FROM_HEIGHT  where the replaced chain stopped; deposits
+//!                      below it are not this chain's       (vault birth)
 //!   ZYN_ZEC_ASSET      the asset bridged ZEC becomes    (XZEC)
 //!   ZYN_EXIT_REVEALS   where exits say to pay           (/etc/zyn/zcash-exit-reveals)
 //!   ZYN_SCAN_STEP      blocks per scan step             (25)
@@ -580,6 +582,35 @@ fn bridge_pending_path(dir: &str, chain: u32) -> std::path::PathBuf {
     std::path::Path::new(dir).join(format!("chain-{chain}.pending"))
 }
 
+/// Bridge passes run back to back before the tip is read again.
+const BRIDGE_BURST: usize = 400;
+
+/// Where the deposit bridge starts looking.
+///
+/// Three inputs, and the rule is that the highest wins:
+///
+/// - **the vault's birth** (`from_height`): nothing below it can be a deposit
+///   to this vault. Starting at zero instead means millions of empty steps.
+/// - **the floor** (`ZYN_BRIDGE_FROM_HEIGHT`): where the chain this one
+///   *replaced* stopped scanning. A vault outlives the ledgers that custody it
+///   — chain 11 handed this vault to chain 212, and the AMM mainnet will hand
+///   its vault to the object ledger — and every deposit below the handover was
+///   the old ledger's to credit. Scanning them again issues them twice: the
+///   old chain's holders are owed on both, and each ledger's solvency check
+///   passes on its own because each counts only what it issued.
+/// - **a saved cursor**: where this bridge got to last time. Above the floor it
+///   is simply progress; below it, it predates the floor being set and is
+///   raised, because the floor is a statement about ownership and a cursor is
+///   only a statement about work.
+///
+/// The value is the last height already handled, so the first height looked
+/// at is one above it.
+fn bridge_start(saved: Option<u64>, floor: Option<u64>, from_height: u64) -> u64 {
+    let birth = from_height.saturating_sub(1);
+    let floor = floor.map(|f| f.saturating_sub(1)).unwrap_or(0);
+    saved.unwrap_or(birth).max(birth).max(floor)
+}
+
 /// Wire the bridge, if this deployment has a seed to derive from.
 ///
 /// `next_index` comes from the ledger rather than from the cursor file: the
@@ -622,15 +653,19 @@ fn build_bridge(
         },
     };
 
-    // With no saved cursor, start at the vault's birth rather than at zero.
-    // The watcher walks every height from its cursor to the confirmed tip, so
-    // a cursor of 0 means four million pointless steps on the first pass —
-    // and the scanner would clamp the range to `from_height` anyway, so those
-    // steps could never have found anything.
-    let scanned_to = std::fs::read_to_string(bridge_cursor_path(dir, chain))
+    let saved = std::fs::read_to_string(bridge_cursor_path(dir, chain))
         .ok()
-        .and_then(|t| t.trim().parse::<u64>().ok())
-        .unwrap_or_else(|| from_height.saturating_sub(1));
+        .and_then(|t| t.trim().parse::<u64>().ok());
+    let floor = std::env::var("ZYN_BRIDGE_FROM_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    let scanned_to = bridge_start(saved, floor, from_height);
+    if let Some(f) = floor {
+        eprintln!(
+            "zyn-object-node: deposits below height {f} belong to the chain this one replaced \
+             and are not credited here"
+        );
+    }
     let pending = std::fs::read(bridge_pending_path(dir, chain))
         .ok()
         .and_then(|b| zynzapd::object_ingress::pending::Pending::decode(&b))
@@ -761,6 +796,14 @@ fn bridge_pass(
         refresh_deposit_addresses(&bridge.addresses, vm);
         actions.extend(bridge.pending.replayable(vm));
         if actions.is_empty() {
+            // Nothing to credit, but the watcher still moved. Writing the
+            // cursor down here is what stops a restart from rescanning every
+            // empty block since the last deposit — which on a quiet chain is
+            // all of them.
+            let _ = std::fs::write(
+                bridge_cursor_path(dir, chain),
+                bridge.watcher.scanned_to().to_string(),
+            );
             return Ok(0);
         }
         zynzapd::object_bridge::decide(vm, &bridge.seed, bridge.zec, &actions, vault)
@@ -1567,24 +1610,40 @@ fn main() {
             // as an emergency. Wait, rather than raise a false alarm.
             if let Some(b) = bridge.as_mut() {
                 if synced >= target {
-                    match bridge_pass(
-                        b,
-                        &scanner,
-                        &notes,
-                        &zebra,
-                        &bridge_node,
-                        &bridge_journal,
-                        &bridge_pub,
-                        &dir2,
-                        chain,
-                    ) {
-                        Ok(0) => {}
-                        Ok(n) => eprintln!("zyn-object-node: bridge credited {n} deposit(s)"),
-                        Err(e) => {
-                            eprintln!("zyn-object-node: BRIDGE PASS FAILED: {e}");
-                            if let Ok(mut g) = sync_writer.lock() {
-                                g.error = e.chars().take(200).collect();
+                    // Passes back to back while the bridge is behind, not one
+                    // per sleep. A pass reports the end of its own range as the
+                    // tip, so it keeps the last `confirmations` blocks back for
+                    // the next pass and nets about half a step — one of those
+                    // every thirty seconds turns an hour of catch-up into a
+                    // day. The cap hands control back to refresh the tip.
+                    for _ in 0..BRIDGE_BURST {
+                        let before = b.watcher.scanned_to();
+                        match bridge_pass(
+                            b,
+                            &scanner,
+                            &notes,
+                            &zebra,
+                            &bridge_node,
+                            &bridge_journal,
+                            &bridge_pub,
+                            &dir2,
+                            chain,
+                        ) {
+                            Ok(0) => {}
+                            Ok(n) => eprintln!("zyn-object-node: bridge credited {n} deposit(s)"),
+                            Err(e) => {
+                                eprintln!("zyn-object-node: BRIDGE PASS FAILED: {e}");
+                                if let Ok(mut g) = sync_writer.lock() {
+                                    g.error = e.chars().take(200).collect();
+                                }
+                                break;
                             }
+                        }
+                        let after = b.watcher.scanned_to();
+                        // Caught up, or not moving: either way the next thing
+                        // worth doing is reading the tip again.
+                        if after >= target || after == before {
+                            break;
                         }
                     }
                 }
@@ -1845,6 +1904,43 @@ mod tests {
         assert_eq!(issued.len(), 2, "each asset stands alone: {issued:?}");
         assert!(issued.contains_key(&"aa".repeat(32)));
         assert!(issued.contains_key(&"bb".repeat(32)));
+    }
+
+    /// A vault outlives the ledgers that custody it. Every deposit below the
+    /// handover was the old ledger's to credit, and scanning it again issues
+    /// it twice — with each ledger's solvency check passing on its own.
+    #[test]
+    fn the_bridge_does_not_start_below_the_chain_it_replaced() {
+        // Chain 11 stopped scanning at 4,380,197 and handed the vault on.
+        assert_eq!(bridge_start(None, Some(4_380_198), 4_354_600), 4_380_197);
+    }
+
+    /// With no handover, the vault's birth — not zero, which is millions of
+    /// empty steps the scanner would clamp away anyway.
+    #[test]
+    fn with_no_floor_the_bridge_starts_at_the_vaults_birth() {
+        assert_eq!(bridge_start(None, None, 4_354_600), 4_354_599);
+    }
+
+    /// A saved cursor above the floor is progress and is kept.
+    #[test]
+    fn a_saved_cursor_above_the_floor_is_kept() {
+        assert_eq!(bridge_start(Some(4_381_000), Some(4_380_198), 4_354_600), 4_381_000);
+    }
+
+    /// A saved cursor below the floor predates the floor being set. The floor
+    /// is a statement about ownership and a cursor only about work, so the
+    /// cursor is raised rather than trusted.
+    #[test]
+    fn a_saved_cursor_below_the_floor_is_raised_to_it() {
+        assert_eq!(bridge_start(Some(4_360_000), Some(4_380_198), 4_354_600), 4_380_197);
+    }
+
+    /// A floor below the vault's birth means nothing: there were no deposits
+    /// to this vault before it existed.
+    #[test]
+    fn a_floor_below_the_vaults_birth_is_the_birth() {
+        assert_eq!(bridge_start(None, Some(100), 4_354_600), 4_354_599);
     }
 
     /// What a wallet shows its holder when it reaches the wrong ledger.
