@@ -618,3 +618,44 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod cadence {
+    use zyn::epoch::EpochPolicy;
+
+    /// The cadence is set by environment and read through several layers. On
+    /// 21 Sep a daily cadence was configured, the running process had the
+    /// variables, and it anchored every ~16 minutes anyway — burning a fee
+    /// each time until the vault could not pay for another (A124).
+    ///
+    /// This pins the arithmetic the daily setting depends on: with those two
+    /// values neither trigger may fire early.
+    #[test]
+    fn a_daily_cadence_does_not_fire_early() {
+        let p = EpochPolicy {
+            intents_per_epoch: 250,
+            epochs_per_anchor: 100_000,
+            max_seconds_per_epoch: 120,
+            max_seconds_per_anchor: 86_400,
+        };
+        assert!(!p.should_anchor(1, 900), "16 minutes is not a day");
+        assert!(!p.should_anchor(8, 3_600), "nor an hour, nor 8 epochs");
+        assert!(!p.should_anchor(500, 86_399), "nor a second short of one");
+        assert!(p.should_anchor(1, 86_400), "a day is");
+        assert!(p.should_anchor(100_000, 0), "and so is the epoch ceiling");
+    }
+
+    /// Zero disables a trigger. A daily cadence set with the seconds trigger
+    /// at zero would never anchor at all, which is the opposite failure and
+    /// just as quiet.
+    #[test]
+    fn a_zero_seconds_trigger_disables_it_rather_than_firing_always() {
+        let p = EpochPolicy {
+            intents_per_epoch: 250,
+            epochs_per_anchor: 100_000,
+            max_seconds_per_epoch: 120,
+            max_seconds_per_anchor: 0,
+        };
+        assert!(!p.should_anchor(1, u64::MAX));
+    }
+}

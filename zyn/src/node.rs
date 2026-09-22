@@ -709,14 +709,34 @@ impl<V: MicrochainVm> Node<V> {
     /// [`Self::confirm_anchor`] settles exactly what this proposal covered.
     /// One proposal at a time — two anchors in flight would race for the same
     /// `previous_root`.
-    pub fn propose_anchor(&mut self, _now: u64) -> Option<Anchor> {
+    pub fn propose_anchor(&mut self, now: u64) -> Option<Anchor> {
         if self.proposed.is_some() || self.pending.is_empty() {
             return None;
         }
         let a = self.build_anchor()?;
         self.ledger.check(&a).ok()?;
         self.proposed = Some((a, self.pending.len()));
+        // Restart the cadence clock here rather than at confirmation. An
+        // anchor costs a Zcash fee whether or not it is ever endorsed, so the
+        // thing to rate-limit is *proposing* one. Waiting for confirmation to
+        // restart the clock is what let a dead signer set be charged for
+        // repeatedly (A124).
+        self.anchored_at = now;
         Some(a)
+    }
+
+    /// Whether the configured cadence says an anchor is due.
+    ///
+    /// The automatic path consults the policy inline; the manual path — where
+    /// a settler carries the anchor to Zcash — had no such check and proposed
+    /// one on **every seal**, so a daily cadence produced an anchor per
+    /// confirmation round-trip instead. Each one burns a fee, so the vault
+    /// emptied in an afternoon (A124).
+    pub fn anchor_due(&self, now: u64) -> bool {
+        self.policy.should_anchor(
+            self.epochs_since_anchor,
+            now.saturating_sub(self.anchored_at),
+        )
     }
 
     /// The chain has the proposed anchor: accept it, publish its snapshot, and
@@ -1507,5 +1527,62 @@ mod tests {
         assert!(n.add_endorsement(a.id(), id, k.sign(&a.id()).to_bytes()));
         assert!(n.add_endorsement(a.id(), id, k.sign(&a.id()).to_bytes()));
         assert!(n.signer_liveness().unwrap().1.contains_key(&id));
+    }
+}
+
+#[cfg(test)]
+mod cadence_governs_both_paths {
+    use super::tests::*;
+    use super::*;
+    use crate::epoch::EpochPolicy;
+    use swapvm::state::SwapState;
+    use swapvm::Params;
+
+    fn daily() -> EpochPolicy {
+        EpochPolicy {
+            intents_per_epoch: 10,
+            epochs_per_anchor: 100_000,
+            max_seconds_per_epoch: 0,
+            max_seconds_per_anchor: 86_400,
+        }
+    }
+
+    fn manual_node() -> Node<SwapState> {
+        let s = SwapState::new(1, Params::v1());
+        Node::resume(s, daily(), Economics::flat(1_000), 0).with_manual_anchoring()
+    }
+
+    /// The manual path proposed an anchor on **every seal**, so a daily
+    /// cadence produced one per Zcash confirmation round-trip — about every
+    /// sixteen minutes — and each burned a fee until the vault could not pay
+    /// for another (A124). `anchor_due` is what the caller must now ask.
+    #[test]
+    fn a_daily_cadence_is_not_due_minutes_after_the_last_anchor() {
+        let mut n = manual_node();
+        let start = 1_000_000u64;
+        n.seal(start);
+
+        assert!(n.anchor_due(start), "the first anchor is due");
+        assert!(n.propose_anchor(start).is_some(), "and is proposed");
+
+        assert!(
+            !n.anchor_due(start + 16 * 60),
+            "sixteen minutes on — one confirmation round-trip — it is not due"
+        );
+        assert!(!n.anchor_due(start + 3_600), "nor an hour");
+        assert!(!n.anchor_due(start + 86_399), "nor a second short of a day");
+        assert!(n.anchor_due(start + 86_400), "a day later it is");
+    }
+
+    /// The clock restarts when an anchor is *proposed*, not when it confirms.
+    /// The fee is paid either way, so a signer set that never endorses must
+    /// not be charged again and again while it stays down.
+    #[test]
+    fn an_unendorsed_proposal_still_restarts_the_clock() {
+        let mut n = manual_node();
+        let start = 2_000_000u64;
+        n.seal(start);
+        assert!(n.propose_anchor(start).is_some());
+        assert!(!n.anchor_due(start + 7_200), "two hours on, still not due");
     }
 }

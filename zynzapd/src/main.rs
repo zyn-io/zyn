@@ -306,6 +306,18 @@ fn run() -> Result<(), String> {
             Err(e) => return Err(format!("ZYN_SIGNER_SET: {}", e)),
         }
     }
+    // Say the cadence out loud. It is set by environment and read through
+    // several layers, and when anchors came 90x more often than configured
+    // there was no way to tell from the outside which layer had dropped it.
+    // An anchor costs a fee, so a cadence that is silently wrong drains the
+    // vault (A124).
+    {
+        let p = cfg.policy();
+        eprintln!(
+            "zynzapd: cadence — seal every {} intents or {}s; anchor every {} epochs or {}s",
+            p.intents_per_epoch, p.max_seconds_per_epoch, p.epochs_per_anchor, p.max_seconds_per_anchor,
+        );
+    }
     if resumed {
         eprintln!(
             "zynzapd: resumed chain {} at seq {} epoch {} with {} anchor(s) in the lineage",
@@ -1252,7 +1264,11 @@ fn run() -> Result<(), String> {
                 // By policy, not by tick: with batch clearing on, the time
                 // between seals is the auction window.
                 let sealed = n.seal_if_due(now).is_some();
-                if sealed {
+                // Sealing is not anchoring. The manual path used to propose an
+                // anchor on every seal, which ignored the configured cadence
+                // entirely and charged a Zcash fee per confirmation
+                // round-trip (A124).
+                if sealed && n.anchor_due(now) {
                     if manual {
                         // Proposed now, confirmed when Zcash has it.
                         n.propose_anchor(now);
