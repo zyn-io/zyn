@@ -126,6 +126,41 @@ fn main() {
     println!("    \"out_epk\": \"{}\",", hex(&out_enc.epk));
     println!("    \"out_ciphertext\": \"{}\",", hex(&out_enc.ciphertext));
     println!("    \"intent\": \"{}\"", hex(&spend));
+    println!("  }},");
+
+    // A signed frame, exactly as `zyn_submitSigned` takes it. Ed25519 is
+    // deterministic, so a browser signing the same payload with the same key
+    // must produce these bytes exactly -- which is what the test holds it to.
+    use ed25519_dalek::{Signer, SigningKey};
+    let key = SigningKey::from_bytes(&[7u8; 32]);
+    let account = zyn_vm::auth::account_of(zyn_vm::auth::Scheme::Ed25519, key.verifying_key().as_bytes());
+    let intent = objectvm::Op::Register {
+        account,
+        program: zyn_vm::program::register_viewing_key(),
+        viewing: viewing_public(&viewing),
+    };
+    let auth = zyn_vm::auth::Authorization {
+        chain_id: 212,
+        vm_id: zyn_vm::zvm::vm_id::<objectvm::ObjectVm>(),
+        valid_until_epoch: 1000,
+    };
+    let payload = zyn_vm::auth::signing_payload::<objectvm::ObjectVm>(&auth, &intent);
+    let sig = key.sign(&payload);
+    let authorized = zyn_vm::verify::authorize_intent::<objectvm::ObjectVm>(
+        &[zyn_vm::verify::Credential::Ed25519 { key: key.verifying_key().to_bytes(), signature: sig.to_bytes() }],
+        &auth,
+        intent,
+        &<objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::genesis(212, objectvm::Limits { max_io: 8 }),
+    )
+    .expect("a holder's own signature authorizes their own registration");
+    println!("  \"signed\": {{");
+    println!("    \"seed\": \"{}\",", hex(&[7u8; 32]));
+    println!("    \"account\": \"{}\",", hex(&account));
+    println!("    \"chain\": 212,");
+    println!("    \"valid_until_epoch\": 1000,");
+    println!("    \"vm_id\": \"{}\",", hex(&auth.vm_id));
+    println!("    \"payload\": \"{}\",", hex(&payload));
+    println!("    \"frame\": \"{}\"", hex(&zyn_vm::verify::encode_authorized::<objectvm::ObjectVm>(&authorized)));
     println!("  }}");
     println!("}}");
 }

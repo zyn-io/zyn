@@ -166,3 +166,46 @@ fn sealing_and_opening_still_round_trips() {
     .unwrap();
     assert_eq!(open(&viewing, &enc).unwrap(), body);
 }
+
+/// The signed frame the browser is held to. If Rust's envelope, payload or
+/// frame layout moves, this fails here rather than as every wallet's
+/// submission being refused.
+#[test]
+fn the_pinned_signed_frame_still_matches() {
+    use ed25519_dalek::{Signer, SigningKey};
+    let j = fixture();
+    let seed = field(&j, "seed_utf8");
+    let viewing = StaticSecret::from(zynzapd::object_keys::viewing_secret(seed.as_bytes(), 0).to_bytes());
+    let key = SigningKey::from_bytes(&[7u8; 32]);
+    let account = zyn_vm::auth::account_of(zyn_vm::auth::Scheme::Ed25519, key.verifying_key().as_bytes());
+    // Read inside the "signed" section: the fixture also has a top-level
+    // numeric "account" (the derivation index), and a first-match reader
+    // would compare against that.
+    let signed = &j[j.find("\"signed\"").expect("a signed section")..];
+    assert_eq!(hex(&account), field(signed, "account"));
+    let intent = objectvm::Op::Register {
+        account,
+        program: zyn_vm::program::register_viewing_key(),
+        viewing: viewing_public(&viewing),
+    };
+    let auth = zyn_vm::auth::Authorization {
+        chain_id: 212,
+        vm_id: zyn_vm::zvm::vm_id::<objectvm::ObjectVm>(),
+        valid_until_epoch: 1000,
+    };
+    assert_eq!(hex(&auth.vm_id), field(signed, "vm_id"));
+    let payload = zyn_vm::auth::signing_payload::<objectvm::ObjectVm>(&auth, &intent);
+    assert_eq!(hex(&payload), field(signed, "payload"));
+    let sig = key.sign(&payload);
+    let authorized = zyn_vm::verify::authorize_intent::<objectvm::ObjectVm>(
+        &[zyn_vm::verify::Credential::Ed25519 { key: key.verifying_key().to_bytes(), signature: sig.to_bytes() }],
+        &auth,
+        intent,
+        &<objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::genesis(212, objectvm::Limits { max_io: 8 }),
+    )
+    .unwrap();
+    assert_eq!(
+        hex(&zyn_vm::verify::encode_authorized::<objectvm::ObjectVm>(&authorized)),
+        field(signed, "frame")
+    );
+}

@@ -212,17 +212,82 @@ export function registerIntent(account, viewing) {
   );
 }
 
-/// Submit an encoded intent. The node takes it as hex and relays it untouched.
-export async function submit(rpcUrl, intentBytes) {
+// ---------------------------------------------------------------------------
+// Signing. The node applies a holder's intent only inside a frame their own
+// key signed; `zyn_submit` is the operator's door and is closed to everyone
+// else. The layouts are pinned to `zyn-vm/src/{auth,verify}.rs` and held to
+// Rust-produced bytes by the shared fixture.
+// ---------------------------------------------------------------------------
+
+import * as ed from '@noble/ed25519';
+
+const AUTH_DOMAIN = te.encode('zyn.auth.v1');
+const ACCOUNT_DOMAIN = te.encode('zyn.account.v1');
+const FRAME_MAGIC = te.encode('ZYNAUTH1');
+const FRAME_SIGNED = 1;
+const SCHEME_ED25519 = 1;
+
+function u64be(n) {
+  const b = new Uint8Array(8);
+  new DataView(b.buffer).setBigUint64(0, BigInt(n), false);
+  return b;
+}
+
+/// Which program a signature is bound to: `H("zyn.vm.v1" ‖ name ‖ u16 version)`.
+/// A signature does not travel between applications, nor across a version
+/// bump that changed what an intent means.
+export const vmId = (name = 'objectvm', version = 1) => {
+  const v = new Uint8Array(2);
+  new DataView(v.buffer).setUint16(0, version, false);
+  return leaf(te.encode('zyn.vm.v1'), te.encode(name), v);
+};
+
+/// The account a key controls: `sha256("zyn.account.v1" ‖ scheme ‖ len ‖ key)`.
+export const accountOf = (publicKey) =>
+  sha256(concatBytes(ACCOUNT_DOMAIN, new Uint8Array([SCHEME_ED25519]), u32be(publicKey.length), publicKey));
+
+/// Exactly what the key signs: the envelope and the intent together, so a
+/// signature cannot be lifted onto another chain, another program, or past
+/// its expiry.
+export function signingPayload(chain, validUntilEpoch, intentBytes) {
+  return concatBytes(
+    AUTH_DOMAIN,
+    new Uint8Array([SCHEME_ED25519]),
+    u32be(chain),
+    vmId(),
+    u64be(validUntilEpoch),
+    u32be(intentBytes.length),
+    intentBytes,
+  );
+}
+
+/// A frame `zyn_submitSigned` accepts: the envelope, one Ed25519 credential,
+/// and the intent. Ed25519 is deterministic, so the same key and intent give
+/// the same frame — which is also what makes a resubmission recognisable as a
+/// replay rather than a second payment.
+export async function signedFrame(secretKey, chain, validUntilEpoch, intentBytes) {
+  const publicKey = await ed.getPublicKeyAsync(secretKey);
+  const signature = await ed.signAsync(signingPayload(chain, validUntilEpoch, intentBytes), secretKey);
+  return concatBytes(
+    FRAME_MAGIC,
+    new Uint8Array([FRAME_SIGNED]),
+    u32be(chain),
+    vmId(),
+    u64be(validUntilEpoch),
+    new Uint8Array([1, SCHEME_ED25519]),
+    publicKey,
+    signature,
+    u32be(intentBytes.length),
+    intentBytes,
+  );
+}
+
+/// Submit a signed frame through the holders' door.
+export async function submitSigned(rpcUrl, frame) {
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'zyn_submit',
-      intent: hex(intentBytes),
-    }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'zyn_submitSigned', frame: hex(frame) }),
   });
   const body = await response.json();
   if (body.error) throw new Error(body.error.message || 'the chain refused the intent');

@@ -342,6 +342,35 @@ fn record(pub_log: &mut Published, op: &Op) {
     }
 }
 
+/// Signed frames already applied, so the same authorization cannot run twice.
+///
+/// A spend replays harmlessly — its inputs are gone — but not everything a
+/// holder signs consumes something. A `PlaceOffer` replayed after its
+/// `CancelOffer` re-lists an item its owner withdrew, and somebody can then
+/// take it; a `Register` replayed after a key rotation points future payments
+/// back at the old key. Keyed by a hash of the whole frame, which covers the
+/// signature: Ed25519 is deterministic, so re-submitting the identical signed
+/// intent produces the identical frame, while a fresh authorization with a new
+/// expiry is a different frame and a deliberate act. Pruned at expiry, when
+/// the envelope check would refuse the frame anyway.
+static REPLAY: std::sync::OnceLock<Mutex<zyn::replay::ReplayIndex>> = std::sync::OnceLock::new();
+
+/// `valid_until_epoch` from a signed frame: `ZYNAUTH1 ‖ kind ‖ chain u32 ‖
+/// vm_id [32] ‖ valid_until u64 ‖ …`, big-endian. Only called after
+/// `decode_authorized` has accepted the frame, so the layout is known good.
+fn frame_expiry(frame: &[u8]) -> Option<u64> {
+    let at = 8 + 1 + 4 + 32;
+    Some(u64::from_be_bytes(frame.get(at..at + 8)?.try_into().ok()?))
+}
+
+fn frame_key(frame: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"objectvm.frame.v1");
+    h.update(frame);
+    h.finalize().into()
+}
+
 /// The operator's credential for `zyn_submit`, from `ZYN_SUBMIT_TOKEN`.
 ///
 /// `zyn_submit` wraps whatever it is given as `Authorized::operator` and
@@ -551,6 +580,49 @@ fn handle(
                 }
             )
         }
+        // The holders' door. A frame is a signed envelope around one intent,
+        // exactly as the journal will record it: `decode_authorized` checks
+        // the envelope is for this chain, this program and not expired, that
+        // every signature verifies, and that together they cover every
+        // account the intent names. A replica runs the same check on the same
+        // bytes, so nothing here is taken on the sequencer's word.
+        "zyn_submitSigned" => {
+            let Some(hexed) = field(body, "frame") else {
+                return err("no frame");
+            };
+            let Some(frame) = unhex(&hexed) else {
+                return err("frame is not hex");
+            };
+            let authorized = {
+                let n = node.lock().unwrap();
+                match zyn_vm::verify::decode_authorized::<ObjectVm>(&frame, n.state()) {
+                    Ok(a) => a,
+                    Err(e) => return err(&format!("refused: {e:?}")),
+                }
+            };
+            // An operator frame decodes too, for intents nobody signs. This
+            // door is for signatures; the operator's is `zyn_submit`.
+            if matches!(authorized.authority(), zyn_vm::verify::Authority::Operator) {
+                return err("this door takes a holder's signature, not an operator frame");
+            }
+            let Some(expiry) = frame_expiry(&frame) else {
+                return err("frame is truncated");
+            };
+            let epoch_now = node.lock().unwrap().state().epoch;
+            if let Some(r) = REPLAY.get() {
+                let mut r = r.lock().unwrap();
+                r.prune(epoch_now);
+                if !r.fresh(frame_key(&frame), expiry) {
+                    return err("already applied: this exact authorization has been used");
+                }
+                let _ = r.save(std::path::Path::new(dir), chain);
+            }
+            let receipts = apply_authorized(authorized, node, journal, pub_log, dir, chain);
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"receipts\":\"{}\"}}}}",
+                escape(&format!("{receipts:?}"))
+            )
+        }
         // Name what this chain serves rather than saying "unknown method".
         // A wallet built for the AMM chains reaches here the moment it asks
         // for `zyn_assets` or `zyn_account`, and a bare refusal reads as an
@@ -575,7 +647,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submit, zyn_anchors, zyn_offers and zyn_depositAddress"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers and zyn_depositAddress"
     )
 }
 
@@ -958,8 +1030,35 @@ fn apply_operator(
     dir: &str,
     chain: u32,
 ) -> Vec<objectvm::Receipt> {
+    apply_authorized(
+        zyn_vm::verify::Authorized::operator(op.clone()),
+        node,
+        journal,
+        pub_log,
+        dir,
+        chain,
+    )
+}
+
+/// [`apply_operator`] for an intent whose authority has already been
+/// established — the operator's, or a holder's verified signature.
+///
+/// The journal records the envelope exactly as it was authorized. That is what
+/// lets a replica re-check a holder's signature rather than take the
+/// sequencer's word for it: an operator envelope around a holder's intent is
+/// one `decode_authorized` refuses outright.
+fn apply_authorized(
+    authorized: zyn_vm::verify::Authorized<Op>,
+    node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
+    pub_log: &Arc<Mutex<Published>>,
+    dir: &str,
+    chain: u32,
+) -> Vec<objectvm::Receipt> {
+        let op = authorized.intent().clone();
+        let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(&authorized);
         let mut n = node.lock().unwrap();
-        let step = n.submit_operator(op.clone(), now_secs());
+        let step = n.submit(authorized, now_secs());
         
         // Write the intent down before anything derived from it is served.
         // A chain nobody can replay is a chain nobody can check, and the
@@ -987,9 +1086,6 @@ fn apply_operator(
             // `Authorized::operator` is the honest envelope — it says who
             // vouched for the intent rather than implying a signature
             // nobody made.
-            let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(
-                &zyn_vm::verify::Authorized::operator(op.clone()),
-            );
             if let Err(err) = j.record(epoch_for_record, step.seq, &encoded) {
                 eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
             }
@@ -1018,7 +1114,7 @@ fn apply_operator(
         }
         if !step.receipts.iter().any(ObjectVm::rejected) {
             let mut p = pub_log.lock().unwrap();
-            record(&mut p, op);
+            record(&mut p, &op);
             save_published(dir, chain, &p);
         }
         save(dir, chain, n.state());
@@ -1442,6 +1538,18 @@ fn main() {
         }
     };
     eprintln!("zyn-object-node: journalling intents to {}/journal/chain-{}", dir, chain);
+    // The replay index outlives a restart, or a restart reopens every window
+    // it was closing. A corrupt index stops the node rather than starting
+    // empty: an empty one would accept every replay it had refused.
+    match zyn::replay::ReplayIndex::load(std::path::Path::new(&dir), chain) {
+        Ok(r) => {
+            let _ = REPLAY.set(Mutex::new(r));
+        }
+        Err(e) => {
+            eprintln!("zyn-object-node: {e}");
+            std::process::exit(1);
+        }
+    }
     let pub_log = Arc::new(Mutex::new(load_published(&dir, chain)));
     {
         let p = pub_log.lock().unwrap();
@@ -2048,5 +2156,183 @@ mod tests {
         assert_eq!(v["anchored_epoch"], 7);
         assert_eq!(v["anchored_height"], 4_380_000u64);
         assert_eq!(v["anchor_txid"], "deadbeef");
+    }
+}
+
+#[cfg(test)]
+mod signed_door {
+    //! The holders' door, driven through the real handler.
+    //!
+    //! Every refusal here is a way somebody could otherwise act on an account
+    //! they do not control, and one test proves the door opens at all — without
+    //! it the rest would pass for a door that is simply shut.
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use zyn_vm::auth::{signing_payload, Authorization};
+    use zyn_vm::spec::MicrochainVm;
+    use zyn_vm::verify::{authorize_intent, encode_authorized, Credential};
+
+    const CHAIN: u32 = 212;
+
+    struct Rig {
+        node: Arc<Mutex<Node<ObjectVm>>>,
+        journal: Arc<Mutex<Journal>>,
+        pub_log: Arc<Mutex<Published>>,
+        sync: Arc<Mutex<SyncProgress>>,
+        dir: String,
+    }
+
+    fn rig(name: &str) -> Rig {
+        let dir = std::env::temp_dir().join(format!("zyn-door-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = REPLAY.set(Mutex::new(zyn::replay::ReplayIndex::default()));
+        let policy = EpochPolicy {
+            intents_per_epoch: 64,
+            epochs_per_anchor: u64::MAX,
+            max_seconds_per_epoch: 3600,
+            max_seconds_per_anchor: u64::MAX,
+        };
+        Rig {
+            node: Arc::new(Mutex::new(Node::new(
+                CHAIN,
+                objectvm::Limits { max_io: 8 },
+                policy,
+                Economics::flat(1),
+            ))),
+            journal: Arc::new(Mutex::new(Journal::open(&dir, CHAIN).unwrap())),
+            pub_log: Arc::new(Mutex::new(Published::default())),
+            sync: Arc::new(Mutex::new(SyncProgress::default())),
+            dir: dir.to_string_lossy().to_string(),
+        }
+    }
+
+    impl Rig {
+        fn submit(&self, frame: &[u8]) -> serde_json::Value {
+            let body = format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"zyn_submitSigned\",\"frame\":\"{}\"}}",
+                hex(frame)
+            );
+            let out = handle(
+                &body, &self.node, &self.journal, false, &self.pub_log, &self.dir, CHAIN, None,
+                &self.sync, None,
+            );
+            serde_json::from_str(&out).expect("the door answers JSON")
+        }
+    }
+
+    /// A Register intent for `key`'s own account, signed by `signer`.
+    fn register_frame(key: &SigningKey, signer: &SigningKey, expiry: u64) -> Vec<u8> {
+        let account = zyn_vm::auth::account_of(
+            zyn_vm::auth::Scheme::Ed25519,
+            key.verifying_key().as_bytes(),
+        );
+        let intent = Op::Register {
+            account,
+            program: zyn_vm::program::register_viewing_key(),
+            viewing: [0x42; 32],
+        };
+        let auth = Authorization {
+            chain_id: CHAIN,
+            vm_id: zyn_vm::zvm::vm_id::<ObjectVm>(),
+            valid_until_epoch: expiry,
+        };
+        let sig = signer.sign(&signing_payload::<ObjectVm>(&auth, &intent));
+        let cred = Credential::Ed25519 {
+            key: signer.verifying_key().to_bytes(),
+            signature: sig.to_bytes(),
+        };
+        // Built the long way round when the signer is not the account's key,
+        // because `authorize_intent` rightly refuses to make one of those.
+        match authorize_intent::<ObjectVm>(&[cred.clone()], &auth, intent.clone(), &ObjectVm::genesis(CHAIN, objectvm::Limits { max_io: 8 })) {
+            Ok(a) => encode_authorized::<ObjectVm>(&a),
+            Err(_) => {
+                let mut e = zyn_vm::commit::Encoder::new();
+                e.bytes(b"ZYNAUTH1").u8(1).u32(auth.chain_id).bytes(&auth.vm_id)
+                    .u64(auth.valid_until_epoch).u8(1).u8(zyn_vm::auth::Scheme::Ed25519.tag())
+                    .bytes(&signer.verifying_key().to_bytes()).bytes(&sig.to_bytes());
+                let i = <ObjectVm as MicrochainVm>::encode_intent(&intent);
+                e.u32(i.len() as u32).bytes(&i);
+                e.finish().to_vec()
+            }
+        }
+    }
+
+    #[test]
+    fn a_holders_own_signature_opens_it() {
+        let r = rig("opens");
+        let key = SigningKey::from_bytes(&[7u8; 32]);
+        let v = r.submit(&register_frame(&key, &key, 1_000));
+        assert!(v.get("error").is_none(), "a valid signature must apply: {v}");
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Registered"), "{v}");
+        assert_eq!(r.node.lock().unwrap().state().viewing.len(), 1);
+    }
+
+    #[test]
+    fn the_same_authorization_cannot_run_twice() {
+        let r = rig("replay");
+        let key = SigningKey::from_bytes(&[8u8; 32]);
+        let frame = register_frame(&key, &key, 1_000);
+        assert!(r.submit(&frame).get("error").is_none());
+        let again = r.submit(&frame);
+        assert!(
+            again["error"]["message"].as_str().unwrap().contains("already applied"),
+            "{again}"
+        );
+    }
+
+    /// The attack the door exists to stop: a valid signature, from the wrong
+    /// key, over an intent naming someone else's account.
+    #[test]
+    fn a_signature_from_someone_else_is_refused() {
+        let r = rig("stranger");
+        let victim = SigningKey::from_bytes(&[9u8; 32]);
+        let thief = SigningKey::from_bytes(&[10u8; 32]);
+        let v = r.submit(&register_frame(&victim, &thief, 1_000));
+        let msg = v["error"]["message"].as_str().unwrap_or_default().to_string();
+        // Refused on *authority* — the victim's account never signed — and not
+        // because the frame was malformed, which would make this test pass for
+        // nothing. (It did, until the credential's scheme tag was encoded right.)
+        assert!(msg.contains("Authority("), "wrong reason: {v}");
+        assert!(!msg.contains("Malformed") && !msg.contains("BadSignature"), "wrong reason: {v}");
+        assert!(r.node.lock().unwrap().state().viewing.is_empty());
+    }
+
+    #[test]
+    fn a_tampered_frame_is_refused() {
+        let r = rig("tamper");
+        let key = SigningKey::from_bytes(&[11u8; 32]);
+        let mut frame = register_frame(&key, &key, 1_000);
+        let last = frame.len() - 1;
+        frame[last] ^= 0x01; // the viewing key the signature covered
+        let v = r.submit(&frame);
+        assert!(v["error"]["message"].as_str().unwrap_or_default().contains("BadSignature"), "wrong reason: {v}");
+        assert!(r.node.lock().unwrap().state().viewing.is_empty());
+    }
+
+    /// An operator frame decodes for intents nobody signs — a Mint among them.
+    /// This door takes signatures and nothing else.
+    #[test]
+    fn an_operator_frame_is_refused_here() {
+        let r = rig("operator");
+        let mint = encode_authorized::<ObjectVm>(&zyn_vm::verify::Authorized::operator(Op::Mint {
+            asset: [0x0e; 32],
+            amount: zyn_vm::Fixed::whole(1_000),
+            owner: [0xAA; 32],
+            nonce: [0x01; 32],
+        }));
+        let v = r.submit(&mint);
+        assert!(v["error"]["message"].as_str().unwrap().contains("operator frame"), "{v}");
+        assert!(r.node.lock().unwrap().state().issued.is_empty(), "nothing may be minted");
+    }
+
+    #[test]
+    fn an_expired_authorization_is_refused() {
+        let r = rig("expired");
+        let key = SigningKey::from_bytes(&[12u8; 32]);
+        // Sealed past epoch 0 first, so an envelope valid until 0 has expired.
+        r.node.lock().unwrap().submit_operator(ObjectVm::seal_intent(), now_secs());
+        let v = r.submit(&register_frame(&key, &key, 0));
+        assert!(v["error"]["message"].as_str().unwrap_or_default().contains("Expired"), "wrong reason: {v}");
     }
 }

@@ -258,3 +258,33 @@ test('a Spend intent encodes to exactly the bytes Rust produces', () => {
   assert.equal(hex(bytes), v.spend.intent);
   assert.equal(bytes[0], v.intent_tags.spend, 'the tag leads');
 });
+
+// ---------------------------------------------------------------------------
+// Signing: the frame the node's holders' door accepts.
+// ---------------------------------------------------------------------------
+
+import { accountOf, signedFrame, signingPayload, vmId } from '../src/object.js';
+import * as ed25519 from '@noble/ed25519';
+
+test('the program id a signature is bound to matches Rust', () => {
+  assert.equal(hex(vmId()), v.signed.vm_id);
+});
+
+test('an ed25519 key controls the same account in both implementations', async () => {
+  const pub = await ed25519.getPublicKeyAsync(unhex(v.signed.seed));
+  assert.equal(hex(accountOf(pub)), v.signed.account);
+});
+
+/// What the key signs, byte for byte. A payload that differed by one byte is a
+/// valid signature over something the node never checks.
+test('the signing payload matches Rust', () => {
+  const intent = registerIntent(unhex(v.signed.account), unhex(v.viewing_key));
+  assert.equal(hex(signingPayload(v.signed.chain, v.signed.valid_until_epoch, intent)), v.signed.payload);
+});
+
+/// Ed25519 is deterministic, so the whole signed frame must come out identical.
+test('a signed frame is byte-identical to the one Rust produces', async () => {
+  const intent = registerIntent(unhex(v.signed.account), unhex(v.viewing_key));
+  const frame = await signedFrame(unhex(v.signed.seed), v.signed.chain, v.signed.valid_until_epoch, intent);
+  assert.equal(hex(frame), v.signed.frame);
+});
