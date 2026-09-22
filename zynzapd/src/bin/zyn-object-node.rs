@@ -10,6 +10,10 @@
 //! ```text
 //!   ZYN_CHAIN_ID       the chain                       (212)
 //!   ZYN_DA_MIRRORS     url[|token],… to PUT bundles to (none)
+//!   ZYN_BRIDGE_SEED    hex, ≥32 bytes; turns deposits on (off)
+//!   ZYN_ZEC_ASSET      the asset bridged ZEC becomes    (XZEC)
+//!   ZYN_EXIT_REVEALS   where exits say to pay           (/etc/zyn/zcash-exit-reveals)
+//!   ZYN_SCAN_STEP      blocks per scan step             (25)
 //!   ZYN_LISTEN         JSON-RPC, read and write        (127.0.0.1:8399)
 //!   ZYN_DATA_DIR       where state is kept             (./object-data)
 //!   ZYN_EPOCH_SECS     seal at least this often        (10)
@@ -61,6 +65,8 @@ struct Anchoring {
     /// Enough to derive an address, and nothing that can spend.
     keys: zyn_custody::shielded::VaultKeys,
     network: zyn_custody::zebra::Network,
+    /// Pays exits out of the vault, when there is somewhere to pay them.
+    exits: Option<zynzapd::object_exit::ExitSettler>,
 }
 
 fn env(name: &str, default: &str) -> String {
@@ -171,7 +177,7 @@ fn status_json(
             "\"commitments\":{},\"live\":{},\"nullifiers\":{},\"reconciled\":{},",
             "\"offers\":{},\"exits\":{},",
             "\"anchored_epoch\":{},\"anchored_height\":{},\"anchor_txid\":\"{}\",",
-            "\"issued\":{},\"deposits_credited\":{},",
+            "\"issued\":{},\"deposits_credited\":{},\"owed_zatoshi\":{},",
             "\"synced_to\":{},\"sync_target\":{},\"sync_error\":\"{}\",",
             "\"state_root\":\"{}\",\"anchoring\":\"{}\"}}"
         ),
@@ -199,6 +205,11 @@ fn status_json(
         // number covering both would be a number that means nothing.
         issued_json(vm),
         vm.deposits.len(),
+        // What the ledger still owes and has not paid, in zatoshi. Counts
+        // exits nobody has revealed a destination for, because an unrevealed
+        // exit is still a debt — a vault sized only for the revealed ones is
+        // a vault that runs out.
+        zynzapd::object_exit::owed(vm, &zec_asset()),
         sync.synced_to,
         sync.target,
         // A JSON string, so a scanner error with a quote in it cannot break
@@ -1049,6 +1060,19 @@ struct SyncProgress {
     error: String,
 }
 
+/// The asset id this chain custodies as bridged ZEC.
+///
+/// One definition, read by both the deposit bridge and the exit settler: if
+/// they disagreed, money would enter as one asset and be owed as another.
+fn zec_asset() -> [u8; 32] {
+    match std::env::var("ZYN_ZEC_ASSET").ok().filter(|s| !s.is_empty()) {
+        None => swapvm::types::XZEC,
+        Some(h) => unhex(&h)
+            .and_then(|b| <[u8; 32]>::try_from(b).ok())
+            .unwrap_or(swapvm::types::XZEC),
+    }
+}
+
 /// Wire the settler, if this deployment has a vault to anchor from.
 ///
 /// Every piece is required: a Zcash node to watch, the vault's viewing key to
@@ -1130,8 +1154,8 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         from_height,
         confirmations,
         attributions.clone(),
-        public,
-        Some(custodians),
+        public.clone(),
+        Some(custodians.clone()),
     )
     .ok()?;
     let settler = zynzapd::anchor::AnchorSettler::new(
@@ -1151,7 +1175,15 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     let addresses: std::sync::Arc<
         Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
     > = std::sync::Arc::new(Mutex::new(std::collections::BTreeMap::new()));
-    let scanner = zyn_custody::shielded::Scanner::new(keys.clone(), from_height, 200)
+    // How many blocks one scan step covers before the trees are written down.
+    //
+    // Smaller is not slower: the work per block is the same, and the batch
+    // size only decides how much is lost when the process stops. A 200-block
+    // step on this hardware can run for the better part of an hour, and a
+    // restart inside one throws all of it away -- which is how a catch-up can
+    // run for hours and save nothing.
+    let step: u64 = env("ZYN_SCAN_STEP", "25").parse().unwrap_or(25).max(1);
+    let scanner = zyn_custody::shielded::Scanner::new(keys.clone(), from_height, step)
         .with_notes(notes.clone())
         .with_attributions(attributions.clone())
         // Without this the scanner has no idea an account's own deposit
@@ -1179,10 +1211,55 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         )
     );
 
+    // Exits. Opt-in on a reveal file, because an exit cannot be paid until
+    // its holder says where -- the chain carries a commitment, not an address.
+    let exits = {
+        let path = env("ZYN_EXIT_REVEALS", "/etc/zyn/zcash-exit-reveals");
+        let path = std::path::Path::new(&path);
+        let network_c = match network {
+            Network::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
+            _ => zcash_protocol::consensus::Network::TestNetwork,
+        };
+        let reveals = if path.exists() {
+            match zynzapd::object_exit::load_reveals(path, network_c) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Refused rather than started with a partial list: paying
+                    // some exits while silently ignoring a line the operator
+                    // believes they filed is worse than paying none.
+                    eprintln!("zyn-object-node: {e} — exit payments stay off");
+                    return None;
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        eprintln!(
+            "zyn-object-node: exit payments ON — {} reveal(s) filed at {}",
+            reveals.len(),
+            path.display()
+        );
+        Some(zynzapd::object_exit::ExitSettler::new(
+            Zebra::connect(&host, port, auth.clone(), network).ok()?,
+            network_c,
+            public.clone(),
+            custodians.clone(),
+            threshold,
+            fvk.clone(),
+            notes.clone(),
+            reveals,
+            zec_asset(),
+            confirmations,
+            std::path::Path::new(dir),
+            chain,
+        ))
+    };
+
     Some(Anchoring {
         addresses,
         keys,
         network,
+        exits,
         scanner,
         notes: notes.clone(),
         zebra: Zebra::connect(&host, port, auth, network).ok()?,
@@ -1501,11 +1578,11 @@ fn main() {
             }
             std::thread::sleep(std::time::Duration::from_secs(30));
         });
-        (a.settler, a.da_dir, a.da_key, a.data_dir)
+        (a.settler, a.da_dir, a.da_key, a.data_dir, a.exits)
     });
 
     // Carry roots to Zcash, and publish what lets anyone check them.
-    if let Some((mut settler, da_dir, da_key, data_dir)) = anchoring {
+    if let Some((mut settler, da_dir, da_key, data_dir, mut exits)) = anchoring {
         // Bundles written only to this box are bundles that die with it. The
         // retired chain pushed its DA to the mirror so a third party could
         // verify a root without asking us; the object ledger had no such push
@@ -1523,6 +1600,9 @@ fn main() {
         }
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
+        // The settled-exit intents go through the same publish path every
+        // other intent does, so this thread needs the published log too.
+        let pub_log = Arc::clone(&pub_log);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
             match settler.poll_once(&node, now_secs()) {
@@ -1577,6 +1657,48 @@ fn main() {
                 }
                 Ok(None) => {}
                 Err(e) => eprintln!("zyn-object-node: anchor pass failed: {e}"),
+            }
+            // Exits, after anchoring. Both spend from the same vault, and
+            // running the anchor first keeps the chain's own settlement ahead
+            // of payouts when notes are scarce -- a chain that cannot anchor
+            // is one whose exits nobody can verify anyway.
+            if let Some(ex) = exits.as_mut() {
+                let ops = {
+                    let vm_ops = node
+                        .lock()
+                        .map_err(|_| "node lock poisoned".to_string())
+                        .and_then(|n| ex.poll_once(n.state()));
+                    match vm_ops {
+                        Ok(ops) => ops,
+                        Err(e) => {
+                            eprintln!("zyn-object-node: exit pass failed: {e}");
+                            Vec::new()
+                        }
+                    }
+                };
+                for op in &ops {
+                    let receipts =
+                        apply_operator(
+                            op,
+                            &node,
+                            &journal,
+                            &pub_log,
+                            &data_dir.to_string_lossy(),
+                            chain,
+                        );
+                    if receipts.iter().any(ObjectVm::rejected) {
+                        // The vault paid and the ledger refused to record it.
+                        // Loud, because the two now disagree about a debt that
+                        // has actually been settled on Zcash.
+                        eprintln!(
+                            "zyn-object-node: SETTLEMENT REFUSED by the ledger: {receipts:?} — \
+                             Zcash has paid this exit and the chain still says it is owed"
+                        );
+                    }
+                }
+                if !ops.is_empty() {
+                    eprintln!("zyn-object-node: recorded {} settled exit(s)", ops.len());
+                }
             }
             // Drained on every pass, not only after a confirmation: a mirror
             // that was down when a bundle was written must still receive it,
@@ -1666,6 +1788,35 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON when nothing is issued");
         assert_eq!(v["issued"], serde_json::json!({}));
         assert_eq!(v["deposits_credited"], 0);
+    }
+
+    /// The debt figure. It counts exits nobody has revealed a destination
+    /// for, because an unrevealed exit is still owed — a vault sized only for
+    /// the revealed ones is a vault that runs out.
+    #[test]
+    fn the_status_reports_what_is_still_owed() {
+        let mut vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        let v: serde_json::Value =
+            serde_json::from_str(&status_json(&vm, true, None, &SyncProgress::default())).unwrap();
+        assert_eq!(v["owed_zatoshi"], 0, "a chain owing nothing says zero");
+
+        vm.exits.push(objectvm::PendingExit {
+            asset: zec_asset(),
+            amount: zynzapd::object_exit::from_zatoshi(5),
+            destination: [0x01; 32],
+            since_epoch: 1,
+            paid_by: None,
+        });
+        vm.exits.push(objectvm::PendingExit {
+            asset: zec_asset(),
+            amount: zynzapd::object_exit::from_zatoshi(9),
+            destination: [0x02; 32],
+            since_epoch: 1,
+            paid_by: Some([0xD1; 32]),
+        });
+        let v: serde_json::Value =
+            serde_json::from_str(&status_json(&vm, true, None, &SyncProgress::default())).unwrap();
+        assert_eq!(v["owed_zatoshi"], 5, "a paid exit is no longer owed");
     }
 
     /// Two assets are never added together: they share no unit, and one

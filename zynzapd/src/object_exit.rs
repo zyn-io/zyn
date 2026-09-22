@@ -450,6 +450,15 @@ impl ExitSettler {
     }
 }
 
+fn unhex_bytes(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok())
+        .collect()
+}
+
 fn unhex32(s: &str) -> Option<Hash> {
     if s.len() != 64 {
         return None;
@@ -459,6 +468,44 @@ fn unhex32(s: &str) -> Option<Hash> {
         out[i] = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
     }
     Some(out)
+}
+
+
+/// Load the reveals an operator has been given, out of band.
+///
+/// `<address> <salt-hex>` per line, `#` comments allowed. No account column,
+/// unlike the AMM's file: an object exit belongs to a commitment, not to an
+/// account, and asking for an account here would invite writing down a link
+/// the chain deliberately does not carry.
+///
+/// A line that does not parse is an error rather than a skip. A reveal the
+/// operator believes they filed and that was silently dropped is an exit that
+/// waits forever for a reason nobody can see.
+pub fn load_reveals(path: &Path, network: Network) -> Result<Vec<Reveal>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+    let mut out = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() != 2 {
+            return Err(format!("line {}: expected `<address> <salt-hex>`", n + 1));
+        }
+        let address = crate::settle::parse_destination(f[0], network).ok_or_else(|| {
+            format!(
+                "line {}: not a transparent or unified address for this network",
+                n + 1
+            )
+        })?;
+        let salt: [u8; 32] = unhex_bytes(f[1])
+            .and_then(|v| v.try_into().ok())
+            .ok_or_else(|| format!("line {}: salt must be 64 hex characters", n + 1))?;
+        out.push(Reveal { address, salt });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -665,5 +712,65 @@ mod inflight_tests {
         assert!(unhex32("abc").is_none());
         assert!(unhex32(&"zz".repeat(32)).is_none());
         assert_eq!(unhex32(&"ab".repeat(32)), Some([0xAB; 32]));
+    }
+}
+
+#[cfg(test)]
+mod reveal_file_tests {
+    use super::*;
+    use zcash_protocol::consensus::Network;
+
+    fn write(text: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zyn-reveals-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join(format!("{}.reveals", text.len()));
+        std::fs::write(&p, text).unwrap();
+        p
+    }
+
+    /// A transparent testnet address and a salt, with comments and blanks.
+    #[test]
+    fn a_reveal_file_parses() {
+        let p = write(concat!(
+            "# where to pay exit 0\n",
+            "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma 0101010101010101010101010101010101010101010101010101010101010101\n\n"
+        ));
+        let r = load_reveals(&p, Network::TestNetwork).expect("parses");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].salt, [0x01; 32]);
+    }
+
+    /// A line that does not parse is an error, not a skip. A reveal the
+    /// operator believes they filed and that was silently dropped is an exit
+    /// that waits forever for a reason nobody can see.
+    #[test]
+    fn a_malformed_line_is_an_error_not_a_silent_skip() {
+        assert!(load_reveals(&write("only-one-field\n"), Network::TestNetwork).is_err());
+        assert!(load_reveals(&write("notanaddress 0101\n"), Network::TestNetwork).is_err());
+        // Right address, salt too short.
+        assert!(load_reveals(
+            &write("tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma 0101\n"),
+            Network::TestNetwork
+        )
+        .is_err());
+    }
+
+    /// A mainnet address is not a testnet reveal. Paying one would send a
+    /// testnet exit to an address on the wrong chain.
+    #[test]
+    fn an_address_for_the_wrong_network_is_refused() {
+        assert!(load_reveals(
+            &write(concat!("t1KkTCS5wWLBhUwsmYtmoLnuAJUL8rEfKtL 0101010101010101010101010101010101010101010101010101010101010101\n")),
+            Network::TestNetwork
+        )
+        .is_err());
+    }
+
+    /// An empty file is a valid state: no reveals filed yet.
+    #[test]
+    fn an_empty_file_is_no_reveals() {
+        assert!(load_reveals(&write("# nothing yet\n"), Network::TestNetwork)
+            .unwrap()
+            .is_empty());
     }
 }
