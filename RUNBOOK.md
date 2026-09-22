@@ -2581,6 +2581,19 @@ exercised against money.
   if requested directly. Config backup at `/root/zyn-rpc.bak.getstatus`.
   `/` and `/testnet` still 405 on GET, deliberately: the mainnet sequencer's
   surface is not widened to make a link prettier.
+- **The node bounds what it will read** (22 Sep). A request over 256 KB, or a
+  declared `Content-Length` over it, gets a 413; a connection that stalls is
+  dropped after 15 s. Before that the read buffer grew without a ceiling, so a
+  lying `Content-Length` or headers that never ended grew it until the box ran
+  out of memory — and that box runs the mainnet sequencer. nginx caps the
+  public route already; this is so the loopback listener does not depend on
+  something in front of it.
+- **Resetting the devnet is expected after a state-shape change.** The state
+  root gained `SECTION_LIVE` on 22 Sep, so the persisted chain would have
+  served roots the new binary disagrees with. `systemctl stop
+  zyn-object-node; rm -rf /var/lib/zyn-object/*; systemctl start
+  zyn-object-node`. Wallets that had scanned it report zero afterwards,
+  correctly — the chain they scanned no longer exists.
 - **Rate limiting is shared** with the other two routes (`limit_req zone=zynrpc
   burst=20`). Hammering `/object` in a loop returns nothing and looks like an
   outage; space the requests before concluding anything is broken.

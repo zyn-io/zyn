@@ -312,7 +312,19 @@ fn field(body: &str, name: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
+/// The most a request may be. An intent is a few hundred bytes; this is
+/// generous and still small enough that a thousand of them cannot matter.
+const MAX_REQUEST: usize = 256 * 1024;
+
+/// How long one connection may take. Without it a client that opens a socket
+/// and says nothing holds a thread forever, and enough of them hold all of
+/// them. nginx caps the public route, but this process also listens on
+/// loopback and should not depend on something in front of it.
+const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32) {
+    let _ = s.set_read_timeout(Some(CONN_TIMEOUT));
+    let _ = s.set_write_timeout(Some(CONN_TIMEOUT));
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -321,6 +333,16 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, pub_log: Arc<Mutex<
             break;
         }
         buf.extend_from_slice(&chunk[..n]);
+        // Read no more than could ever be a request. This grew without a
+        // ceiling, so a declared Content-Length of a terabyte — or headers
+        // that simply never end — grew it until the box ran out of memory,
+        // and the box runs the mainnet sequencer too.
+        if buf.len() > MAX_REQUEST {
+            let _ = s.write_all(
+                b"HTTP/1.1 413 Payload Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+            );
+            return;
+        }
         if let Some(pos) = find(&buf, b"\r\n\r\n") {
             let head = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
             let want = head
@@ -329,6 +351,12 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, pub_log: Arc<Mutex<
                 .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).find(|x| !x.is_empty()))
                 .and_then(|d| d.parse::<usize>().ok())
                 .unwrap_or(0);
+            if want > MAX_REQUEST {
+                let _ = s.write_all(
+                    b"HTTP/1.1 413 Payload Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+                );
+                return;
+            }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
                 let out = handle(&body, &node, &pub_log, &dir, chain);

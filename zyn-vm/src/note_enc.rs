@@ -97,7 +97,16 @@ pub fn seal(
         return Err(NoteEncError::Malformed);
     }
     let epk = PublicKey::from(&ephemeral).to_bytes();
-    let shared = ephemeral.diffie_hellman(&PublicKey::from(*to)).to_bytes();
+    let dh = ephemeral.diffie_hellman(&PublicKey::from(*to));
+    // A low-order viewing key drives the exchange to an all-zero shared
+    // secret, which anybody can recompute — the note would be sealed in
+    // public. The sender is the one who would suffer no loss and the
+    // recipient the one who would, so it is refused here rather than left
+    // to whoever chose the key.
+    if !dh.was_contributory() {
+        return Err(NoteEncError::Malformed);
+    }
+    let shared = dh.to_bytes();
 
     let mut padded = Vec::with_capacity(PLAINTEXT_LEN);
     padded.extend_from_slice(&(plaintext.len() as u32).to_be_bytes());
@@ -212,5 +221,50 @@ mod tests {
             seal(&to, secret(15), &[0u8; PLAINTEXT_LEN + 1]),
             Err(NoteEncError::Malformed)
         );
+    }
+}
+
+#[cfg(test)]
+mod low_order {
+    use super::*;
+
+    /// A low-order public key drives X25519 to an all-zero shared secret,
+    /// which anyone can recompute. Sealing to one would publish the note.
+    #[test]
+    fn sealing_to_a_degenerate_key_is_refused() {
+        // The small-order points of Curve25519. Each forces a zero output.
+        let degenerate: [[u8; 32]; 3] = [
+            [0u8; 32],
+            {
+                let mut k = [0u8; 32];
+                k[0] = 1;
+                k
+            },
+            [
+                0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae, 0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f,
+                0xc4, 0x6a, 0xda, 0x09, 0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd, 0x86, 0x62, 0x05, 0x16,
+                0x5f, 0x49, 0xb8, 0x00,
+            ],
+        ];
+        for k in degenerate {
+            assert_eq!(
+                seal(&k, StaticSecret::from([7u8; 32]), b"note"),
+                Err(NoteEncError::Malformed),
+                "sealing to a low-order key must be refused"
+            );
+        }
+    }
+
+    /// And an ordinary key still works, so the check is not simply refusing.
+    #[test]
+    fn sealing_to_a_real_key_still_works() {
+        let recipient = StaticSecret::from([0x11u8; 32]);
+        let note = seal(
+            &viewing_public(&recipient),
+            StaticSecret::from([7u8; 32]),
+            b"note",
+        )
+        .expect("an ordinary key seals");
+        assert_eq!(open(&recipient, &note).unwrap(), b"note");
     }
 }
