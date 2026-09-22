@@ -1351,11 +1351,24 @@ fn main() {
         }
     }
 
+    // Which Zcash this chain settles on, and whether it settles at all. These
+    // are two facts and the banner said one: it read "TESTNET" whenever
+    // anchoring was on, so a **mainnet** object ledger announced itself as a
+    // testnet. A node that misnames the network it holds money on is the one
+    // line of output nobody re-reads.
     eprintln!(
-        "zyn-object-node: chain {} listening on {} — {}",
+        "zyn-object-node: chain {} listening on {} — {} ({})",
         chain,
         listen,
-        if anchoring.is_some() { "TESTNET" } else { "DEVNET" }
+        match env("ZYN_NETWORK", "testnet").as_str() {
+            "mainnet" | "main" => "MAINNET",
+            _ => "TESTNET",
+        },
+        if anchoring.is_some() {
+            "anchoring"
+        } else {
+            "devnet, anchoring off"
+        }
     );
     // Say which one it is, and never say the better one by default. A node
     // that claims to anchor and does not is worse than one that admits it.
