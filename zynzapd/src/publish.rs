@@ -19,6 +19,7 @@
 //!   chain-<id>/index            epoch root anchor_id txid height
 //! ```
 
+use zyn_vm::spec::MicrochainVm;
 use std::fs;
 use std::path::Path;
 
@@ -272,8 +273,8 @@ pub fn read_local(root: &Path, chain_id: u32, epoch: u64) -> Result<Bundle, Stri
 
 /// Assemble the bundle for an anchor the chain just confirmed, from what the
 /// node holds and the journal on disk.
-pub fn bundle_for(
-    node: &zyn::node::Node<swapvm::state::SwapState>,
+pub fn bundle_for<V: MicrochainVm>(
+    node: &zyn::node::Node<V>,
     journal_root: &Path,
     chain_id: u32,
     anchor: &Anchor,
@@ -299,7 +300,7 @@ pub fn bundle_for(
     let first = last.saturating_add(1).saturating_sub(anchor.epochs);
     let intents = zyn::journal::files_for(journal_root, chain_id, first..=last)
         .map_err(|e| format!("journal: {}", e))?;
-    all_sealed(&intents)?;
+    all_sealed::<V>(&intents)?;
     Ok(Bundle {
         anchor: *anchor,
         certificate,
@@ -314,12 +315,12 @@ pub fn bundle_for(
 /// the anchor, the intents, and the leaves, so signers can verify and endorse
 /// while the transaction confirms. Its certificate is whatever has been
 /// gathered so far — empty at broadcast, filled by [`bundle_for`] on settle.
-pub fn proposed_bundle(
-    node: &zyn::node::Node<swapvm::state::SwapState>,
+pub fn proposed_bundle<V: MicrochainVm>(
+    node: &zyn::node::Node<V>,
     journal_root: &Path,
     chain_id: u32,
     anchor: &Anchor,
-    snapshot: &zyn::da::Snapshot<swapvm::state::SwapState>,
+    snapshot: &zyn::da::Snapshot<V>,
     txid: &str,
 ) -> Result<Bundle, String> {
     let published = snapshot
@@ -336,7 +337,7 @@ pub fn proposed_bundle(
     let first = last.saturating_add(1).saturating_sub(anchor.epochs);
     let intents = zyn::journal::files_for(journal_root, chain_id, first..=last)
         .map_err(|e| format!("journal: {}", e))?;
-    all_sealed(&intents)?;
+    all_sealed::<V>(&intents)?;
     Ok(Bundle {
         anchor: *anchor,
         certificate,
@@ -358,7 +359,7 @@ pub fn proposed_bundle(
 /// minutes on 8 Sep 2026 (epoch 2215: 62 bytes published, 96 on disk).
 ///
 /// Refusing here costs one pass, and the next one publishes a whole bundle.
-fn all_sealed(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
+fn all_sealed<V: MicrochainVm>(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
     use zyn_vm::spec::MicrochainVm;
     for (epoch, raw) in files {
         let f = zyn::journal::read_epoch(raw)
@@ -369,12 +370,12 @@ fn all_sealed(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
             .and_then(|(_, bytes)| {
                 if f.version == 1 {
                     let mut d = zyn_vm::read::Decoder::new(bytes);
-                    <swapvm::state::SwapState as MicrochainVm>::decode_intent(&mut d)
+                    <V as MicrochainVm>::decode_intent(&mut d)
                 } else {
-                    zyn::verify::decode_committed_intent::<swapvm::state::SwapState>(bytes).ok()
+                    zyn::verify::decode_committed_intent::<V>(bytes).ok()
                 }
             })
-            .map(|i| matches!(i, swapvm::tx::Intent::Checkpoint))
+            .map(|i| <V as MicrochainVm>::is_seal(&i))
             .unwrap_or(false);
         if !sealed {
             return Err(format!(

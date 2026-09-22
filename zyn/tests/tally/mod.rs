@@ -175,6 +175,10 @@ impl MicrochainVm for TallyVm {
         ]
     }
 
+    fn is_seal(intent: &Tick) -> bool {
+        matches!(intent, Tick::Seal)
+    }
+
     fn seal_intent() -> Tick {
         Tick::Seal
     }

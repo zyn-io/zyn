@@ -80,6 +80,10 @@ impl MicrochainVm for SwapState {
         SwapState::sections(self)
     }
 
+    fn is_seal(intent: &Intent) -> bool {
+        matches!(intent, Intent::Checkpoint)
+    }
+
     fn seal_intent() -> Intent {
         Intent::Checkpoint
     }
@@ -537,7 +541,11 @@ mod tests {
                     self.0.accounts_root(),
                 ]
             }
-            fn seal_intent() -> Intent {
+            fn is_seal(intent: &Intent) -> bool {
+        matches!(intent, Intent::Checkpoint)
+    }
+
+    fn seal_intent() -> Intent {
                 Intent::Checkpoint
             }
             fn sealed(r: &[Receipt]) -> Option<Checkpoint> {

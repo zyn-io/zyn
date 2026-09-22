@@ -30,6 +30,7 @@ use std::sync::{Arc, Mutex};
 
 use objectvm::{Limits, ObjectVm, Op};
 use zyn::epoch::EpochPolicy;
+use zyn::journal::Journal;
 use zyn::{Economics, Node};
 use zyn_vm::read::Decoder;
 use zyn_vm::spec::MicrochainVm;
@@ -228,6 +229,7 @@ fn record(pub_log: &mut Published, op: &Op) {
 fn handle(
     body: &str,
     node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
     pub_log: &Arc<Mutex<Published>>,
     dir: &str,
     chain: u32,
@@ -274,6 +276,26 @@ fn handle(
             let mut n = node.lock().unwrap();
             let step = n.submit_operator(op.clone(), now_secs());
             let receipts = format!("{:?}", step.receipts);
+
+            // Write the intent down before anything derived from it is served.
+            // A chain nobody can replay is a chain nobody can check, and the
+            // published root is only meaningful next to the intents that
+            // produced it. The seal is recorded too: an epoch whose last
+            // record is not a seal is one a verifier refuses, and refusing
+            // *here* costs one pass where publishing it halts every replica
+            // that reads the bundle.
+            {
+                let mut j = journal.lock().unwrap();
+                let encoded = ObjectVm::encode_intent(&op);
+                if let Err(err) = j.record(n.state().epoch, step.seq, &encoded) {
+                    eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
+                }
+                if step.sealed.is_some() {
+                    let seal = ObjectVm::encode_intent(&ObjectVm::seal_intent());
+                    let _ = j.record(n.state().epoch, step.seq.saturating_add(1), &seal);
+                    let _ = j.sync();
+                }
+            }
             // `submit` seals itself when the policy is due, so most seals
             // happen here rather than on the timer. Log from both, or a chain
             // that is working looks like one that is asleep — which cost most
@@ -329,7 +351,7 @@ const MAX_REQUEST: usize = 256 * 1024;
 /// loopback and should not depend on something in front of it.
 const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32) {
+fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32) {
     let _ = s.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = s.set_write_timeout(Some(CONN_TIMEOUT));
     let mut buf = Vec::new();
@@ -366,7 +388,7 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, pub_log: Arc<Mutex<
             }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
-                let out = handle(&body, &node, &pub_log, &dir, chain);
+                let out = handle(&body, &node, &journal, &pub_log, &dir, chain);
                 let _ = s.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -424,6 +446,16 @@ fn main() {
         }
     };
     let node = Arc::new(Mutex::new(vm.with_manual_anchoring()));
+    // The journal is what makes this chain checkable by anyone else: a root
+    // is only meaningful next to the intents that produced it.
+    let journal = match Journal::open(&dir, chain) {
+        Ok(j) => Arc::new(Mutex::new(j)),
+        Err(e) => {
+            eprintln!("zyn-object-node: cannot open the journal in {}: {}", dir, e);
+            std::process::exit(1);
+        }
+    };
+    eprintln!("zyn-object-node: journalling intents to {}/journal/chain-{}", dir, chain);
     let pub_log = Arc::new(Mutex::new(load_published(&dir, chain)));
     {
         let p = pub_log.lock().unwrap();
@@ -471,9 +503,10 @@ fn main() {
     };
     let mut _backlog: VecDeque<()> = VecDeque::new();
     for s in l.incoming().flatten() {
+        let journal = Arc::clone(&journal);
         let node = Arc::clone(&node);
         let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
-        std::thread::spawn(move || serve(s, node, pub_log, dir, chain));
+        std::thread::spawn(move || serve(s, node, journal, pub_log, dir, chain));
     }
 }

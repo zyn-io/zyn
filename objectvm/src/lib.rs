@@ -1137,6 +1137,10 @@ impl MicrochainVm for ObjectVm {
         ]
     }
 
+    fn is_seal(intent: &Op) -> bool {
+        matches!(intent, Op::Seal)
+    }
+
     fn seal_intent() -> Op {
         Op::Seal
     }

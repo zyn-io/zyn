@@ -348,6 +348,9 @@ impl MicrochainVm for LeakyVm {
     fn sections(&self) -> Vec<Hash> {
         self.0.sections()
     }
+    fn is_seal(intent: &Tick) -> bool {
+        matches!(intent, Tick::Seal)
+    }
     fn seal_intent() -> Tick {
         Tick::Seal
     }

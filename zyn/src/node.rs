@@ -1532,7 +1532,7 @@ mod tests {
 
 #[cfg(test)]
 mod cadence_governs_both_paths {
-    use super::tests::*;
+
     use super::*;
     use crate::epoch::EpochPolicy;
     use swapvm::state::SwapState;
