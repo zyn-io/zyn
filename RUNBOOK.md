@@ -2549,6 +2549,46 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-sexies. Checking the object ledger (22 Sep 2026)
+
+```sh
+ZYN_CHAIN_ID=212 ZYN_DATA_DIR=/var/lib/zyn-object \
+ZYN_DA_DIR=/var/lib/zyn-object/da zyn-object-publish
+```
+
+Two answers. **Publishable** means every closed epoch ends with a seal — the
+check a publisher runs before building a bundle, and the one a replica refuses
+without. **Replayed** applies the journal from genesis and prints the root it
+reaches; that root must equal the one `/object` serves.
+
+```
+chain 212: 2 epoch(s) on disk, 2 publishable, 0 refused
+replayed 4 intent(s) across 2 epoch(s) -> root f3461acf…
+```
+
+Replay is the answer that matters. "Publishable" only says each epoch is
+closed; replay says the intents actually produce the state being served. An
+epoch whose records were filed under the wrong number passes the first and
+fails the second — which is precisely how chain 11 ended up with an anchored
+root its own intents could not reproduce.
+
+**Three traps, all of which cost time here:**
+
+- **Seals are records.** A v2 journal holds *authorized* intents, so a bare
+  one decodes as nothing and the epoch reads as never closed. `Authorized::
+  operator` is the honest envelope for something arriving on the operator's
+  own RPC — it names who vouched rather than implying a signature nobody made.
+- **Replay applies seals too.** A seal advances the epoch and is part of what
+  the root commits to. Skipping them reaches a different root and reads as a
+  corrupt journal when nothing is wrong.
+- **State and journal must start together.** Deleting one and keeping the
+  other leaves a chain that cannot be replayed from genesis, which is the
+  single property it exists to have. If you wipe, wipe both.
+
+The newest epoch is normally still open and therefore not publishable. That is
+the system working, and the tool says "still open" rather than counting it as
+a refusal.
+
 ## 5f-quinquies. Chain 11 is retired (22 Sep 2026)
 
 Stopped and disabled on Hetzner. Nothing is deleted: 10,442 epoch files and

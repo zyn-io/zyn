@@ -285,16 +285,41 @@ fn handle(
             // *here* costs one pass where publishing it halts every replica
             // that reads the bundle.
             {
+                // The epoch this intent belongs to, read *before* a seal moves
+                // the state on. Taking it afterwards files the intent under
+                // the epoch that follows it, and the one it actually closed
+                // ends up empty.
+                let epoch_for_record = if step.sealed.is_some() {
+                    n.state().epoch.saturating_sub(1)
+                } else {
+                    n.state().epoch
+                };
                 let mut j = journal.lock().unwrap();
-                let encoded = ObjectVm::encode_intent(&op);
-                if let Err(err) = j.record(n.state().epoch, step.seq, &encoded) {
+                // A v2 journal holds *authorized* intents, not raw ones: a
+                // replica decodes the envelope and re-checks the authority
+                // before applying anything, so writing a bare intent produces
+                // a file that reads as unsealed and a bundle no verifier will
+                // take. These arrive over the operator's own RPC, so
+                // `Authorized::operator` is the honest envelope — it says who
+                // vouched for the intent rather than implying a signature
+                // nobody made.
+                let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(
+                    &zyn_vm::verify::Authorized::operator(op.clone()),
+                );
+                if let Err(err) = j.record(epoch_for_record, step.seq, &encoded) {
                     eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
                 }
                 if step.sealed.is_some() {
-                    let seal = ObjectVm::encode_intent(&ObjectVm::seal_intent());
-                    let _ = j.record(n.state().epoch, step.seq.saturating_add(1), &seal);
-                    let _ = j.sync();
+                    let seal = zyn_vm::verify::encode_authorized::<ObjectVm>(
+                        &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
+                    );
+                    let _ = j.record(epoch_for_record, step.seq.saturating_add(1), &seal);
                 }
+                // Always. The writer buffers, so an intent recorded and not
+                // flushed is one a verifier fetching this epoch will not find
+                // — and the node had exactly that bug, leaving a file holding
+                // nothing but its header.
+                let _ = j.sync();
             }
             // `submit` seals itself when the policy is due, so most seals
             // happen here rather than on the timer. Log from both, or a chain
@@ -479,6 +504,7 @@ fn main() {
     // scanning it sees epochs go by rather than wondering if it is alive.
     {
         let node = Arc::clone(&node);
+        let journal = Arc::clone(&journal);
         let dir = dir.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -487,6 +513,20 @@ fn main() {
             // `seal_if_due` refuses an empty epoch, and a submission that was
             // already due sealed itself above.
             if n.seal_if_due(now_secs()).is_some() {
+                // The seal belongs in the journal wherever it happens. Sealing
+                // here and recording it only on the submit path left the epoch
+                // closed in memory and open on disk, which every verifier
+                // reads as an epoch that was never finished.
+                let closed = n.state().epoch.saturating_sub(1);
+                if let Ok(mut j) = journal.lock() {
+                    let seal = zyn_vm::verify::encode_authorized::<ObjectVm>(
+                        &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
+                    );
+                    if let Err(e) = j.record(closed, n.state().seq(), &seal) {
+                        eprintln!("zyn-object-node: could not journal the timer seal: {e}");
+                    }
+                    let _ = j.sync();
+                }
                 eprintln!(
                     "zyn-object-node: sealed epoch {} on the timer — root {}",
                     n.state().epoch,

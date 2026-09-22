@@ -65,12 +65,29 @@ fn a_journalled_epoch_parses_and_ends_with_its_seal() {
     for op in &ops {
         seq += 1;
         vm.apply(seq, op);
-        j.record(1, seq, &ObjectVm::encode_intent(op))
-            .expect("record");
+        // A v2 journal holds authorized intents. Writing a bare one produces
+        // a file that reads as unsealed, which the publisher refuses and no
+        // verifier will take — the node had this bug until the publisher
+        // caught it.
+        j.record(
+            1,
+            seq,
+            &zyn_vm::verify::encode_authorized::<ObjectVm>(
+                &zyn_vm::verify::Authorized::operator(op.clone()),
+            ),
+        )
+        .expect("record");
     }
     seq += 1;
-    j.record(1, seq, &ObjectVm::encode_intent(&ObjectVm::seal_intent()))
-        .expect("seal");
+    vm.apply(seq, &ObjectVm::seal_intent());
+    j.record(
+        1,
+        seq,
+        &zyn_vm::verify::encode_authorized::<ObjectVm>(
+            &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
+        ),
+    )
+    .expect("seal");
     j.sync().expect("sync");
 
     let raw = std::fs::read(
@@ -92,22 +109,22 @@ fn a_journalled_epoch_parses_and_ends_with_its_seal() {
     // The last record must be the seal — the exact test a publisher runs
     // before it will build a bundle.
     let last = &f.records.last().expect("non-empty").1;
-    let decoded = <ObjectVm as MicrochainVm>::decode_intent(&mut zyn_vm::read::Decoder::new(last))
-        .expect("the last record decodes");
+    let decoded = zyn_vm::verify::decode_committed_intent::<ObjectVm>(last)
+        .expect("the last record decodes as an authorized intent");
     assert!(
         <ObjectVm as MicrochainVm>::is_seal(&decoded),
         "the last record of a sealed epoch must be the seal"
     );
 
     // And replaying the journal reaches the same root the node published.
+    //
+    // Every record, seals included. A seal advances the epoch and is part of
+    // what the root commits to, so a replay that skips them lands on a
+    // different root and reads as a corrupted journal when nothing is wrong.
     let mut replay = ObjectVm::genesis(chain, Limits { max_io: 8 });
     let mut n = 0u64;
     for (_, bytes) in &f.records {
-        let mut d = zyn_vm::read::Decoder::new(bytes);
-        let op = <ObjectVm as MicrochainVm>::decode_intent(&mut d).expect("decodes");
-        if <ObjectVm as MicrochainVm>::is_seal(&op) {
-            continue;
-        }
+        let op = zyn_vm::verify::decode_committed_intent::<ObjectVm>(bytes).expect("decodes");
         n += 1;
         replay.apply(n, &op);
     }

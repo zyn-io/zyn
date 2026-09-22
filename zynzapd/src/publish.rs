@@ -359,6 +359,15 @@ pub fn proposed_bundle<V: MicrochainVm>(
 /// minutes on 8 Sep 2026 (epoch 2215: 62 bytes published, 96 on disk).
 ///
 /// Refusing here costs one pass, and the next one publishes a whole bundle.
+/// Whether these journal files are each closed by a seal.
+///
+/// Public so a publisher can ask the question without building a bundle —
+/// checking on disk, before anything is served, is the cheap place to find an
+/// epoch that was never closed.
+pub fn all_sealed_public<V: MicrochainVm>(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
+    all_sealed::<V>(files)
+}
+
 fn all_sealed<V: MicrochainVm>(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
     use zyn_vm::spec::MicrochainVm;
     for (epoch, raw) in files {
