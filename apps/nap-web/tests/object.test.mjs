@@ -1,0 +1,128 @@
+// The browser's half of the object-ledger note format.
+//
+// The Rust side opens these notes too, and nothing makes the two agree except
+// that they were written from the same spec. The failure if they drift is
+// silent: a wallet looks at the right chain, opens nothing, and reports zero —
+// which is indistinguishable from having been robbed. So both sides check the
+// same committed fixture, and neither can move alone.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+import {
+  commitment,
+  hex,
+  nullifierKey,
+  nullifierOf,
+  openNote,
+  scan,
+  unhex,
+  viewingKey,
+  viewingSecret,
+} from '../src/object.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const v = JSON.parse(readFileSync(join(here, 'object-vectors.json'), 'utf8'));
+const seed = new TextEncoder().encode(v.seed_utf8);
+
+/// The salts are a wire format. An account registered on chain is bound to the
+/// viewing key this produces; change a salt and every restored wallet looks at
+/// the wrong ciphertexts and finds nothing.
+test('the key derivations match the Rust side', () => {
+  assert.equal(hex(viewingKey(seed, v.account)), v.viewing_key);
+  assert.equal(hex(nullifierKey(seed, v.account)), v.nullifier_key);
+});
+
+/// The whole point: a note sealed by Rust opens in the browser.
+test('a note sealed by the Rust side opens here', () => {
+  const note = openNote(viewingSecret(seed, v.account), unhex(v.epk), unhex(v.ciphertext));
+  assert.ok(note, 'the note must open');
+  assert.equal(hex(note.asset), v.note.asset);
+  assert.equal(note.amount, BigInt(v.note.amount));
+  assert.equal(hex(note.nonce), v.note.nonce);
+});
+
+/// Amounts are WAD units, so a few ZEC already exceeds what a double holds
+/// exactly. A wallet that rounds a balance is a wallet that lies about it.
+test('the amount survives as an exact integer', () => {
+  const note = openNote(viewingSecret(seed, v.account), unhex(v.epk), unhex(v.ciphertext));
+  assert.equal(typeof note.amount, 'bigint');
+  assert.equal(note.amount.toString(), v.note.amount);
+  // And this is why it is a BigInt: at this magnitude a double cannot even
+  // tell the value from the next one up, so a wallet holding the balance as a
+  // Number would be unable to represent the difference a single unit makes.
+  assert.equal(
+    Number(note.amount),
+    Number(note.amount) + 1,
+    'a double cannot separate these, which is the reason for BigInt'
+  );
+});
+
+test('the commitment and nullifier match the Rust side', () => {
+  const note = openNote(viewingSecret(seed, v.account), unhex(v.epk), unhex(v.ciphertext));
+  const c = commitment(note, unhex(v.owner));
+  assert.equal(hex(c), v.commitment);
+  assert.equal(hex(nullifierOf(nullifierKey(seed, v.account), c)), v.nullifier);
+});
+
+/// Not ours and damaged are one case, exactly as in Rust: telling a scanner
+/// *why* a trial decryption failed tells an attacker which notes are close.
+test('a note for somebody else does not open, and neither does rubbish', () => {
+  const other = viewingSecret(new TextEncoder().encode('a different seed'), 0);
+  assert.equal(openNote(other, unhex(v.epk), unhex(v.ciphertext)), null);
+
+  const secret = viewingSecret(seed, v.account);
+  const damaged = unhex(v.ciphertext);
+  damaged[0] ^= 0xff;
+  assert.equal(openNote(secret, unhex(v.epk), damaged), null);
+  assert.equal(openNote(secret, new Uint8Array(32), unhex(v.ciphertext)), null);
+  assert.equal(openNote(secret, unhex(v.epk), new Uint8Array(0)), null);
+});
+
+/// A mirror is not trusted. It could hand back a real ciphertext paired with
+/// somebody else's commitment, and a wallet that believed the pairing would
+/// show a balance it cannot spend.
+test('a note paired with the wrong commitment is not counted', () => {
+  const feed = {
+    outputs: [{ commitment: 'ff'.repeat(32), epk: v.epk, ciphertext: v.ciphertext }],
+    nullifiers: [],
+  };
+  const held = scan(feed, {
+    secret: viewingSecret(seed, v.account),
+    nkey: nullifierKey(seed, v.account),
+    owner: unhex(v.owner),
+  });
+  assert.equal(held.held.length, 0, 'the pairing must be checked, not assumed');
+});
+
+/// A spent note is gone. Without this the wallet shows money it cannot move.
+test('a note whose nullifier has appeared is not held', () => {
+  const args = {
+    secret: viewingSecret(seed, v.account),
+    nkey: nullifierKey(seed, v.account),
+    owner: unhex(v.owner),
+  };
+  const outputs = [{ commitment: v.commitment, epk: v.epk, ciphertext: v.ciphertext }];
+
+  const unspent = scan({ outputs, nullifiers: [] }, args);
+  assert.equal(unspent.held.length, 1);
+  assert.equal(unspent.balances.get(v.note.asset), BigInt(v.note.amount));
+
+  const spent = scan({ outputs, nullifiers: [v.nullifier] }, args);
+  assert.equal(spent.held.length, 0, 'a spent note must not still be held');
+});
+
+/// An empty or malformed feed is a balance of nothing, not a crash.
+test('a missing or empty feed reads as nothing held', () => {
+  const args = {
+    secret: viewingSecret(seed, v.account),
+    nkey: nullifierKey(seed, v.account),
+    owner: unhex(v.owner),
+  };
+  for (const feed of [{}, { outputs: [] }, { outputs: [], nullifiers: [] }]) {
+    assert.equal(scan(feed, args).held.length, 0);
+  }
+});
