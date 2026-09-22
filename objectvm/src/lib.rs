@@ -365,6 +365,44 @@ impl ObjectVm {
         self.live.keys().copied().collect()
     }
 
+    /// Does the ledger account for every object it ever created?
+    ///
+    /// Every commitment ever appended is either still live or has been
+    /// retired, and retiring one publishes exactly one nullifier. So:
+    ///
+    /// ```text
+    ///     commitments  ==  live  +  nullifiers
+    /// ```
+    ///
+    /// This is the double-spend check that actually works at this tier, and
+    /// it is worth being precise about why the obvious one does not. §130.10
+    /// hoped a stranger could "check no nullifier appeared twice" — but a
+    /// nullifier is chosen by the spender and the VM cannot verify it derives
+    /// from their key, so an operator retiring an object twice would simply
+    /// publish two unrelated nullifiers and the check would pass (A120).
+    ///
+    /// Counting closes that. An object cannot leave the live set without a
+    /// nullifier appearing, and a nullifier cannot appear without an object
+    /// leaving, so an operator who retires an object quietly — or invents
+    /// spends that retired nothing — fails this immediately. The counts are
+    /// in the node's status output, so it is checkable by anyone without
+    /// holding any key.
+    ///
+    /// What it does **not** do is tell you *which* object a nullifier
+    /// retired. That linkage stays hidden on purpose — see
+    /// `a_published_nullifier_does_not_name_its_commitment` — and recovering
+    /// it for a verifier without also handing it to every observer is what
+    /// A108's circuit is for.
+    pub fn reconciled(&self) -> Result<(), &'static str> {
+        let created = self.commitments.len();
+        let held = self.live.len();
+        let retired = self.nullifiers.len();
+        if created != held + retired {
+            return Err("objects created do not equal those held plus those retired");
+        }
+        Ok(())
+    }
+
     /// The bytes an account leaf commits to.
     ///
     /// `account_leaf` hashes exactly this and `account_record` serves exactly

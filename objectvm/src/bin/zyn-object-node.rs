@@ -121,7 +121,8 @@ fn status_json(vm: &ObjectVm) -> String {
     format!(
         concat!(
             "{{\"chain\":{},\"epoch\":{},\"seq\":{},\"accounts\":{},",
-            "\"commitments\":{},\"nullifiers\":{},\"offers\":{},\"exits\":{},",
+            "\"commitments\":{},\"live\":{},\"nullifiers\":{},\"reconciled\":{},",
+            "\"offers\":{},\"exits\":{},",
             "\"state_root\":\"{}\",\"anchoring\":\"none — devnet, roots reach no chain\"}}"
         ),
         vm.chain_id,
@@ -129,7 +130,13 @@ fn status_json(vm: &ObjectVm) -> String {
         vm.seq,
         vm.accounts.len(),
         vm.commitments.len(),
+        // `live` and `reconciled` are here so the double-spend check can be
+        // run by anyone reading this endpoint: every object ever created is
+        // either still held or retired exactly once, and the counts say so
+        // without needing a key (A120).
+        vm.live.len(),
         vm.nullifiers.len(),
+        vm.reconciled().is_ok(),
         vm.offers.len(),
         vm.exits.len(),
         hex(&vm.state_root()),

@@ -1033,3 +1033,56 @@ fn the_oldest_unpaid_exit_is_the_one_reported_first() {
     assert_eq!(debts[0].destination, [0xD4; 32]);
     assert_eq!(egress::outstanding(&vm, &ZEC), Fixed::whole(13));
 }
+
+/// Counting is the double-spend check that works at this tier.
+///
+/// §130.10 hoped a stranger could check no nullifier appeared twice. They
+/// cannot: a nullifier is the spender's choice and the VM cannot verify it
+/// derives from their key, so retiring an object twice would just publish two
+/// unrelated nullifiers (A120). What is checkable, without any key, is that
+/// every object ever created is either still live or has been retired exactly
+/// once — `commitments == live + nullifiers`.
+#[test]
+fn every_object_is_either_held_or_retired() {
+    let (mut vm, input) = funded();
+    assert_eq!(vm.reconciled(), Ok(()), "a fresh ledger reconciles");
+
+    vm.apply(
+        2,
+        &Op::Spend {
+            spender: ALICE,
+            program: program::private_transfer(),
+            inputs: vec![(input, nullifier(&ALICE_KEY, &input))],
+            outputs: vec![out(note(17, BOB, 6))],
+        },
+    );
+    assert_eq!(vm.reconciled(), Ok(()), "and still does after a spend");
+    assert_eq!(
+        vm.commitments.len(),
+        vm.live.len() + vm.nullifiers.len(),
+        "the identity the check rests on"
+    );
+
+    // An operator who retires an object without publishing a nullifier is
+    // exactly what this catches — the counts stop adding up. Take one that is
+    // actually live: `input` was spent above, so removing it again is a no-op
+    // and would have proved nothing.
+    let still_live = *vm.live.keys().next().expect("the spend created an output");
+    vm.live.remove(&still_live);
+    assert!(
+        vm.reconciled().is_err(),
+        "an object retired quietly must fail reconciliation"
+    );
+}
+
+/// And one that invents spends which retired nothing fails the same way.
+#[test]
+fn invented_nullifiers_without_retirements_are_caught() {
+    let (mut vm, _input) = funded();
+    assert_eq!(vm.reconciled(), Ok(()));
+    vm.nullifiers.insert([0xAB; 32]);
+    assert!(
+        vm.reconciled().is_err(),
+        "a nullifier that retired nothing must fail reconciliation"
+    );
+}

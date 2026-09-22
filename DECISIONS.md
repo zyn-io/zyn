@@ -6171,3 +6171,41 @@ validated as positive at the point it enters the system, not where it is
 used.** Zero-checks are what you write when you are thinking about empty
 inputs rather than about hostile ones.
 
+### §136.7 — What "anyone can check we did not double-spend" actually means
+
+§130.10 said publishing commitments and nullifiers in the clear lets a
+stranger with no key check that no nullifier appeared twice. **That check does
+not work**, and finding out why took a wrong turn worth recording.
+
+A nullifier is chosen by the spender. The VM cannot verify it derives from
+their key — it holds no key, and there is no circuit yet to constrain the
+derivation. An operator retiring the same object twice would simply publish
+two unrelated nullifiers, and "no nullifier appeared twice" would pass.
+
+**The wrong fix** was to derive the nullifier in the VM from the commitment,
+making it verifiable by anyone. It works, and it destroys a property the
+design holds deliberately: `a_published_nullifier_does_not_name_its_commitment`
+asserts that a nullifier must not identify which commitment it retired, and
+without the owner's key there is no path between them. A VM-derived nullifier
+is that path, published for everyone. The test caught it, which is the whole
+reason to write a test for a property rather than a behaviour.
+
+**The right check is counting.** Every commitment ever appended is either
+still live or has been retired, and retiring one publishes exactly one
+nullifier:
+
+```text
+    commitments  ==  live  +  nullifiers
+```
+
+An operator who retires an object quietly fails it, and so does one who
+invents spends that retired nothing. It needs no key, it does not reveal which
+nullifier belongs to which commitment, and the counts are in the node's status
+output so anyone can run it. `ObjectVm::reconciled()`.
+
+This is weaker than the claim §130.10 made: it proves the books balance, not
+that a particular object was spent once. The stronger statement needs the
+derivation constrained inside a proof, which is A108. Until then the honest
+sentence is "anyone can check the ledger accounts for every object it
+created", and that is what the docs should say.
+
