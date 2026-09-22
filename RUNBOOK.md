@@ -2857,6 +2857,30 @@ something real before they are exercised against money.
     registers a viewing key. Nothing expires it. Debts are written before the
     cursor: if only one survives a crash it must be the list of what is owed,
     because a cursor that is behind only costs a rescan.
+- **Exits** (22 Sep, A134). `ZYN_EXIT_REVEALS`, `<address> <salt-hex>` per
+  line. An object exit names a **commitment**, `H(address ‖ salt)`, not an
+  address — the chain never carries where anyone's money went — so nothing can
+  be paid until the holder reveals the preimage out of band. A reveal is a
+  proof: it is matched by recomputing the commitment, so one naming an address
+  the exit never named is a stranger, not a redirection. A line that does not
+  parse refuses the whole file: a reveal the operator believes they filed and
+  that was quietly dropped is an exit that waits forever for a reason nobody
+  can see. `zyn_status` reports `owed_zatoshi`, counting exits nobody has
+  revealed — an unrevealed exit is still a debt.
+- **A replica** (22 Sep, A135). `zyn-object-replica.service` on **Contabo**,
+  verifying chain 212 from the mirror on a box that does not sequence it. It
+  refetches the published intents, replays them through `ObjectVm` from
+  genesis, and compares the root with the one the chain published; with
+  `ZYN_VAULT_FVK` and a testnet Zebra it also checks Zcash carries the anchor.
+  Contabo has no testnet Zebra, so today it is **replay-only and says so on
+  every start**. Tunnelling to the sequencer's Zebra would not fix that — the
+  box being verified would be supplying the evidence (§118.3).
+- **Scan throughput is the operational limit.** A 200-block step took the
+  better part of an hour on the cax11; `ZYN_SCAN_STEP=25` now lands one every
+  ~2.5 minutes, so progress is durable and visible. It is the same work per
+  block either way — roughly **600 blocks/hour**, which is ~16 hours for a
+  10,000-block catch-up. Sizing a box for a testnet catch-up is one thing;
+  mainnet's chain is longer.
 - **Objects are unbacked until that bridge is turned on.** Anchoring a root and
   backing an object are different promises, and the banner says them
   separately.
