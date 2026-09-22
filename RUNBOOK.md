@@ -2549,6 +2549,33 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-quinquies. Chain 11 is retired (22 Sep 2026)
+
+Stopped and disabled on Hetzner. Nothing is deleted: 10,442 epoch files and
+64 MB of state stay on the volume, because A126's sequence collision is the
+only surviving evidence of a bug worth understanding.
+
+**Why, rather than repairing it.** Its history is poisoned at epoch 9190 — one
+sequence number carrying two different intents, so the anchored root
+corresponds to no consistent intent set (A126). It held 0.1 **TAZ** from a
+faucet and two accounts, both ours. It was sealing an epoch every five seconds
+that could never anchor — 1,251 of them by the end — and its degraded signer
+set generated alerts that masked real problems on mainnet. Keeping it running
+was not neutral; it was noise plus a growing pile of unanchorable epochs.
+
+It also proved nothing that mainnet does not: **26460 anchors to Zcash for
+real.** Chain 11's remaining value is forensic.
+
+`/testnet` now answers **410 Gone** with a JSON-RPC error naming the date and
+pointing at `/object` and `/`. A 502 from a dead upstream reads as an outage,
+and the difference matters to anyone deciding whether to wait for it.
+
+**The signer and custodian hosts stay as they are.** They were rearranged to
+one identity per machine earlier the same day and are the set the next testnet
+should use; tearing them down to rebuild them would be work for its own sake.
+
+Config backups: `/root/zyn-rpc.bak.retire-testnet` and `.bak.retire2`.
+
 ## 5f-quater. One signer per machine (22 Sep 2026)
 
 Chain 11's set is 2-of-3 (`ZYN_SIGNER_THRESHOLD=2`). Until today **two of the
