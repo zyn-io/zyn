@@ -110,3 +110,80 @@ pub fn fresh(chain: u32) -> ObjectVm {
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
 }
+
+// ---------------------------------------------------------------------------
+// The third claim: Zcash carries it.
+// ---------------------------------------------------------------------------
+
+/// What checking an anchor against Zcash concluded.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum OnChain {
+    /// A Zcash transaction at this height carries exactly this anchor.
+    Carried { height: u64 },
+    /// The transaction exists and does not say what the chain claims, or no
+    /// transaction carrying this anchor was found in the range searched.
+    Missing { why: String },
+}
+
+/// Is the anchor the index names really on Zcash?
+///
+/// This is what makes the replay claim expensive to lie about. Replaying
+/// intents proves the operator applied the rules they published; it says
+/// nothing about *when*, and nothing stops them republishing a different
+/// history tomorrow. An anchor buried in Zcash does: rewriting it means
+/// rewriting Zcash.
+///
+/// Needs the vault's **viewing** key, which finds notes and cannot spend one.
+/// A replica holding it can read the vault's own anchors and nothing else of
+/// consequence — the same posture the AMM's replica runs in.
+///
+/// Searched around the height the index claims rather than at it exactly: the
+/// index records the height the settler saw a confirmation at, and a reorg can
+/// move a transaction by a block or two without making it a different anchor.
+pub fn anchor_on_zcash(
+    scanner: &zyn_custody::shielded::Scanner,
+    zebra: &zyn_custody::zebra::Zebra,
+    chain: u32,
+    entry: &crate::publish::IndexEntry,
+    slack: u64,
+) -> OnChain {
+    let from = entry.height.saturating_sub(slack);
+    let to = entry.height.saturating_add(slack);
+    let (_, sightings) = match scanner.anchors(zebra, from, to) {
+        Ok(v) => v,
+        Err(e) => {
+            return OnChain::Missing {
+                why: format!("cannot read Zcash {from}..={to}: {e:?}"),
+            }
+        }
+    };
+    for s in &sightings {
+        let Some((seen_chain, seen_epoch, seen_id)) = zyn::anchor::Anchor::parse_memo(&s.memo)
+        else {
+            continue;
+        };
+        if seen_chain != chain || seen_epoch != entry.epoch {
+            continue;
+        }
+        // The anchor id is a hash over the whole anchor, and the anchor
+        // commits to the state root — so matching it ties the root this
+        // replica just recomputed to a transaction in a Zcash block.
+        if seen_id == entry.anchor_id {
+            return OnChain::Carried { height: s.height };
+        }
+        return OnChain::Missing {
+            why: format!(
+                "Zcash carries anchor {} for epoch {} and the chain published {}",
+                hex(&seen_id),
+                entry.epoch,
+                hex(&entry.anchor_id)
+            ),
+        };
+    }
+    OnChain::Missing {
+        why: format!(
+            "no anchor for epoch {} found on Zcash in {from}..={to}",
+            entry.epoch
+        ),
+    }
+}

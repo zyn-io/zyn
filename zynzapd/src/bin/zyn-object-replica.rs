@@ -77,6 +77,21 @@ fn main() -> Result<(), String> {
         .timeout(std::time::Duration::from_secs(30))
         .build();
 
+    // The Zcash half. Optional, and its absence is stated rather than
+    // glossed: without it this verifies that the operator applied the rules
+    // they published, and not that they published them when they said.
+    let zcash = build_zcash();
+    match &zcash {
+        Some(_) => eprintln!(
+            "zyn-object-replica: anchors will be checked against Zcash as well as replayed"
+        ),
+        None => eprintln!(
+            "zyn-object-replica: no ZYN_VAULT_FVK — replaying only. Roots are checked against \
+             the published intents and NOT against Zcash, so this cannot tell a chain that was \
+             rewritten from one that was not"
+        ),
+    }
+
     eprintln!(
         "zyn-object-replica: verifying chain {chain} from {} mirror(s)",
         mirrors.len()
@@ -84,7 +99,7 @@ fn main() -> Result<(), String> {
 
     let mut verified_through: u64 = 0;
     loop {
-        match pass(&agent, &mirrors, chain, verified_through) {
+        match pass(&agent, &mirrors, chain, verified_through, zcash.as_ref()) {
             Ok(through) => {
                 if through > verified_through {
                     eprintln!(
@@ -107,11 +122,17 @@ fn main() -> Result<(), String> {
 /// Returns the highest epoch verified. Stops at the first disagreement: past
 /// it, every later root is built on something this replica does not accept, so
 /// continuing would report agreement about a chain it has already rejected.
+type Zcash = (
+    zyn_custody::shielded::Scanner,
+    zyn_custody::zebra::Zebra,
+);
+
 fn pass(
     agent: &ureq::Agent,
     mirrors: &[String],
     chain: u32,
     from: u64,
+    zcash: Option<&Zcash>,
 ) -> Result<u64, String> {
     let index = fetch(agent, mirrors, &zynzapd::publish::index_rel(chain))
         .map_err(|e| format!("cannot read the index: {e}"))?;
@@ -131,7 +152,7 @@ fn pass(
     let mut through = from;
 
     for e in &entries {
-        match verify_one(agent, mirrors, chain, e, &mut vm, &mut seq) {
+        match verify_one(agent, mirrors, chain, e, &mut vm, &mut seq, zcash) {
             Verdict::Verified { epoch, root } => {
                 through = epoch;
                 if epoch > from {
@@ -150,6 +171,37 @@ fn pass(
         }
     }
     Ok(through)
+}
+
+
+/// The Zcash side, if this replica was given a viewing key to use.
+fn build_zcash() -> Option<Zcash> {
+    use zyn_custody::zebra::{Network, Zebra};
+    let fvk_hex = std::env::var("ZYN_VAULT_FVK").ok().filter(|s| !s.is_empty())?;
+    let bytes = (0..fvk_hex.len() / 2)
+        .map(|i| u8::from_str_radix(fvk_hex.get(i * 2..i * 2 + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    let fvk = orchard::keys::FullViewingKey::from_bytes(&bytes.try_into().ok()?)?;
+    let network = match env("ZYN_NETWORK", "testnet").as_str() {
+        "mainnet" | "main" => Network::Mainnet,
+        _ => Network::Testnet,
+    };
+    let host = env("ZYN_ZEBRA_HOST", "127.0.0.1");
+    let port: u16 = env("ZYN_ZEBRA_PORT", "18232").parse().ok()?;
+    let user = std::env::var("ZYN_ZEBRA_USER").ok();
+    let pass = std::env::var("ZYN_ZEBRA_PASSWORD").ok();
+    let auth = match (&user, &pass) {
+        (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
+        _ => None,
+    };
+    let from: u64 = env("ZYN_FROM_HEIGHT", "0").parse().unwrap_or(0);
+    let zebra = Zebra::connect(&host, port, auth, network).ok()?;
+    let scanner = zyn_custody::shielded::Scanner::new(
+        zyn_custody::shielded::VaultKeys::from_full_viewing_key(fvk),
+        from,
+        64,
+    );
+    Some((scanner, zebra))
 }
 
 /// Fetch one path from the first mirror that serves it.
@@ -184,6 +236,7 @@ fn verify_one(
     e: &zynzapd::publish::IndexEntry,
     vm: &mut ObjectVm,
     seq: &mut u64,
+    zcash: Option<&Zcash>,
 ) -> Verdict {
     // The same layout the sequencer wrote. A replica reading a different path
     // would be reading a different chain.
@@ -198,10 +251,33 @@ fn verify_one(
         }
     };
     match zynzapd::object_verify::verify_epoch(&raw, &e.root, vm, seq) {
-        zynzapd::object_verify::Verdict::Verified { root } => Verdict::Verified {
-            epoch: e.epoch,
-            root,
-        },
+        zynzapd::object_verify::Verdict::Verified { root } => {
+            // The replay agrees. Now: does Zcash say this root existed when
+            // the chain says it did?
+            if let Some((scanner, zebra)) = zcash {
+                match zynzapd::object_verify::anchor_on_zcash(scanner, zebra, chain, e, 12) {
+                    zynzapd::object_verify::OnChain::Carried { height } => {
+                        if height != e.height {
+                            eprintln!(
+                                "zyn-object-replica: epoch {} anchored at height {height}, index \
+                                 says {} — a reorg moved it, which is not a disagreement",
+                                e.epoch, e.height
+                            );
+                        }
+                    }
+                    zynzapd::object_verify::OnChain::Missing { why } => {
+                        return Verdict::Disagrees {
+                            epoch: e.epoch,
+                            why,
+                        }
+                    }
+                }
+            }
+            Verdict::Verified {
+                epoch: e.epoch,
+                root,
+            }
+        }
         zynzapd::object_verify::Verdict::Disagrees { why } => Verdict::Disagrees {
             epoch: e.epoch,
             why,
