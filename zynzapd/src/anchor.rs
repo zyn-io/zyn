@@ -37,7 +37,12 @@ use zyn_custody::payout::{self, Destination, Envelope, Payment};
 use zyn_custody::shielded::PoolStores;
 use zyn_custody::zebra::Zebra;
 
-use crate::rpc::Shared;
+use std::sync::{Arc, Mutex};
+use zyn::node::Node;
+use zyn_vm::spec::MicrochainVm;
+
+/// A node the settler drives, whatever state machine it runs.
+type SharedOf<V> = Arc<Mutex<Node<V>>>;
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -474,7 +479,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
 
     /// One pass: follow up what is in flight, then propose and send the next.
     /// Returns the anchor the chain confirmed this pass, if any.
-    pub fn poll_once(&mut self, node: &Shared, now: u64) -> Result<Option<Confirmed>, String> {
+    pub fn poll_once<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<Option<Confirmed>, String> {
         // Reported, not repaired automatically. `confirmations` answers "not
         // known to this node", which a resyncing Zebra says about everything —
         // re-broadcasting on that would be a stampede. An operator re-anchors
@@ -617,7 +622,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         Ok(gone)
     }
 
-    fn follow_up(&mut self, node: &Shared, now: u64) -> Result<Option<Confirmed>, String> {
+    fn follow_up<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<Option<Confirmed>, String> {
         let mut changed = false;
         let mut confirmed = None;
         let tip = self.chain.tip()?;
@@ -720,7 +725,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         Ok(confirmed)
     }
 
-    fn send_next(&mut self, node: &Shared, now: u64) -> Result<(), String> {
+    fn send_next<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<(), String> {
         // Do not build on a link that is no longer there. Extending it costs
         // nothing now and produces a chain nobody can verify later, which is
         // far worse than stopping: a stalled chain is recoverable, an
@@ -864,7 +869,7 @@ mod tests {
         }
     }
 
-    fn node() -> Shared {
+    fn node() -> SharedOf<SwapState> {
         let policy = EpochPolicy {
             intents_per_epoch: 10,
             epochs_per_anchor: 1,

@@ -251,3 +251,97 @@ pub fn save(store: &FileStore, journal: &Arc<Mutex<Journal>>, shared: &Shared) {
         eprintln!("zynzapd: proposal save failed: {:?}", e);
     }
 }
+
+/// Where a pool's note tree lives on disk.
+pub fn note_tree_path(
+    dir: &std::path::Path,
+    chain_id: u32,
+    pool: orchard::ValuePool,
+) -> std::path::PathBuf {
+    dir.join(format!(
+        "notes-{}-{}.tree",
+        chain_id,
+        match pool {
+            orchard::ValuePool::Orchard => "orchard",
+            orchard::ValuePool::Ironwood => "ironwood",
+        }
+    ))
+}
+
+/// Open the vault's two note trees, resuming from disk where that is sound.
+///
+/// A tree written at the last save resumes where it stopped — checked against
+/// the node's root at that height before it is trusted. Anything else is
+/// re-seeded from the node's frontier.
+///
+/// **Both pools, or neither.** `feed_block` appends every block to both trees,
+/// so re-seeding one from the vault's birth while the other resumes at the tip
+/// would walk thousands of blocks into the resumed tree a second time — the
+/// exact divergence the root check exists to catch, manufactured at boot.
+///
+/// Extracted so the object ledger anchors from the same code the account
+/// ledger does. Two implementations of this would drift, and the failure when
+/// they did would be a tree that disagrees with the chain.
+pub fn open_note_trees(
+    dir: &std::path::Path,
+    chain_id: u32,
+    zebra: &zyn_custody::zebra::Zebra,
+    seed_height: u64,
+) -> Result<zyn_custody::shielded::PoolStores, String> {
+    use orchard::ValuePool;
+    use std::sync::{Arc, Mutex};
+    use zyn_custody::notes::NoteStore;
+
+    let resume = |pool: ValuePool| -> Option<NoteStore> {
+        let bytes = std::fs::read(note_tree_path(dir, chain_id, pool)).ok()?;
+        let store = match NoteStore::decode(&bytes) {
+            Some(s) => s,
+            None => {
+                eprintln!("{pool:?} note tree on disk did not decode; re-seeding");
+                return None;
+            }
+        };
+        let at = store.synced_to().unwrap_or(seed_height);
+        let ts = zebra.tree_state_of(at, pool).ok()?;
+        if store.root_bytes() == Some(ts.final_root) {
+            eprintln!(
+                "{pool:?} note tree resumed from disk at {at}, root matches the node ({} notes held)",
+                store.held().count()
+            );
+            Some(store)
+        } else {
+            eprintln!("{pool:?} note tree on disk does not match the node at {at}; re-seeding");
+            None
+        }
+    };
+    let fresh = |pool: ValuePool| -> Result<NoteStore, String> {
+        let ts = zebra
+            .tree_state_of(seed_height, pool)
+            .map_err(|e| format!("z_gettreestate {seed_height}: {e}"))?;
+        let store = NoteStore::from_frontier(&ts.final_state, seed_height)
+            .map_err(|e| format!("cannot seed the {pool:?} note tree: {e:?}"))?;
+        if store.root_bytes() != Some(ts.final_root) {
+            return Err(format!(
+                "the {pool:?} tree seeded from the node does not reproduce the node's root"
+            ));
+        }
+        eprintln!("{pool:?} note tree seeded at {seed_height}, root matches the node");
+        Ok(store)
+    };
+
+    let (o, i) = match (resume(ValuePool::Orchard), resume(ValuePool::Ironwood)) {
+        (Some(o), Some(i)) if o.synced_to() == i.synced_to() => (o, i),
+        (Some(_), Some(_)) => {
+            eprintln!("the two note trees stopped at different heights; re-seeding both");
+            (fresh(ValuePool::Orchard)?, fresh(ValuePool::Ironwood)?)
+        }
+        _ => {
+            eprintln!("re-seeding both note trees together — they are fed together");
+            (fresh(ValuePool::Orchard)?, fresh(ValuePool::Ironwood)?)
+        }
+    };
+    Ok(zyn_custody::shielded::PoolStores {
+        orchard: Arc::new(Mutex::new(o)),
+        ironwood: Arc::new(Mutex::new(i)),
+    })
+}

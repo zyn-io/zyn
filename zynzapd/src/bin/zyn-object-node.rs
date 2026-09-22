@@ -35,6 +35,15 @@ use zyn::{Economics, Node};
 use zyn_vm::read::Decoder;
 use zyn_vm::spec::MicrochainVm;
 
+/// Everything the chain needs to reach Zcash. Absent means this is a devnet
+/// and says so — a root that reaches no chain is a claim, not a settlement.
+struct Anchoring {
+    settler: zynzapd::anchor::AnchorSettler<zyn_custody::zebra::Zebra, zynzapd::anchor::ZcashBuilder>,
+    da_dir: std::path::PathBuf,
+    da_key: Option<[u8; 32]>,
+    data_dir: std::path::PathBuf,
+}
+
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
 }
@@ -435,12 +444,105 @@ fn find(h: &[u8], needle: &[u8]) -> Option<usize> {
     h.windows(needle.len()).position(|w| w == needle)
 }
 
+/// Wire the settler, if this deployment has a vault to anchor from.
+///
+/// Every piece is required: a Zcash node to watch, the vault's viewing key to
+/// find its notes, and a custodian quorum to authorise the spend. Missing any
+/// one of them is a devnet, not a misconfiguration, so this returns `None`
+/// rather than failing — and the caller says which it got.
+fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
+    use zyn_custody::zebra::{Network, Zebra};
+
+    let host = std::env::var("ZYN_ZEBRA_HOST").ok()?;
+    let port: u16 = std::env::var("ZYN_ZEBRA_PORT").ok()?.parse().ok()?;
+    let fvk_hex = std::env::var("ZYN_VAULT_FVK").ok()?;
+    let custodians: Vec<String> = std::env::var("ZYN_CUSTODIANS")
+        .ok()?
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if custodians.is_empty() {
+        return None;
+    }
+    let threshold: u16 = env("ZYN_CUSTODY_THRESHOLD", "2").parse().ok()?;
+    let network = match env("ZYN_NETWORK", "testnet").as_str() {
+        "mainnet" => Network::Mainnet,
+        _ => Network::Testnet,
+    };
+    let from_height: u64 = env("ZYN_FROM_HEIGHT", "0").parse().unwrap_or(0);
+    let confirmations: u64 = env("ZYN_CONFIRMATIONS", "6").parse().unwrap_or(6);
+
+    let bytes = (0..fvk_hex.len() / 2)
+        .map(|i| u8::from_str_radix(fvk_hex.get(i * 2..i * 2 + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    let fvk = orchard::keys::FullViewingKey::from_bytes(&bytes.try_into().ok()?)?;
+    let public = zyn_custody::shares::load_public::<zyn_custody::ceremony::Zcash>(
+        std::path::Path::new(&env("ZYN_VAULT_PUBLIC", "/var/lib/zyn/vault-public")),
+    )
+    .ok()?;
+    // Zebra's RPC credentials, if it wants any.
+    let user = std::env::var("ZYN_ZEBRA_USER").ok();
+    let pass = std::env::var("ZYN_ZEBRA_PASSWORD").ok();
+    let auth = match (&user, &pass) {
+        (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
+        _ => None,
+    };
+    // The same trees the account ledger uses, opened by the same code.
+    let zebra = Zebra::connect(&host, port, auth.clone(), network).ok()?;
+    let notes =
+        zynzapd::boot::open_note_trees(std::path::Path::new(dir), chain, &zebra, from_height)
+            .map_err(|e| eprintln!("zyn-object-node: {e}"))
+            .ok()?;
+
+    let builder = zynzapd::anchor::ZcashBuilder::new(
+        // The builder speaks `zcash_protocol`'s network, the RPC client ours.
+        match network {
+            Network::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
+            _ => zcash_protocol::consensus::Network::TestNetwork,
+        },
+        Vec::new(), // no local shares: this box signs through custodians
+        threshold,
+        fvk,
+        notes,
+        zebra,
+        from_height,
+        confirmations,
+        Default::default(),
+        public,
+        Some(custodians),
+    )
+    .ok()?;
+    let settler = zynzapd::anchor::AnchorSettler::new(
+        Zebra::connect(&host, port, auth, network).ok()?,
+        builder,
+        confirmations,
+        std::path::Path::new(dir),
+        chain,
+    )
+    .ok()?;
+
+    Some(Anchoring {
+        settler,
+        da_dir: std::path::PathBuf::from(env("ZYN_DA_DIR", &format!("{dir}/da"))),
+        da_key: std::env::var("ZYN_DA_KEY")
+            .ok()
+            .and_then(|k| zynzapd::dacrypt::key_from_hex(&k).ok()),
+        data_dir: std::path::PathBuf::from(dir),
+    })
+}
+
 fn main() {
     let chain: u32 = env("ZYN_CHAIN_ID", "212").parse().unwrap_or(212);
     let listen = env("ZYN_LISTEN", "127.0.0.1:8399");
     let dir = env("ZYN_DATA_DIR", "./object-data");
     let epoch_secs: u64 = env("ZYN_EPOCH_SECS", "10").parse().unwrap_or(10);
     let max_io: u32 = env("ZYN_MAX_IO", "16").parse().unwrap_or(16);
+
+    // Anchoring is opt-in and all-or-nothing. Without a vault to pay from and
+    // a Zcash node to watch, a root reaches nothing and the banner below says
+    // so — being loudly a devnet is better than being quietly one.
+    let anchoring = build_anchoring(chain, &dir);
 
     if std::fs::create_dir_all(&dir).is_err() {
         eprintln!("zyn-object-node: cannot use {}", dir);
@@ -494,10 +596,25 @@ fn main() {
     }
 
     eprintln!(
-        "zyn-object-node: chain {} listening on {} — DEVNET, objects are unbacked",
-        chain, listen
+        "zyn-object-node: chain {} listening on {} — {}",
+        chain,
+        listen,
+        if anchoring.is_some() { "TESTNET" } else { "DEVNET" }
     );
-    eprintln!("zyn-object-node: anchoring OFF — roots are sealed and served, and reach no chain");
+    // Say which one it is, and never say the better one by default. A node
+    // that claims to anchor and does not is worse than one that admits it.
+    if anchoring.is_some() {
+        eprintln!(
+            "zyn-object-node: anchoring ON — roots are carried to Zcash and settle there"
+        );
+        eprintln!(
+            "zyn-object-node: objects are still unbacked: no deposit bridge credits real ZEC yet"
+        );
+    } else {
+        eprintln!(
+            "zyn-object-node: anchoring OFF — roots are sealed and served, and reach no chain"
+        );
+    }
     eprintln!("zyn-object-node: state in {}", dir);
 
     // Seal on a timer, so a chain with no traffic still advances and a wallet
@@ -513,6 +630,11 @@ fn main() {
             // `seal_if_due` refuses an empty epoch, and a submission that was
             // already due sealed itself above.
             if n.seal_if_due(now_secs()).is_some() {
+                // A sealed epoch is a root worth carrying. Proposing is free
+                // and idempotent — `propose_anchor` refuses while one is in
+                // flight — and the settler below is what turns a proposal
+                // into something Zcash has seen.
+                n.propose_anchor(now_secs());
                 // The seal belongs in the journal wherever it happens. Sealing
                 // here and recording it only on the submit path left the epoch
                 // closed in memory and open on disk, which every verifier
@@ -533,6 +655,65 @@ fn main() {
                     hex(&n.state().state_root())
                 );
                 save(&dir, chain, n.state());
+            }
+        });
+    }
+
+    // Carry roots to Zcash, and publish what lets anyone check them.
+    if let Some(mut a) = anchoring {
+        let node = Arc::clone(&node);
+        let journal = Arc::clone(&journal);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(20));
+            match a.settler.poll_once(&node, now_secs()) {
+                Ok(Some(c)) => {
+                    eprintln!(
+                        "zyn-object-node: anchor for epoch {} CONFIRMED on Zcash in {} at height {} — root {} is now something anyone can check",
+                        c.anchor.checkpoint.epoch,
+                        c.txid,
+                        c.height,
+                        hex(&c.anchor.checkpoint.state_root),
+                    );
+                    // Flush first: the bundle is read back off disk, and an
+                    // epoch still buffered would publish without its seal.
+                    if let Ok(mut j) = journal.lock() {
+                        let _ = j.sync();
+                    }
+                    let built = node
+                        .lock()
+                        .map_err(|_| "node lock poisoned".to_string())
+                        .and_then(|n| {
+                            zynzapd::publish::bundle_for::<ObjectVm>(
+                                &n,
+                                &a.data_dir,
+                                chain,
+                                &c.anchor,
+                                &c.txid,
+                                c.height,
+                            )
+                        })
+                        .and_then(|b| {
+                            zynzapd::publish::write_local_sealed(
+                                &a.da_dir,
+                                chain,
+                                &b,
+                                a.da_key.as_ref(),
+                            )
+                        });
+                    match built {
+                        Ok(files) => eprintln!(
+                            "zyn-object-node: DA bundle for epoch {} written ({} files)",
+                            c.anchor.checkpoint.epoch,
+                            files.len()
+                        ),
+                        Err(e) => eprintln!(
+                            "zyn-object-node: could not write the bundle for epoch {}: {e}",
+                            c.anchor.checkpoint.epoch
+                        ),
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("zyn-object-node: anchor pass failed: {e}"),
             }
         });
     }
