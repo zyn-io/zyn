@@ -1305,6 +1305,46 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             Ok(json!({ "schema": AGENT_SCHEMA, "mandate": public, "on_chain_authority_ends_at_epoch": on_chain_until }))
         }
         ("GET", "/api/overview") => overview(app),
+        // What this wallet holds on the object ledger.
+        //
+        // Not a lookup: the ledger answers no question about an account, so
+        // the wallet downloads what everyone is served and opens what it can
+        // with its own viewing key (§133.5). The node is never told which
+        // outputs mattered, because it is never asked about any of them.
+        ("GET", "/api/object") => {
+            let host = std::env::var("ZYN_OBJECT_NODE")
+                .unwrap_or_else(|_| "127.0.0.1:8499".to_string());
+            let (viewing, nullifier_key) = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.object_keys(0)?
+            };
+            let account = account(&app.key());
+            let wallet = crate::object_client::scan(&host, &account, viewing, nullifier_key)
+                .map_err(|e| e.to_string())?;
+
+            // Grouped by asset, because a holder thinks in assets and the
+            // ledger thinks in notes.
+            let mut by_asset: std::collections::BTreeMap<[u8; 32], (i128, u32)> =
+                std::collections::BTreeMap::new();
+            for o in &wallet.live {
+                let e = by_asset.entry(o.note.asset).or_insert((0, 0));
+                e.0 = e.0.saturating_add(o.note.amount.0);
+                e.1 += 1;
+            }
+            Ok(json!({
+                "node": host,
+                "account": hex(&account),
+                "held": by_asset.iter().map(|(asset, (amount, notes))| json!({
+                    "asset": hex(asset),
+                    "amount": Fixed(*amount).to_string(),
+                    "notes": notes,
+                })).collect::<Vec<_>>(),
+                "live": wallet.live.len(),
+                // Kept rather than dropped: a wallet that forgets its own
+                // history cannot explain a balance to its holder.
+                "spent": wallet.spent.len(),
+            }))
+        }
         ("GET", "/api/curves") => {
             zyn_only(app)?;
             Ok(json!({ "curves": app.node.curves()?.iter().map(curve_json).collect::<Vec<_>>() }))

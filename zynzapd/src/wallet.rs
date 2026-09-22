@@ -849,6 +849,24 @@ impl Wallet {
         .to_json()
     }
 
+    /// The two keys this wallet uses on the object ledger.
+    ///
+    /// Derived here rather than by handing the seed out, because the seed is
+    /// the wallet and these are not: a viewing key finds what arrived and a
+    /// nullifier key recognises what left, and neither can move a coin
+    /// (`object_keys`). Callers that scan an object ledger need exactly these
+    /// two and must never need more.
+    pub fn object_keys(
+        &self,
+        account: u32,
+    ) -> Result<(zyn_vm::note_enc::StaticSecret, [u8; 32]), String> {
+        let seed = self.material.seed()?;
+        Ok((
+            crate::object_keys::viewing_secret(&seed, account),
+            crate::object_keys::nullifier_key(&seed, account),
+        ))
+    }
+
     pub fn export_backup_with_zyn(&self, source: ZynKeySource) -> String {
         WalletBackup {
             material: self.material.clone(),
