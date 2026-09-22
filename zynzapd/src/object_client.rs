@@ -10,8 +10,6 @@
 //! bytes to [`Scanner`], and returns what opened. The node is never told which
 //! outputs were interesting, because it is never asked about any of them.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
 
 use zyn_vm::note_enc::{EncryptedNote, StaticSecret};
 use zyn_vm::scan::{PublishedOutput, Scanner, Wallet};
@@ -83,25 +81,39 @@ fn nullifiers(body: &str) -> Vec<[u8; 32]> {
 }
 
 /// One POST, no dependencies.
+/// Where the object ledger answers.
+///
+/// Accepts a full URL or a bare `host:port`. The bare form is what the node's
+/// own loopback address looks like and is assumed to be plain HTTP on `/`;
+/// anything else is taken as written, which is what lets a desktop wallet
+/// reach the public endpoint — that one is HTTPS and lives on a path, and the
+/// raw-socket client this replaced could express neither.
+fn url_of(host: &str) -> String {
+    if host.starts_with("http://") || host.starts_with("https://") {
+        host.to_string()
+    } else {
+        format!("http://{host}/")
+    }
+}
+
 fn rpc(host: &str, body: &str) -> Result<String, ObjectError> {
-    let mut s = TcpStream::connect(host).map_err(|e| ObjectError::Unreachable(e.to_string()))?;
-    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(20)));
-    let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(20)));
-    let req = format!(
-        "POST / HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        host,
-        body.len(),
-        body
-    );
-    s.write_all(req.as_bytes())
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build();
+    let response = agent
+        .post(&url_of(host))
+        .set("content-type", "application/json")
+        .send_string(body)
         .map_err(|e| ObjectError::Unreachable(e.to_string()))?;
+    // Bounded. The feed grows with the chain and comes from somewhere this
+    // wallet does not control, so it is not read without a ceiling.
     let mut out = String::new();
-    s.read_to_string(&mut out)
-        .map_err(|e| ObjectError::Unreachable(e.to_string()))?;
-    let at = out
-        .find("\r\n\r\n")
-        .ok_or(ObjectError::Malformed("no body"))?;
-    Ok(out[at + 4..].to_string())
+    std::io::Read::read_to_string(
+        &mut std::io::Read::take(response.into_reader(), 64 << 20),
+        &mut out,
+    )
+    .map_err(|e| ObjectError::Unreachable(e.to_string()))?;
+    Ok(out)
 }
 
 /// Parse a published feed into what a scanner takes.

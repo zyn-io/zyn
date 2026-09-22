@@ -33,8 +33,22 @@ use crate::wallet::{
 };
 
 pub const DEFAULT_LIGHTD_TESTNET: &str = "168.119.53.39:8098";
+/// The AMM sequencer this wallet's swap and pool routes talk to.
+///
+/// Mainnet 26460 on the public gateway. It pointed at `168.119.53.39:8099`,
+/// chain 11, until that chain was retired on 22 Sep 2026 and its sequencer
+/// stopped — a default that names a chain which produces no epochs is a
+/// wallet whose Zyn tab fails for a reason its holder cannot see.
 pub const DEFAULT_NODE: &str = "168.119.53.39:8099";
 pub const DEFAULT_CHAIN: u32 = 11;
+
+/// The object ledger — the **testnet**, chain 212.
+///
+/// A full URL, because the public endpoint is HTTPS on a path and a bare
+/// `host:port` can only ever mean plain HTTP on `/`. The loopback form still
+/// works for a node talking to itself.
+pub const DEFAULT_OBJECT_NODE: &str = "https://zyn-rpc.cavebro.win/object";
+pub const OBJECT_CHAIN: u32 = 212;
 pub const DEFAULT_VAULT: &str = "utest1h6sfz7alnztp0vst6u0s8sxj9zhzrv5s7qjy5897qcdse75epp43x4uus90naxaea973q22nshuggyywujdj5zulckj2vppz85x2t407";
 
 /// Where the keys live and what the app talks to.
@@ -1313,7 +1327,9 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // outputs mattered, because it is never asked about any of them.
         ("GET", "/api/object") => {
             let host = std::env::var("ZYN_OBJECT_NODE")
-                .unwrap_or_else(|_| "127.0.0.1:8499".to_string());
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| DEFAULT_OBJECT_NODE.to_string());
             let (viewing, nullifier_key) = {
                 let w = app.wallet.lock().map_err(|_| "wallet busy")?;
                 w.object_keys(0)?
@@ -1333,6 +1349,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             }
             Ok(json!({
                 "node": host,
+                "chain": OBJECT_CHAIN,
                 "account": hex(&account),
                 "held": by_asset.iter().map(|(asset, (amount, notes))| json!({
                     "asset": hex(asset),
