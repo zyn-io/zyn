@@ -128,3 +128,54 @@ test('the pages link to each other, so no capability is an orphan', () => {
   assert.match(exit, /href="\/deposit"/);
   assert.match(item, /href="\/items"/);
 });
+
+// ---------------------------------------------------------------------------
+// The headers a site that talks to a wallet should have.
+// ---------------------------------------------------------------------------
+
+const { readdir } = await import('node:fs/promises');
+
+test('the built site ships a policy, and it names every inline script', async () => {
+  // The node status page shipped a full policy and this one -- the one that
+  // takes money -- shipped none, so the checkout could be framed and a click
+  // on an invisible overlay was a click on "pay".
+  const headers = await readFile(new URL('../dist/_headers', import.meta.url), 'utf8');
+  for (const h of [
+    'Content-Security-Policy',
+    'X-Frame-Options: DENY',
+    'X-Content-Type-Options: nosniff',
+    'Referrer-Policy: no-referrer',
+  ]) {
+    assert.ok(headers.includes(h), `${h} is served`);
+  }
+  assert.ok(headers.includes("frame-ancestors 'none'"), 'the checkout cannot be framed');
+  assert.ok(headers.includes("object-src 'none'"));
+  assert.ok(headers.includes("base-uri 'none'"));
+
+  // Every inline script on the site must be named by a hash, or the page is
+  // broken in production and nowhere else.
+  const { createHash } = await import('node:crypto');
+  const pages = (await readdir(new URL('../', import.meta.url))).filter((f) => f.endsWith('.html'));
+  let checked = 0;
+  for (const page of pages) {
+    const html = await readFile(new URL('../' + page, import.meta.url), 'utf8');
+    for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+      if (!m[1].trim()) continue;
+      const hash = createHash('sha256').update(m[1], 'utf8').digest('base64');
+      assert.ok(
+        headers.includes(`'sha256-${hash}'`),
+        `${page}'s inline script is named in the policy`,
+      );
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 8, `every page's script was checked (saw ${checked})`);
+});
+
+test('the pages load no script from anywhere else', () => {
+  // The policy is only as good as this: with no external scripts, anything
+  // the browser is asked to run that is not hashed above was injected.
+  for (const [name, page] of Object.entries(pages)) {
+    assert.doesNotMatch(page, /<script[^>]+src=["']https?:/, `${name} loads no remote script`);
+  }
+});

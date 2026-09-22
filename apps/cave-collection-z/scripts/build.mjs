@@ -6,7 +6,8 @@
 // believing them. That is what makes a plain static host an acceptable place
 // to keep art for a shielded chain — the host is a byte source, not an
 // authority.
-import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
@@ -75,6 +76,49 @@ await writeFile(
 // Hash-named means immutable, which means a year of caching is honest rather
 // than optimistic. Cross-origin is safe for the same reason: bytes that do not
 // match the name are discarded by whoever asked for them.
+//
+// Everything else gets the headers a site that talks to a wallet should have
+// had from the start. The node status page shipped a full policy; this one --
+// the one that takes money -- shipped none, so the checkout could be framed
+// and a click on an invisible overlay was a click on "pay".
+//
+// The CSP names the SHA-256 of every inline script the site serves. That is
+// what makes `script-src` meaningful here: the pages have no external scripts
+// at all, so anything the browser is asked to run that is not on this list was
+// injected. Computed rather than written down, because a hash maintained by
+// hand is a hash that goes stale and takes the site down with it.
+const pages = ['index.html', 'whitelist.html', 'deposit.html', 'terms.html', 'mint.html',
+  'items.html', 'item.html', 'market.html', 'exit.html'];
+const scriptHashes = new Set();
+for (const page of pages) {
+  const html = await readFile(new URL(page, root), 'utf8');
+  for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+    // Only inline bodies: a <script src=...> has nothing to hash, and this
+    // site has none.
+    if (!m[1].trim()) continue;
+    scriptHashes.add(`'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`);
+  }
+}
+
+const csp = [
+  "default-src 'none'",
+  `script-src 'self' ${[...scriptHashes].join(' ')}`,
+  // Style attributes are used on a handful of elements. Inline *styles* cannot
+  // exfiltrate or execute the way inline scripts can, so this is the one place
+  // the policy relaxes.
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  // The pages reach their own Functions and nothing else. The wallet is spoken
+  // to through an injected object, not over the network, so no origin needs to
+  // be named here for it.
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join('; ');
+
 await writeFile(
   new URL('_headers', output),
   [
@@ -83,6 +127,14 @@ await writeFile(
     '  Cache-Control: public, max-age=31536000, immutable',
     '  Access-Control-Allow-Origin: *',
     '  X-Content-Type-Options: nosniff',
+    '',
+    '/*',
+    `  Content-Security-Policy: ${csp}`,
+    '  X-Frame-Options: DENY',
+    '  X-Content-Type-Options: nosniff',
+    '  Referrer-Policy: no-referrer',
+    '  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()',
+    '  Cross-Origin-Opener-Policy: same-origin',
     '',
   ].join('\n'),
 );
