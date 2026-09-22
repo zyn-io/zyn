@@ -1233,7 +1233,15 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         // address exists, so a payment to one falls through to the memo rules
         // and a depositor who cannot set a memo -- a faucet, most wallets --
         // has no way to be credited at all.
-        .with_addresses(addresses.clone());
+        .with_addresses(addresses.clone())
+        // Feed the note trees only with blocks `confirmations` deep. The
+        // deposit bridge's `observe` advances the trees as a side effect, and
+        // without a lag it fed them to the tip -- into blocks a reorg can take
+        // away, leaving a tree whose root the chain never had and whose
+        // witnesses Zcash refuses. The AMM node has carried this since §32.11;
+        // the object node's scanner was built without it, which showed as a
+        // status reading "-12 blocks behind" the moment the bridge first ran.
+        .with_tree_lag(confirmations);
 
     // Say where to pay this vault, at startup, in the log.
     //
