@@ -57,7 +57,27 @@ pub const DEFAULT_CHAIN: u32 = 26460;
 /// works for a node talking to itself.
 pub const DEFAULT_OBJECT_NODE: &str = "https://zyn-rpc.cavebro.win/object";
 pub const OBJECT_CHAIN: u32 = 212;
+
+/// The object ledger on **mainnet**, chain 26460, at the gateway's root.
+///
+/// 26460 was the AMM chain's id. The two ledgers custody the same vault from
+/// the same height, so they cannot run side by side under any id — both would
+/// credit every deposit — and the AMM chain is retired at handover, which
+/// frees the id. Until that handover this endpoint still answers as the AMM
+/// gateway, and the tab says so rather than inventing a balance.
+pub const DEFAULT_OBJECT_NODE_MAINNET: &str = "https://zyn-rpc.cavebro.win/";
+pub const OBJECT_CHAIN_MAINNET: u32 = 26460;
+/// The testnet vault — custodied by chain 212 since chain 11 was retired.
 pub const DEFAULT_VAULT: &str = "utest1h6sfz7alnztp0vst6u0s8sxj9zhzrv5s7qjy5897qcdse75epp43x4uus90naxaea973q22nshuggyywujdj5zulckj2vppz85x2t407";
+
+/// The mainnet vault, DKG'd 10 Sep across three machines; the sequencer holds
+/// no share of it.
+///
+/// There was only one vault address in this file, the testnet one, so a
+/// mainnet wallet had no way to pay the mainnet vault at all — every
+/// deposit or top-up it built named a testnet address, which the send path
+/// refuses as the wrong network. Refused rather than lost, but unusable.
+pub const DEFAULT_VAULT_MAINNET: &str = "u1kc38pww6c8ahz0z20g9kv9s7afrc2npmr8s6nngw00qufveq43q5m2vh8u7wxpaltl0vjs7etr7y7d0pcm5dtc24pqhu5qfe5cwtyc2u";
 
 /// Where the keys live and what the app talks to.
 #[derive(Clone, Debug)]
@@ -85,7 +105,10 @@ impl Config {
             chain: env("ZYN_CHAIN", &DEFAULT_CHAIN.to_string())
                 .parse()
                 .unwrap_or(DEFAULT_CHAIN),
-            vault: env("ZYN_VAULT", DEFAULT_VAULT),
+            // An explicit override, or empty for "the vault of whichever
+            // network the wallet is on" — the network can change at runtime,
+            // so the choice is made at use, not here.
+            vault: std::env::var("ZYN_VAULT").unwrap_or_default(),
             dir,
         }
     }
@@ -546,6 +569,24 @@ impl App {
     /// fetched and already encoded for the node's own network — so a testnet
     /// node answers a mainnet wallet with `utest1…` and gives itself away. No
     /// extra round trip, and no new protocol to keep in step.
+    /// The vault this wallet pays: the override if one was set, otherwise the
+    /// vault of the network the wallet is on right now.
+    pub fn vault_address(&self) -> String {
+        if !self.vault.trim().is_empty() {
+            return self.vault.clone();
+        }
+        let mainnet = self
+            .wallet
+            .lock()
+            .map(|w| w.network() == Network::MainNetwork)
+            .unwrap_or(false);
+        if mainnet {
+            DEFAULT_VAULT_MAINNET.to_string()
+        } else {
+            DEFAULT_VAULT.to_string()
+        }
+    }
+
     pub fn chain_mismatch(&self) -> Option<String> {
         let network = self.wallet.lock().ok()?.network();
         let addr = self.deposit_address()?;
@@ -1334,10 +1375,23 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // with its own viewing key (§133.5). The node is never told which
         // outputs mattered, because it is never asked about any of them.
         ("GET", "/api/object") => {
+            // The ledger of the network the wallet is on. One default for
+            // both meant a mainnet wallet read the testnet's notes — and found
+            // none, which reads as an empty wallet rather than the wrong one.
+            let mainnet = app
+                .wallet
+                .lock()
+                .map(|w| w.network() == Network::MainNetwork)
+                .unwrap_or(false);
+            let (default_node, chain) = if mainnet {
+                (DEFAULT_OBJECT_NODE_MAINNET, OBJECT_CHAIN_MAINNET)
+            } else {
+                (DEFAULT_OBJECT_NODE, OBJECT_CHAIN)
+            };
             let host = std::env::var("ZYN_OBJECT_NODE")
                 .ok()
                 .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| DEFAULT_OBJECT_NODE.to_string());
+                .unwrap_or_else(|| default_node.to_string());
             let (viewing, nullifier_key) = {
                 let w = app.wallet.lock().map_err(|_| "wallet busy")?;
                 w.object_keys(0)?
@@ -1357,7 +1411,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             }
             Ok(json!({
                 "node": host,
-                "chain": OBJECT_CHAIN,
+                "chain": chain,
                 "account": hex(&account),
                 "held": by_asset.iter().map(|(asset, (amount, notes))| json!({
                     "asset": hex(asset),
@@ -1696,9 +1750,15 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // The all-zero account is the operator top-up: held for fees, never
         // credited, so supply and backing stay equal and nobody is diluted.
         ("POST", "/api/topup") => {
-            zyn_only(app)?;
+            // The vault's fee reserve: an anchor is a self-send that burns a
+            // ZIP-317 fee, so a vault that holds nothing cannot anchor at all.
+            // Not an AMM operation — it is a Zcash payment to the vault with
+            // the all-zero account in the memo, which every scanner reads as
+            // "credited to nobody" rather than stopping on an unattributed
+            // note. It pays the shared vault address, never a per-account one,
+            // because a per-account address *is* a credit to that account.
             let zat = zatoshi_of(input, "amount")?;
-            let to = app.vault.clone();
+            let to = network_vault(app)?;
             let memo = zyn_custody::memo::encode_text(&[0u8; 32]);
             App::start_job(app, "topup", move |a| {
                 let txid = send(a, &to, zat, Some(&memo), "topup")?;
@@ -2174,17 +2234,15 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
 /// would show balances backed by money it cannot see and hand out deposit
 /// addresses nobody on this chain can pay. Which chain is fine; disagreeing
 /// about it is not.
-/// The vault to pay, checked against the wallet's own network.
-///
-/// A mainnet wallet shown the testnet vault is real money sent to a chain it
-/// cannot spend from, and `chain_mismatch` cannot catch that — it derived the
-/// network from an address the *node* issued, and a wallet with no AMM chain
-/// has no node to ask.
-fn checked_vault(app: &App) -> Result<(String, bool), String> {
-    let (address, per_account) = match app.deposit_address() {
-        Some(a) => (a, true),
-        None => (app.vault.clone(), false),
-    };
+/// The shared vault address for the wallet's network, refusing a mismatch.
+fn network_vault(app: &App) -> Result<String, String> {
+    let address = app.vault_address();
+    same_network(app, &address)?;
+    Ok(address)
+}
+
+/// Refuse an address on the other network from the wallet's.
+fn same_network(app: &App, address: &str) -> Result<(), String> {
     let testnet_address = address.starts_with("utest1") || address.starts_with("tm");
     let testnet_wallet = {
         let w = app.wallet.lock().map_err(|_| "wallet busy")?;
@@ -2198,6 +2256,21 @@ fn checked_vault(app: &App) -> Result<(String, bool), String> {
             if testnet_wallet { "testnet" } else { "mainnet" }
         ));
     }
+    Ok(())
+}
+
+/// The vault to pay, checked against the wallet's own network.
+///
+/// A mainnet wallet shown the testnet vault is real money sent to a chain it
+/// cannot spend from, and `chain_mismatch` cannot catch that — it derived the
+/// network from an address the *node* issued, and a wallet with no AMM chain
+/// has no node to ask.
+fn checked_vault(app: &App) -> Result<(String, bool), String> {
+    let (address, per_account) = match app.deposit_address() {
+        Some(a) => (a, true),
+        None => (app.vault_address(), false),
+    };
+    same_network(app, &address)?;
     Ok((address, per_account))
 }
 
@@ -2335,7 +2408,8 @@ fn force_via_zcash(app: &App, intent: &Intent) -> Result<String, String> {
     let mut w = app.wallet.lock().map_err(|_| "wallet busy")?;
     app.note("forcing via Zcash: building a 0.0001 payment to the vault with the signed intent in its memo; proving takes a minute".to_string());
     let mut events = Vec::new();
-    let txid = w.send_with_memo(&app.vault, 10_000, memo, |e| {
+    let vault = app.vault_address();
+    let txid = w.send_with_memo(&vault, 10_000, memo, |e| {
         if !matches!(e, Event::Progress { .. }) {
             events.push(e)
         }
@@ -2344,7 +2418,7 @@ fn force_via_zcash(app: &App, intent: &Intent) -> Result<String, String> {
     drop(w);
     app.record(network, &events);
     let mut h = app.history(network);
-    h.push(json!({ "kind": "forced", "txid": txid, "zatoshi": 10_000u64, "height": 0, "memo": "forced intent", "to": app.vault, "at": App::now() }));
+    h.push(json!({ "kind": "forced", "txid": txid, "zatoshi": 10_000u64, "height": 0, "memo": "forced intent", "to": vault, "at": App::now() }));
     app.write_history(network, &h);
     let _ = overview(app);
     Ok(txid)
@@ -2728,7 +2802,7 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
         // the send form accepts, so scanning needs no wallet-specific parser.
         "account_qr_svg": qr_svg(&hex(&id)),
         "memo": zyn_custody::memo::encode_text(&id),
-        "vault": app.vault,
+        "vault": app.vault_address(),
         // This account's own deposit address. Where present, deposits need no
         // memo — the address is the attribution — and the UI should show this
         // rather than the shared vault address.
@@ -2736,12 +2810,12 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
         // The same thing as a payment request, so paying from another wallet
         // is a scan rather than a careful copy.
         "deposit_uri": deposit_uri(
-            app.deposit_address().as_deref().unwrap_or(&app.vault),
+            &app.deposit_address().unwrap_or_else(|| app.vault_address()),
             app.deposit_address().is_none().then(|| zyn_custody::memo::encode_text(&id)).as_deref(),
             None,
         ),
         "deposit_qr_svg": qr_svg(&deposit_uri(
-            app.deposit_address().as_deref().unwrap_or(&app.vault),
+            &app.deposit_address().unwrap_or_else(|| app.vault_address()),
             app.deposit_address().is_none().then(|| zyn_custody::memo::encode_text(&id)).as_deref(),
             None,
         )),
@@ -2981,5 +3055,17 @@ mod gate_tests {
             super::DEFAULT_OBJECT_NODE.starts_with("https://"),
             "a desktop wallet cannot reach the sequencer's loopback address"
         );
+    }
+
+    /// Each network pays its own vault. With one address a mainnet wallet
+    /// could only ever name the testnet vault, which the send path refuses.
+    #[test]
+    fn each_network_has_its_own_vault_and_ledger() {
+        assert!(super::DEFAULT_VAULT.starts_with("utest1"), "testnet vault");
+        assert!(super::DEFAULT_VAULT_MAINNET.starts_with("u1"), "mainnet vault");
+        assert_ne!(super::DEFAULT_VAULT, super::DEFAULT_VAULT_MAINNET);
+        assert_eq!(super::OBJECT_CHAIN, 212);
+        assert_eq!(super::OBJECT_CHAIN_MAINNET, 26460);
+        assert_ne!(super::DEFAULT_OBJECT_NODE, super::DEFAULT_OBJECT_NODE_MAINNET);
     }
 }
