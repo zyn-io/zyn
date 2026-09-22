@@ -126,3 +126,68 @@ test('a missing or empty feed reads as nothing held', () => {
     assert.equal(scan(feed, args).held.length, 0);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Recovery: the keys have to survive being stored.
+// ---------------------------------------------------------------------------
+
+import { deriveIdentity, openSealedWallet, sealWallet } from '../src/core.js';
+
+const PHRASE =
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+/// The failure this guards is silent: a wallet kept on a device would open,
+/// control its Zyn account, and report an empty object-ledger balance --
+/// indistinguishable from having been robbed. The keys come from the BIP39
+/// seed, which is zeroed after derivation and never present on the stored
+/// path, so they must travel in the sealed blob.
+test('the object keys survive sealing and unsealing', async () => {
+  const id = deriveIdentity(PHRASE, '', 0);
+  assert.ok(id.viewing, 'deriving a wallet produces a viewing key');
+  assert.ok(id.nullifier, 'and a nullifier key');
+
+  const blob = await sealWallet(id, [], 'a password long enough', 0);
+  const { identity } = await openSealedWallet(blob, 'a password long enough');
+
+  assert.equal(hex(identity.viewing), hex(id.viewing), 'the viewing key must come back');
+  assert.equal(hex(identity.nullifier), hex(id.nullifier), 'and the nullifier key');
+});
+
+/// The same phrase must give the same keys every time, or a restore looks at
+/// the wrong ciphertexts and finds nothing.
+test('the same phrase derives the same object keys', () => {
+  const a = deriveIdentity(PHRASE, '', 0);
+  const b = deriveIdentity(PHRASE, '', 0);
+  assert.equal(hex(a.viewing), hex(b.viewing));
+  assert.equal(hex(a.nullifier), hex(b.nullifier));
+
+  // And a different account index is a different wallet, so a payer
+  // encrypting to one must not produce notes the other can open.
+  const other = deriveIdentity(PHRASE, '', 1);
+  assert.notEqual(hex(a.viewing), hex(other.viewing));
+  assert.notEqual(hex(a.nullifier), hex(other.nullifier));
+});
+
+/// Holding a viewing key must not yield the key that spends.
+test('the object keys are not the identity key', () => {
+  const id = deriveIdentity(PHRASE, '', 0);
+  assert.notEqual(hex(id.viewing), hex(id.secretKey));
+  assert.notEqual(hex(id.nullifier), hex(id.secretKey));
+  assert.notEqual(hex(id.viewing), hex(id.nullifier));
+});
+
+/// A wallet sealed before the object ledger existed must still open. It reads
+/// as holding nothing there, which is right: the Zyn account it does control
+/// keeps working.
+test('a blob sealed without object keys still opens', async () => {
+  const id = deriveIdentity(PHRASE, '', 0);
+  const blob = await sealWallet(
+    { secretKey: id.secretKey }, // no viewing/nullifier, as an older wallet had
+    [],
+    'a password long enough',
+    0
+  );
+  const { identity } = await openSealedWallet(blob, 'a password long enough');
+  assert.equal(hex(identity.secretKey), hex(id.secretKey));
+  assert.equal(identity.viewing, undefined);
+});

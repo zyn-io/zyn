@@ -29,6 +29,8 @@
       "zcash": "ZEC testnet",
       "zcashPrefix": "utest1",
       "chain": 212,
+      "kind": "object",
+      "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
       "rpcUrl": "/rpc/testnet",
       "claimUrl": "/claim",
       "mediaGateway": "/media",

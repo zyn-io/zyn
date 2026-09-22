@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { scan as scanObjects } from './object.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import './styles.css';
@@ -318,6 +319,15 @@ async function refresh(announce = true) {
     const status = await rpc(config.rpcUrl, 'zyn_status');
     if (!active()) return;
     const epoch = checkedEpoch(status, config.chain);
+
+    // An object ledger answers none of the questions below. It publishes
+    // commitments and nullifiers and says nothing about who owns what, so the
+    // balance is computed here from the holder's own keys rather than asked
+    // for. Everything after this point is the AMM chains' shape.
+    if (config.kind === 'object') {
+      await refreshObject(epoch, announce, active);
+      return;
+    }
     // The identity *and* every receiving account. An item bought through a
     // store lands in the latter (§97.5), so reading only the identity shows an
     // empty pocket to somebody who has just paid.
@@ -414,6 +424,48 @@ async function loadDepositAddress(owner) {
 /// one of. ZEC.zy is always listed even at zero — somebody who has just sent a
 /// deposit needs to watch it arrive, and an empty list would look like the
 /// wallet had not noticed.
+
+/// Hold-and-compute, for a chain that will not tell you what you own.
+///
+/// `zyn_published` carries every note the chain has ever published and every
+/// nullifier it has seen. Opening the ones that belong to this wallet, and
+/// dropping the ones already spent, is the balance. Nothing here asks the
+/// operator a question whose answer they could tailor.
+async function refreshObject(epoch, announce, active) {
+  if (!identity?.viewing || !identity?.nullifier) {
+    holdings = []; assets = []; listings = [];
+    renderCoins(); renderItems();
+    note('This wallet was stored before the object ledger existed. Restore it from the recovery phrase to read balances here.', true);
+    return;
+  }
+
+  const published = await rpc(config.rpcUrl, 'zyn_published');
+  if (!active()) return;
+  const { held } = scanObjects(published, {
+    secret: identity.viewing,
+    nkey: identity.nullifier,
+    owner: identity.account,
+  });
+
+  // An object ledger has no asset registry, so the only name this wallet can
+  // put to an id is the one the deployment pinned. Anything else is shown by
+  // its id rather than given a name nobody assigned.
+  const zec = config.zecAsset;
+  const seen = [...new Set(held.map((h) => h.asset))];
+  assets = seen.map((id) => ({
+    id,
+    symbol: id === zec ? 'ZEC.zy' : `asset ${id.slice(0, 8)}…`,
+  }));
+  if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });
+
+  // `renderCoins` reads decimal strings, and these are WAD BigInts.
+  holdings = held.map((h) => ({ asset: h.asset, amount: h.amount.toString() }));
+  listings = [];
+  renderCoins();
+  renderItems();
+  if (announce) note(`Synced at epoch ${epoch}.`);
+}
+
 function renderCoins() {
   const coins = holdings
     .map((h) => ({ ...h, meta: assets.find((a) => a.id === h.asset) }))

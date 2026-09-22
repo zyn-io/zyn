@@ -1,6 +1,10 @@
 import * as ed from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
+import {
+  nullifierKey as objectNullifierKey,
+  viewingSecret as objectViewingSecret,
+} from './object.js';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
@@ -54,8 +58,27 @@ export function deriveIdentity(words, passphrase = '', accountIndex = 0) {
   const secretKey = hkdf(sha256, bip39Seed, te.encode(DERIVATION.salt), concat(te.encode(DERIVATION.info), u32(index)), 32);
   const publicKey = ed.getPublicKey(secretKey);
   const account = sha256(concat(te.encode('zyn.account.v1'), u8(1), u32(publicKey.length), publicKey));
+  // The object ledger's two keys, derived here because this is the only place
+  // the BIP39 seed exists. It is zeroed on the next line, and `identityFromSecretKey`
+  // -- the path a stored wallet takes -- never has it at all, so a wallet that
+  // derived these lazily would work from the phrase and silently report an
+  // empty balance from a kept device. They travel in the sealed blob instead.
+  //
+  // Neither can spend. The viewing key finds notes, the nullifier key
+  // recognises spends, and the identity key is derived from the same seed by a
+  // different salt so holding either of these does not yield it.
+  const viewing = objectViewingSecret(bip39Seed, index);
+  const nullifier = objectNullifierKey(bip39Seed, index);
   bip39Seed.fill(0);
-  return { secretKey, publicKey, account, accountHex: hex(account), accountIndex: index };
+  return {
+    secretKey,
+    publicKey,
+    account,
+    accountHex: hex(account),
+    accountIndex: index,
+    viewing,
+    nullifier,
+  };
 }
 
 /// Rebuild an identity from the derived key alone.
@@ -99,6 +122,11 @@ export async function sealWallet(identity, receiving, password, accountIndex = 0
   const bundle = te.encode(JSON.stringify({
     i: hex(identity.secretKey),
     r: (receiving || []).map((r) => ({ c: hex(r.collection), k: hex(r.secretKey) })),
+    // The object-ledger keys, which cannot be recovered from `i`: they come
+    // from the BIP39 seed by their own salts, and this blob is the only place
+    // a device that does not hold the phrase can find them.
+    ov: identity.viewing ? hex(identity.viewing) : undefined,
+    on: identity.nullifier ? hex(identity.nullifier) : undefined,
   }));
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -134,6 +162,12 @@ export async function openSealedWallet(blob, password) {
   }
   const bundle = JSON.parse(new TextDecoder().decode(plain));
   const identity = identityFromSecretKey(unhex(bundle.i, 32), blob.accountIndex);
+  // Carried forward when the blob has them. A wallet sealed before the object
+  // ledger existed does not, and reads as holding nothing there rather than
+  // failing to open -- which is the right way round: the Zyn account it does
+  // control still works.
+  if (bundle.ov) identity.viewing = unhex(bundle.ov, 32);
+  if (bundle.on) identity.nullifier = unhex(bundle.on, 32);
   const receiving = (bundle.r || []).map((r) => ({
     ...identityFromSecretKey(unhex(r.k, 32), blob.accountIndex),
     collection: unhex(r.c, 32),
