@@ -2549,6 +2549,40 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-octies. The object testnet (22 Sep 2026)
+
+Chain 212 runs on **Hetzner**, where the vault, Zebra and custodians already
+are — a settler that had to reach them over a tunnel would add a failure mode
+for nothing.
+
+```
+zyn-object-node.service     the chain, anchoring, DA bundles
+zyn-object-tunnel.service   exposes its RPC on the public gateway (8500)
+/etc/zyn/zyn-object.env     0600; carries ZYN_VAULT_FVK
+```
+
+`https://zyn-rpc.cavebro.win/object` is served through the tunnel from
+Contabo's nginx. The old devnet node on Contabo is stopped and disabled.
+
+**Anchoring is opt-in and all-or-nothing.** Without a Zebra, a vault viewing
+key and custodians, the node says `DEVNET … anchoring OFF` and carries
+nothing. With them it says `TESTNET … anchoring ON`, and the status JSON says
+the same — it reported `devnet` while anchoring was live until 22 Sep, which
+is the wrong lie in either direction.
+
+**It anchors from the vault chain 11 used.** 234 Ironwood notes, ~0.0001 TAZ
+burned per anchor, so no faucet request is needed for years. Anchors are paid
+from **Ironwood**, never Orchard: post-NU6.3 the Orchard pool forbids
+cross-address transfers by consensus, so a payout from it must go to a
+transparent output and the exit becomes public.
+
+**The note trees must reach the tip before the first anchor.** Seeding fixes
+only where a tree starts; until it is walked forward the vault's notes are on
+chain and invisible, and every anchor fails with *waiting for a spendable
+Ironwood note* while the money sits there. Each batch is persisted, so a
+restart resumes rather than starting again — catch-up from the vault's birth
+is hours, not minutes. **Do not quote a completion time for it.**
+
 ## 5f-septies. Attributions are keyed on the byte order you cannot see (22 Sep 2026)
 
 A shielded deposit with no Zyn memo stops the note-tree walk dead —

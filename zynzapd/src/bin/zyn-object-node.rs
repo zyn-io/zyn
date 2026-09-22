@@ -136,13 +136,13 @@ fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
 }
 
 /// The one-line JSON the status op answers with.
-fn status_json(vm: &ObjectVm) -> String {
+fn status_json(vm: &ObjectVm, anchoring: bool) -> String {
     format!(
         concat!(
             "{{\"chain\":{},\"epoch\":{},\"seq\":{},\"accounts\":{},",
             "\"commitments\":{},\"live\":{},\"nullifiers\":{},\"reconciled\":{},",
             "\"offers\":{},\"exits\":{},",
-            "\"state_root\":\"{}\",\"anchoring\":\"none — devnet, roots reach no chain\"}}"
+            "\"state_root\":\"{}\",\"anchoring\":\"{}\"}}"
         ),
         vm.chain_id,
         vm.epoch,
@@ -159,6 +159,14 @@ fn status_json(vm: &ObjectVm) -> String {
         vm.offers.len(),
         vm.exits.len(),
         hex(&vm.state_root()),
+        // The status is what a reader believes without asking anyone. It said
+        // "devnet" while the node was carrying roots to Zcash, which is the
+        // wrong lie to tell in either direction.
+        if anchoring {
+            "on — roots are carried to Zcash and settle there"
+        } else {
+            "none — devnet, roots reach no chain"
+        },
     )
 }
 
@@ -248,6 +256,7 @@ fn handle(
     body: &str,
     node: &Arc<Mutex<Node<ObjectVm>>>,
     journal: &Arc<Mutex<Journal>>,
+    anchoring: bool,
     pub_log: &Arc<Mutex<Published>>,
     dir: &str,
     chain: u32,
@@ -256,7 +265,7 @@ fn handle(
     match method.as_str() {
         "zyn_status" => {
             let n = node.lock().unwrap();
-            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", status_json(n.state()))
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", status_json(n.state(), anchoring))
         }
         // Everything a wallet needs to rebuild itself, and nothing else.
         "zyn_published" => {
@@ -394,7 +403,7 @@ const MAX_REQUEST: usize = 256 * 1024;
 /// loopback and should not depend on something in front of it.
 const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32) {
+fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32, anchoring: bool) {
     let _ = s.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = s.set_write_timeout(Some(CONN_TIMEOUT));
     let mut buf = Vec::new();
@@ -431,7 +440,7 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<
             }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
-                let out = handle(&body, &node, &journal, &pub_log, &dir, chain);
+                let out = handle(&body, &node, &journal, anchoring, &pub_log, &dir, chain);
                 let _ = s.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -774,6 +783,9 @@ fn main() {
     // right there. Each batch is persisted: catch-up can take hours, and a
     // restart that discarded it would begin again from the same stale
     // position (A115).
+    // Remembered before `anchoring` is consumed below, so the status can say
+    // which mode this node is in.
+    let anchors = anchoring.is_some();
     let anchoring = anchoring.map(|a| {
         // Split it: the scanner and its Zcash connection go to the sync
         // thread, the settler to the anchoring one. Neither type is `Clone`,
@@ -893,6 +905,6 @@ fn main() {
         let node = Arc::clone(&node);
         let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
-        std::thread::spawn(move || serve(s, node, journal, pub_log, dir, chain));
+        std::thread::spawn(move || serve(s, node, journal, pub_log, dir, chain, anchors));
     }
 }
