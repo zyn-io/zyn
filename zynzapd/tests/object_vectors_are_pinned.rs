@@ -117,6 +117,38 @@ fn the_pinned_programs_and_intent_encoding_still_hold() {
         },
     );
     assert_eq!(hex(&encoded), field(&j, "register_intent"));
+
+    // The Spend encoding too: it carries lengths and a variable-length
+    // ciphertext, so it is the one a second implementation is most likely to
+    // get subtly wrong.
+    let nkey = zynzapd::object_keys::nullifier_key(seed.as_bytes(), 0);
+    let note = Note {
+        asset: unhex(&field(&j, "asset")).try_into().unwrap(),
+        amount: Fixed(field(&j, "amount").parse().unwrap()),
+        owner,
+        nonce: unhex(&field(&j, "nonce")).try_into().unwrap(),
+    };
+    let commit = commitment(&note).unwrap();
+    let spend = <objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::encode_intent(
+        &objectvm::Op::Spend {
+            spender: owner,
+            program: zyn_vm::program::private_transfer(),
+            inputs: vec![(commit, nullifier(&nkey, &commit))],
+            outputs: vec![objectvm::Output {
+                note: Note {
+                    asset: note.asset,
+                    amount: Fixed(field(&j, "out_amount").parse().unwrap()),
+                    owner: unhex(&field(&j, "out_owner")).try_into().unwrap(),
+                    nonce: unhex(&field(&j, "out_nonce")).try_into().unwrap(),
+                },
+                enc: zyn_vm::note_enc::EncryptedNote {
+                    epk: unhex(&field(&j, "out_epk")).try_into().unwrap(),
+                    ciphertext: unhex(&field(&j, "out_ciphertext")),
+                },
+            }],
+        },
+    );
+    assert_eq!(hex(&spend), field(&j, "intent"));
 }
 
 /// And sealing to the same key still produces something that round-trips —

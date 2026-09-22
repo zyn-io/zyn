@@ -228,3 +228,59 @@ export async function submit(rpcUrl, intentBytes) {
   if (body.error) throw new Error(body.error.message || 'the chain refused the intent');
   return body.result;
 }
+
+/// Seal a note to a recipient's viewing key.
+///
+/// `ephemeral` must be fresh for every note. Reusing one links the notes and,
+/// worse, reuses the key the fixed nonce's safety rests on.
+export function sealNote(toViewingKey, ephemeralSecret, note) {
+  const body = concatBytes(note.asset, i128Bytes(note.amount), note.nonce);
+  if (body.length !== 80) throw new Error('a note is asset, amount and nonce');
+  const padded = new Uint8Array(PLAINTEXT_LEN);
+  new DataView(padded.buffer).setUint32(0, body.length, false);
+  padded.set(body, 4);
+  const shared = x25519.getSharedSecret(ephemeralSecret, toViewingKey);
+  const epk = x25519.getPublicKey(ephemeralSecret);
+  return {
+    epk,
+    ciphertext: chacha20poly1305(noteKey(shared, epk), NOTE_NONCE).encrypt(padded),
+  };
+}
+
+const TAG_SPEND = 2;
+
+function u32be(n) {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, n, false);
+  return b;
+}
+
+/// `Op::Spend` — retire these commitments, create these notes.
+///
+/// `inputs` is `{commitment, nullifier}` and `outputs` is `{note, enc}` as
+/// `sealNote` returns. The VM checks that what goes in equals what comes out;
+/// this only has to encode it the way the VM reads it.
+export function spendIntent(spender, program, inputs, outputs) {
+  const parts = [
+    new Uint8Array([TAG_SPEND]),
+    spender,
+    unhex(program),
+    u32be(inputs.length),
+    u32be(outputs.length),
+  ];
+  for (const i of inputs) parts.push(i.commitment, i.nullifier);
+  for (const o of outputs) {
+    parts.push(
+      o.note.asset,
+      i128Bytes(o.note.amount),
+      o.note.owner,
+      o.note.nonce,
+      o.enc.epk,
+      u32be(o.enc.ciphertext.length),
+      o.enc.ciphertext,
+    );
+  }
+  return concatBytes(...parts);
+}
+
+PROGRAM.privateTransfer = '1bf1117563416d5aea4b85568432f26dd1c13418f440b0095592db5cc449fcae';

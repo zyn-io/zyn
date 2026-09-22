@@ -213,3 +213,48 @@ test('a Register intent encodes to exactly the bytes Rust produces', () => {
   assert.equal(bytes[0], v.intent_tags.register, 'the tag leads');
   assert.equal(bytes.length, 1 + 32 + 32 + 32);
 });
+
+import { sealNote, spendIntent } from '../src/object.js';
+
+/// A note sealed here must open on the Rust side, which is what makes a
+/// payment from this wallet findable by its recipient.
+test('a note sealed here has the shape Rust opens', () => {
+  const recipientSecret = viewingSecret(new TextEncoder().encode('recipient seed'), 0);
+  const recipient = viewingKey(new TextEncoder().encode('recipient seed'), 0);
+  const note = {
+    asset: unhex(v.note.asset),
+    amount: 2000000000000000000n,
+    owner: unhex(v.spend.out_owner),
+    nonce: unhex(v.spend.out_nonce),
+  };
+  const enc = sealNote(recipient, new Uint8Array(32).fill(0x55), note);
+  // It round-trips through our own opener, which is byte-compatible with the
+  // Rust one by the vectors above.
+  const back = openNote(recipientSecret, enc.epk, enc.ciphertext);
+  assert.ok(back, 'the recipient must be able to open it');
+  assert.equal(back.amount, note.amount);
+  assert.equal(hex(back.nonce), hex(note.nonce));
+  assert.equal(hex(back.asset), hex(note.asset));
+});
+
+/// The Spend encoding, checked against the bytes Rust produced.
+test('a Spend intent encodes to exactly the bytes Rust produces', () => {
+  const bytes = spendIntent(
+    unhex(v.owner),
+    v.programs.private_transfer,
+    [{ commitment: unhex(v.commitment), nullifier: unhex(v.nullifier) }],
+    [
+      {
+        note: {
+          asset: unhex(v.note.asset),
+          amount: BigInt(v.spend.out_amount),
+          owner: unhex(v.spend.out_owner),
+          nonce: unhex(v.spend.out_nonce),
+        },
+        enc: { epk: unhex(v.spend.out_epk), ciphertext: unhex(v.spend.out_ciphertext) },
+      },
+    ],
+  );
+  assert.equal(hex(bytes), v.spend.intent);
+  assert.equal(bytes[0], v.intent_tags.spend, 'the tag leads');
+});

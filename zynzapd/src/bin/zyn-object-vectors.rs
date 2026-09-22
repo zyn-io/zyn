@@ -88,6 +88,44 @@ fn main() {
         program: zyn_vm::program::register_viewing_key(),
         viewing: viewing_public(&viewing),
     });
-    println!("  \"register_intent\": \"{}\"", hex(&reg));
+    println!("  \"register_intent\": \"{}\",", hex(&reg));
+
+    // A whole Spend: one input retired, one output created. The shape a send
+    // takes, pinned so the browser can be held to the bytes.
+    let out_note = Note {
+        asset: note.asset,
+        amount: Fixed::whole(2),
+        owner: [0xB0; 32],
+        nonce: [0x77; 32],
+    };
+    let mut out_plain = Vec::with_capacity(80);
+    out_plain.extend_from_slice(&out_note.asset);
+    out_plain.extend_from_slice(&out_note.amount.0.to_be_bytes());
+    out_plain.extend_from_slice(&out_note.nonce);
+    let out_enc = seal(
+        &viewing_public(&StaticSecret::from([0xB0u8; 32])),
+        StaticSecret::from([0x55u8; 32]),
+        &out_plain,
+    )
+    .expect("seals");
+    let spend = <objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::encode_intent(
+        &objectvm::Op::Spend {
+            spender: owner,
+            program: zyn_vm::program::private_transfer(),
+            inputs: vec![(commit, nullifier(&nkey, &commit))],
+            outputs: vec![objectvm::Output {
+                note: out_note,
+                enc: out_enc.clone(),
+            }],
+        },
+    );
+    println!("  \"spend\": {{");
+    println!("    \"out_owner\": \"{}\",", hex(&out_note.owner));
+    println!("    \"out_amount\": \"{}\",", out_note.amount.0);
+    println!("    \"out_nonce\": \"{}\",", hex(&out_note.nonce));
+    println!("    \"out_epk\": \"{}\",", hex(&out_enc.epk));
+    println!("    \"out_ciphertext\": \"{}\",", hex(&out_enc.ciphertext));
+    println!("    \"intent\": \"{}\"", hex(&spend));
+    println!("  }}");
     println!("}}");
 }
