@@ -12,7 +12,13 @@
 /// Which upstream path each route reaches. Naming them beats forwarding a
 /// prefix: a chain the deployment has not declared cannot be reached by
 /// guessing a URL.
-const ROUTES = { '': '', testnet: 'testnet/' };
+///
+/// `testnet` reaches `/object` — chain 212, the object ledger. It reached
+/// `/testnet` until 22 Sep 2026, when chain 11 was retired; that upstream now
+/// answers 410, so leaving this pointed at it would have kept the wallet's
+/// testnet asking a chain that is gone. The route name is the wallet's word
+/// for "the testnet", and the testnet is 212.
+const ROUTES = { '': '', testnet: 'object' };
 
 export async function onRequest({ request, env, params }) {
   const base = env.ZYN_RPC_URL;

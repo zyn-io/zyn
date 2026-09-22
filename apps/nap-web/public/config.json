@@ -28,7 +28,7 @@
       "network": "Zyn testnet",
       "zcash": "ZEC testnet",
       "zcashPrefix": "utest1",
-      "chain": 11,
+      "chain": 212,
       "rpcUrl": "/rpc/testnet",
       "claimUrl": "/claim",
       "mediaGateway": "/media",

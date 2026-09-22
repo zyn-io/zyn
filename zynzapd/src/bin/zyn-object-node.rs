@@ -477,8 +477,32 @@ fn handle(
                 receipts
             )
         }
-        _ => err("unknown method"),
+        // Name what this chain serves rather than saying "unknown method".
+        // A wallet built for the AMM chains reaches here the moment it asks
+        // for `zyn_assets` or `zyn_account`, and a bare refusal reads as an
+        // outage; this reads as what it is — a different ledger with a
+        // different method table.
+        other => err(&unknown_method(other)),
     }
+}
+
+/// Why a method this ledger does not serve was refused.
+///
+/// A wallet built for the AMM chains reaches here the moment it asks for
+/// `zyn_assets` or `zyn_account`, and shows the holder whatever this says. A
+/// bare "unknown method" reads as an outage and sends someone looking for a
+/// fault that does not exist; naming the ledger and its method table says what
+/// actually happened — they reached a different chain.
+fn unknown_method(method: &str) -> String {
+    let named = if method.is_empty() {
+        "that method".to_string()
+    } else {
+        escape(method)
+    };
+    format!(
+        "this chain is an object ledger and does not serve {named}. It serves \
+         zyn_status, zyn_published, zyn_submit, zyn_anchors and zyn_offers"
+    )
 }
 
 fn err(why: &str) -> String {
@@ -1131,6 +1155,24 @@ mod tests {
         assert_eq!(v["anchored_height"], 0);
         assert_eq!(v["anchor_txid"], "");
         assert!(v["anchoring"].as_str().unwrap().starts_with("on"));
+    }
+
+    /// What a wallet shows its holder when it reaches the wrong ledger.
+    #[test]
+    fn a_method_this_ledger_does_not_serve_says_which_ledger_this_is() {
+        let msg = unknown_method("zyn_assets");
+        assert!(msg.contains("object ledger"), "{msg}");
+        assert!(msg.contains("zyn_assets"), "it must name what was asked: {msg}");
+        assert!(msg.contains("zyn_status"), "and what it does serve: {msg}");
+        // It goes into a JSON error field, so a method name with a quote in it
+        // must not end the document early.
+        let sneaky = unknown_method("a\"b");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&err(&sneaky)).is_ok(),
+            "the refusal must stay parseable: {sneaky}"
+        );
+        // A body with no method at all still gets a sentence, not a blank.
+        assert!(unknown_method("").contains("that method"));
     }
 
     /// And when one has landed, the status carries the mapping rather than
