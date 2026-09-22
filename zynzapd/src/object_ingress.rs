@@ -514,6 +514,21 @@ pub mod pending {
             }
         }
 
+        /// Take note of one debt directly.
+        ///
+        /// [`record`] reads a `Planned` list, which is what the bridge had
+        /// before it grew a decision step of its own. This is the same insert
+        /// from the other side — same map, same "first height wins" rule, so
+        /// a deposit recorded twice is still one debt.
+        pub fn owe(&mut self, account: AccountId, amount: Fixed, txid: [u8; 32], height: u64) {
+            self.debts.entry(txid).or_insert(Debt {
+                account,
+                amount,
+                txid,
+                height,
+            });
+        }
+
         /// Forget a debt, once the ledger has actually taken it.
         ///
         /// Only call this against a receipt. Dropping a debt because an

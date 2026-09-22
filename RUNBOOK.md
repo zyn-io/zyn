@@ -2827,10 +2827,39 @@ something real before they are exercised against money.
   devnet wording (`"none — devnet, roots reach no chain"`) is still what a
   node without a Zebra, a vault FVK and custodians reports, and it is never
   the better of the two by default.
-- **Objects are still unbacked.** Anchoring a root and backing an object are
-  different promises: until `object_ingress` is wired to a real watcher, no
-  object on this chain corresponds to deposited ZEC. The startup banner says
-  this separately, and it is the one claim not to overstate.
+- **The deposit bridge** (22 Sep, A133). Confirmed ZEC in the vault becomes an
+  object its holder can find. Opt-in on `ZYN_BRIDGE_SEED`, the way anchoring is
+  opt-in: without it the banner still says objects are unbacked, because they
+  are. `ZYN_ZEC_ASSET` defaults to the same `XZEC` id the AMM chains use, so one
+  wallet recognises bridged ZEC on either ledger.
+  - **The seed is part of the chain's identity.** Deposit nonces are
+    `HKDF(seed, txid)`, so a restarted bridge rebuilds the *identical* intent
+    and being refused as a duplicate is proof the work was done. Change the
+    seed and the same deposit would build a different object — one the
+    holder's wallet never looks for. It lives in `/etc/zyn/zyn-object.env`
+    (0600) beside the vault FVK. **Back it up.** It cannot spend anything, but
+    anyone holding it can link every deposit commitment to its Zcash
+    transaction.
+  - **Every pass checks the backing first.** The watcher attests to the
+    vault's balance before the credits it covers, and a pass whose attestation
+    comes up short credits *nothing* — including deposits that would
+    individually have been fine. The vault is not short by one deposit; it is
+    short, and no intent repairs that. The cursor does not advance either, so
+    the next pass looks at the same range rather than stepping over the
+    evidence.
+  - **It waits for the note trees.** Before they reach the tip the vault's own
+    notes are invisible, so the balance the watcher would attest to is not the
+    vault's balance — and attesting too low is exactly what the solvency gate
+    treats as an emergency. It runs in the same thread as the note walk, which
+    is also what stops two scanners feeding one tree twice.
+  - **A deposit for an unregistered holder is owed, not dropped.** It goes in
+    `chain-<id>.pending` (`ZYNPEND1`) and is credited the moment that account
+    registers a viewing key. Nothing expires it. Debts are written before the
+    cursor: if only one survives a crash it must be the list of what is owed,
+    because a cursor that is behind only costs a rescan.
+- **Objects are unbacked until that bridge is turned on.** Anchoring a root and
+  backing an object are different promises, and the banner says them
+  separately.
 - **The routes beside it**: `/` is mainnet 26460. `/testnet` is **410 Gone**
   since 22 Sep, returning a JSON-RPC error naming chain 11's retirement and
   pointing at `/object` — a retired chain answers, rather than timing out and

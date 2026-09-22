@@ -438,3 +438,87 @@ fn every_field_survives_the_round_trip() {
         Debt { account: [0xAB; 32], amount: Fixed::whole(123_456), txid: [0xCD; 32], height: 4_371_399 }
     );
 }
+
+/// The solvency gate, driven by the real watcher rather than a hand-written
+/// action.
+///
+/// `drive` above asserts solvency and would panic; the node cannot panic, so
+/// `object_bridge::decide` returns the refusal as a value and the node turns
+/// it into an alarm. This is that path, and the thing it must never do is
+/// credit the deposits in a pass whose attestation came up short.
+mod solvency {
+    use super::*;
+    use zynzapd::object_bridge::{decide, Decided, Pass};
+
+    /// A chain view whose vault balance can be made to lie — which is what a
+    /// vault that has been drained looks like from here.
+    struct Drained {
+        inner: Blocks,
+        claim: i64,
+    }
+
+    impl ChainView for Drained {
+        fn tip(&self) -> u64 {
+            self.inner.tip()
+        }
+        fn deposits_at(&self, height: u64) -> Vec<ObservedDeposit> {
+            self.inner.deposits_at(height)
+        }
+        fn balance_at(&self, _height: u64) -> Option<Fixed> {
+            Some(Fixed::whole(self.claim))
+        }
+    }
+
+    #[test]
+    fn a_pass_whose_vault_came_up_short_credits_nothing() {
+        let mut vm = registered_vm();
+        // `registered_vm` consumed seq 1, and the VM refuses a gap.
+        let mut seq = 1u64;
+
+        // First, a normal deposit that really is backed.
+        let chain = Blocks {
+            tip: Cell::new(100),
+            deposits: vec![(10, [0xD1; 32], 5)],
+        };
+        let mut watcher = Watcher::new(CONFIRMATIONS, 0);
+        let planned = drive(&mut vm, &mut seq, &chain, &mut watcher);
+        assert!(planned.iter().any(|p| matches!(p, Planned::Submit(_))));
+        assert_eq!(vm.issued.get(&ZEC).copied().unwrap(), Fixed::whole(5));
+
+        // Now the vault reports holding less than was issued, while a fresh
+        // deposit sits in the same pass.
+        let drained = Drained {
+            inner: Blocks {
+                tip: Cell::new(200),
+                deposits: vec![(150, [0xD2; 32], 7)],
+            },
+            claim: 1,
+        };
+        let actions = watcher.poll(&drained).expect("the chain view answered");
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, zyn_custody::watcher::WatcherAction::Credit { .. })),
+            "the pass must contain a credit, or it proves nothing"
+        );
+
+        // The vault really does hold only 1 here — it was drained.
+        match decide(&vm, SEED, ZEC, &actions, Fixed::whole(1)) {
+            Pass::Insolvent { observed, issued, .. } => {
+                assert_eq!(observed, Fixed::whole(1));
+                assert_eq!(issued, Fixed::whole(5));
+            }
+            Pass::Apply(items) => panic!(
+                "an under-backed vault must refuse the whole pass, and it decided to apply {:?}",
+                items.iter().filter(|d| matches!(d, Decided::Credit { .. })).count()
+            ),
+            Pass::Unverifiable { asset } => {
+                panic!("this pass carries only the bridged asset, not {asset:?}")
+            }
+        }
+
+        // And the ledger is untouched: nothing was issued against a vault
+        // that could not cover it.
+        assert_eq!(vm.issued.get(&ZEC).copied().unwrap(), Fixed::whole(5));
+    }
+}

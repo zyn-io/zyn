@@ -52,6 +52,15 @@ struct Anchoring {
     da_dir: std::path::PathBuf,
     da_key: Option<[u8; 32]>,
     data_dir: std::path::PathBuf,
+    /// `diversifier index -> account`: the deposit addresses that exist.
+    ///
+    /// Derived, not stored. `deposit_index` is a pure function of the account
+    /// id, so every registered account already *has* a deposit address —
+    /// this register is just the scanner being told which ones to recognise.
+    addresses: std::sync::Arc<Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>>,
+    /// Enough to derive an address, and nothing that can spend.
+    keys: zyn_custody::shielded::VaultKeys,
+    network: zyn_custody::zebra::Network,
 }
 
 fn env(name: &str, default: &str) -> String {
@@ -162,6 +171,7 @@ fn status_json(
             "\"commitments\":{},\"live\":{},\"nullifiers\":{},\"reconciled\":{},",
             "\"offers\":{},\"exits\":{},",
             "\"anchored_epoch\":{},\"anchored_height\":{},\"anchor_txid\":\"{}\",",
+            "\"issued\":{},\"deposits_credited\":{},",
             "\"synced_to\":{},\"sync_target\":{},\"sync_error\":\"{}\",",
             "\"state_root\":\"{}\",\"anchoring\":\"{}\"}}"
         ),
@@ -182,6 +192,13 @@ fn status_json(
         last.map(|a| a.epoch).unwrap_or(0),
         last.map(|a| a.height).unwrap_or(0),
         last.map(|a| a.txid.as_str()).unwrap_or(""),
+        // What the ledger claims the vault owes it, per asset. A reader
+        // comparing this with the vault's balance on Zcash is doing the same
+        // check the bridge does every pass, without needing a key. Never
+        // summed across assets: two different assets share no unit, and one
+        // number covering both would be a number that means nothing.
+        issued_json(vm),
+        vm.deposits.len(),
         sync.synced_to,
         sync.target,
         // A JSON string, so a scanner error with a quote in it cannot break
@@ -218,6 +235,16 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// `{"<asset hex>": "<amount>"}` — what the ledger has issued, per asset.
+fn issued_json(vm: &ObjectVm) -> String {
+    let rows: Vec<String> = vm
+        .issued
+        .iter()
+        .map(|(asset, amount)| format!("\"{}\":\"{}\"", hex(asset), amount))
+        .collect();
+    format!("{{{}}}", rows.join(","))
 }
 
 fn hex(b: &[u8]) -> String {
@@ -312,6 +339,10 @@ fn handle(
     chain: u32,
     da_dir: Option<&std::path::Path>,
     sync: &Arc<Mutex<SyncProgress>>,
+    vault: Option<&(
+        zyn_custody::shielded::VaultKeys,
+        zcash_protocol::consensus::NetworkType,
+    )>,
 ) -> String {
     let method = field(body, "method").unwrap_or_default();
     match method.as_str() {
@@ -407,74 +438,52 @@ fn handle(
             let Some(op) = ObjectVm::decode_intent(&mut d) else {
                 return err("intent did not decode");
             };
-            let mut n = node.lock().unwrap();
-            let step = n.submit_operator(op.clone(), now_secs());
-            let receipts = format!("{:?}", step.receipts);
-
-            // Write the intent down before anything derived from it is served.
-            // A chain nobody can replay is a chain nobody can check, and the
-            // published root is only meaningful next to the intents that
-            // produced it. The seal is recorded too: an epoch whose last
-            // record is not a seal is one a verifier refuses, and refusing
-            // *here* costs one pass where publishing it halts every replica
-            // that reads the bundle.
-            {
-                // The epoch this intent belongs to, read *before* a seal moves
-                // the state on. Taking it afterwards files the intent under
-                // the epoch that follows it, and the one it actually closed
-                // ends up empty.
-                let epoch_for_record = if step.sealed.is_some() {
-                    n.state().epoch.saturating_sub(1)
-                } else {
-                    n.state().epoch
-                };
-                let mut j = journal.lock().unwrap();
-                // A v2 journal holds *authorized* intents, not raw ones: a
-                // replica decodes the envelope and re-checks the authority
-                // before applying anything, so writing a bare intent produces
-                // a file that reads as unsealed and a bundle no verifier will
-                // take. These arrive over the operator's own RPC, so
-                // `Authorized::operator` is the honest envelope — it says who
-                // vouched for the intent rather than implying a signature
-                // nobody made.
-                let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(
-                    &zyn_vm::verify::Authorized::operator(op.clone()),
-                );
-                if let Err(err) = j.record(epoch_for_record, step.seq, &encoded) {
-                    eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
-                }
-                if step.sealed.is_some() {
-                    let seal = zyn_vm::verify::encode_authorized::<ObjectVm>(
-                        &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
-                    );
-                    let _ = j.record(epoch_for_record, step.seq.saturating_add(1), &seal);
-                }
-                // Always. The writer buffers, so an intent recorded and not
-                // flushed is one a verifier fetching this epoch will not find
-                // — and the node had exactly that bug, leaving a file holding
-                // nothing but its header.
-                let _ = j.sync();
-            }
-            // `submit` seals itself when the policy is due, so most seals
-            // happen here rather than on the timer. Log from both, or a chain
-            // that is working looks like one that is asleep — which cost most
-            // of 21 Sep to learn on testnet (A115).
-            if step.sealed.is_some() {
-                eprintln!(
-                    "zyn-object-node: sealed epoch {} — root {}",
-                    n.state().epoch,
-                    hex(&n.state().state_root())
-                );
-            }
-            if !step.receipts.iter().any(ObjectVm::rejected) {
-                let mut p = pub_log.lock().unwrap();
-                record(&mut p, &op);
-                save_published(dir, chain, &p);
-            }
-            save(dir, chain, n.state());
+            let receipts = format!(
+                "{:?}",
+                apply_operator(&op, node, journal, pub_log, dir, chain)
+            );
             format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"receipts\":{:?}}}}}",
                 receipts
+            )
+        }
+        // Where to send Zcash so it becomes an object for this account.
+        //
+        // One address per account, so **no memo is needed**: the address is
+        // the attribution. That matters because the things people actually
+        // pay from -- faucets, exchange withdrawals, most wallets -- cannot
+        // set one, and a deposit with no memo is not credited at all.
+        //
+        // Open rather than signature-gated. The address is derived from the
+        // account id by a pure function, so anyone holding the id can already
+        // compute it given the vault's public key; gating would protect
+        // nothing and would stop a wallet showing a holder where to deposit.
+        "zyn_depositAddress" => {
+            let Some(keys) = vault.as_ref() else {
+                return err("this node custodies no vault, so it has no deposit address");
+            };
+            let Some(hexed) = field(body, "account") else {
+                return err("no account");
+            };
+            let Some(account) = unhex(&hexed).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("account is not 32 hex bytes");
+            };
+            // Said plainly, because a deposit to an unregistered account is
+            // held rather than credited and a holder should know that before
+            // they send rather than after.
+            let registered = {
+                let n = node.lock().unwrap();
+                n.state().viewing.contains_key(&account)
+            };
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"address\":\"{}\",\"registered\":{},\"note\":\"{}\"}}}}",
+                keys.0.deposit_address(&account, keys.1),
+                registered,
+                if registered {
+                    "send Zcash here and it becomes an object for this account; no memo needed"
+                } else {
+                    "this account has not registered a viewing key, so a deposit here is held as owed and credited the moment it does"
+                }
             )
         }
         // Name what this chain serves rather than saying "unknown method".
@@ -501,7 +510,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submit, zyn_anchors and zyn_offers"
+         zyn_status, zyn_published, zyn_submit, zyn_anchors, zyn_offers and zyn_depositAddress"
     )
 }
 
@@ -534,7 +543,383 @@ const MAX_REQUEST: usize = 256 * 1024;
 /// loopback and should not depend on something in front of it.
 const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32, anchoring: bool, da_dir: Option<std::path::PathBuf>, sync: Arc<Mutex<SyncProgress>>) {
+/// The deposit bridge's own state: where it has looked, and what it owes.
+///
+/// Opt-in and all-or-nothing, like anchoring. Without `ZYN_BRIDGE_SEED` there
+/// is no bridge and the banner says objects are unbacked — which was true and
+/// said so for as long as the bridge did not exist. Turning it on with a seed
+/// that is not the one previous deposits used would rebuild *different*
+/// objects for them, so the seed is as much a part of the chain's identity as
+/// its id (see `object_ingress`).
+struct Bridge {
+    seed: Vec<u8>,
+    zec: zyn_custody::watcher::AssetId,
+    addresses: std::sync::Arc<
+        Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
+    >,
+    watcher: zyn_custody::watcher::Watcher,
+    pending: zynzapd::object_ingress::pending::Pending,
+}
+
+fn bridge_cursor_path(dir: &str, chain: u32) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(format!("chain-{chain}.bridge"))
+}
+
+fn bridge_pending_path(dir: &str, chain: u32) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(format!("chain-{chain}.pending"))
+}
+
+/// Wire the bridge, if this deployment has a seed to derive from.
+///
+/// `next_index` comes from the ledger rather than from the cursor file: the
+/// VM is the authority on what it has already credited, and a cursor that
+/// disagreed with it would be the one thing that could double-credit.
+fn build_bridge(
+    dir: &str,
+    chain: u32,
+    confirmations: u64,
+    vm: &ObjectVm,
+    from_height: u64,
+    addresses: std::sync::Arc<
+        Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
+    >,
+) -> Option<Bridge> {
+    let seed_hex = std::env::var("ZYN_BRIDGE_SEED").ok().filter(|s| !s.is_empty())?;
+    let Some(seed) = unhex(&seed_hex) else {
+        eprintln!("zyn-object-node: ZYN_BRIDGE_SEED is not hex — the bridge stays off");
+        return None;
+    };
+    if seed.len() < 32 {
+        eprintln!(
+            "zyn-object-node: ZYN_BRIDGE_SEED is {} bytes; 32 or more, or the derived \
+             nonces are guessable — the bridge stays off",
+            seed.len()
+        );
+        return None;
+    }
+    // The same asset id the AMM chains use for bridged ZEC, so one wallet
+    // recognises it on either ledger. Overridable, because a chain that
+    // custodies a different asset should say so rather than inherit a name.
+    let zec = match std::env::var("ZYN_ZEC_ASSET").ok().filter(|s| !s.is_empty()) {
+        None => swapvm::types::XZEC,
+        Some(h) => match unhex(&h).and_then(|b| <[u8; 32]>::try_from(b).ok()) {
+            Some(a) => a,
+            None => {
+                eprintln!("zyn-object-node: ZYN_ZEC_ASSET is not 32 hex bytes — the bridge stays off");
+                return None;
+            }
+        },
+    };
+
+    // With no saved cursor, start at the vault's birth rather than at zero.
+    // The watcher walks every height from its cursor to the confirmed tip, so
+    // a cursor of 0 means four million pointless steps on the first pass —
+    // and the scanner would clamp the range to `from_height` anyway, so those
+    // steps could never have found anything.
+    let scanned_to = std::fs::read_to_string(bridge_cursor_path(dir, chain))
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .unwrap_or_else(|| from_height.saturating_sub(1));
+    let pending = std::fs::read(bridge_pending_path(dir, chain))
+        .ok()
+        .and_then(|b| zynzapd::object_ingress::pending::Pending::decode(&b))
+        .unwrap_or_default();
+
+    // A debt below the cursor is one the watcher will never report again, so
+    // the cursor must not run ahead of what is still owed.
+    let from = match pending.earliest_height() {
+        Some(h) => scanned_to.min(h.saturating_sub(1)),
+        None => scanned_to,
+    };
+    if from != scanned_to {
+        eprintln!(
+            "zyn-object-node: bridge cursor {scanned_to} is ahead of an unpaid debt at \
+             {}; rewinding to {from}",
+            pending.earliest_height().unwrap_or(0)
+        );
+    }
+
+    eprintln!(
+        "zyn-object-node: deposit bridge ON — scanning from {from}, {} debt(s) outstanding, \
+         asset {}",
+        pending.len(),
+        hex(&zec)
+    );
+    // Every account already registered gets its deposit address recognised
+    // before the first pass, not after it.
+    let known = refresh_deposit_addresses(&addresses, vm);
+    eprintln!("zyn-object-node: {known} deposit address(es) recognised");
+    Some(Bridge {
+        seed,
+        zec,
+        addresses,
+        watcher: zyn_custody::watcher::Watcher::resume(
+            confirmations,
+            vm.deposits.len() as u64,
+            from,
+        ),
+        pending,
+    })
+}
+
+/// Teach the scanner every registered account's deposit address.
+///
+/// Derived from the ledger rather than remembered: `deposit_index` is a pure
+/// function of the account id, so an account that has registered a viewing key
+/// already has a deposit address whether anyone asked for it or not. Rebuilt
+/// each pass because accounts register while the node runs, and an address the
+/// scanner does not know is a deposit that falls through to the memo rules.
+fn refresh_deposit_addresses(
+    register: &Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
+    vm: &ObjectVm,
+) -> usize {
+    let Ok(mut map) = register.lock() else {
+        return 0;
+    };
+    for account in vm.viewing.keys() {
+        let index = *zyn_custody::shielded::deposit_index(account).as_bytes();
+        map.insert(index, *account);
+    }
+    map.len()
+}
+
+/// What the vault holds, unspent, across every pool it uses.
+///
+/// Summed from the note stores rather than from a scan range: these are the
+/// notes the vault still has, so anchors that spent from it are already
+/// accounted for. A range sum is not a balance (see `object_bridge`).
+fn vault_balance(notes: &zyn_custody::shielded::PoolStores) -> Result<zyn_vm::Fixed, String> {
+    let mut total: i128 = 0;
+    for pool in [
+        orchard::ValuePool::Orchard,
+        orchard::ValuePool::Ironwood,
+    ] {
+        let held = notes
+            .of(pool)
+            .lock()
+            .map_err(|_| "note store lock poisoned".to_string())?
+            .balance();
+        total = total
+            .checked_add(held as i128)
+            .ok_or_else(|| "vault balance overflowed".to_string())?;
+    }
+    Ok(zyn_vm::Fixed(total))
+}
+
+/// One pass of the deposit bridge: look at Zcash, credit what is backed.
+///
+/// Returns the number of deposits credited. An insolvent vault returns an
+/// error and advances nothing — the cursor stays where it was, so the next
+/// pass looks at the same range rather than stepping over the evidence.
+#[allow(clippy::too_many_arguments)]
+fn bridge_pass(
+    bridge: &mut Bridge,
+    scanner: &zyn_custody::shielded::Scanner,
+    notes: &zyn_custody::shielded::PoolStores,
+    zebra: &zyn_custody::zebra::Zebra,
+    node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
+    pub_log: &Arc<Mutex<Published>>,
+    dir: &str,
+    chain: u32,
+) -> Result<usize, String> {
+    // The height this pass starts at. Debts are recorded against it rather
+    // than against where the pass ended: a rewind has to re-cover the whole
+    // range a debt could have been in, and the watcher's actions do not carry
+    // per-deposit heights.
+    let from = bridge.watcher.scanned_to().saturating_add(1);
+    let observed = scanner
+        .observe(zebra, from)
+        .map_err(|e| format!("scan failed: {e:?}"))?;
+    let mut actions = bridge
+        .watcher
+        .poll(&observed)
+        .map_err(|e| format!("watcher refused the range: {e:?}"))?;
+
+    // What the vault actually holds, unspent, across both pools. Not the
+    // watcher's attestation: that sums one scan range (see `object_bridge`).
+    // This figure accounts for the anchors that spent from the vault, which
+    // is the whole reason a range sum cannot stand in for it.
+    let vault = vault_balance(notes)?;
+
+    // Retries go down the same road as live credits, deliberately: a retry
+    // with its own path would be a path nothing tests.
+    let decided = {
+        let n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
+        let vm = n.state();
+        refresh_deposit_addresses(&bridge.addresses, vm);
+        actions.extend(bridge.pending.replayable(vm));
+        if actions.is_empty() {
+            return Ok(0);
+        }
+        zynzapd::object_bridge::decide(vm, &bridge.seed, bridge.zec, &actions, vault)
+    };
+
+    let items = match decided {
+        zynzapd::object_bridge::Pass::Insolvent {
+            asset,
+            observed,
+            issued,
+        } => {
+            // Not a retry. No intent repairs this, and crediting on would
+            // deepen a hole rather than fill it.
+            return Err(format!(
+                "INSOLVENT: the vault attests to {observed:?} of asset {} but the ledger \
+                 has issued {issued:?}. Nothing was credited and the cursor did not move",
+                hex(&asset.unwrap_or(bridge.zec))
+            ));
+        }
+        zynzapd::object_bridge::Pass::Unverifiable { asset } => {
+            return Err(format!(
+                "a deposit arrived in asset {} whose backing this bridge cannot check. \
+                 Nothing was credited",
+                hex(&asset)
+            ));
+        }
+        zynzapd::object_bridge::Pass::Apply(items) => items,
+    };
+
+    let mut credited = 0usize;
+    for item in items {
+        match item {
+            zynzapd::object_bridge::Decided::Credit { op, txid } => {
+                let receipts = apply_operator(&op, node, journal, pub_log, dir, chain);
+                if receipts.iter().any(ObjectVm::rejected) {
+                    eprintln!(
+                        "zyn-object-node: the ledger refused the credit for {}: {receipts:?}",
+                        hex(&txid)
+                    );
+                    continue;
+                }
+                // Settled against a receipt, never against having built the
+                // intent: dropping a debt in that window is the loss this
+                // whole list exists to prevent.
+                bridge.pending.settle(&txid);
+                credited += 1;
+                eprintln!("zyn-object-node: credited deposit {}", hex(&txid));
+            }
+            zynzapd::object_bridge::Decided::Owed {
+                account,
+                amount,
+                txid,
+            } => {
+                bridge.pending.owe(account, amount, txid, from);
+                eprintln!(
+                    "zyn-object-node: deposit {} is owed to an account that has not \
+                     registered a viewing key — the ZEC stays in the vault and nothing \
+                     expires it",
+                    hex(&txid)
+                );
+            }
+            zynzapd::object_bridge::Decided::AlreadyCredited { txid } => {
+                // On the ledger already, so the debt (if any) is discharged.
+                bridge.pending.settle(&txid);
+            }
+            zynzapd::object_bridge::Decided::Rejected { txid, why } => {
+                eprintln!(
+                    "zyn-object-node: refused deposit {}: {why}",
+                    hex(&txid)
+                );
+            }
+        }
+    }
+
+    // Persist the debts before the cursor. If only one of the two survives a
+    // crash it must be the list of what is owed: a cursor that is behind
+    // costs a rescan, and the VM refuses the duplicate credit anyway.
+    let _ = std::fs::write(bridge_pending_path(dir, chain), bridge.pending.encode());
+    let _ = std::fs::write(
+        bridge_cursor_path(dir, chain),
+        bridge.watcher.scanned_to().to_string(),
+    );
+    Ok(credited)
+}
+
+/// Apply one operator-authorised intent: journal it, apply it, publish it.
+///
+/// Every intent the node accepts goes through here, whichever door it came in
+/// by — the RPC, or the deposit bridge. The bridge could have called
+/// `submit_operator` directly and written its own journal record, and it would
+/// have worked until the two copies drifted; the journal accounting here is
+/// subtle enough (which epoch a record belongs to, the seal that must follow
+/// it, the flush that must not be skipped) that a second implementation is a
+/// second set of those bugs.
+fn apply_operator(
+    op: &Op,
+    node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
+    pub_log: &Arc<Mutex<Published>>,
+    dir: &str,
+    chain: u32,
+) -> Vec<objectvm::Receipt> {
+        let mut n = node.lock().unwrap();
+        let step = n.submit_operator(op.clone(), now_secs());
+        
+        // Write the intent down before anything derived from it is served.
+        // A chain nobody can replay is a chain nobody can check, and the
+        // published root is only meaningful next to the intents that
+        // produced it. The seal is recorded too: an epoch whose last
+        // record is not a seal is one a verifier refuses, and refusing
+        // *here* costs one pass where publishing it halts every replica
+        // that reads the bundle.
+        {
+            // The epoch this intent belongs to, read *before* a seal moves
+            // the state on. Taking it afterwards files the intent under
+            // the epoch that follows it, and the one it actually closed
+            // ends up empty.
+            let epoch_for_record = if step.sealed.is_some() {
+                n.state().epoch.saturating_sub(1)
+            } else {
+                n.state().epoch
+            };
+            let mut j = journal.lock().unwrap();
+            // A v2 journal holds *authorized* intents, not raw ones: a
+            // replica decodes the envelope and re-checks the authority
+            // before applying anything, so writing a bare intent produces
+            // a file that reads as unsealed and a bundle no verifier will
+            // take. These arrive over the operator's own RPC, so
+            // `Authorized::operator` is the honest envelope — it says who
+            // vouched for the intent rather than implying a signature
+            // nobody made.
+            let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(
+                &zyn_vm::verify::Authorized::operator(op.clone()),
+            );
+            if let Err(err) = j.record(epoch_for_record, step.seq, &encoded) {
+                eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
+            }
+            if step.sealed.is_some() {
+                let seal = zyn_vm::verify::encode_authorized::<ObjectVm>(
+                    &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
+                );
+                let _ = j.record(epoch_for_record, step.seq.saturating_add(1), &seal);
+            }
+            // Always. The writer buffers, so an intent recorded and not
+            // flushed is one a verifier fetching this epoch will not find
+            // — and the node had exactly that bug, leaving a file holding
+            // nothing but its header.
+            let _ = j.sync();
+        }
+        // `submit` seals itself when the policy is due, so most seals
+        // happen here rather than on the timer. Log from both, or a chain
+        // that is working looks like one that is asleep — which cost most
+        // of 21 Sep to learn on testnet (A115).
+        if step.sealed.is_some() {
+            eprintln!(
+                "zyn-object-node: sealed epoch {} — root {}",
+                n.state().epoch,
+                hex(&n.state().state_root())
+            );
+        }
+        if !step.receipts.iter().any(ObjectVm::rejected) {
+            let mut p = pub_log.lock().unwrap();
+            record(&mut p, op);
+            save_published(dir, chain, &p);
+        }
+        save(dir, chain, n.state());
+    step.receipts
+}
+
+fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32, anchoring: bool, da_dir: Option<std::path::PathBuf>, sync: Arc<Mutex<SyncProgress>>, vault: Option<(zyn_custody::shielded::VaultKeys, zcash_protocol::consensus::NetworkType)>) {
     let _ = s.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = s.set_write_timeout(Some(CONN_TIMEOUT));
     let mut buf = Vec::new();
@@ -571,7 +956,10 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<
             }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
-                let out = handle(&body, &node, &journal, anchoring, &pub_log, &dir, chain, da_dir.as_deref(), &sync);
+                let out = handle(
+                    &body, &node, &journal, anchoring, &pub_log, &dir, chain,
+                    da_dir.as_deref(), &sync, vault.as_ref(),
+                );
                 let _ = s.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -759,15 +1147,42 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         "zyn-object-node: {} shielded deposit(s) attributed out of band",
         attributions.len()
     );
-    let scanner = zyn_custody::shielded::Scanner::new(
-        zyn_custody::shielded::VaultKeys::from_full_viewing_key(fvk.clone()),
-        from_height,
-        200,
-    )
-    .with_notes(notes.clone())
-    .with_attributions(attributions.clone());
+    let keys = zyn_custody::shielded::VaultKeys::from_full_viewing_key(fvk.clone());
+    let addresses: std::sync::Arc<
+        Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
+    > = std::sync::Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+    let scanner = zyn_custody::shielded::Scanner::new(keys.clone(), from_height, 200)
+        .with_notes(notes.clone())
+        .with_attributions(attributions.clone())
+        // Without this the scanner has no idea an account's own deposit
+        // address exists, so a payment to one falls through to the memo rules
+        // and a depositor who cannot set a memo -- a faucet, most wallets --
+        // has no way to be credited at all.
+        .with_addresses(addresses.clone());
+
+    // Say where to pay this vault, at startup, in the log.
+    //
+    // The address is public — it is what a depositor is given — and having it
+    // only in a config file meant the answer to "where do I send it" was a
+    // key nobody should be reading. Index 0 is the vault's own address:
+    // change, anchors and top-ups arrive here, and so does a deposit that
+    // names its account in a `ZYN1:<hex>` memo.
+    eprintln!(
+        "zyn-object-node: vault address ({}) {}",
+        std::env::var("ZYN_NETWORK").unwrap_or_else(|_| "testnet".into()),
+        scanner.address(
+            0,
+            match network {
+                Network::Mainnet => zcash_protocol::consensus::NetworkType::Main,
+                _ => zcash_protocol::consensus::NetworkType::Test,
+            },
+        )
+    );
 
     Some(Anchoring {
+        addresses,
+        keys,
+        network,
         scanner,
         notes: notes.clone(),
         zebra: Zebra::connect(&host, port, auth, network).ok()?,
@@ -871,9 +1286,20 @@ fn main() {
         eprintln!(
             "zyn-object-node: anchoring ON — roots are carried to Zcash and settle there"
         );
-        eprintln!(
-            "zyn-object-node: objects are still unbacked: no deposit bridge credits real ZEC yet"
-        );
+        // Anchoring a root and backing an object are different promises, and
+        // the banner keeps saying them separately. This line was
+        // unconditional for as long as no bridge existed; now it reports
+        // which of the two is true rather than assuming the worse one.
+        if std::env::var("ZYN_BRIDGE_SEED").ok().filter(|v| !v.is_empty()).is_some() {
+            eprintln!(
+                "zyn-object-node: deposit bridge configured — confirmed ZEC becomes an object, \
+                 and every pass checks the vault still holds what the ledger issued"
+            );
+        } else {
+            eprintln!(
+                "zyn-object-node: objects are still unbacked: no deposit bridge credits real ZEC yet"
+            );
+        }
     } else {
         eprintln!(
             "zyn-object-node: anchoring OFF — roots are sealed and served, and reach no chain"
@@ -939,6 +1365,22 @@ fn main() {
     // on the settler's lock to answer "how far along are we" is a reader that
     // blocks exactly when the settler is busy.
     let rpc_da_dir: Option<std::path::PathBuf> = anchoring.as_ref().map(|a| a.da_dir.clone());
+    // Enough to derive a deposit address and nothing that can spend, kept for
+    // the RPC because the scanner itself moves into the sync thread.
+    let rpc_vault: Option<(
+        zyn_custody::shielded::VaultKeys,
+        zcash_protocol::consensus::NetworkType,
+    )> = anchoring.as_ref().map(|a| {
+        (
+            a.keys.clone(),
+            match a.network {
+                zyn_custody::zebra::Network::Mainnet => {
+                    zcash_protocol::consensus::NetworkType::Main
+                }
+                _ => zcash_protocol::consensus::NetworkType::Test,
+            },
+        )
+    });
     let sync_progress = Arc::new(Mutex::new(SyncProgress::default()));
     let sync_writer = Arc::clone(&sync_progress);
     let anchoring = anchoring.map(|a| {
@@ -948,7 +1390,32 @@ fn main() {
         // the same blocks into it twice.
         let (scanner, notes, zebra, confirmations) =
             (a.scanner, a.notes, a.zebra, a.confirmations);
+        let addresses = a.addresses.clone();
         let dir2 = dir.clone();
+        // The bridge shares this thread with the note walk on purpose. Both
+        // want the scanner, and `observe` advances the note trees as a side
+        // effect of looking for deposits — two threads holding it would walk
+        // the same blocks into one tree twice.
+        let bridge_node = Arc::clone(&node);
+        let bridge_journal = Arc::clone(&journal);
+        let bridge_pub = Arc::clone(&pub_log);
+        let mut bridge = {
+            let n = bridge_node.lock().unwrap();
+            build_bridge(
+                &dir2,
+                chain,
+                confirmations,
+                n.state(),
+                scanner.from_height(),
+                addresses.clone(),
+            )
+        };
+        if bridge.is_none() {
+            eprintln!(
+                "zyn-object-node: deposit bridge OFF — no ZYN_BRIDGE_SEED, so no Zcash \
+                 deposit becomes an object and the ledger's objects stay unbacked"
+            );
+        }
         std::thread::spawn(move || loop {
             let tip = match zebra.tip() {
                 Ok(t) => t,
@@ -1000,6 +1467,35 @@ fn main() {
                             g.error = format!("catch-up stopped: {e:?}");
                         }
                         break;
+                    }
+                }
+            }
+            // Deposits, once the trees are at the tip. Before that the vault's
+            // own notes are still invisible, so the balance the watcher would
+            // attest to is not the vault's balance -- and attesting to a
+            // number that is too low is exactly what the solvency gate treats
+            // as an emergency. Wait, rather than raise a false alarm.
+            if let Some(b) = bridge.as_mut() {
+                if synced >= target {
+                    match bridge_pass(
+                        b,
+                        &scanner,
+                        &notes,
+                        &zebra,
+                        &bridge_node,
+                        &bridge_journal,
+                        &bridge_pub,
+                        &dir2,
+                        chain,
+                    ) {
+                        Ok(0) => {}
+                        Ok(n) => eprintln!("zyn-object-node: bridge credited {n} deposit(s)"),
+                        Err(e) => {
+                            eprintln!("zyn-object-node: BRIDGE PASS FAILED: {e}");
+                            if let Ok(mut g) = sync_writer.lock() {
+                                g.error = e.chars().take(200).collect();
+                            }
+                        }
                     }
                 }
             }
@@ -1110,8 +1606,9 @@ fn main() {
         let dir = dir.clone();
         let da_dir = rpc_da_dir.clone();
         let sync = Arc::clone(&sync_progress);
+        let vault = rpc_vault.clone();
         std::thread::spawn(move || {
-            serve(s, node, journal, pub_log, dir, chain, anchors, da_dir, sync)
+            serve(s, node, journal, pub_log, dir, chain, anchors, da_dir, sync, vault)
         });
     }
 }
@@ -1155,6 +1652,35 @@ mod tests {
         assert_eq!(v["anchored_height"], 0);
         assert_eq!(v["anchor_txid"], "");
         assert!(v["anchoring"].as_str().unwrap().starts_with("on"));
+    }
+
+    /// The backing claim is the number that matters once real money is in:
+    /// a reader compares it against the vault's balance on Zcash and is doing
+    /// the same check the bridge does every pass, without needing a key. A
+    /// chain that has issued nothing must still emit a valid empty object,
+    /// not a bare `{}`-shaped hole that breaks the whole document.
+    #[test]
+    fn the_status_reports_what_the_ledger_has_issued_per_asset() {
+        let vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        let out = status_json(&vm, true, None, &SyncProgress::default());
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON when nothing is issued");
+        assert_eq!(v["issued"], serde_json::json!({}));
+        assert_eq!(v["deposits_credited"], 0);
+    }
+
+    /// Two assets are never added together: they share no unit, and one
+    /// number covering both would mean nothing.
+    #[test]
+    fn issued_is_reported_per_asset_and_never_summed() {
+        let mut vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        vm.issued.insert([0xAA; 32], zyn_vm::Fixed::whole(3));
+        vm.issued.insert([0xBB; 32], zyn_vm::Fixed::whole(4));
+        let v: serde_json::Value =
+            serde_json::from_str(&status_json(&vm, true, None, &SyncProgress::default())).unwrap();
+        let issued = v["issued"].as_object().expect("an object keyed by asset");
+        assert_eq!(issued.len(), 2, "each asset stands alone: {issued:?}");
+        assert!(issued.contains_key(&"aa".repeat(32)));
+        assert!(issued.contains_key(&"bb".repeat(32)));
     }
 
     /// What a wallet shows its holder when it reaches the wrong ledger.

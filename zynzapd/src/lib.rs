@@ -20,6 +20,7 @@ pub mod exitproof;
 pub mod feeds;
 pub mod publish;
 pub mod object_client;
+pub mod object_bridge;
 pub mod object_ingress;
 pub mod object_keys;
 pub mod receive;
