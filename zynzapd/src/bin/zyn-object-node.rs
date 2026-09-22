@@ -342,6 +342,42 @@ fn record(pub_log: &mut Published, op: &Op) {
     }
 }
 
+/// The operator's credential for `zyn_submit`, from `ZYN_SUBMIT_TOKEN`.
+///
+/// `zyn_submit` wraps whatever it is given as `Authorized::operator` and
+/// applies it. Nothing checks a signature, because nothing *can*: the VM trusts
+/// an operator intent by definition. Reachable from the public gateway, that
+/// made every caller the operator — able to mint unbacked ZEC, credit a deposit
+/// that never happened, mark an exit paid, or spend any note whose owner they
+/// could guess. So it is closed unless the caller presents this token, and it
+/// is closed when no token is configured at all: a console with no lock should
+/// not open because somebody forgot to set one.
+///
+/// Holders' own intents need a different door — one that checks *their*
+/// signature — and are refused here until that door exists.
+static SUBMIT_TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn submit_token() -> Option<&'static str> {
+    SUBMIT_TOKEN
+        .get_or_init(|| {
+            std::env::var("ZYN_SUBMIT_TOKEN")
+                .ok()
+                .map(|t| t.trim().to_string())
+                .filter(|t| t.len() >= 32)
+        })
+        .as_deref()
+}
+
+/// Equal-time comparison, so the check does not leak the token a byte at a
+/// time to someone timing refusals.
+fn token_matches(given: &str, want: &str) -> bool {
+    let (a, b) = (given.as_bytes(), want.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 fn handle(
     body: &str,
     node: &Arc<Mutex<Node<ObjectVm>>>,
@@ -441,6 +477,22 @@ fn handle(
         // An intent as `encode_intent` produced it. Hex because this is a
         // devnet console, not a wire protocol.
         "zyn_submit" => {
+            match submit_token() {
+                None => {
+                    return err(
+                        "zyn_submit is closed: it applies intents as the operator's, and this \
+                         node has no ZYN_SUBMIT_TOKEN configured",
+                    )
+                }
+                Some(want) => {
+                    if !token_matches(&field(body, "token").unwrap_or_default(), want) {
+                        return err(
+                            "zyn_submit applies intents as the operator's and needs the \
+                             operator's token",
+                        );
+                    }
+                }
+            }
             let Some(hexed) = field(body, "intent") else {
                 return err("no intent");
             };
@@ -1949,6 +2001,16 @@ mod tests {
     #[test]
     fn a_floor_below_the_vaults_birth_is_the_birth() {
         assert_eq!(bridge_start(None, Some(100), 4_354_600), 4_354_599);
+    }
+
+    /// Equal-time, and length is not enough to match.
+    #[test]
+    fn the_operator_token_must_match_exactly() {
+        let want = "k".repeat(40);
+        assert!(token_matches(&want, &want));
+        assert!(!token_matches(&"k".repeat(39), &want));
+        assert!(!token_matches(&format!("{}x", "k".repeat(39)), &want));
+        assert!(!token_matches("", &want));
     }
 
     /// What a wallet shows its holder when it reaches the wrong ledger.
