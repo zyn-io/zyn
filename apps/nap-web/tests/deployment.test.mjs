@@ -45,6 +45,18 @@ test('mainnet is still 26460 and is still the default', () => {
   assert.equal(config.rpcUrl, '/rpc');
 });
 
+/// Both Zyn chains are object ledgers now: 212 on testnet, and 26460 on
+/// mainnet since the AMM chain that held that id was retired on 23 Sep 2026.
+/// A network left on the AMM shape asks for `zyn_assets`, which an object
+/// ledger does not serve, and shows "Holdings unavailable".
+test('every network is read as an object ledger', () => {
+  for (const n of config.networks) {
+    assert.equal(n.kind, 'object', `${n.id} is still read as an AMM chain`);
+    assert.match(n.zecAsset, /^[0-9a-f]{64}$/, `${n.id} names no ZEC asset`);
+  }
+  assert.equal(config.kind, 'object', 'the default network too');
+});
+
 /// Every declared rpcUrl must be a route the worker actually serves, or the
 /// wallet asks for a path that 404s with "no such chain".
 test('every network rpcUrl resolves to a declared route', () => {

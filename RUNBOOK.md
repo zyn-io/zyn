@@ -2703,10 +2703,56 @@ gone — a gateway to nothing is not harmless, it is a thing that looks like
 infrastructure. The object ledger needs no equivalent: it speaks JSON over
 HTTP itself, which is what `zyn-rpc` existed to provide for a binary node.
 
-## 5f-quinquies. Mainnet on the object ledger — chain 26460 (staged 22 Sep 2026)
+## 5f-quinquies. Mainnet on the object ledger — chain 26460 (handed over 23 Sep 2026)
 
-**Staged, not started.** `/etc/zyn/zyn-object-mainnet.env` (0600) and
-`zyn-object-mainnet.service` on Contabo, disabled. Listens on `127.0.0.1:8599`.
+**Live.** `zyn-object-mainnet.service` on Contabo, `127.0.0.1:8599`, config
+`/etc/zyn/zyn-object-mainnet.env` (0600). Public at the gateway's root,
+`https://zyn-rpc.cavebro.win/`. The AMM chain (`zynzapd-mainnet`) and its
+gateway (`zyn-rpc-mainnet`, `:8096`) are stopped and disabled; its state,
+journal and trees stay in `/var/lib/zyn/mainnet-v12`, snapshotted to
+`/root/amm-26460-final-20260922.tgz` (0600). Its published history is at
+Hetzner's `/var/zyn/mirror/chain-26460-amm-retired-20260922`. Bridge floor
+**3,492,731**. Started with trees at the tip (3,492,729), copied from the AMM
+chain.
+
+**It does not anchor yet.** The vault holds one Ironwood note worth less than
+an anchor costs, and a top-up is not planned soon. Epochs seal and are served;
+roots reach no chain until the vault is funded. The status says
+`anchored_epoch: 0`, and the bot pages when the first one lands.
+
+**What retired with the AMM chain: NAPMOLE, 333 items.** Collection
+`d3090c31228b5614ddd13e7ff29bb251e211cfbfe1057a279be2a67460619261`, cap 333,
+all 333 held by the creator `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99`,
+minted in epochs 2–4 — anchored, since the last anchor was 2457. Ours, and to
+be minted again on the object ledger. The exact content hashes and serials are
+in the retired state; `zyn-inspect /var/lib/zyn/mainnet-v12 26460` lists them
+and their holders without a key. A collection `CAVEZ` (cap 4444) existed with
+nothing minted.
+
+**The handover took two passes, and the script now catches both causes.** Its
+safety check counted ZEC backing only, so it would have retired a chain
+holding 333 items without a word; it now counts outstanding collection items
+and needs `--retire-collections` to proceed. And the object-node binary on
+Contabo predated the bridge floor, so it ignored `ZYN_BRIDGE_FROM_HEIGHT` and
+started scanning from the vault's birth — stopped before it wrote a cursor or
+recorded a debt, redeployed, restarted at 3,492,730. The script now refuses a
+binary that does not know the floor, and stops the ledger if the floor line is
+missing from its log after start.
+
+### Where the mainnet vault's shares are
+
+Three shares from the 10 Sep DKG; threshold two.
+
+| slot on Contabo | share | host | how it reaches Contabo |
+|---|---|---|---|
+| `8212` | 01 | **Hetzner**, `zyn-custodian-main`, `127.0.0.1:8210`, `/var/zyn/custody-main` — moved from the Mac on 11 Sep | `zyn-mirror-tunnel` on Contabo, `-L 8212:127.0.0.1:8210` |
+| `8213` | — | **MacBook Air** | reverse tunnel *into* Contabo, key `air-custody-tunnel`, open since 22 Sep 12:36 |
+| `8211` | — | **Windows box** (HP Pro Mini, `192.168.1.21`), inside the WSL distro `zyn` | key `win-custody-tunnel` is authorized; **the distro is stopped, so the tunnel is down** |
+
+Two of two live shares at threshold two: one outage stops anchoring and exits.
+The third's placement is undecided.
+
+**Earlier text, kept for the reasoning:**
 
 **Why 26460, the AMM chain's id.** Both ledgers custody the same vault from
 the same height (same viewing-key fingerprint, both from 3,479,600). Side by

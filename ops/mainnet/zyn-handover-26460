@@ -14,7 +14,8 @@
 # Runs on Contabo. Touches Hetzner once, to move the mirror's old tree aside.
 set -euo pipefail
 MODE="${1:-check}"
-[ "$MODE" = "check" ] || [ "$MODE" = "--execute" ] || { echo "usage: $0 [--execute]"; exit 2; }
+RETIRE_ITEMS="${2:-}"
+[ "$MODE" = "check" ] || [ "$MODE" = "--execute" ] || { echo "usage: $0 [--execute [--retire-collections]]"; exit 2; }
 
 AMM_ENV=/etc/zyn/zynzapd-mainnet.env
 OBJ_ENV=/etc/zyn/zyn-object-mainnet.env
@@ -49,6 +50,11 @@ grep -q '^ZYN_CHAIN_ID=26460$' "$OBJ_ENV" || die "$OBJ_ENV is not staged as 2646
 [ -f "$PROGRESS" ] || die "no AMM bridge progress at $PROGRESS"
 for p in ironwood orchard; do [ -f "$AMM_DATA/notes-26460-$p.tree" ] || die "no AMM $p tree"; done
 [ "$(grep -c '8096' "$NGINX")" = "1" ] || die "expected exactly one reference to :8096 in $NGINX"
+# The floor is written to the config in step 4. A binary older than the floor
+# ignores it silently and scans the retired chain's deposits from the vault's
+# birth -- so the binary has to be checked, not assumed.
+grep -aq 'ZYN_BRIDGE_FROM_HEIGHT' /usr/local/bin/zyn-object-node \
+  || die "/usr/local/bin/zyn-object-node predates the bridge floor; deploy a current build first"
 ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER" "test -d $MIRROR/chain-26460 && ! test -e $MIRROR/$ARCHIVE" \
   || die "Hetzner's mirror has no chain-26460 tree, or $ARCHIVE already exists"
 
@@ -64,6 +70,23 @@ print(r["backing"], r["pools"], r["accounts"])')
   echo "  AMM 26460 holds: backing $BACKING, pools $POOLS, accounts $ACCOUNTS"
   [ "$BACKING" = "0.0" ] || die "the AMM chain holds $BACKING of backing — somebody's money is on it"
   [ "$POOLS" = "0" ] || die "the AMM chain has $POOLS pool(s)"
+  # Backing counts ZEC. It does not count collections: a chain can hold zero
+  # backing and hundreds of items. Retiring it stops those items being
+  # transferable -- their mint stays anchored and the journal stays on disk,
+  # but somebody has to decide that is acceptable, so it takes a flag.
+  ITEMS="$(curl -s --max-time 10 -X POST http://127.0.0.1:8096/ -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_collections"}' | python3 -c "$(cat <<'COUNT'
+import sys, json
+cs = json.load(sys.stdin)["result"]
+held = [c for c in cs if c["outstanding"]]
+print(sum(c["outstanding"] for c in cs), " ".join("%s:%d" % (c["symbol"], c["outstanding"]) for c in held))
+COUNT
+)")"
+  read -r OUTSTANDING DETAIL <<<"$ITEMS"
+  echo "  outstanding collection items: $OUTSTANDING ${DETAIL:-}"
+  if [ "$OUTSTANDING" != "0" ] && [ "$RETIRE_ITEMS" != "--retire-collections" ]; then
+    die "the AMM chain holds $OUTSTANDING collection item(s) ($DETAIL). Pass --retire-collections to retire them with it"
+  fi
 else
   echo "  AMM 26460 already stopped"
 fi
@@ -94,12 +117,18 @@ do_ systemctl enable --now zyn-object-mainnet
 if [ "$MODE" = "--execute" ]; then
   sleep 12
   curl -s --max-time 10 -X POST http://127.0.0.1:8599/ -H 'content-type: application/json' \
-    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_status"}' | python3 -c '
-import sys, json
-r = json.load(sys.stdin)["result"]
-assert r["chain"] == 26460, r["chain"]
-print(f"  chain {r[\"chain\"]} epoch {r[\"epoch\"]} anchoring: {r[\"anchoring\"][:2]} trees {r[\"synced_to\"]}/{r[\"sync_target\"]}")'
-  journalctl -u zyn-object-mainnet -n 20 --no-pager -o cat | grep -E "MAINNET|belong to the chain|resumed from disk" | sed "s/^/  /"
+    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_status"}' > /tmp/handover-status.json
+  python3 - /tmp/handover-status.json <<'CHECK'
+import json, sys
+r = json.load(open(sys.argv[1]))["result"]
+assert r["chain"] == 26460, "answered as chain %s" % r["chain"]
+print("  chain %s epoch %s trees %s/%s" % (r["chain"], r["epoch"], r["synced_to"], r["sync_target"]))
+CHECK
+  if ! journalctl -u zyn-object-mainnet -n 40 --no-pager -o cat | grep -q "belong to the chain this one replaced"; then
+    systemctl stop zyn-object-mainnet
+    die "the object ledger started without the bridge floor; stopped it before it credited anything"
+  fi
+  journalctl -u zyn-object-mainnet -n 40 --no-pager -o cat | grep -E "MAINNET|belong to the chain|bridge ON" | sed "s/^/  /"
 fi
 
 echo "== 7. point the public gateway's / at it"

@@ -21,7 +21,9 @@
           "name": "Cave Collection Z",
           "id": "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e"
         }
-      ]
+      ],
+      "kind": "object",
+      "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201"
     },
     {
       "id": "testnet",
@@ -42,5 +44,7 @@
       "name": "Cave Collection Z",
       "id": "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e"
     }
-  ]
+  ],
+  "kind": "object",
+  "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201"
 }

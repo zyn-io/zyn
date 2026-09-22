@@ -87,10 +87,14 @@ impl Bot {
     /// healthy in every other respect.
     /// Ask the object ledger. Every method here is a public read.
     fn object(&self, method: &str) -> Result<serde_json::Value, String> {
+        self.object_at(&self.object, method)
+    }
+
+    fn object_at(&self, url: &str, method: &str) -> Result<serde_json::Value, String> {
         let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
         let v: serde_json::Value = self
             .agent
-            .post(&self.object)
+            .post(url)
             .timeout(Duration::from_secs(15))
             .send_json(body)
             .map_err(|e| e.to_string())?
@@ -421,14 +425,15 @@ impl Bot {
     }
 
     /// Look at the chain every few minutes and push what changed.
-    fn watch(&self) {
+    /// Watch one chain. Run once per chain in `ZYN_WATCH`.
+    fn watch(&self, url: &str) {
         let mut prev: Option<serde_json::Value> = None;
         let mut down = false;
         loop {
-            match self.object("zyn_status") {
+            match self.object_at(url, "zyn_status") {
                 Ok(now) => {
                     if down {
-                        self.tell(&format!("\u{2713} chain {}: reachable again", self.chain));
+                        self.tell(&format!("\u{2713} {url}: reachable again"));
                         down = false;
                     }
                     // The first look compares against a baseline that differs
@@ -447,7 +452,7 @@ impl Bot {
                 // itself gets muted.
                 Err(e) => {
                     if !down {
-                        self.tell(&format!("\u{26a0} chain {}: unreachable — {e}", self.chain));
+                        self.tell(&format!("\u{26a0} {url}: unreachable — {e}"));
                         down = true;
                     }
                 }
@@ -640,9 +645,17 @@ fn main() -> Result<(), String> {
         zebras,
     };
     let bot = std::sync::Arc::new(bot);
-    {
+    // Every chain worth being paged about. Testnet's node answers on this box;
+    // mainnet's is on Contabo, behind the public gateway's root since the AMM
+    // chain that held 26460 was retired. Each alert names its chain, so one
+    // chat can carry both without ambiguity.
+    let watch: Vec<String> = env("ZYN_WATCH")
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_else(|| vec![bot.object.clone()]);
+    for url in watch {
         let bot = std::sync::Arc::clone(&bot);
-        std::thread::spawn(move || bot.watch());
+        eprintln!("zyn-tgbot: watching {url}");
+        std::thread::spawn(move || bot.watch(&url));
     }
     bot.run();
     Ok(())
