@@ -2549,6 +2549,52 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-ter. The tunnel watchdog (22 Sep 2026)
+
+A reverse tunnel can be perfectly healthy and carry no forward. That is A110,
+and it froze both chains again on 22 Sep.
+
+`ExitOnForwardFailure=yes` — which these units already set — only covers
+**establishment**. If the remote forward is torn down afterwards, because the
+server reaped it or a half-dead predecessor still held the port, ssh keeps a
+live session with nothing on it. `systemctl is-active` says `active`,
+`ServerAliveInterval` sees a responsive peer, and the sequencer cannot reach
+the custodian at all. Every local signal says fine.
+
+So the check has to ask the far end, and the sequencer already answers: its
+health output names each custodian by the port the forward should land on.
+
+```sh
+/usr/local/bin/zyn-tunnel-watch <port> <chain> <unit>
+```
+
+Installed on the Windows box as `zyn-tunnel-watch@<port>-<chain>-<unit>.timer`,
+every two minutes:
+
+```
+zyn-tunnel-watch@8211-main-zyn-custody-tunnel-main.timer
+zyn-tunnel-watch@8112-testnet-zyn-custody-tunnel.timer
+```
+
+Three things it deliberately does **not** do:
+
+- **It does not act on one failed poll.** Two consecutive strikes are required.
+  A single failure is as likely to be the path to the sequencer as the tunnel,
+  and a restart on a blip is its own outage — a restart races the session it
+  just killed for the port, which is precisely how this failure reproduces.
+- **It does not count an unreachable sequencer as a strike.** That says nothing
+  about the tunnel.
+- **It does not guess the chain.** This host holds a share of both vaults and
+  the two tunnels land on different sequencers, so the chain is part of the
+  instance name. An unknown chain exits 64 rather than checking the wrong one.
+
+Sources are kept in `ops/tunnel-watch/` so the box is reproducible.
+
+**The Mac still needs an equivalent.** It runs signers 1 and 2 under launchd,
+and both their tunnels were dead on 22 Sep with `status 255` while the signers
+themselves ran. launchd has no timer units; a `StartInterval` agent doing the
+same check is the shape.
+
 ## 5f-bis. The object-ledger devnet (21 Sep 2026)
 
 DECISIONS §133. Chain 212, the object ledger, running so that Cave's mint,
