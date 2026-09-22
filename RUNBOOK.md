@@ -2875,6 +2875,26 @@ something real before they are exercised against money.
   Contabo has no testnet Zebra, so today it is **replay-only and says so on
   every start**. Tunnelling to the sequencer's Zebra would not fix that — the
   box being verified would be supplying the evidence (§118.3).
+- **The wallet reads and writes it** (22 Sep, A136). `apps/nap-web/src/object.js`.
+  An object ledger publishes commitments and nullifiers and says nothing about
+  who owns what, so a balance is **computed**, not asked for: open every
+  published note, drop the ones whose nullifier has appeared, and what is left
+  is the holding. The commitment is recomputed rather than taken from the feed
+  — a mirror could pair a real ciphertext with someone else's commitment.
+  Amounts are `BigInt`, because WAD units exceed what a double holds exactly.
+  - **Both implementations are pinned to one fixture**,
+    `apps/nap-web/tests/object-vectors.json`, printed by `zyn-object-vectors`.
+    `object.test.mjs` holds the browser to it; `object_vectors_are_pinned.rs`
+    holds Rust to it, including a frozen ciphertext and the encoded `Register`
+    and `Spend` intents. Neither side can move alone — and it has to be a
+    fixture rather than a review, because the symptom of drift is **silence**:
+    a wallet looks at the right chain, opens nothing, reports zero, and that
+    is indistinguishable from having been robbed.
+  - **The object keys ride in the sealed blob.** They come from the BIP39 seed,
+    which `deriveIdentity` zeroes, and `identityFromSecretKey` — the path a
+    kept wallet takes — never has it. Derived lazily, a wallet would work from
+    the phrase and report empty from a device. A blob sealed before this still
+    opens and says so rather than showing a silent zero.
 - **Scan throughput is the operational limit.** A 200-block step took the
   better part of an hour on the cax11; `ZYN_SCAN_STEP=25` now lands one every
   ~2.5 minutes, so progress is durable and visible. It is the same work per
