@@ -18,7 +18,6 @@
 
 use std::time::Duration;
 
-use zynzapd::client::Node;
 
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.is_empty())
@@ -30,7 +29,14 @@ struct Bot {
     /// answers anyone is a bot whose token is a disclosure.
     allowed: Vec<i64>,
     agent: ureq::Agent,
-    node: Node,
+    /// Where the object ledger answers. It speaks JSON over HTTP; the AMM
+    /// sequencer spoke a binary framing on a raw socket, and pointing this at
+    /// the new chain was never a matter of changing a port.
+    object: String,
+    /// The chain it reports on, for the heading. Read from the node's own
+    /// reply where possible — a bot that prints a chain id from its config
+    /// will happily tell you about a chain it is not actually watching.
+    chain: u32,
     /// `(label, host:port)` for each Zcash node worth watching.
     zebras: Vec<(String, String)>,
 }
@@ -79,79 +85,189 @@ impl Bot {
     /// Height, epoch, and — the number that mattered on 9 Sep — how far the
     /// last anchor is behind the tip. A sequencer waiting on signatures looks
     /// healthy in every other respect.
-    fn status(&self) -> String {
-        let s = match self.node.status() {
-            Ok(s) => s,
-            Err(e) => return format!("chain {}: unreachable — {}", self.node.chain, e),
-        };
-        let lag = s.epoch.saturating_sub(s.anchored_epoch);
-        let mark = if lag > 60 { "\u{26a0}" } else { "\u{2713}" };
-        let mut out = format!(
-            "<b>chain {}</b>\nepoch <b>{}</b>  seq {}\nlast anchor <b>{}</b>  (lag {} {})\nbacking {}  pools {}  accounts {}",
-            self.node.chain, s.epoch, s.seq, s.anchored_epoch, lag, mark, s.backing, s.pools, s.accounts
-        );
-        if s.forced_pending > 0 || s.censored > 0 {
-            out.push_str(&format!(
-                "\nforced pending {}  censored {}",
-                s.forced_pending, s.censored
-            ));
+    /// Ask the object ledger. Every method here is a public read.
+    fn object(&self, method: &str) -> Result<serde_json::Value, String> {
+        let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
+        let v: serde_json::Value = self
+            .agent
+            .post(&self.object)
+            .timeout(Duration::from_secs(15))
+            .send_json(body)
+            .map_err(|e| e.to_string())?
+            .into_json()
+            .map_err(|e| format!("unreadable reply: {}", e))?;
+        if let Some(e) = v.get("error") {
+            return Err(e.get("message").and_then(|m| m.as_str()).unwrap_or("error").to_string());
         }
-        let down: Vec<&str> = s
-            .health
-            .iter()
-            .filter(|h| h.down)
-            .map(|h| h.name.as_str())
-            .collect();
-        out.push_str(&if down.is_empty() {
-            format!("\n\u{2713} {} source(s) healthy", s.health.len())
-        } else {
-            format!("\n\u{26a0} DOWN: {}", down.join(", "))
-        });
-        out
+        v.get("result").cloned().ok_or_else(|| "no result".to_string())
     }
 
-    /// Per-source health as the sequencer sees it, with how stale each is.
+    fn status(&self) -> String {
+        match self.object("zyn_status") {
+            Ok(s) => render_status(&s, self.chain),
+            Err(e) => format!("chain {}: unreachable — {}", self.chain, e),
+        }
+    }
+}
+
+/// Turn a status document into the message a phone shows.
+///
+/// Separated from fetching it so it can be tested against a real reply: the
+/// bot spent a day reporting confidently on a chain that had been retired,
+/// and the way that goes unnoticed is that nothing ever checks the words.
+fn render_status(s: &serde_json::Value, fallback_chain: u32) -> String {
+    {
+        let u = |k: &str| s.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let t = |k: &str| s.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let chain = s.get("chain").and_then(|x| x.as_u64()).unwrap_or(fallback_chain as u64);
+
+        let mut out = format!(
+            "<b>chain {}</b>\nepoch <b>{}</b>  seq {}\n{} object(s) live  {} retired  {} account(s)",
+            chain,
+            u("epoch"),
+            u("seq"),
+            u("live"),
+            u("nullifiers"),
+            u("accounts"),
+        );
+
+        // The conservation check, which is the object ledger's equivalent of
+        // "does the money add up": every object ever created is either still
+        // held or retired exactly once. Anyone can verify it from this same
+        // endpoint, which is why it is reported rather than asserted (A120).
+        out.push_str(&if s.get("reconciled").and_then(|x| x.as_bool()) == Some(true) {
+            format!("\n\u{2713} reconciled ({} commitments = {} live + {} spent)", u("commitments"), u("live"), u("nullifiers"))
+        } else {
+            format!("\n\u{26a0} NOT RECONCILED — {} commitments, {} live, {} spent", u("commitments"), u("live"), u("nullifiers"))
+        });
+
+        if u("offers") > 0 || u("exits") > 0 {
+            out.push_str(&format!("\n{} resting offer(s)  {} exit(s)", u("offers"), u("exits")));
+        }
+
+        // Anchoring is the half that can fail silently: the ledger keeps
+        // sequencing perfectly while nothing reaches Zcash, and only the lag
+        // says so.
+        let anchoring = t("anchoring");
+        if anchoring.starts_with("none") {
+            out.push_str(&format!("\n\u{26a0} anchoring {}", anchoring));
+            return out;
+        }
+        let anchored = u("anchored_epoch");
+        if anchored == 0 {
+            out.push_str("\n\u{26a0} no anchor has landed yet");
+        } else {
+            let lag = u("epoch").saturating_sub(anchored);
+            // One a day, so an epoch lag is not the unit that matters; what
+            // matters is whether the last one landed and how far the ledger
+            // has run since.
+            let mark = if lag > 2000 { "\u{26a0}" } else { "\u{2713}" };
+            out.push_str(&format!(
+                "\n{} last anchor epoch <b>{}</b> at Zcash height {} (lag {} epochs)",
+                mark, anchored, u("anchored_height"), lag
+            ));
+        }
+
+        // Why no anchor has landed is nearly always this: the vault's note
+        // trees are still walking to the tip, so there is no spendable note
+        // to anchor from yet. Reporting the distance turns a mystery into a
+        // wait with an end.
+        let (synced, target) = (u("synced_to"), u("sync_target"));
+        if target > 0 && synced < target {
+            out.push_str(&format!(
+                "\n\u{23f3} vault notes {} of {} blocks ({} behind)",
+                synced,
+                target,
+                target - synced
+            ));
+        } else if target > 0 {
+            out.push_str(&format!("\n\u{2713} vault notes at the tip ({})", synced));
+        }
+        let err = t("sync_error");
+        if !err.is_empty() {
+            out.push_str(&format!("\n\u{26a0} {}", err.chars().take(160).collect::<String>()));
+        }
+        out
+    }
+}
+
+impl Bot {
+    /// What the chain depends on, and whether each of those is working.
+    ///
+    /// The AMM sequencer polled several price sources and reported one health
+    /// row per source. The object ledger has no price sources: what it depends
+    /// on is the vault's view of Zcash, so that is what this reports. The
+    /// command keeps its old name because that is what the muscle memory
+    /// types at 3am.
     fn signers(&self) -> String {
-        let s = match self.node.status() {
+        let s = match self.object("zyn_status") {
             Ok(s) => s,
             Err(e) => return format!("unreachable — {}", e),
         };
-        if s.health.is_empty() {
-            return "no health sources reported".into();
-        }
-        let mut out = String::from("<b>sources</b>\n");
-        for h in &s.health {
-            let mark = if h.down { "\u{26a0}" } else { "\u{2713}" };
+        let u = |k: &str| s.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        let anchoring = s.get("anchoring").and_then(|x| x.as_str()).unwrap_or("");
+        let mut out = String::from("<b>what the chain rests on</b>\n");
+
+        out.push_str(&if anchoring.starts_with("none") {
+            format!("\u{26a0} <b>anchoring</b> — {}\n", anchoring)
+        } else {
+            format!("\u{2713} <b>anchoring</b> — {}\n", anchoring)
+        });
+
+        let (synced, target) = (u("synced_to"), u("sync_target"));
+        if target == 0 {
+            out.push_str("\u{26a0} <b>vault notes</b> — no Zcash tip read yet\n");
+        } else if synced < target {
             out.push_str(&format!(
-                "{} <b>{}</b> — scanned to {}",
-                mark, h.name, h.scanned_to
+                "\u{23f3} <b>vault notes</b> — scanned to {} of {}, {} behind\n",
+                synced,
+                target,
+                target - synced
             ));
-            if !h.error.is_empty() {
-                let msg: String = h.error.chars().take(90).collect();
-                out.push_str(&format!("\n    {}", msg));
-            }
-            out.push('\n');
+        } else {
+            out.push_str(&format!("\u{2713} <b>vault notes</b> — at the tip ({})\n", synced));
         }
+
+        let err = s.get("sync_error").and_then(|x| x.as_str()).unwrap_or("");
+        if !err.is_empty() {
+            out.push_str(&format!("    {}\n", err.chars().take(160).collect::<String>()));
+        }
+
+        // The ledger's own integrity, which no external source can vouch for.
+        out.push_str(&if s.get("reconciled").and_then(|x| x.as_bool()) == Some(true) {
+            "\u{2713} <b>conservation</b> — every object held once or retired once\n".to_string()
+        } else {
+            "\u{26a0} <b>conservation</b> — the object counts do not balance\n".to_string()
+        });
         out
     }
 
     /// The epoch-to-Zcash mapping, newest last. This is the thing worth being
     /// able to check from a phone: whether roots are still reaching Zcash.
     fn anchors(&self) -> String {
-        match self.node.anchors(5) {
-            Err(e) => format!("anchors unavailable — {}", e),
-            Ok(a) if a.is_empty() => "no anchors published yet".into(),
-            Ok(a) => {
-                let mut out = String::from("<b>recent anchors</b>\n");
-                for x in &a {
-                    out.push_str(&format!(
-                        "epoch <b>{}</b> @ height {}\n  <code>{}</code>\n",
-                        x.epoch, x.height, x.txid
-                    ));
-                }
-                out
-            }
+        let a = match self.object("zyn_anchors") {
+            Ok(v) => v,
+            Err(e) => return format!("anchors unavailable — {}", e),
+        };
+        let Some(rows) = a.as_array() else {
+            return "anchors unavailable — unexpected reply".into();
+        };
+        if rows.is_empty() {
+            // Not an error, and usually not a fault: say what to check next
+            // rather than leaving a bare negative.
+            return "no anchors published yet — /signers says what is holding it up".into();
         }
+        let mut out = String::from("<b>recent anchors</b>\n");
+        for x in rows {
+            let g = |k: &str| x.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            out.push_str(&format!(
+                "epoch <b>{}</b> @ height {}\n  <code>{}</code>\n",
+                g("epoch"),
+                g("height"),
+                x.get("txid").and_then(|v| v.as_str()).unwrap_or("?")
+            ));
+        }
+        out
     }
 
     /// Both Zcash nodes: height against the network's own estimate of the tip.
@@ -204,24 +320,39 @@ impl Bot {
         out
     }
 
+    /// Resting listings in the marketplace.
+    ///
+    /// The AMM had an order book of asset-for-asset offers. This is the Cave
+    /// store's listings: one object, one price. Sellers are not shown — a
+    /// listing is public, who placed it is not.
     fn offers(&self) -> String {
-        match self.node.offers() {
-            Err(e) => format!("offers unavailable — {}", e),
-            Ok(o) if o.is_empty() => "no resting offers".into(),
-            Ok(o) => {
-                let mut out = format!("<b>{} resting offer(s)</b>\n", o.len());
-                for x in o.iter().take(10) {
-                    out.push_str(&format!(
-                        "#{} asset {} \u{2192} {} of asset {}\n",
-                        x.id,
-                        zynzapd::client::hex(&x.offer_asset),
-                        x.want_amount,
-                        zynzapd::client::hex(&x.want_asset)
-                    ));
-                }
-                out
-            }
+        let v = match self.object("zyn_offers") {
+            Ok(v) => v,
+            Err(e) => return format!("offers unavailable — {}", e),
+        };
+        let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
+        if total == 0 {
+            return "no resting offers".into();
         }
+        let empty = Vec::new();
+        let rows = v.get("offers").and_then(|x| x.as_array()).unwrap_or(&empty);
+        let mut out = format!("<b>{} resting offer(s)</b>\n", total);
+        for x in rows {
+            let item = x.get("item").and_then(|s| s.as_str()).unwrap_or("?");
+            out.push_str(&format!(
+                "<code>{}\u{2026}</code> \u{2192} {} of asset {}\n",
+                &item[..item.len().min(16)],
+                x.get("price").and_then(|s| s.as_str()).unwrap_or("?"),
+                x.get("price_asset")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s[..s.len().min(8)].to_string())
+                    .unwrap_or_default(),
+            ));
+        }
+        if total as usize > rows.len() {
+            out.push_str(&format!("\n\u{2026} and {} more", total as usize - rows.len()));
+        }
+        out
     }
 
     /// The whitelist register.
@@ -284,7 +415,7 @@ impl Bot {
             "offers" => self.offers(),
             "nodes" | "zebra" => self.nodes(),
             "list" | "waitlist" | "whitelist" => self.whitelist(),
-            "help" => "/status  chain height, last anchor, lag\n/signers  per-source health\n/list  whitelist applications\n/anchors  recent roots on Zcash\n/offers  the order book\n/nodes  zcash mainnet + testnet sync".into(),
+            "help" => "/status  epoch, objects, last anchor\n/signers  anchoring + vault note sync\n/list  whitelist applications\n/anchors  recent roots on Zcash\n/offers  resting marketplace listings\n/nodes  zcash mainnet + testnet sync".into(),
             other => format!("unknown command: {}\ntry /help", other),
         }
     }
@@ -292,9 +423,10 @@ impl Bot {
     fn run(&self) {
         let mut offset: i64 = 0;
         eprintln!(
-            "zyn-tgbot: polling; answering {} chat(s); node {}",
+            "zyn-tgbot: polling; answering {} chat(s); chain {} at {}",
             self.allowed.len(),
-            self.node.addr
+            self.chain,
+            self.object
         );
         loop {
             let body = serde_json::json!({ "timeout": 50, "offset": offset });
@@ -358,9 +490,13 @@ fn main() -> Result<(), String> {
             "ZYN_TG_CHATS is required: a comma-separated list of chat ids allowed to ask".into(),
         );
     }
-    let addr = env("ZYN_NODE").unwrap_or_else(|| "127.0.0.1:8099".into());
+    // The object ledger speaks JSON over HTTP. `ZYN_NODE` named a raw socket
+    // on the retired AMM chain; it is deliberately not reused, so a host that
+    // still has the old variable set does not quietly look like it works.
+    let object = env("ZYN_OBJECT_URL").unwrap_or_else(|| "http://127.0.0.1:8499/".into());
     // Two Zcash nodes, and neither is optional to the story: testnet is what
-    // chain 11 anchors into, mainnet is what the vault will custody against.
+    // the object ledger anchors into, mainnet is what the vault custodies
+    // against.
     let zebras: Vec<(String, String)> = vec![
         (
             "testnet".into(),
@@ -372,7 +508,7 @@ fn main() -> Result<(), String> {
         ),
     ];
     let chain: u32 = env("ZYN_CHAIN_ID")
-        .unwrap_or_else(|| "11".into())
+        .unwrap_or_else(|| "212".into())
         .parse()
         .map_err(|_| "ZYN_CHAIN_ID")?;
 
@@ -382,9 +518,98 @@ fn main() -> Result<(), String> {
         agent: ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(60))
             .build(),
-        node: Node::new(&addr, chain),
+        object,
+        chain,
         zebras,
     };
     bot.run();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact document chain 212 returned on 22 Sep, so the rendering is
+    /// tested against a real reply rather than one written to pass.
+    const LIVE: &str = r#"{"chain":212,"epoch":1,"seq":2,"accounts":1,"commitments":1,
+        "live":1,"nullifiers":0,"reconciled":true,"offers":0,"exits":0,
+        "anchored_epoch":0,"anchored_height":0,"anchor_txid":"",
+        "synced_to":4368400,"sync_target":4380781,"sync_error":"",
+        "state_root":"d67c2fe014e71d950b246f00d6b8c1d6e7bbb64e3a5296915b0679b6441587e7",
+        "anchoring":"on — roots are carried to Zcash and settle there"}"#;
+
+    fn live() -> serde_json::Value {
+        serde_json::from_str(LIVE).unwrap()
+    }
+
+    /// The bug this whole change exists to fix: the bot reported chain 11
+    /// long after chain 11 was retired, because the chain it named came from
+    /// its own config rather than from the node answering.
+    #[test]
+    fn it_names_the_chain_the_node_reports_not_the_one_configured() {
+        let out = render_status(&live(), 11);
+        assert!(out.contains("chain 212"), "{out}");
+        assert!(!out.contains("chain 11"), "it must not report a retired chain: {out}");
+    }
+
+    /// A chain that is anchoring but has not landed one yet must say both
+    /// halves. Saying only "anchoring on" reads as success; saying only "no
+    /// anchor" reads as broken. It is neither — it is waiting on the scan.
+    #[test]
+    fn a_chain_waiting_on_its_note_trees_says_so_and_says_how_far() {
+        let out = render_status(&live(), 212);
+        assert!(out.contains("no anchor has landed yet"), "{out}");
+        assert!(out.contains("12381 behind"), "it must report the distance left: {out}");
+    }
+
+    /// Conservation is the object ledger's "does the money add up". A failure
+    /// has to be unmissable, not a number the reader must compare themselves.
+    #[test]
+    fn a_ledger_that_does_not_balance_is_reported_as_a_warning() {
+        let mut v = live();
+        v["reconciled"] = serde_json::json!(false);
+        v["live"] = serde_json::json!(5);
+        let out = render_status(&v, 212);
+        assert!(out.contains("NOT RECONCILED"), "{out}");
+
+        assert!(render_status(&live(), 212).contains("reconciled"), "and says so when it does");
+    }
+
+    /// Once an anchor lands, the mapping to Zcash is the headline, and the
+    /// note-tree line becomes a tick rather than a wait.
+    #[test]
+    fn a_landed_anchor_is_reported_with_its_height() {
+        let mut v = live();
+        v["anchored_epoch"] = serde_json::json!(4);
+        v["anchored_height"] = serde_json::json!(4_380_900u64);
+        v["epoch"] = serde_json::json!(5);
+        v["synced_to"] = v["sync_target"].clone();
+        let out = render_status(&v, 212);
+        assert!(out.contains("last anchor epoch <b>4</b>"), "{out}");
+        assert!(out.contains("4380900"), "{out}");
+        assert!(out.contains("at the tip"), "{out}");
+        assert!(!out.contains("no anchor has landed"), "{out}");
+    }
+
+    /// A node that is not anchoring at all must not be dressed up: the devnet
+    /// status said "anchoring" while carrying nothing, and that is the wrong
+    /// lie in either direction.
+    #[test]
+    fn a_chain_that_anchors_nowhere_is_reported_as_a_warning() {
+        let mut v = live();
+        v["anchoring"] = serde_json::json!("none — devnet, roots reach no chain");
+        let out = render_status(&v, 212);
+        assert!(out.contains("\u{26a0} anchoring none"), "{out}");
+    }
+
+    /// The scanner stall is the actionable case: it names a transaction the
+    /// operator has to attribute by hand, so it must survive into the message.
+    #[test]
+    fn a_stalled_scan_reports_why() {
+        let mut v = live();
+        v["sync_error"] = serde_json::json!("stopped at 4368401: abc123 carries no Zyn memo");
+        let out = render_status(&v, 212);
+        assert!(out.contains("carries no Zyn memo"), "{out}");
+    }
 }

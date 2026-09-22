@@ -136,12 +136,32 @@ fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
 }
 
 /// The one-line JSON the status op answers with.
-fn status_json(vm: &ObjectVm, anchoring: bool) -> String {
+/// The recent anchors this node has published, oldest first.
+///
+/// Read from the published index rather than from memory: that file is what
+/// `zyn-object-publish` and every replica already treat as the truth, so an
+/// answer given here cannot drift from the one given there.
+fn recent_anchors(da_dir: Option<&std::path::Path>, chain: u32, limit: usize) -> Vec<zynzapd::publish::IndexEntry> {
+    let Some(dir) = da_dir else { return Vec::new() };
+    let text = std::fs::read_to_string(dir.join(zynzapd::publish::index_rel(chain))).unwrap_or_default();
+    let all = zynzapd::publish::parse_index(&text);
+    let from = all.len().saturating_sub(limit);
+    all[from..].to_vec()
+}
+
+fn status_json(
+    vm: &ObjectVm,
+    anchoring: bool,
+    last: Option<&zynzapd::publish::IndexEntry>,
+    sync: &SyncProgress,
+) -> String {
     format!(
         concat!(
             "{{\"chain\":{},\"epoch\":{},\"seq\":{},\"accounts\":{},",
             "\"commitments\":{},\"live\":{},\"nullifiers\":{},\"reconciled\":{},",
             "\"offers\":{},\"exits\":{},",
+            "\"anchored_epoch\":{},\"anchored_height\":{},\"anchor_txid\":\"{}\",",
+            "\"synced_to\":{},\"sync_target\":{},\"sync_error\":\"{}\",",
             "\"state_root\":\"{}\",\"anchoring\":\"{}\"}}"
         ),
         vm.chain_id,
@@ -158,6 +178,14 @@ fn status_json(vm: &ObjectVm, anchoring: bool) -> String {
         vm.reconciled().is_ok(),
         vm.offers.len(),
         vm.exits.len(),
+        last.map(|a| a.epoch).unwrap_or(0),
+        last.map(|a| a.height).unwrap_or(0),
+        last.map(|a| a.txid.as_str()).unwrap_or(""),
+        sync.synced_to,
+        sync.target,
+        // A JSON string, so a scanner error with a quote in it cannot break
+        // the document it is being reported in.
+        escape(&sync.error),
         hex(&vm.state_root()),
         // The status is what a reader believes without asking anyone. It said
         // "devnet" while the node was carrying roots to Zcash, which is the
@@ -168,6 +196,27 @@ fn status_json(vm: &ObjectVm, anchoring: bool) -> String {
             "none — devnet, roots reach no chain"
         },
     )
+}
+
+/// A string safe to drop inside the hand-rolled JSON above.
+///
+/// The scanner's errors carry txids and operator prose, and one unescaped
+/// quote in a status document is a status document nothing can parse — which
+/// looks exactly like the node being down.
+fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn hex(b: &[u8]) -> String {
@@ -260,12 +309,69 @@ fn handle(
     pub_log: &Arc<Mutex<Published>>,
     dir: &str,
     chain: u32,
+    da_dir: Option<&std::path::Path>,
+    sync: &Arc<Mutex<SyncProgress>>,
 ) -> String {
     let method = field(body, "method").unwrap_or_default();
     match method.as_str() {
         "zyn_status" => {
             let n = node.lock().unwrap();
-            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", status_json(n.state(), anchoring))
+            let anchors = recent_anchors(da_dir, chain, 1);
+            let sync = sync.lock().map(|g| SyncProgress {
+                synced_to: g.synced_to,
+                target: g.target,
+                error: g.error.clone(),
+            }).unwrap_or_default();
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}",
+                status_json(n.state(), anchoring, anchors.last(), &sync)
+            )
+        }
+        // The epoch-to-Zcash mapping. This is the one thing worth checking
+        // from away from a desk: whether roots are still landing.
+        "zyn_anchors" => {
+            let rows: Vec<String> = recent_anchors(da_dir, chain, 10)
+                .iter()
+                .map(|a| {
+                    format!(
+                        "{{\"epoch\":{},\"height\":{},\"txid\":\"{}\",\"root\":\"{}\"}}",
+                        a.epoch,
+                        a.height,
+                        escape(&a.txid),
+                        hex(&a.root)
+                    )
+                })
+                .collect();
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{}]}}",
+                rows.join(",")
+            )
+        }
+        // Resting listings. A listing is already public — it is an offer to
+        // the world — so serving it discloses nothing the marketplace does
+        // not. The seller is not named: that stays with the operator.
+        "zyn_offers" => {
+            let n = node.lock().unwrap();
+            let vm = n.state();
+            let rows: Vec<String> = vm
+                .offers
+                .iter()
+                .take(25)
+                .map(|(item, o)| {
+                    format!(
+                        "{{\"item\":\"{}\",\"price_asset\":\"{}\",\"price\":\"{}\",\"expires_at_epoch\":{}}}",
+                        hex(item),
+                        hex(&o.price_asset),
+                        o.price_amount,
+                        o.expires_at_epoch
+                    )
+                })
+                .collect();
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"total\":{},\"offers\":[{}]}}}}",
+                vm.offers.len(),
+                rows.join(",")
+            )
         }
         // Everything a wallet needs to rebuild itself, and nothing else.
         "zyn_published" => {
@@ -403,7 +509,7 @@ const MAX_REQUEST: usize = 256 * 1024;
 /// loopback and should not depend on something in front of it.
 const CONN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32, anchoring: bool) {
+fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<Journal>>, pub_log: Arc<Mutex<Published>>, dir: String, chain: u32, anchoring: bool, da_dir: Option<std::path::PathBuf>, sync: Arc<Mutex<SyncProgress>>) {
     let _ = s.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = s.set_write_timeout(Some(CONN_TIMEOUT));
     let mut buf = Vec::new();
@@ -440,7 +546,7 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<
             }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
-                let out = handle(&body, &node, &journal, anchoring, &pub_log, &dir, chain);
+                let out = handle(&body, &node, &journal, anchoring, &pub_log, &dir, chain, da_dir.as_deref(), &sync);
                 let _ = s.write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -511,6 +617,23 @@ fn load_attributions(
         }
     }
     Ok(out)
+}
+
+/// What the note-tree walker has learned, for anyone who asks.
+///
+/// The walker prints its progress and the settler prints its anchors, which
+/// means the one question worth asking from a phone — "is the chain still
+/// reaching Zcash, and if not how far behind is it" — could only be answered
+/// by reading journald over ssh. The sync thread owns the writes; the RPC
+/// reads. Anchors are not duplicated here: they are already on disk in the
+/// published index, and a second copy is a second thing that can disagree.
+#[derive(Default)]
+struct SyncProgress {
+    synced_to: u64,
+    target: u64,
+    /// Why the walk stopped, empty while it is walking. This is the field
+    /// that turns "no anchors yet" from a mystery into a cause.
+    error: String,
 }
 
 /// Wire the settler, if this deployment has a vault to anchor from.
@@ -786,6 +909,13 @@ fn main() {
     // Remembered before `anchoring` is consumed below, so the status can say
     // which mode this node is in.
     let anchors = anchoring.is_some();
+    // Where the published index lives, kept for the RPC: the settler thread
+    // takes ownership of the same path below, and a reader that has to wait
+    // on the settler's lock to answer "how far along are we" is a reader that
+    // blocks exactly when the settler is busy.
+    let rpc_da_dir: Option<std::path::PathBuf> = anchoring.as_ref().map(|a| a.da_dir.clone());
+    let sync_progress = Arc::new(Mutex::new(SyncProgress::default()));
+    let sync_writer = Arc::clone(&sync_progress);
     let anchoring = anchoring.map(|a| {
         // Split it: the scanner and its Zcash connection go to the sync
         // thread, the settler to the anchoring one. Neither type is `Clone`,
@@ -805,11 +935,19 @@ fn main() {
             };
             let target = tip.saturating_sub(confirmations);
             let mut synced = notes.synced_to().unwrap_or(0);
+            if let Ok(mut g) = sync_writer.lock() {
+                g.target = target;
+                g.synced_to = synced;
+            }
             while synced < target {
                 match scanner.sync_notes(&zebra, target) {
                     Ok(h) => {
                         synced = h;
                         save_note_trees(&dir2, chain, &notes);
+                        if let Ok(mut g) = sync_writer.lock() {
+                            g.synced_to = synced;
+                            g.error.clear();
+                        }
                         eprintln!("zyn-object-node: note trees synced to {synced} of {target}");
                     }
                     Err(zyn_custody::shielded::ScanRangeError::Unattributable {
@@ -817,16 +955,25 @@ fn main() {
                         height,
                         amount,
                     }) => {
+                        let txid_hex: String =
+                            txid.iter().map(|b| format!("{:02x}", b)).collect();
                         eprintln!(
                             "zyn-object-node: note tree catch-up stopped at {height}: {amount:?} \
-                             in {} carries no Zyn memo — add it to ZYN_ATTRIBUTIONS \
-                             (the all-zero account means a vault top-up crediting nobody)",
-                            txid.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                             in {txid_hex} carries no Zyn memo — add it to ZYN_ATTRIBUTIONS \
+                             (the all-zero account means a vault top-up crediting nobody)"
                         );
+                        if let Ok(mut g) = sync_writer.lock() {
+                            g.error = format!(
+                                "stopped at {height}: {txid_hex} carries no Zyn memo — add it to ZYN_ATTRIBUTIONS"
+                            );
+                        }
                         break;
                     }
                     Err(e) => {
                         eprintln!("zyn-object-node: note tree catch-up stopped: {e:?}");
+                        if let Ok(mut g) = sync_writer.lock() {
+                            g.error = format!("catch-up stopped: {e:?}");
+                        }
                         break;
                     }
                 }
@@ -905,6 +1052,71 @@ fn main() {
         let node = Arc::clone(&node);
         let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
-        std::thread::spawn(move || serve(s, node, journal, pub_log, dir, chain, anchors));
+        let da_dir = rpc_da_dir.clone();
+        let sync = Arc::clone(&sync_progress);
+        std::thread::spawn(move || {
+            serve(s, node, journal, pub_log, dir, chain, anchors, da_dir, sync)
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The status document is hand-rolled JSON, and the one failure mode that
+    /// matters is a document nothing can parse — which a reader cannot tell
+    /// apart from the node being down. The scanner's errors are operator prose
+    /// carrying txids, so they are the field most likely to contain a quote.
+    #[test]
+    fn a_scanner_error_with_a_quote_still_leaves_parseable_json() {
+        let vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        let sync = SyncProgress {
+            synced_to: 10,
+            target: 20,
+            error: "stopped: \"abc\" carries no memo\nadd it\tsomewhere".into(),
+        };
+        let out = status_json(&vm, true, None, &sync);
+        let v: serde_json::Value =
+            serde_json::from_str(&out).expect("the status must stay parseable");
+        assert_eq!(
+            v["sync_error"], "stopped: \"abc\" carries no memo\nadd it\tsomewhere",
+            "and must round-trip the message rather than mangle it"
+        );
+        assert_eq!(v["synced_to"], 10);
+        assert_eq!(v["sync_target"], 20);
+    }
+
+    /// A node that has never anchored must say so as zero rather than omit the
+    /// field: the bot reads "no anchor yet" from it, and a missing key would
+    /// read as the same zero for the wrong reason.
+    #[test]
+    fn a_chain_with_no_anchors_reports_zero_not_a_missing_field() {
+        let vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        let out = status_json(&vm, true, None, &SyncProgress::default());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["anchored_epoch"], 0);
+        assert_eq!(v["anchored_height"], 0);
+        assert_eq!(v["anchor_txid"], "");
+        assert!(v["anchoring"].as_str().unwrap().starts_with("on"));
+    }
+
+    /// And when one has landed, the status carries the mapping rather than
+    /// making a reader go and find the index themselves.
+    #[test]
+    fn a_landed_anchor_is_reported_with_its_zcash_transaction() {
+        let vm = ObjectVm::genesis(212, objectvm::Limits { max_io: 8 });
+        let last = zynzapd::publish::IndexEntry {
+            epoch: 7,
+            root: [0xAB; 32],
+            anchor_id: [0xCD; 32],
+            txid: "deadbeef".into(),
+            height: 4_380_000,
+        };
+        let out = status_json(&vm, true, Some(&last), &SyncProgress::default());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["anchored_epoch"], 7);
+        assert_eq!(v["anchored_height"], 4_380_000u64);
+        assert_eq!(v["anchor_txid"], "deadbeef");
     }
 }
