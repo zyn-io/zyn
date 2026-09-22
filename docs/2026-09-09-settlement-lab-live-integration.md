@@ -4,9 +4,17 @@
 **Goal:** replace the rehearsal model in `apps/zyn-settlement-lab` with real calls
 to a live Zyn daemon, one beat at a time.
 
+> **Superseded, 22 Sep 2026.** Testnet chain 11 was retired and replaced by the
+> object ledger, **chain 212**. This document is kept because its reasoning
+> about the lab still holds, but do not follow its addresses: chain 11 produces
+> no epochs, `168.119.53.39:8099` has no listener, and the `zynzapd` daemon API
+> this plan is built on (`/api/mint`, `/api/force`, AcceptOffer) does not exist
+> on the object ledger. Porting the lab to chain 212 is a rewrite against a
+> different protocol, not a change of chain id.
+
 Nothing here needs the mainnet node, the Windows box, or any of the hardware
-currently being worked on. It is all developed against **testnet chain 11**,
-which is live now.
+currently being worked on. It was all developed against **testnet chain 11**,
+which was live when this was written.
 
 ## Why this is the right piece to parallelise
 
@@ -22,7 +30,9 @@ the local model until their route is proven.
 
 ## What is live
 
-- Sequencer / testnet chain 11: `168.119.53.39:8099`
+- Sequencer / testnet chain 11: `168.119.53.39:8099` — **retired 22 Sep 2026.**
+  The testnet is now chain 212, an object ledger, reached over JSON-RPC at
+  `https://zyn-rpc.cavebro.win/object`. It serves a different method table.
 - Existing assets: xZEC (ZEC.zy) is asset 1, ZYN is asset 7, SOL.zy is asset 2
 - Anchors are produced every 30 epochs or 1800 s, whichever comes first
 

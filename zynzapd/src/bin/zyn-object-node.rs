@@ -9,6 +9,7 @@
 //!
 //! ```text
 //!   ZYN_CHAIN_ID       the chain                       (212)
+//!   ZYN_DA_MIRRORS     url[|token],… to PUT bundles to (none)
 //!   ZYN_LISTEN         JSON-RPC, read and write        (127.0.0.1:8399)
 //!   ZYN_DATA_DIR       where state is kept             (./object-data)
 //!   ZYN_EPOCH_SECS     seal at least this often        (10)
@@ -985,6 +986,21 @@ fn main() {
 
     // Carry roots to Zcash, and publish what lets anyone check them.
     if let Some((mut settler, da_dir, da_key, data_dir)) = anchoring {
+        // Bundles written only to this box are bundles that die with it. The
+        // retired chain pushed its DA to the mirror so a third party could
+        // verify a root without asking us; the object ledger had no such push
+        // at all, so its bundles would have existed in exactly one place.
+        let mut publisher = zynzapd::publish::Publisher::new(zynzapd::publish::parse_mirrors(
+            &std::env::var("ZYN_DA_MIRRORS").unwrap_or_default(),
+        ));
+        match publisher.mirrors().len() {
+            0 => eprintln!(
+                "zyn-object-node: DA bundles are written to {} only — set ZYN_DA_MIRRORS \
+                 so a root outlives this box and someone else can check it",
+                da_dir.display()
+            ),
+            n => eprintln!("zyn-object-node: DA bundles publish to {n} mirror(s)"),
+        }
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
         std::thread::spawn(move || loop {
@@ -1025,11 +1041,14 @@ fn main() {
                             )
                         });
                     match built {
-                        Ok(files) => eprintln!(
-                            "zyn-object-node: DA bundle for epoch {} written ({} files)",
-                            c.anchor.checkpoint.epoch,
-                            files.len()
-                        ),
+                        Ok(files) => {
+                            eprintln!(
+                                "zyn-object-node: DA bundle for epoch {} written ({} files)",
+                                c.anchor.checkpoint.epoch,
+                                files.len()
+                            );
+                            publisher.queue(files);
+                        }
                         Err(e) => eprintln!(
                             "zyn-object-node: could not write the bundle for epoch {}: {e}",
                             c.anchor.checkpoint.epoch
@@ -1038,6 +1057,19 @@ fn main() {
                 }
                 Ok(None) => {}
                 Err(e) => eprintln!("zyn-object-node: anchor pass failed: {e}"),
+            }
+            // Drained on every pass, not only after a confirmation: a mirror
+            // that was down when a bundle was written must still receive it,
+            // and the queue is what remembers that.
+            if !publisher.mirrors().is_empty() && publisher.pending_len() > 0 {
+                match publisher.poll_once() {
+                    Ok(n) if n > 0 => eprintln!(
+                        "zyn-object-node: pushed {n} DA file(s); {} still queued",
+                        publisher.pending_len()
+                    ),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("zyn-object-node: DA mirror push failed: {e}"),
+                }
             }
         });
     }

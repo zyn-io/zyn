@@ -844,7 +844,14 @@ echo "<reveal line>" >> /etc/zyn/zcash-reveals && systemctl restart zynzapd
 The settler builds, proves, signs and broadcasts on its next pass; the exit
 confirms on Zyn once the payout is `ZYN_CONFIRMATIONS` deep on Zcash.
 
-## 4h. What is deployed (5 Sep 2026)
+## 4h. What is deployed (5 Sep 2026) — RETIRED
+
+> **Chain 11 was retired on 22 Sep 2026.** `zynzapd.service` is stopped and
+> disabled, `:8099` has no listener, and the testnet is now chain 212 (§5f-bis).
+> This section is kept as the record of how that chain was deployed — its
+> paths, its vault and its scan height are what a reader needs to interpret
+> the history and the mirror's `chain-11/` tree. Do not follow it to stand
+> anything up.
 
 On `zyn-zebra-testnet` (168.119.53.39, cax11, Zebra in Docker on the 60 GB volume):
 
@@ -1514,11 +1521,15 @@ the verifier set.
 ### The replica
 
 ```
-ZYN_CHAIN_ID=11 ZYN_DATA_DIR=/var/lib/zyn/replica ZYN_LISTEN=0.0.0.0:8100 \
+ZYN_CHAIN_ID=<chain> ZYN_DATA_DIR=/var/lib/zyn/replica ZYN_LISTEN=0.0.0.0:8100 \
 ZYN_DA_MIRRORS=http://<mirror>:8181 ZYN_VAULT_FVK=<hex> \
 ZYN_ZEBRA_HOST=<zebra> ZYN_ZEBRA_PORT=18232 ZYN_BRIDGE_FROM_HEIGHT=<vault birth> \
 ZYN_SEQUENCER=<host:port> ZYN_DA_LISTEN=0.0.0.0:8182 zyn-replica
 ```
+
+`zyn-replica` verifies an **AMM** chain — mainnet 26460, or chain 11 before it
+was retired. The object ledger (chain 212, the testnet) has no replica yet:
+`zyn_anchors` and the DA bundles are what a third party checks it with today.
 
 Holds the vault's **viewing** key only. Each pass: scan Zcash for `ZYA`
 self-sends at depth, fetch the bundle, check `anchor.bin` hashes to the memo's
@@ -2724,7 +2735,13 @@ comparing digests rather than keys.
 
 **Still owed:** the retired plists sit in `~/.zyn/retired/` (0600) on the Mac
 rather than being erased, so the move is reversible while the new hosts prove
-themselves. Erase them once chain 11 has anchored from the new set.
+themselves. The original condition — "erase them once chain 11 has anchored
+from the new set" — can no longer be met: chain 11 was retired on 22 Sep and
+will never anchor again. These signers endorsed an **AMM** chain, and the
+testnet that replaced it (chain 212) settles through the FROST custodians
+instead, so the signer set they belong to has no live chain at all. Erase them
+when mainnet 26460 next anchors from this set, or when the keys are rotated —
+not on a condition that cannot occur.
 
 ## 5f-ter. The tunnel watchdog (22 Sep 2026)
 
@@ -2772,25 +2789,48 @@ and both their tunnels were dead on 22 Sep with `status 255` while the signers
 themselves ran. launchd has no timer units; a `StartInterval` agent doing the
 same check is the shape.
 
-## 5f-bis. The object-ledger devnet (21 Sep 2026)
+## 5f-bis. The object-ledger testnet — chain 212 (21 Sep 2026, promoted 22 Sep)
 
-DECISIONS §133. Chain 212, the object ledger, running so that Cave's mint,
-listings and claims can be exercised against something real before they are
-exercised against money.
+DECISIONS §133. **Chain 212 is the testnet.** It replaced chain 11, which was
+retired on 22 Sep 2026 (A126/A128). Anything still naming chain 11 as "the
+testnet" is stale: that chain produces no epochs and its RPC has no listener.
 
-- **On Contabo**, `zyn-object-node.service`, `127.0.0.1:8499`, state in
-  `/var/lib/zyn-object`. Public at `https://zyn-rpc.cavebro.win/object`
-  alongside `/` (mainnet 26460) and `/testnet` (chain 11).
-- **It holds no key and can spend nothing.** No vault, no custodians, no
-  signer set, no bridge, and anchoring is off: roots are sealed and served and
-  reach no chain. The status output says so in words — `"anchoring": "none —
-  devnet, roots reach no chain"` — so nobody reads a devnet root as a settled
-  one. It shares a box with the mainnet sequencer, which is why the unit also
-  carries `ProtectSystem=strict` and a single `ReadWritePaths`.
+It exists so Cave's mint, listings and claims can be exercised against
+something real before they are exercised against money.
+
+- **On Hetzner** (`168.119.53.39`), `zyn-object-node.service`,
+  `127.0.0.1:8499`, config `/etc/zyn/zyn-object.env` (0600 — it carries
+  `ZYN_VAULT_FVK`), state in `/var/lib/zyn-object`. It reaches the public
+  gateway through `zyn-object-tunnel.service`, a reverse tunnel to Contabo's
+  `127.0.0.1:8500`, which nginx serves as
+  `https://zyn-rpc.cavebro.win/object`. It ran on Contabo as a devnet until
+  22 Sep; the node moved to Hetzner because that is where the testnet Zebra,
+  the vault and the custodians already are.
+- **Anchoring is ON.** Roots are carried to Zcash testnet and settle there,
+  and the status says so in words rather than leaving a reader to guess:
+  `"anchoring": "on — roots are carried to Zcash and settle there"`. The
+  devnet wording (`"none — devnet, roots reach no chain"`) is still what a
+  node without a Zebra, a vault FVK and custodians reports, and it is never
+  the better of the two by default.
+- **Objects are still unbacked.** Anchoring a root and backing an object are
+  different promises: until `object_ingress` is wired to a real watcher, no
+  object on this chain corresponds to deposited ZEC. The startup banner says
+  this separately, and it is the one claim not to overstate.
+- **The routes beside it**: `/` is mainnet 26460. `/testnet` is **410 Gone**
+  since 22 Sep, returning a JSON-RPC error naming chain 11's retirement and
+  pointing at `/object` — a retired chain answers, rather than timing out and
+  looking like an outage.
 - **Methods**: `zyn_status`, `zyn_submit` (a hex intent from
-  `ObjectVm::encode_intent`), and `zyn_published` — commitments, ephemeral
-  keys and ciphertexts, which is everything a wallet needs to rebuild itself
-  and nothing privileged.
+  `ObjectVm::encode_intent`), `zyn_published` (commitments, ephemeral keys
+  and ciphertexts — everything a wallet needs to rebuild itself and nothing
+  privileged), `zyn_anchors` (the epoch-to-Zcash index, read from the
+  published index file so it cannot disagree with what a replica serves), and
+  `zyn_offers` (resting listings, sellers omitted).
+- **What `zyn_status` reports beyond the counts** (22 Sep, A129):
+  `anchored_epoch` / `anchored_height` / `anchor_txid` for the last root that
+  landed, and `synced_to` / `sync_target` / `sync_error` for the vault's note
+  trees. Before that both lived only in journald, so "is the chain still
+  reaching Zcash" was a question you could only answer over ssh.
 - **To reset it**: `systemctl stop zyn-object-node; rm -rf
   /var/lib/zyn-object/*; systemctl start zyn-object-node`. Wallets that had
   scanned it will report zero afterwards, correctly, because the chain they
@@ -2802,8 +2842,8 @@ exercised against money.
   performs the `zyn_status` call on the reader's behalf (`proxy_method POST`
   + `proxy_set_body`). `POST` is untouched, and `/object-status` returns 404
   if requested directly. Config backup at `/root/zyn-rpc.bak.getstatus`.
-  `/` and `/testnet` still 405 on GET, deliberately: the mainnet sequencer's
-  surface is not widened to make a link prettier.
+  `/` still 405s on GET, deliberately: the mainnet sequencer's surface is not
+  widened to make a link prettier. `/testnet` now answers 410 on any method.
 - **The node bounds what it will read** (22 Sep). A request over 256 KB, or a
   declared `Content-Length` over it, gets a 413; a connection that stalls is
   dropped after 15 s. Before that the read buffer grew without a ceiling, so a

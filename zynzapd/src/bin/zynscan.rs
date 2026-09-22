@@ -13,7 +13,7 @@
 //! ```text
 //!   ZYN_SCAN_LISTEN    HTTP, read-only            (0.0.0.0:8090)
 //!   ZYN_SCAN_NODE      node RPC to read           (127.0.0.1:8100, a replica)
-//!   ZYN_CHAIN_ID       the chain                  (11)
+//!   ZYN_CHAIN_ID       the chain                  (required)
 //!   ZYN_SCAN_LIMIT     anchors to show            (200)
 //!   ZYN_SCAN_REFRESH   seconds between reads      (15)
 //!   ZYN_SCAN_EXPLORER  Zcash explorer tx base URL
@@ -56,7 +56,30 @@ fn now() -> u64 {
 fn main() {
     let listen = env("ZYN_SCAN_LISTEN", "0.0.0.0:8090");
     let addr = env("ZYN_SCAN_NODE", "127.0.0.1:8100");
-    let chain: u32 = env("ZYN_CHAIN_ID", "11").parse().unwrap_or(11);
+    // No default. This defaulted to 11 until that chain was retired on 22 Sep
+    // 2026, and a tool that silently picks a chain is how you read the wrong
+    // one. Defaulting to mainnet instead would be worse than a dead chain, and
+    // the object ledger (chain 212, the testnet) speaks JSON over HTTP rather
+    // than this binary framing, so it is not a candidate either.
+    let chain: u32 = match std::env::var("ZYN_CHAIN_ID").ok().filter(|v| !v.is_empty()) {
+        Some(v) => match v.parse() {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("{}: ZYN_CHAIN_ID must be a number, got {:?}", "zynscan", v);
+                std::process::exit(1)
+            }
+        },
+        None => {
+            eprintln!(
+                "{}: ZYN_CHAIN_ID is required — it names the chain to serve. \
+                 Mainnet is 26460; testnet chain 11 was retired on 22 Sep 2026 \
+                 and its replacement, chain 212, is an object ledger this tool \
+                 does not speak.",
+                "zynscan"
+            );
+            std::process::exit(1)
+        }
+    };
     let limit: u32 = env("ZYN_SCAN_LIMIT", "200").parse().unwrap_or(200);
     let refresh: u64 = env("ZYN_SCAN_REFRESH", "15").parse().unwrap_or(15).max(2);
     let explorer = env(

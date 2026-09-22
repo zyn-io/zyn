@@ -212,8 +212,10 @@ change is much easier to understand when both sides remain visible.
 
 ## Build and rehearsal order
 
-The application can be developed against chain 11 while the Windows Zebra node
-syncs. Mainnet is needed for rehearsals and the final recording, not for routine
+The application can be developed against the testnet while the Windows Zebra
+node syncs. (Written when the testnet was chain 11; it was retired on 22 Sep
+2026 and the testnet is now chain 212, the object ledger, which serves a
+different method table.) Mainnet is needed for rehearsals and the final recording, not for routine
 UI work.
 
 - **9–12 Sep:** buy/sell client and endpoint, validation, paid claim path

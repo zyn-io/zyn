@@ -155,7 +155,7 @@ function renderLive() {
   const step = LIVE_STEPS[Math.min(liveState.step, 6)];
   const collection = findCollection(liveState.snapshot, liveState.collectionId);
   const latestAnchor = liveState.snapshot?.anchors?.at(-1) || liveState.snapshot?.wallets?.a?.settlement?.last;
-  const network = liveState.snapshot?.wallets?.a?.chain != null ? `chain ${liveState.snapshot.wallets.a.chain}` : 'testnet chain 11';
+  const network = liveState.snapshot?.wallets?.a?.chain != null ? `chain ${liveState.snapshot.wallets.a.chain}` : 'testnet chain 212';
   const receiptEvents = [...liveState.events].reverse();
   const actionAmount = liveState.step === 4 ? (collection?.redeem_price || 'Live floor') : liveState.step === 5 ? (liveState.redeemAmount || 'Pending redemption') : step?.amount;
   $('#app').innerHTML = `${appHeader()}<main class="live-main">
