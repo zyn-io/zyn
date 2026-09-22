@@ -1485,27 +1485,10 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             // vault is real money sent to a chain it cannot come back from.
             // So the address is checked against the wallet's own network
             // here, whichever source it came from.
-            let address = match app.deposit_address() {
-                Some(address) => json!({ "address": address, "memo": false }),
-                // No per-account address: the shared vault still works, but
-                // only with the account memo attached.
-                None => json!({ "address": app.vault, "memo": true }),
-            };
-            let shown = address["address"].as_str().unwrap_or_default();
-            let testnet_address = shown.starts_with("utest1") || shown.starts_with("tm");
-            let testnet_wallet = {
-                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
-                w.network() != Network::MainNetwork
-            };
-            if testnet_address != testnet_wallet {
-                return Err(format!(
-                    "refusing to show a {} deposit address to a {} wallet — sending there \
-                     would put money on a chain this wallet cannot spend from",
-                    if testnet_address { "testnet" } else { "mainnet" },
-                    if testnet_wallet { "testnet" } else { "mainnet" }
-                ));
-            }
-            Ok(address)
+            let (address, per_account) = checked_vault(app)?;
+            // `memo: true` means the address is shared and the account has to
+            // be named in a memo. A per-account address *is* the attribution.
+            Ok(json!({ "address": address, "memo": !per_account }))
         }
         // A fresh account to receive one item at, so the journal names
         // something that has never been used and never will be again (§95).
@@ -1641,7 +1624,10 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             }))
         }
         ("GET", "/api/zyn-key") => {
-            zyn_only(app)?;
+            // The key is local; only the on-chain record needs a sequencer.
+            // Refusing the whole route left a holder unable to see which Zyn
+            // account they even have.
+            let has_chain = !app.cfg.node.trim().is_empty();
             let current_key = app.key();
             let current = account(&current_key);
             let source = app.zyn_key_source()?;
@@ -1650,13 +1636,25 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 w.default_zyn_source()
                     .and_then(|s| w.zyn_signing_key(&s).ok().map(|k| (s, account(&k))))
             };
-            let record = app.node.account(&current_key)?.unwrap_or_default();
-            let authorities = app.node.collections()?.into_iter()
-                .filter(|c| c.creator == current)
-                .map(|c| json!({ "collection": c.id, "symbol": c.symbol, "phase": c.phase_name() }))
-                .collect::<Vec<_>>();
+            let record = if has_chain {
+                app.node.account(&current_key)?.unwrap_or_default()
+            } else {
+                Default::default()
+            };
+            let authorities = if has_chain {
+                app.node.collections()?.into_iter()
+                    .filter(|c| c.creator == current)
+                    .map(|c| json!({ "collection": c.id, "symbol": c.symbol, "phase": c.phase_name() }))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             Ok(json!({
                 "account": hex(&current),
+                // Says whether the on-chain half below was actually read or
+                // is simply absent, so a page does not render "nothing held"
+                // as a fact when it is an unanswered question.
+                "chain_read": has_chain,
                 "source": match source { ZynKeySource::Derived { .. } => "bip39-hkdf", ZynKeySource::Legacy { .. } => "legacy-ed25519" },
                 "derived_account": derived.as_ref().map(|(_, id)| hex(id)),
                 "migration_available": false,
@@ -1670,13 +1668,17 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             Err("Automatic migration is disabled until settlement verification and resumable recovery are implemented; the original Zyn key has not been changed".into())
         }
         ("POST", "/api/deposit") => {
-            zyn_only(app)?;
+            // Not behind the AMM gate. A deposit is a Zcash transaction to the
+            // vault carrying this account in its memo; it needs a vault
+            // address and a wallet, and no sequencer at all. Gating it meant
+            // the one button that puts money *into* Zyn stopped working when
+            // the AMM chain went away.
             let zat = zatoshi_of(input, "amount")?;
             // Its own address needs no memo — the address is the attribution.
             // Without one, fall back to the shared vault address and a memo.
-            let (to, memo) = match app.deposit_address() {
-                Some(a) => (a, None),
-                None => (app.vault.clone(), Some(zyn_custody::memo::encode_text(&account(&app.key())))),
+            let (to, memo) = match checked_vault(app)? {
+                (a, true) => (a, None),
+                (a, false) => (a, Some(zyn_custody::memo::encode_text(&account(&app.key())))),
             };
             App::start_job(app, "deposit", move |a| {
                 let txid = send(a, &to, zat, memo.as_deref(), "deposit")?;
@@ -2172,6 +2174,33 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
 /// would show balances backed by money it cannot see and hand out deposit
 /// addresses nobody on this chain can pay. Which chain is fine; disagreeing
 /// about it is not.
+/// The vault to pay, checked against the wallet's own network.
+///
+/// A mainnet wallet shown the testnet vault is real money sent to a chain it
+/// cannot spend from, and `chain_mismatch` cannot catch that — it derived the
+/// network from an address the *node* issued, and a wallet with no AMM chain
+/// has no node to ask.
+fn checked_vault(app: &App) -> Result<(String, bool), String> {
+    let (address, per_account) = match app.deposit_address() {
+        Some(a) => (a, true),
+        None => (app.vault.clone(), false),
+    };
+    let testnet_address = address.starts_with("utest1") || address.starts_with("tm");
+    let testnet_wallet = {
+        let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+        w.network() != Network::MainNetwork
+    };
+    if testnet_address != testnet_wallet {
+        return Err(format!(
+            "refusing to use a {} vault address with a {} wallet — sending there would put \
+             money on a chain this wallet cannot spend from",
+            if testnet_address { "testnet" } else { "mainnet" },
+            if testnet_wallet { "testnet" } else { "mainnet" }
+        ));
+    }
+    Ok((address, per_account))
+}
+
 /// The gate every route that needs an **AMM** chain passes through.
 ///
 /// Two refusals, and the order matters: a wallet with no AMM chain configured
