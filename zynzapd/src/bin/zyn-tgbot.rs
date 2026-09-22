@@ -420,6 +420,48 @@ impl Bot {
         }
     }
 
+    /// Look at the chain every few minutes and push what changed.
+    fn watch(&self) {
+        let mut prev: Option<serde_json::Value> = None;
+        let mut down = false;
+        loop {
+            match self.object("zyn_status") {
+                Ok(now) => {
+                    if down {
+                        self.tell(&format!("\u{2713} chain {}: reachable again", self.chain));
+                        down = false;
+                    }
+                    // The first look compares against a baseline that differs
+                    // only in the standing faults, so a scan that was already
+                    // stopped when the bot started is still reported — while
+                    // anchors and deposits that already existed are not news.
+                    let base = prev.clone().unwrap_or_else(|| baseline(&now));
+                    for a in alerts(Some(&base), &now) {
+                        self.tell(&a);
+                    }
+                    // Kept across an outage, so whatever changed while the node
+                    // was unreachable is still compared against what came before.
+                    prev = Some(now);
+                }
+                // Once per outage, not every five minutes: a pager that repeats
+                // itself gets muted.
+                Err(e) => {
+                    if !down {
+                        self.tell(&format!("\u{26a0} chain {}: unreachable — {e}", self.chain));
+                        down = true;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(300));
+        }
+    }
+
+    fn tell(&self, text: &str) {
+        for chat in &self.allowed {
+            self.say(*chat, text);
+        }
+    }
+
     fn run(&self) {
         let mut offset: i64 = 0;
         eprintln!(
@@ -478,6 +520,81 @@ impl Bot {
     }
 }
 
+/// What changed between two status documents that someone should be told.
+///
+/// The bot answered questions and pushed nothing, so the events that need a
+/// person — the scan stopping on a payment it cannot attribute, the first
+/// anchor landing, a deposit becoming an object — sat in a status document
+/// until someone happened to type `/status`. A stopped scan in particular
+/// waits on an operator: nothing moves until the transaction is attributed.
+///
+/// `prev` is `None` on the first look, which reports nothing: a restart of
+/// the bot is not news.
+/// `now` with its standing faults cleared: the comparison point for a first
+/// look, so a fault already present is reported and nothing else is.
+fn baseline(now: &serde_json::Value) -> serde_json::Value {
+    let mut b = now.clone();
+    if let Some(o) = b.as_object_mut() {
+        o.insert("sync_error".into(), serde_json::json!(""));
+        o.insert("reconciled".into(), serde_json::json!(true));
+    }
+    b
+}
+
+fn alerts(prev: Option<&serde_json::Value>, now: &serde_json::Value) -> Vec<String> {
+    let Some(prev) = prev else { return Vec::new() };
+    let u = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+    let t = |v: &serde_json::Value, k: &str| {
+        v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    };
+    let chain = u(now, "chain");
+    let mut out = Vec::new();
+
+    let (was, is) = (t(prev, "sync_error"), t(now, "sync_error"));
+    if !is.is_empty() && is != was {
+        out.push(format!(
+            "\u{26a0} <b>chain {chain}: scan stopped</b>\n{}",
+            is.chars().take(300).collect::<String>()
+        ));
+    } else if is.is_empty() && !was.is_empty() {
+        out.push(format!("\u{2713} chain {chain}: scan running again"));
+    }
+
+    if u(prev, "anchored_epoch") == 0 && u(now, "anchored_epoch") > 0 {
+        out.push(format!(
+            "\u{2713} <b>chain {chain}: first anchor on Zcash</b>\nepoch {} at height {}\n<code>{}</code>",
+            u(now, "anchored_epoch"),
+            u(now, "anchored_height"),
+            t(now, "anchor_txid")
+        ));
+    }
+
+    let (d0, d1) = (u(prev, "deposits_credited"), u(now, "deposits_credited"));
+    if d1 > d0 {
+        out.push(format!(
+            "\u{2713} chain {chain}: {} deposit(s) credited ({d1} in all)",
+            d1 - d0
+        ));
+    }
+
+    let (o0, o1) = (u(prev, "owed_zatoshi"), u(now, "owed_zatoshi"));
+    if o1 > o0 {
+        out.push(format!(
+            "chain {chain}: {} zat newly owed to exits ({o1} outstanding)",
+            o1 - o0
+        ));
+    }
+
+    let rec = |v: &serde_json::Value| v.get("reconciled").and_then(|x| x.as_bool());
+    if rec(now) == Some(false) && rec(prev) != Some(false) {
+        out.push(format!(
+            "\u{26a0} <b>chain {chain}: NOT RECONCILED</b> — objects created no longer equal \
+             objects held plus objects retired"
+        ));
+    }
+    out
+}
+
 fn main() -> Result<(), String> {
     let token = env("ZYN_TG_TOKEN").ok_or("ZYN_TG_TOKEN is required")?;
     let allowed: Vec<i64> = env("ZYN_TG_CHATS")
@@ -522,6 +639,11 @@ fn main() -> Result<(), String> {
         chain,
         zebras,
     };
+    let bot = std::sync::Arc::new(bot);
+    {
+        let bot = std::sync::Arc::clone(&bot);
+        std::thread::spawn(move || bot.watch());
+    }
     bot.run();
     Ok(())
 }
@@ -590,6 +712,63 @@ mod tests {
         assert!(out.contains("4380900"), "{out}");
         assert!(out.contains("at the tip"), "{out}");
         assert!(!out.contains("no anchor has landed"), "{out}");
+    }
+
+    fn with(v: &serde_json::Value, k: &str, x: serde_json::Value) -> serde_json::Value {
+        let mut v = v.clone();
+        v[k] = x;
+        v
+    }
+
+    /// The event that waits on a person: a payment with no memo stops the
+    /// scan until someone attributes it. It must be pushed, with the txid.
+    #[test]
+    fn a_stopped_scan_is_pushed_with_its_reason() {
+        let before = live();
+        let after = with(&before, "sync_error", serde_json::json!(
+            "stopped at 4380950: abc123 carries no Zyn memo — add it to ZYN_ATTRIBUTIONS"));
+        let a = alerts(Some(&before), &after);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert!(a[0].contains("scan stopped") && a[0].contains("abc123"), "{}", a[0]);
+        // And it is not repeated every five minutes while it stays stopped.
+        assert!(alerts(Some(&after), &after).is_empty());
+        // Clearing it is news too.
+        assert!(alerts(Some(&after), &before)[0].contains("running again"));
+    }
+
+    /// A scan already stopped when the bot starts is a standing fault, not a
+    /// restart artifact — the first look must still report it.
+    #[test]
+    fn a_stall_present_at_startup_is_still_reported() {
+        let now = with(&live(), "sync_error", serde_json::json!("stopped at 1: x"));
+        let a = alerts(Some(&baseline(&now)), &now);
+        assert_eq!(a.len(), 1, "{a:?}");
+        // But nothing that merely already existed is announced.
+        let quiet = alerts(Some(&baseline(&live())), &live());
+        assert!(quiet.is_empty(), "{quiet:?}");
+    }
+
+    #[test]
+    fn the_first_anchor_and_new_deposits_are_pushed() {
+        let before = with(&live(), "deposits_credited", serde_json::json!(1));
+        let after = with(
+            &with(&with(&before, "anchored_epoch", serde_json::json!(3)),
+                  "anchored_height", serde_json::json!(4_381_500u64)),
+            "deposits_credited", serde_json::json!(3),
+        );
+        let a = alerts(Some(&before), &after).join("\n");
+        assert!(a.contains("first anchor") && a.contains("4381500"), "{a}");
+        assert!(a.contains("2 deposit(s) credited"), "{a}");
+        // A later anchor is not "first".
+        let later = with(&after, "anchored_epoch", serde_json::json!(4));
+        assert!(!alerts(Some(&after), &later).join("").contains("first anchor"));
+    }
+
+    #[test]
+    fn losing_reconciliation_is_pushed_once() {
+        let bad = with(&live(), "reconciled", serde_json::json!(false));
+        assert!(alerts(Some(&live()), &bad)[0].contains("NOT RECONCILED"));
+        assert!(alerts(Some(&bad), &bad).is_empty());
     }
 
     /// A node that is not anchoring at all must not be dressed up: the devnet
