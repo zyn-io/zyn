@@ -2688,6 +2688,15 @@ should use; tearing them down to rebuild them would be work for its own sake.
 
 Config backups: `/root/zyn-rpc.bak.retire-testnet` and `.bak.retire2`.
 
+**`zyn-rpc.service` on Hetzner is stopped and disabled** (22 Sep). It was the
+chain-11 JSON-RPC gateway on `127.0.0.1:8095`, relaying to the sequencer's
+`:8099`, and it outlived both: `:8099` had no listener, nothing in nginx on
+either box routed to `:8095`, no other unit referenced it, and it held no
+established connection. It stayed up for a week answering for a chain that was
+gone — a gateway to nothing is not harmless, it is a thing that looks like
+infrastructure. The object ledger needs no equivalent: it speaks JSON over
+HTTP itself, which is what `zyn-rpc` existed to provide for a binary node.
+
 ## 5f-quater. One signer per machine (22 Sep 2026)
 
 Chain 11's set is 2-of-3 (`ZYN_SIGNER_THRESHOLD=2`). Until today **two of the
