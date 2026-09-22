@@ -91,6 +91,34 @@ fn the_pinned_ciphertext_still_opens() {
     assert_eq!(hex(&plain[48..]), field(&j, "nonce"));
 }
 
+/// The program ids and the encoded intent in the fixture must still be what
+/// Rust produces. The browser builds intents from these bytes, so a change
+/// here that the fixture did not catch would mean a wallet submitting
+/// something the node refuses -- or worse, something it accepts that runs a
+/// different rule.
+#[test]
+fn the_pinned_programs_and_intent_encoding_still_hold() {
+    let j = fixture();
+    assert_eq!(
+        hex(&zyn_vm::program::register_viewing_key().0),
+        field(&j, "register_viewing_key")
+    );
+
+    let seed = field(&j, "seed_utf8");
+    let viewing = StaticSecret::from(
+        zynzapd::object_keys::viewing_secret(seed.as_bytes(), 0).to_bytes(),
+    );
+    let owner: [u8; 32] = unhex(&field(&j, "owner")).try_into().unwrap();
+    let encoded = <objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::encode_intent(
+        &objectvm::Op::Register {
+            account: owner,
+            program: zyn_vm::program::register_viewing_key(),
+            viewing: viewing_public(&viewing),
+        },
+    );
+    assert_eq!(hex(&encoded), field(&j, "register_intent"));
+}
+
 /// And sealing to the same key still produces something that round-trips —
 /// the encrypt path, which the frozen ciphertext cannot cover.
 #[test]

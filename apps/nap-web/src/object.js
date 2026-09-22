@@ -170,3 +170,61 @@ export function unhex(s) {
 }
 
 export { hex };
+
+// ---------------------------------------------------------------------------
+// Writing to it.
+// ---------------------------------------------------------------------------
+
+/// Program ids, pinned to `zyn-vm/src/program.rs`.
+///
+/// A wire constant: an intent naming a program the VM does not know is an
+/// intent it will not run, and one naming the *wrong* known program is worse —
+/// it runs a rule the holder did not intend.
+export const PROGRAM = {
+  registerViewingKey: 'e08ada46a2a9adb8d9cbfc45316173f8a5e0edf6ec035252b19fd8b6600a5386',
+};
+
+/// Intent tags, pinned to `ObjectVm::encode_intent`.
+const TAG_REGISTER = 8;
+
+function concatBytes(...parts) {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+/// `Op::Register` as the node's `zyn_submit` expects it.
+///
+/// Publishing where to be paid. Re-registering replaces the key, because a
+/// holder who loses one needs a way to be paid again — and the old key could
+/// never spend anything, it only ever found notes. What it costs is that
+/// anyone able to submit as this account can redirect *future*
+/// discoverability, not any note that already exists.
+export function registerIntent(account, viewing) {
+  return concatBytes(
+    new Uint8Array([TAG_REGISTER]),
+    account,
+    unhex(PROGRAM.registerViewingKey),
+    viewing,
+  );
+}
+
+/// Submit an encoded intent. The node takes it as hex and relays it untouched.
+export async function submit(rpcUrl, intentBytes) {
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'zyn_submit',
+      intent: hex(intentBytes),
+    }),
+  });
+  const body = await response.json();
+  if (body.error) throw new Error(body.error.message || 'the chain refused the intent');
+  return body.result;
+}

@@ -191,3 +191,25 @@ test('a blob sealed without object keys still opens', async () => {
   assert.equal(hex(identity.secretKey), hex(id.secretKey));
   assert.equal(identity.viewing, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Writing.
+// ---------------------------------------------------------------------------
+
+import { PROGRAM, registerIntent } from '../src/object.js';
+
+/// A program id is a wire constant: naming one the VM does not know is an
+/// intent it will not run, and naming the wrong *known* one runs a rule the
+/// holder did not intend.
+test('the program ids match the Rust side', () => {
+  assert.equal(PROGRAM.registerViewingKey, v.programs.register_viewing_key);
+});
+
+/// The encoding is checked against bytes Rust produced, not against a
+/// description of them.
+test('a Register intent encodes to exactly the bytes Rust produces', () => {
+  const bytes = registerIntent(unhex(v.owner), unhex(v.viewing_key));
+  assert.equal(hex(bytes), v.register_intent);
+  assert.equal(bytes[0], v.intent_tags.register, 'the tag leads');
+  assert.equal(bytes.length, 1 + 32 + 32 + 32);
+});

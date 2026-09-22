@@ -58,6 +58,36 @@ fn main() {
     println!("  \"epk\": \"{}\",", hex(&enc.epk));
     println!("  \"ciphertext\": \"{}\",", hex(&enc.ciphertext));
     println!("  \"commitment\": \"{}\",", hex(&commit));
-    println!("  \"nullifier\": \"{}\"", hex(&nullifier(&nkey, &commit)));
+    println!("  \"nullifier\": \"{}\",", hex(&nullifier(&nkey, &commit)));
+
+    // The program ids and intent tags a browser needs in order to *build* an
+    // intent rather than only read one. Wire constants: a wallet that encoded
+    // a different tag would have its submission refused, and a wrong program
+    // id is an intent the VM will not run.
+    println!("  \"programs\": {{");
+    println!(
+        "    \"register_viewing_key\": \"{}\",",
+        hex(&zyn_vm::program::register_viewing_key().0)
+    );
+    println!("    \"private_transfer\": \"{}\",", hex(&zyn_vm::program::private_transfer().0));
+    println!(
+        "    \"place_offer\": \"{}\",",
+        hex(&zyn_vm::program::place_offer().0)
+    );
+    println!(
+        "    \"take_offer\": \"{}\"",
+        hex(&zyn_vm::program::take_offer().0)
+    );
+    println!("  }},");
+    println!("  \"intent_tags\": {{ \"spend\": 2, \"register\": 8 }},");
+
+    // A whole Register intent, encoded, so the browser can be held to the
+    // exact bytes rather than to a description of them.
+    let reg = <objectvm::ObjectVm as zyn_vm::spec::MicrochainVm>::encode_intent(&objectvm::Op::Register {
+        account: owner,
+        program: zyn_vm::program::register_viewing_key(),
+        viewing: viewing_public(&viewing),
+    });
+    println!("  \"register_intent\": \"{}\"", hex(&reg));
     println!("}}");
 }
