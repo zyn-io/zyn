@@ -70,7 +70,9 @@ pub fn files_for(
 pub struct Journal {
     dir: PathBuf,
     chain_id: u32,
-    open: Option<(u64, BufWriter<File>)>,
+    /// The epoch currently open, its writer, and the highest seq already
+    /// on disk for it — so a replay cannot write the same record twice.
+    open: Option<(u64, BufWriter<File>, Option<u64>)>,
 }
 
 impl Journal {
@@ -97,7 +99,7 @@ impl Journal {
                 "intent too large",
             ));
         }
-        if self.open.as_ref().map(|(e, _)| *e != epoch).unwrap_or(true) {
+        if self.open.as_ref().map(|(e, _, _)| *e != epoch).unwrap_or(true) {
             self.sync()?;
             let path = self.dir.join(format!("epoch-{}.intents", epoch));
             let mut f = OpenOptions::new()
@@ -125,18 +127,37 @@ impl Journal {
                     ));
                 }
             }
-            self.open = Some((epoch, BufWriter::new(f)));
+            // What is already here. A restart that replays intents calls
+            // `record` again for epochs the journal already holds, and this
+            // opened in append mode without looking — so those records were
+            // written a second time. The file then failed `read_epoch` with
+            // `OutOfOrder`, which stopped the publisher, which stopped the
+            // signers endorsing, which froze anchoring: six epochs of chain 11
+            // were unreadable this way on 21 Sep (A125).
+            //
+            // Scanned tolerantly on purpose: a file already corrupted this way
+            // must still accept new records, or the repair is a restart that
+            // cannot happen.
+            let highest = highest_seq_on_disk(&path);
+            self.open = Some((epoch, BufWriter::new(f), highest));
         }
-        let (_, w) = self.open.as_mut().expect("opened above");
+        let (_, w, highest) = self.open.as_mut().expect("opened above");
+        // Already recorded. Writing it again is what corrupts the file, and
+        // silently skipping is right: the record is present and identical, so
+        // there is nothing for a caller to do about it.
+        if highest.map(|h| seq <= h).unwrap_or(false) {
+            return Ok(());
+        }
         w.write_all(&seq.to_be_bytes())?;
         w.write_all(&(encoded.len() as u32).to_be_bytes())?;
         w.write_all(encoded)?;
+        *highest = Some(seq);
         Ok(())
     }
 
     /// Flush and fsync whatever is open. Called at every seal and on shutdown.
     pub fn sync(&mut self) -> std::io::Result<()> {
-        if let Some((_, w)) = self.open.as_mut() {
+        if let Some((_, w, _)) = self.open.as_mut() {
             w.flush()?;
             w.get_ref().sync_all()?;
         }
@@ -173,6 +194,32 @@ pub enum JournalError {
 
 /// Parse one epoch file. Every read is bounds-checked; junk is refused, never
 /// interpreted.
+/// The highest record sequence already written to an epoch file.
+///
+/// Tolerant by design: it stops at the first malformed record and returns
+/// what it read. A file corrupted by the duplicate-append bug must still be
+/// appendable, or recovering from it would need the very restart that cannot
+/// complete. `None` means the file is absent or holds no records yet.
+fn highest_seq_on_disk(path: &Path) -> Option<u64> {
+    let b = fs::read(path).ok()?;
+    if b.len() < HEADER_LEN {
+        return None;
+    }
+    let mut p = HEADER_LEN;
+    let mut highest: Option<u64> = None;
+    while p + 12 <= b.len() {
+        let seq = u64::from_be_bytes(b[p..p + 8].try_into().ok()?);
+        let len = u32::from_be_bytes(b[p + 8..p + 12].try_into().ok()?) as usize;
+        p += 12;
+        if len > MAX_RECORD || b.len() - p < len {
+            break;
+        }
+        highest = Some(highest.map_or(seq, |h: u64| h.max(seq)));
+        p += len;
+    }
+    highest
+}
+
 pub fn read_epoch(b: &[u8]) -> Result<EpochFile, JournalError> {
     if b.len() < HEADER_LEN {
         return Err(JournalError::NotAJournal);
@@ -473,5 +520,98 @@ mod tests {
         }
         let f = read_epoch(&fs::read(epoch_path(&root, 5, 0)).unwrap()).unwrap();
         assert_eq!(f.records, vec![(1, b"a".to_vec()), (2, b"b".to_vec())]);
+    }
+}
+
+#[cfg(test)]
+mod replay_is_idempotent {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("zyn-jrnl-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    /// A restart that replays intents called `record` again for epochs the
+    /// journal already held. It opened in append mode without looking, so the
+    /// records went in a second time and the file then failed `read_epoch`
+    /// with `OutOfOrder` — which stopped the publisher, which stopped the
+    /// signers endorsing, which froze anchoring. Six epochs of chain 11 were
+    /// unreadable this way on 21 Sep (A125).
+    #[test]
+    fn recording_the_same_epoch_twice_does_not_duplicate_it() {
+        let dir = tmp("dup");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        for (seq, body) in [(100u64, b"one".as_slice()), (101, b"two")] {
+            j.record(9190, seq, body).expect("record");
+        }
+        j.sync().expect("sync");
+
+        // The replay: a fresh Journal over the same directory, same records.
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        for (seq, body) in [(100u64, b"one".as_slice()), (101, b"two")] {
+            again.record(9190, seq, body).expect("record");
+        }
+        again.sync().expect("sync");
+
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        let f = read_epoch(&raw).expect("the file must still be readable");
+        assert_eq!(
+            f.records.len(),
+            2,
+            "a replayed epoch must not gain a second copy of its records"
+        );
+        assert_eq!(f.records[0].0, 100);
+        assert_eq!(f.records[1].0, 101);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// New records after a replay still land, so a restart makes progress
+    /// rather than silently dropping everything.
+    #[test]
+    fn a_replay_still_accepts_records_it_has_not_seen() {
+        let dir = tmp("grow");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 100, b"one").expect("record");
+        j.sync().expect("sync");
+
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        again.record(9190, 100, b"one").expect("replayed");
+        again.record(9190, 101, b"two").expect("new");
+        again.sync().expect("sync");
+
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        let f = read_epoch(&raw).expect("readable");
+        assert_eq!(f.records.len(), 2);
+        assert_eq!(f.records[1].0, 101);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A file already corrupted by the old behaviour must still be appendable,
+    /// or recovering from it would need the restart that cannot complete.
+    #[test]
+    fn an_already_corrupt_file_can_still_be_appended_to() {
+        let dir = tmp("corrupt");
+        let chain_dir = dir_for(&dir, 11);
+        fs::create_dir_all(&chain_dir).unwrap();
+        let path = chain_dir.join("epoch-9190.intents");
+        let mut raw = Vec::new();
+        raw.extend_from_slice(MAGIC_V2);
+        raw.extend_from_slice(&11u32.to_be_bytes());
+        raw.extend_from_slice(&9190u64.to_be_bytes());
+        for seq in [100u64, 101, 100, 101] {
+            raw.extend_from_slice(&seq.to_be_bytes());
+            raw.extend_from_slice(&3u32.to_be_bytes());
+            raw.extend_from_slice(b"abc");
+        }
+        fs::write(&path, &raw).unwrap();
+        assert_eq!(read_epoch(&raw).unwrap_err(), JournalError::OutOfOrder);
+
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 102, b"new").expect("a corrupt file still accepts");
+        j.sync().expect("sync");
+        assert!(fs::read(&path).unwrap().len() > raw.len());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
