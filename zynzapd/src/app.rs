@@ -39,8 +39,16 @@ pub const DEFAULT_LIGHTD_TESTNET: &str = "168.119.53.39:8098";
 /// chain 11, until that chain was retired on 22 Sep 2026 and its sequencer
 /// stopped — a default that names a chain which produces no epochs is a
 /// wallet whose Zyn tab fails for a reason its holder cannot see.
-pub const DEFAULT_NODE: &str = "168.119.53.39:8099";
-pub const DEFAULT_CHAIN: u32 = 11;
+/// No AMM chain by default.
+///
+/// This named `168.119.53.39:8099`, chain 11, until that chain was retired and
+/// its sequencer stopped. Every route behind `zyn_only` then failed with a
+/// connection error, which reads as a broken machine rather than a chain that
+/// is gone — and the extension's whole Zyn surface reads as broken with it.
+/// Empty means "not configured", which `zyn_only` can say plainly. `ZYN_NODE`
+/// still points it at a sequencer for anyone who has one.
+pub const DEFAULT_NODE: &str = "";
+pub const DEFAULT_CHAIN: u32 = 26460;
 
 /// The object ledger — the **testnet**, chain 212.
 ///
@@ -1466,13 +1474,38 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             })
         }
         ("GET", "/api/deposit-address") => {
-            zyn_only(app)?;
-            match app.deposit_address() {
-                Some(address) => Ok(json!({ "address": address, "memo": false })),
-                // The node cannot issue one: the shared vault address still
-                // works, but only with the account memo attached.
-                None => Ok(json!({ "address": app.vault, "memo": true })),
+            // Deliberately **not** behind `zyn_only`. Depositing needs a vault
+            // address, not an AMM chain, and gating it behind one meant a
+            // wallet with no sequencer configured could not tell its holder
+            // where to send anything.
+            //
+            // The guard it does need is the network. `chain_mismatch` derived
+            // that from an address the node issued, so with no node there is
+            // nothing to compare — and a mainnet wallet shown the testnet
+            // vault is real money sent to a chain it cannot come back from.
+            // So the address is checked against the wallet's own network
+            // here, whichever source it came from.
+            let address = match app.deposit_address() {
+                Some(address) => json!({ "address": address, "memo": false }),
+                // No per-account address: the shared vault still works, but
+                // only with the account memo attached.
+                None => json!({ "address": app.vault, "memo": true }),
+            };
+            let shown = address["address"].as_str().unwrap_or_default();
+            let testnet_address = shown.starts_with("utest1") || shown.starts_with("tm");
+            let testnet_wallet = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.network() != Network::MainNetwork
+            };
+            if testnet_address != testnet_wallet {
+                return Err(format!(
+                    "refusing to show a {} deposit address to a {} wallet — sending there \
+                     would put money on a chain this wallet cannot spend from",
+                    if testnet_address { "testnet" } else { "mainnet" },
+                    if testnet_wallet { "testnet" } else { "mainnet" }
+                ));
             }
+            Ok(address)
         }
         // A fresh account to receive one item at, so the journal names
         // something that has never been used and never will be again (§95).
@@ -2139,7 +2172,26 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
 /// would show balances backed by money it cannot see and hand out deposit
 /// addresses nobody on this chain can pay. Which chain is fine; disagreeing
 /// about it is not.
+/// The gate every route that needs an **AMM** chain passes through.
+///
+/// Two refusals, and the order matters: a wallet with no AMM chain configured
+/// has nothing to mismatch against, so that is checked first.
+///
+/// The second refusal exists because the first symptom was "Connection refused
+/// (os error 61)" against a host that had been switched off. That is a fault
+/// message for a fault that does not exist — nothing is wrong with the
+/// network, the chain those routes served was retired. A holder reading it
+/// checks their firewall; what they need to know is that swaps and pools have
+/// no chain here and their money is on the Zyn tab.
 fn zyn_only(app: &App) -> Result<(), String> {
+    if app.cfg.node.trim().is_empty() {
+        return Err(
+            "this wallet has no AMM chain configured. Chain 11 was retired on 22 Sep 2026 and \
+             the testnet is now the object ledger, chain 212, which has no pools or curves — \
+             holdings there are on the Zyn tab. Set ZYN_NODE to reach an AMM sequencer."
+                .into(),
+        );
+    }
     match app.chain_mismatch() {
         Some(e) => Err(e),
         None => Ok(()),
@@ -2876,6 +2928,29 @@ mod deposit_uri_tests {
         assert_eq!(
             super::deposit_uri("utest1abc", None, None),
             "zcash:utest1abc?message=Zyn%20deposit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    /// The refusal a holder reads when the AMM routes have no chain.
+    ///
+    /// It replaced "Connection refused (os error 61)" against a host that had
+    /// been switched off — a fault message for a fault that does not exist.
+    /// Somebody reading that checks their firewall; what they need to know is
+    /// that swaps and pools have no chain here and their money is elsewhere.
+    #[test]
+    fn the_amm_gate_names_the_retirement_and_where_the_money_is() {
+        // The default must not name a chain that produces no epochs.
+        assert_eq!(super::DEFAULT_NODE, "", "no AMM chain by default");
+        assert_ne!(super::DEFAULT_CHAIN, 11, "chain 11 was retired");
+        assert_eq!(super::OBJECT_CHAIN, 212);
+        // And the object endpoint must be reachable from a holder's machine,
+        // which means a URL rather than the node's own loopback address.
+        assert!(
+            super::DEFAULT_OBJECT_NODE.starts_with("https://"),
+            "a desktop wallet cannot reach the sequencer's loopback address"
         );
     }
 }
