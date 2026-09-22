@@ -2703,6 +2703,59 @@ gone — a gateway to nothing is not harmless, it is a thing that looks like
 infrastructure. The object ledger needs no equivalent: it speaks JSON over
 HTTP itself, which is what `zyn-rpc` existed to provide for a binary node.
 
+## 5f-quinquies. Mainnet on the object ledger — chain 26460 (staged 22 Sep 2026)
+
+**Staged, not started.** `/etc/zyn/zyn-object-mainnet.env` (0600) and
+`zyn-object-mainnet.service` on Contabo, disabled. Listens on `127.0.0.1:8599`.
+
+**Why 26460, the AMM chain's id.** Both ledgers custody the same vault from
+the same height (same viewing-key fingerprint, both from 3,479,600). Side by
+side under *any* ids they would both credit every deposit — two ledgers
+issuing against one backing — and both would build anchors from the same
+notes, so Zcash refuses one. The AMM chain therefore stops before the object
+ledger starts, and that frees the id. It is the id the wallet config, the
+extension, the docs and the gateway root already use.
+
+**The handover is a script**, `/usr/local/sbin/zyn-handover-26460`
+(source `ops/mainnet/`). With no argument it checks and prints; with
+`--execute` it:
+
+1. refuses unless the AMM chain holds nothing — backing `0.0`, pools `0`
+   (as of 22 Sep: backing 0.0, pools 0, 2 accounts, both ours);
+2. stops and disables `zynzapd-mainnet` — its state and journal stay on disk;
+3. reads where its bridge stopped and writes that + 1 as
+   `ZYN_BRIDGE_FROM_HEIGHT` (A139);
+4. copies its `notes-26460-*.tree` — this vault's trees, at the tip — so the
+   object ledger does not walk 13,000+ blocks;
+5. moves Hetzner's `/var/zyn/mirror/chain-26460` to
+   `chain-26460-amm-retired-<date>`. Publish paths are `chain-<id>/<epoch>`,
+   so the new chain's epoch 0 and index would otherwise land on the old
+   ones. **A verifier of the retired AMM chain reads the archived path from
+   then on.** Its anchors stay on Zcash under chain id 26460 forever; the
+   object ledger's settler tracks its own txids and never scans for
+   sightings, and the object replica checks ±12 blocks around each of its
+   own anchors, all above the handover — so neither is confused by them;
+6. starts `zyn-object-mainnet` and checks it answers as 26460;
+7. repoints nginx `location = /` from `:8096` to `:8599`, `nginx -t` or
+   restore;
+8. retires `zyn-rpc-mainnet`.
+
+It prints the rollback. The dry run passes every precondition.
+
+**What the handover does not fix: the vault is empty.** It holds one Ironwood
+note worth less than an anchor costs (≥20,000 zat: 10,000 self-send +
+10,000 ZIP-317 fee), which is why the AMM chain has not anchored since epoch
+2457 at 21:52 UTC 21 Sep. Top it up from a **mainnet** Nap wallet with
+`/api/topup` — it pays the shared vault address with the all-zero memo, which
+every scanner reads as "credited to nobody". A plain send with no memo stops
+the scan instead.
+
+**Custody is at exactly threshold.** `8212` on Contabo is Hetzner's share 01
+tunnelled in (`zyn-mirror-tunnel`, `-L 8212:127.0.0.1:8210`); `8213` is an
+inbound reverse tunnel from another host. `8211` is in the AMM chain's list
+with nothing behind it — no unit, no listener — and is left out of the
+object ledger's. Two of two live shares, threshold two: no redundancy.
+
 ## 5f-quater. One signer per machine (22 Sep 2026)
 
 Chain 11's set is 2-of-3 (`ZYN_SIGNER_THRESHOLD=2`). Until today **two of the
@@ -2895,6 +2948,17 @@ something real before they are exercised against money.
     kept wallet takes — never has it. Derived lazily, a wallet would work from
     the phrase and report empty from a device. A blob sealed before this still
     opens and says so rather than showing a silent zero.
+- **The bridge floor** (22 Sep, A139). `ZYN_BRIDGE_FROM_HEIGHT=4380198` on
+  chain 212. A vault outlives the ledgers that custody it, and the bridge
+  scanned from the vault's *birth* — so every deposit chain 11 had already
+  credited would have been credited again on 212, with each ledger's
+  solvency check passing on its own. The floor is where the previous chain's
+  bridge stopped: chain 11's progress file
+  (`/mnt/HC_Volume_106795140/zyn-data-v12/bridge-11-<XZEC>.progress`,
+  `ZYNBRDG2`, `scanned_to` is the big-endian u64 after the magic) reads
+  4,380,197, written when it stopped at 12:33 UTC having credited two
+  deposits. **Every handover of a vault sets this.** A saved cursor below the
+  floor is raised, not trusted.
 - **Scan throughput is the operational limit.** A 200-block step took the
   better part of an hour on the cax11; `ZYN_SCAN_STEP=25` now lands one every
   ~2.5 minutes, so progress is durable and visible. It is the same work per
