@@ -2562,9 +2562,22 @@ pub fn overview(app: &App) -> Result<Value, String> {
         let z = h["zatoshi"].as_u64().unwrap_or(0);
         h["zec"] = json!(zec(z));
     }
-    let zyn = match app.chain_mismatch() {
-        None => zyn_overview(app, network, &address)?,
-        Some(why) => json!({ "available": false, "why": why }),
+    // No AMM chain configured: say so, and let the page hide the panels that
+    // need one instead of rendering them to refuse on first click. The object
+    // ledger's panel loads on its own and is unaffected — that is where the
+    // Zyn holdings are now.
+    let zyn = if app.cfg.node.trim().is_empty() {
+        json!({
+            "available": false,
+            "object": true,
+            "why": "Swaps, pools and account transfers ran on the AMM chain, which this \
+                    wallet has no connection to. Zyn holdings are on the object ledger, below."
+        })
+    } else {
+        match app.chain_mismatch() {
+            None => zyn_overview(app, network, &address)?,
+            Some(why) => json!({ "available": false, "why": why }),
+        }
     };
     let job = app.job().map(|j| json!({ "kind": j.kind, "progress": j.progress.map(|(at, to)| json!({ "at": at, "to": to })), "started": j.started }));
     let mut o = json!({

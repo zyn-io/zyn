@@ -1154,7 +1154,14 @@ function render(s) {
   // Zyn
   const z = s.zyn;
   $('zyn-off').hidden = z.available; $('zyn-account').hidden = !z.available; $('zyn-move').hidden = !z.available; $('zyn-send').hidden = !z.available;
-  if (!z.available) { $('zyn-why').textContent = z.why || ''; chip('chip-zyn', 'warn', 'zyn · mainnet later'); return; }
+  if (!z.available) {
+    $('zyn-why').textContent = z.why || '';
+    // No AMM chain is not a fault when the object ledger is there to read:
+    // the chip says which ledger this is rather than raising a warning.
+    if (z.object) chip('chip-zyn', 'ok', 'zyn · object ledger');
+    else chip('chip-zyn', 'warn', 'zyn · mainnet later');
+    return;
+  }
   $('zyn-exit').textContent = z.exit && z.exit.epoch !== null && z.exit.epoch !== undefined
     ? `Exit proof kept for epoch ${z.exit.epoch}${z.exit.verified ? ' ✓' : ' (does not verify)'} — enough to leave even if the sequencer disappears.`
     : 'Exit proof: none yet — kept automatically after the first anchor reaches Zcash.';

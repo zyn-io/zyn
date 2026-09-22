@@ -428,6 +428,43 @@ async function paintArt(el, item) {
   el.dataset.verified = '1';
 }
 
+// The object ledger, if one is configured. Failing to reach it must not read
+// as "you hold nothing": those look identical and mean opposite things, so an
+// unreachable ledger hides the panel and says why rather than showing zero.
+async function loadObjects() {
+  const panel = $('zyn-objects');
+  if (!panel) return;
+  let o = null;
+  try {
+    o = await api('/api/object');
+  } catch (e) {
+    panel.hidden = true;
+    return;
+  }
+  if (!o || !Array.isArray(o.held)) { panel.hidden = true; return; }
+  $('obj-node').textContent = o.node || '';
+  const tb = $('obj-held').querySelector('tbody');
+  tb.replaceChildren();
+  for (const h of o.held) {
+    const tr = document.createElement('tr');
+    const sym = document.createElement('td');
+    sym.textContent = (h.asset || '').slice(0, 16) + '…';
+    sym.className = 'mono';
+    const amt = document.createElement('td');
+    amt.className = 'r num';
+    amt.textContent = h.amount;
+    const n = document.createElement('td');
+    n.className = 'r num';
+    n.textContent = h.notes;
+    tr.append(sym, amt, n);
+    tb.append(tr);
+  }
+  $('obj-note').textContent = o.held.length
+    ? `${o.live} note(s) held, ${o.spent} spent.`
+    : 'Nothing here yet. Objects arrive when a deposit is credited or someone sends you one.';
+  panel.hidden = false;
+}
+
 function renderItems(z) {
   const items = z.items || [];
   $('it-account-qr').innerHTML = z.account_qr_svg || '';
@@ -554,6 +591,9 @@ function showTab(name) {
   for (const m of document.querySelectorAll('main')) m.hidden = m.dataset.tab !== name;
   try { localStorage.setItem('tab', name); } catch {}
   if (name === 'settings') loadZynKey().catch((e) => { $('zyn-key-status').textContent = e.message; });
+  // The object ledger is scanned, not queried, so it is loaded when its tab
+  // is opened rather than on every refresh — a scan costs the whole feed.
+  if (name === 'zyn') loadObjects().catch(() => {});
 }
 
 function render(s) {
@@ -612,7 +652,14 @@ function render(s) {
   // Zyn
   const z = s.zyn;
   $('zyn-off').hidden = z.available; $('zyn-account').hidden = !z.available; $('zyn-move').hidden = !z.available; $('zyn-send').hidden = !z.available;
-  if (!z.available) { $('zyn-why').textContent = z.why || ''; chip('chip-zyn', 'warn', 'zyn · mainnet later'); return; }
+  if (!z.available) {
+    $('zyn-why').textContent = z.why || '';
+    // No AMM chain is not a fault when the object ledger is there to read:
+    // the chip says which ledger this is rather than raising a warning.
+    if (z.object) chip('chip-zyn', 'ok', 'zyn · object ledger');
+    else chip('chip-zyn', 'warn', 'zyn · mainnet later');
+    return;
+  }
   $('zyn-exit').textContent = z.exit && z.exit.epoch !== null && z.exit.epoch !== undefined
     ? `Exit proof kept for epoch ${z.exit.epoch}${z.exit.verified ? ' ✓' : ' (does not verify)'} — enough to leave even if the sequencer disappears.`
     : 'Exit proof: none yet — kept automatically after the first anchor reaches Zcash.';
