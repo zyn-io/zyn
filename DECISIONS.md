@@ -6136,3 +6136,38 @@ about an account, not a request from a person.
 That `anchored` is a root Zcash actually saw. The proof shows its sections
 hash to that root; it cannot show the root was witnessed, and nothing
 self-contained could. A custodian looks the anchor up.
+
+### §136.6 — Conservation is a sum, so every term must be positive
+
+The audit found three ways to create value or halt the VM, all from the same
+root: amounts were checked against *zero* rather than against *positive*.
+
+**A negative output pays for an inflated one.** Conservation is a per-asset
+sum of inputs minus outputs. Spend 10, create 1,000 for yourself and −990 for
+anywhere, and the sum is zero. The books balance and the spender holds a
+hundred times what they put in — spendable, sellable, and exitable against the
+vault. `commitment()` refused `Fixed::ZERO` and nothing else, so the note was
+committable and entered every tree.
+
+Fixed at that chokepoint: `commitment()` now refuses any amount `<= 0`, and a
+note that cannot be committed cannot enter any tree, which covers every path
+at once rather than each call site separately.
+
+**A negative withdrawal raises the backed supply.** `apply_withdraw` subtracts
+the amount from `issued`, so a negative one adds. It also records a debt of
+less than nothing. One of those and the chain will let you withdraw the
+difference for real.
+
+**A negative asking price is met by any payment, including none**, because the
+claim path checks the seller was paid *at least* the asking price.
+
+**An unchecked `sum()` over attacker-chosen outputs panics.** The claim path
+totalled the seller's payment with `.sum()`, which overflows on two outputs of
+`i128::MAX`. A panic inside the VM is a halt, not a refusal, and the input
+that causes one is free to construct. Now a checked fold that refuses.
+
+The general rule this leaves: **a value that participates in a sum must be
+validated as positive at the point it enters the system, not where it is
+used.** Zero-checks are what you write when you are thinking about empty
+inputs rather than about hostile ones.
+

@@ -472,8 +472,8 @@ impl ObjectVm {
                 Err(ObjectError::ZeroNonce) => {
                     return vec![Receipt::Refused("an output needs a nonce")]
                 }
-                Err(ObjectError::ZeroAmount) => {
-                    return vec![Receipt::Refused("an output of nothing")]
+                Err(ObjectError::NotPositive) => {
+                    return vec![Receipt::Refused("an output must be worth something")]
                 }
             }
         }
@@ -603,11 +603,18 @@ impl ObjectVm {
 
         // The seller is paid at least what was asked, and the buyer receives
         // the object itself rather than something merely similar.
-        let paid: i128 = created
-            .iter()
-            .filter(|(_, n)| n.owner == offer.seller && n.asset == offer.price_asset)
-            .map(|(_, n)| n.amount.0)
-            .sum();
+        let mut paid: i128 = 0;
+        for (_, n) in &created {
+            if n.owner == offer.seller && n.asset == offer.price_asset {
+                paid = match paid.checked_add(n.amount.0) {
+                    Some(v) => v,
+                    // Unreachable while every amount is positive and bounded
+                    // by conservation — but `sum()` here used to panic on
+                    // attacker-chosen outputs, and a halt is not a refusal.
+                    None => return vec![Receipt::Refused("payment overflow")],
+                };
+            }
+        }
         if paid < offer.price_amount.0 {
             return vec![Receipt::Refused("the seller was not paid the asking price")];
         }
@@ -683,8 +690,12 @@ impl ObjectVm {
         if *program != program::withdraw() {
             return vec![Receipt::Refused("wrong program for a withdrawal")];
         }
-        if *amount == Fixed::ZERO {
-            return vec![Receipt::Refused("a withdrawal of nothing")];
+        // Not merely non-zero. A *negative* withdrawal subtracts a negative
+        // from `issued`, which raises the supply the vault believes it backs,
+        // and records a debt of less than nothing. Do it once and the chain
+        // will let you withdraw the difference for real (§136.6).
+        if amount.0 <= 0 {
+            return vec![Receipt::Refused("a withdrawal must be of something")];
         }
         if *destination == [0u8; 32] {
             return vec![Receipt::Refused("a withdrawal needs a destination")];
@@ -859,7 +870,7 @@ impl MicrochainVm for ObjectVm {
                     Err(ObjectError::ZeroNonce) => {
                         return vec![Receipt::Refused("a mint needs a nonce")]
                     }
-                    Err(ObjectError::ZeroAmount) => {
+                    Err(ObjectError::NotPositive) => {
                         return vec![Receipt::Refused("a mint of nothing")]
                     }
                 };
@@ -1006,8 +1017,11 @@ impl MicrochainVm for ObjectVm {
                 if self.offers.contains_key(item) {
                     return vec![Receipt::Refused("already listed")];
                 }
-                if *price_amount == Fixed::ZERO {
-                    return vec![Receipt::Refused("a listing needs a price")];
+                // A negative asking price is satisfied by any payment at
+                // all, including none, because the claim path only checks
+                // the seller was paid *at least* this much.
+                if price_amount.0 <= 0 {
+                    return vec![Receipt::Refused("a listing needs a price above nothing")];
                 }
                 if *expires_at_epoch < self.epoch {
                     return vec![Receipt::Refused("already expired")];

@@ -65,7 +65,15 @@ pub enum ObjectError {
     /// A zero nonce makes the commitment openable by guessing.
     ZeroNonce,
     /// A note of nothing is not a note; it would be a free entry in the tree.
-    ZeroAmount,
+    /// An amount of zero or less.
+    ///
+    /// Zero is not a note. **Negative is worse than not a note**: conservation
+    /// is a per-asset sum, so a negative output subtracts from what the
+    /// outputs total and pays for an inflated positive one. Spend 10, create
+    /// 1,000 and −990, and the books balance while the spender holds a
+    /// hundred times what they put in (§136.6). Refusing it here covers every
+    /// path, because a note that cannot be committed cannot enter any tree.
+    NotPositive,
 }
 
 /// The commitment the chain stores for a note.
@@ -77,8 +85,8 @@ pub fn commitment(note: &Note) -> Result<Hash, ObjectError> {
     if note.nonce == [0u8; 32] {
         return Err(ObjectError::ZeroNonce);
     }
-    if note.amount == Fixed::ZERO {
-        return Err(ObjectError::ZeroAmount);
+    if note.amount.0 <= 0 {
+        return Err(ObjectError::NotPositive);
     }
     let mut e = Encoder::new();
     e.bytes(b"zyn.object.v1")
@@ -245,7 +253,7 @@ mod tests {
         assert_eq!(commitment(&n), Err(ObjectError::ZeroNonce));
         n.nonce = [1u8; 32];
         n.amount = Fixed::ZERO;
-        assert_eq!(commitment(&n), Err(ObjectError::ZeroAmount));
+        assert_eq!(commitment(&n), Err(ObjectError::NotPositive));
     }
 
     /// Every field is bound. Two notes differing anywhere are two commitments.
