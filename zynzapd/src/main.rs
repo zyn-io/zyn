@@ -725,10 +725,11 @@ fn run() -> Result<(), String> {
                         // scan will say so every pass until it is attributed.
                         // Not a reason to refuse to start.
                         Err(zyn_custody::shielded::ScanRangeError::Unattributable {
+                            txid,
                             height,
                             amount,
                         }) => {
-                            eprintln!("zynzapd: note tree catch-up stopped at {}: shielded funds ({:?}) carry no Zyn memo — attribute them (ZYN_ZEBRA_ATTRIBUTIONS) and restart", height, amount);
+                            eprintln!("zynzapd: note tree catch-up stopped at {}: shielded funds ({:?}) in {} carry no Zyn memo — attribute them (ZYN_ZEBRA_ATTRIBUTIONS) and restart", height, amount, txid.iter().map(|b| format!("{:02x}", b)).collect::<String>());
                             break;
                         }
                         Err(e) => return Err(format!("note tree catch-up: {:?}", e)),

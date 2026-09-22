@@ -2549,6 +2549,33 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-septies. Attributions are keyed on the byte order you cannot see (22 Sep 2026)
+
+A shielded deposit with no Zyn memo stops the note-tree walk dead —
+`Unattributable` — and until it is attributed the vault's notes stay invisible
+and every anchor fails for want of a note sitting a few blocks further on.
+
+The trap: **Zcash txids are displayed reversed.** `getblock`, every explorer
+and every log line you are likely to copy from show one byte order; the
+scanner keys `ZYN_*_ATTRIBUTIONS` on the other. An entry in the wrong order
+matches nothing and is indistinguishable from a missing one, so the symptom is
+"I attributed it and nothing changed".
+
+Getting from one to the other:
+
+```sh
+python3 -c "print(bytes.fromhex('<txid>')[::-1].hex())"
+```
+
+The error now names the transaction, in the order the file wants, so this
+should not need diagnosing twice. It previously reported only a height and an
+amount, which left an operator eliminating candidates by hand — that cost most
+of an afternoon here.
+
+**The all-zero account means nobody**: it raises the vault's balance and
+credits no user, which is exactly what faucet funding is. Attribute a top-up
+that way rather than inventing an owner for it.
+
 ## 5f-sexies. Checking the object ledger (22 Sep 2026)
 
 ```sh

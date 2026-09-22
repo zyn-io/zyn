@@ -34,10 +34,19 @@ use zyn::journal::Journal;
 use zyn::{Economics, Node};
 use zyn_vm::read::Decoder;
 use zyn_vm::spec::MicrochainVm;
+use zynzapd::anchor::Chain as _;
 
 /// Everything the chain needs to reach Zcash. Absent means this is a devnet
 /// and says so — a root that reaches no chain is a claim, not a settlement.
 struct Anchoring {
+    /// Walks the vault's note trees forward. Without it the trees stay at the
+    /// height they were seeded and the vault's notes -- which exist on chain
+    /// -- are invisible, so every anchor fails with "waiting for a spendable
+    /// Ironwood note" while the money is sitting right there.
+    scanner: zyn_custody::shielded::Scanner,
+    notes: zyn_custody::shielded::PoolStores,
+    zebra: zyn_custody::zebra::Zebra,
+    confirmations: u64,
     settler: zynzapd::anchor::AnchorSettler<zyn_custody::zebra::Zebra, zynzapd::anchor::ZcashBuilder>,
     da_dir: std::path::PathBuf,
     da_key: Option<[u8; 32]>,
@@ -444,6 +453,57 @@ fn find(h: &[u8], needle: &[u8]) -> Option<usize> {
     h.windows(needle.len()).position(|w| w == needle)
 }
 
+/// `<txid> <account-hex>` per line, `#` comments allowed.
+///
+/// A shielded deposit with no Zyn memo cannot be credited to anyone, and the
+/// scanner refuses to guess. This is where an operator says, out of band, who
+/// one belongs to.
+fn load_attributions(
+    path: &std::path::Path,
+) -> Result<std::collections::BTreeMap<[u8; 32], [u8; 32]>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+    let mut out = std::collections::BTreeMap::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() != 2 {
+            return Err(format!(
+                "{} line {}: expected `<txid> <account-hex>`",
+                path.display(),
+                n + 1
+            ));
+        }
+        let parse = |h: &str| -> Option<[u8; 32]> {
+            if h.len() != 64 {
+                return None;
+            }
+            (0..32)
+                .map(|i| u8::from_str_radix(h.get(i * 2..i * 2 + 2)?, 16).ok())
+                .collect::<Option<Vec<u8>>>()?
+                .try_into()
+                .ok()
+        };
+        let (txid, account) = (parse(f[0]), parse(f[1]));
+        match (txid, account) {
+            (Some(t), Some(a)) => {
+                out.insert(t, a);
+            }
+            _ => {
+                return Err(format!(
+                    "{} line {}: both fields must be 32 bytes of hex",
+                    path.display(),
+                    n + 1
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Wire the settler, if this deployment has a vault to anchor from.
 ///
 /// Every piece is required: a Zcash node to watch, the vault's viewing key to
@@ -495,6 +555,22 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
             .map_err(|e| eprintln!("zyn-object-node: {e}"))
             .ok()?;
 
+    // Which account a memo-less shielded deposit belongs to.
+    //
+    // Without these the tree walk stops dead at the first such deposit —
+    // `Unattributable` — and every anchor then fails for want of a note that
+    // is sitting on chain a few blocks further on. The vault's own faucet
+    // funding is exactly that kind of deposit, so this is not an edge case
+    // here, it is the first block that matters.
+    let attributions = std::env::var("ZYN_ATTRIBUTIONS")
+        .ok()
+        .map(|p| load_attributions(std::path::Path::new(&p)))
+        .transpose()
+        .map_err(|e: String| eprintln!("zyn-object-node: {e}"))
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
     let builder = zynzapd::anchor::ZcashBuilder::new(
         // The builder speaks `zcash_protocol`'s network, the RPC client ours.
         match network {
@@ -503,12 +579,12 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         },
         Vec::new(), // no local shares: this box signs through custodians
         threshold,
-        fvk,
-        notes,
+        fvk.clone(),
+        notes.clone(),
         zebra,
         from_height,
         confirmations,
-        Default::default(),
+        attributions.clone(),
         public,
         Some(custodians),
     )
@@ -522,7 +598,23 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     )
     .ok()?;
 
+    eprintln!(
+        "zyn-object-node: {} shielded deposit(s) attributed out of band",
+        attributions.len()
+    );
+    let scanner = zyn_custody::shielded::Scanner::new(
+        zyn_custody::shielded::VaultKeys::from_full_viewing_key(fvk.clone()),
+        from_height,
+        200,
+    )
+    .with_notes(notes.clone())
+    .with_attributions(attributions.clone());
+
     Some(Anchoring {
+        scanner,
+        notes: notes.clone(),
+        zebra: Zebra::connect(&host, port, auth, network).ok()?,
+        confirmations,
         settler,
         da_dir: std::path::PathBuf::from(env("ZYN_DA_DIR", &format!("{dir}/da"))),
         da_key: std::env::var("ZYN_DA_KEY")
@@ -530,6 +622,21 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
             .and_then(|k| zynzapd::dacrypt::key_from_hex(&k).ok()),
         data_dir: std::path::PathBuf::from(dir),
     })
+}
+
+/// Write both note trees where the next boot will look for them.
+fn save_note_trees(dir: &str, chain: u32, notes: &zyn_custody::shielded::PoolStores) {
+    for (pool, store) in [
+        (orchard::ValuePool::Orchard, &notes.orchard),
+        (orchard::ValuePool::Ironwood, &notes.ironwood),
+    ] {
+        let path = zynzapd::boot::note_tree_path(std::path::Path::new(dir), chain, pool);
+        if let Ok(s) = store.lock() {
+            if let Err(e) = std::fs::write(&path, s.encode()) {
+                eprintln!("zyn-object-node: cannot save the {pool:?} note tree: {e}");
+            }
+        }
+    }
 }
 
 fn main() {
@@ -659,13 +766,71 @@ fn main() {
         });
     }
 
+    // Walk the vault's note trees forward, before and during anchoring.
+    //
+    // Seeding a tree only fixes where it starts. Until it is fed the blocks
+    // since, the vault's notes are on chain and invisible, and every anchor
+    // fails with "waiting for a spendable Ironwood note" while the money sits
+    // right there. Each batch is persisted: catch-up can take hours, and a
+    // restart that discarded it would begin again from the same stale
+    // position (A115).
+    let anchoring = anchoring.map(|a| {
+        // Split it: the scanner and its Zcash connection go to the sync
+        // thread, the settler to the anchoring one. Neither type is `Clone`,
+        // and neither should be — two scanners feeding one tree would walk
+        // the same blocks into it twice.
+        let (scanner, notes, zebra, confirmations) =
+            (a.scanner, a.notes, a.zebra, a.confirmations);
+        let dir2 = dir.clone();
+        std::thread::spawn(move || loop {
+            let tip = match zebra.tip() {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("zyn-object-node: cannot read the Zcash tip: {e}");
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    continue;
+                }
+            };
+            let target = tip.saturating_sub(confirmations);
+            let mut synced = notes.synced_to().unwrap_or(0);
+            while synced < target {
+                match scanner.sync_notes(&zebra, target) {
+                    Ok(h) => {
+                        synced = h;
+                        save_note_trees(&dir2, chain, &notes);
+                        eprintln!("zyn-object-node: note trees synced to {synced} of {target}");
+                    }
+                    Err(zyn_custody::shielded::ScanRangeError::Unattributable {
+                        txid,
+                        height,
+                        amount,
+                    }) => {
+                        eprintln!(
+                            "zyn-object-node: note tree catch-up stopped at {height}: {amount:?} \
+                             in {} carries no Zyn memo — add it to ZYN_ATTRIBUTIONS \
+                             (the all-zero account means a vault top-up crediting nobody)",
+                            txid.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("zyn-object-node: note tree catch-up stopped: {e:?}");
+                        break;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        });
+        (a.settler, a.da_dir, a.da_key, a.data_dir)
+    });
+
     // Carry roots to Zcash, and publish what lets anyone check them.
-    if let Some(mut a) = anchoring {
+    if let Some((mut settler, da_dir, da_key, data_dir)) = anchoring {
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
-            match a.settler.poll_once(&node, now_secs()) {
+            match settler.poll_once(&node, now_secs()) {
                 Ok(Some(c)) => {
                     eprintln!(
                         "zyn-object-node: anchor for epoch {} CONFIRMED on Zcash in {} at height {} — root {} is now something anyone can check",
@@ -685,7 +850,7 @@ fn main() {
                         .and_then(|n| {
                             zynzapd::publish::bundle_for::<ObjectVm>(
                                 &n,
-                                &a.data_dir,
+                                &data_dir,
                                 chain,
                                 &c.anchor,
                                 &c.txid,
@@ -694,10 +859,10 @@ fn main() {
                         })
                         .and_then(|b| {
                             zynzapd::publish::write_local_sealed(
-                                &a.da_dir,
+                                &da_dir,
                                 chain,
                                 &b,
-                                a.da_key.as_ref(),
+                                da_key.as_ref(),
                             )
                         });
                     match built {

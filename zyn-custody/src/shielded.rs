@@ -696,6 +696,10 @@ pub enum ScanRangeError {
     /// leave the vault holding money whose owner nobody recorded, and the
     /// backing attestation that follows would be wrong by exactly that amount.
     Unattributable {
+        /// Which transaction. Without it the operator is told a deposit
+        /// somewhere in a block cannot be credited and left to find it by
+        /// elimination — which is exactly as slow as it sounds.
+        txid: [u8; 32],
         height: u64,
         amount: Fixed,
     },
@@ -852,7 +856,11 @@ impl Scanner {
                         height,
                         &handed_out,
                     )
-                    .map_err(|amount| ScanRangeError::Unattributable { height, amount })?,
+                    .map_err(|amount| ScanRangeError::Unattributable {
+                        txid,
+                        height,
+                        amount,
+                    })?,
                 );
                 forced.extend(scanned.forced);
             }
@@ -1119,7 +1127,11 @@ impl Scanner {
                         txid,
                         height,
                     )
-                    .map_err(|amount| ScanRangeError::Unattributable { height, amount })?,
+                    .map_err(|amount| ScanRangeError::Unattributable {
+                        txid,
+                        height,
+                        amount,
+                    })?,
                 );
                 forced.extend(scanned.forced.iter().cloned());
                 for a in scanned.actions {
