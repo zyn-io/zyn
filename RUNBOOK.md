@@ -2549,6 +2549,55 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
 
+## 5f-quater. One signer per machine (22 Sep 2026)
+
+Chain 11's set is 2-of-3 (`ZYN_SIGNER_THRESHOLD=2`). Until today **two of the
+three keys ran on one laptop**, so that laptop was simultaneously sufficient to
+certify anything and necessary for anything to be certified. Both moved off.
+
+| identity | host | init | port |
+|---|---|---|---|
+| `9ce67be6…` | Oracle `levu-paperd` 92.5.12.15 | systemd `zyn-signer1` | 8100 |
+| `27048d32…` | Air 192.168.1.27 (user `zhang`) | launchd `dev.zyn.signer2` | 8101 |
+| `cc158dc4…` | Windows box | systemd `zyn-signer` | — |
+
+A signer endorses **anchors**; it holds no vault share and can move nothing.
+Its endorsement is what releases deposits (`anchor.rs`: *"Release deposits only
+after a signer set endorses each anchor"*), so a set below threshold stops
+deposits becoming spendable — which is exactly what happened all of 21–22 Sep.
+
+**A signer needs three things from elsewhere**: Hetzner's testnet Zebra
+(18232), the DA mirror (8181), and the sequencer to endorse to (8099). The
+first two come over an ssh tunnel whose key on Hetzner is restricted to
+exactly that:
+
+```
+restrict,port-forwarding,permitopen="127.0.0.1:18232",permitopen="127.0.0.1:8181"
+```
+
+No shell, no agent, no pty. A signer reads a chain and endorses; a tunnel key
+that could do more is a tunnel key that eventually will.
+
+**`ZYN_DA_KEY` is not optional any more.** Bundles are sealed from epoch 9184,
+so a verifier without the key cannot read one. signer2 had never been given it
+— it was distributed to the publisher and to signer1 only — which is its own
+reason that signer could not advance. Both new hosts have it; verified by
+comparing digests rather than keys.
+
+**Two traps, both hit today:**
+
+- A manual test tunnel left running holds 18232/8181 and the service unit then
+  cannot bind them. With `Requires=zyn-tunnel.service` the signer is stopped
+  every time the tunnel fails, so it looks like a signer fault and is not.
+  Kill stray `ssh -L` before starting the units.
+- The Air was **already** running a copy of `27048d32`. Installing it a third
+  time on Oracle would have put one signing key on three machines, which is
+  worse hygiene than the problem being solved. One identity, one host.
+
+**Still owed:** the retired plists sit in `~/.zyn/retired/` (0600) on the Mac
+rather than being erased, so the move is reversible while the new hosts prove
+themselves. Erase them once chain 11 has anchored from the new set.
+
 ## 5f-ter. The tunnel watchdog (22 Sep 2026)
 
 A reverse tunnel can be perfectly healthy and carry no forward. That is A110,
