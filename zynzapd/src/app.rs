@@ -1545,7 +1545,19 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     out.push(json!({ "token": hex(&token), "meta": c.get("meta"), "amount": held.to_string() }));
                 }
             }
-            Ok(json!({ "holdings": out }))
+            // The tokens this wallet made: its own nonces, turned into token ids.
+            let (_, chain) = object_target(app);
+            let key = app.key();
+            let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+            let mine: std::collections::BTreeSet<String> =
+                (0..used + 24).map(|n| hex(&objectvm::market::token_of(&s.me, &market_nonce(&key, n)))).collect();
+            let created: Vec<Value> = m
+                .get("curves")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter(|c| c.get("token").and_then(Value::as_str).is_some_and(|t| mine.contains(t))).map(|c| json!({ "token": c["token"], "meta": c.get("meta") })).collect())
+                .unwrap_or_default();
+            let zec: i128 = s.wallet.live.iter().filter(|o| o.note.asset == XZEC).map(|o| o.note.amount.0).sum();
+            Ok(json!({ "zec": zec.to_string(), "holdings": out, "created": created }))
         }
         ("POST", "/api/object/curve/create") => {
             let (host, chain) = object_target(app);
@@ -1568,7 +1580,16 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 inputs: inputs.clone(),
                 change: change.clone(),
             })?;
-            Ok(json!({ "token": hex(&objectvm::market::token_of(&s.me, &nonce)) }))
+            let token = objectvm::market::token_of(&s.me, &nonce);
+            // A picture and description, if given, are attached off chain by
+            // the page: it gets the proof that this key made this token.
+            let description = input.get("description").and_then(Value::as_str).unwrap_or("");
+            let image = input.get("image").and_then(Value::as_str).unwrap_or("");
+            if description.chars().count() > 400 || image.len() > 420_000 {
+                return Ok(json!({ "token": hex(&token) }));
+            }
+            let hash = content_hash(description, image);
+            Ok(json!({ "token": hex(&token), "content": { "hash": hex(&hash), "proof": content_proof(&app.key(), &nonce, &token, &hash) } }))
         }
         ("POST", "/api/object/curve/buy") | ("POST", "/api/object/curve/sell") => {
             let (host, chain) = object_target(app);
@@ -1579,6 +1600,12 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             if !buy && amount.0 % objectvm::curve::LOT.0 != 0 {
                 return Err("sell whole lots of 12,500 tokens".into());
             }
+            // The page's floor: whole lots of tokens for a buy, ZEC.zy for a sell.
+            let floor = match input.get(if buy { "minTokens" } else { "minZec" }).and_then(Value::as_str) {
+                Some(v) => crate::object_client::parse_amount(v)?,
+                None => zyn_vm::Fixed::ZERO,
+            };
+            let min_out = if buy { zyn_vm::Fixed(floor.0 / objectvm::curve::LOT.0 * objectvm::curve::LOT.0) } else { floor };
             let zec = XZEC;
             let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, if buy { zec } else { token }, amount)?;
             let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::CurveTrade {
@@ -1587,7 +1614,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 token,
                 buy,
                 amount_in: amount,
-                min_out: zyn_vm::Fixed::ZERO,
+                min_out,
                 inputs: inputs.clone(),
                 change: change.clone(),
                 nonce,
@@ -2827,6 +2854,26 @@ fn submit_fresh(app: &App, host: &str, chain: u32, build: impl Fn([u8; 32]) -> o
     Err("every nonce tried was already used".into())
 }
 
+/// What a creator attaches to a token: the hash of `{description, image, v}`
+/// as JSON — the browser wallet's `contentHash`, byte for byte.
+fn content_hash(description: &str, image: &str) -> [u8; 32] {
+    let body = json!({ "description": description, "image": image, "v": 1 }).to_string();
+    Sha256::digest(body.as_bytes()).into()
+}
+
+/// Proof that this key made `token` and attaches `hash` to it — the browser
+/// wallet's `contentProof`, byte for byte, checked by Cave Jade's store.
+fn content_proof(key: &SigningKey, nonce: &[u8; 32], token: &[u8; 32], hash: &[u8; 32]) -> Value {
+    let mut message = b"cave.jade.content.v1".to_vec();
+    message.extend_from_slice(token);
+    message.extend_from_slice(hash);
+    json!({
+        "publicKey": hex(key.verifying_key().as_bytes()),
+        "nonce": hex(nonce),
+        "signature": hex(&key.sign(&message).to_bytes()),
+    })
+}
+
 /// A launchpad token's 32 bytes of meta: the ticker in the first 8 (1–8
 /// capitals or digits), the name in the other 24 (plain printable text),
 /// zero-padded — the browser wallet's `encodeMeta`, byte for byte.
@@ -3625,5 +3672,23 @@ mod curve_meta_tests {
         assert!(super::curve_meta("TOO-LONG1", "x").is_err());
         assert!(super::curve_meta("OK", &"n".repeat(25)).is_err());
         assert!(super::curve_meta("OK", "tab\there").is_err());
+    }
+
+    /// A picture attached from desktop Nap must pass Jade's store check: the
+    /// same hash and signature the browser wallet makes (apps/nap-web object.js).
+    #[test]
+    fn content_proof_matches_the_browser_wallet() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let nonce = [9; 32];
+        let token = objectvm::market::token_of(&crate::client::account(&key), &nonce);
+        assert_eq!(super::hex(&token), "f940d7208317055613eaa818fc603e248c6b5ab6130e36b25c8183346653dd0e");
+        let hash = super::content_hash("Jade \"é\" \n line", "");
+        assert_eq!(super::hex(&hash), "859b411c7d4e1a231e88f2178ee5ff1d4d7da6ee7ef85687fa0818bcd6418ac5");
+        let proof = super::content_proof(&key, &nonce, &token, &hash);
+        assert_eq!(proof["publicKey"], "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c");
+        assert_eq!(
+            proof["signature"],
+            "39a4b2bac06e788fadaa21e6db76afeb0db23dc249e2cc808d808e2b6e02f30b0cc7ba2e581719c4c43b3ace0f0aaffa6f9fb630ec986dd1dc8906e97f7cc10b"
+        );
     }
 }

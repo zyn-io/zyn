@@ -26,3 +26,4 @@
 .cn-spin { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #ffffff22; border-top-color: #e8a916; animation: cn-turn 0.9s linear infinite; }
 @keyframes cn-turn { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cn-spin { animation: none; } }
+.cn-picture { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid #ffffff2d; }

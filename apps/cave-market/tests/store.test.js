@@ -84,34 +84,51 @@ test('hash routing preserves four NFT marketplace views', () => {
   assert.match(css, /\.collection-intro/);
 });
 
-test('standalone fungible product uses the jade-yard identity and phase-one rules', () => {
-  for (const label of ['Cave Jade', 'The Jade Gallery', 'Pick your stone', 'Rough', 'Open a window', 'Reveal the jade', 'Fixed supply', 'ZEC.zy', 'Curve sells stay open']) {
+test('standalone fungible product uses the jade-yard identity and the launchpad essentials', () => {
+  for (const label of ['Cave Jade', 'Pick a stone', 'Place a stone', 'Market cap', 'Bonding curve', 'Fills', 'Portfolio', 'ZEC.zy']) {
     assert.match(jadeHtml, new RegExp(label));
   }
+  // Sorts, never defaulting to an empty tab; candles with timeframes; the trade panel's aids.
+  for (const sort of ['movers', 'new', 'mcap', 'last', 'near', 'grad']) assert.match(jadeHtml, new RegExp(`data-sort="${sort}"`));
+  assert.match(jadeHtml, /data-sort="movers" class="active"/);
+  for (const tf of [60, 300, 900, 3600, 14400, 86400]) assert.match(jadeHtml, new RegExp(`data-tf="${tf}"`));
+  for (const id of ['trade-presets', 'trade-slip', 'trade-min', 'trade-balance', 'curve-bar', 'coin-age', 'stone-image', 'stone-description']) assert.match(jadeHtml, new RegExp(`id="${id}"`));
+  // Privacy is stated, not hidden: no holder list, no wallets on fills.
+  assert.match(jadeHtml, /no wallets, by design/);
+  assert.match(jadeHtml, /Holders<\/dt><dd id="coin-holders">private/);
   assert.match(jadeCss, /--jade: #06483d/);
   assert.match(jadeCss, /--metal:/);
-  assert.match(jadeHtml, /id="launch-stone" type="submit" disabled>Place in the yard<\/button>/);
-  assert.doesNotMatch(jadeHtml, /Cave Signal|Make the market move|landing page/i);
+  assert.match(jadeCss, /@media \(max-width: 760px\)/);
+  assert.match(jadeHtml, /id="launch-stone" class="j-primary" type="submit" disabled>Create coin<\/button>/);
+  assert.doesNotMatch(jadeHtml, /ZynZap|Cave Signal|Make the market move|landing page/i);
 });
 
 test('Jade reads the public yard from the chain and acts only through Nap (§141)', () => {
   assert.match(jadeJs, /renderGallery/);
   assert.match(jadeJs, /renderPreview/);
   assert.match(jadeJs, /\[0-9a-f\]\{64\}/);
-  // One fetch: the chain's public market, with no credentials.
-  assert.equal((jadeJs.match(/fetch\(/g) || []).length, 1);
-  assert.match(jadeJs, /rpc\('zyn_market'\)/);
+  // Reads: the chain's public RPC, and this site's own content and price endpoints — nothing else.
+  const fetched = [...jadeJs.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1].trim());
+  assert.ok(fetched.length >= 3);
+  for (const target of fetched) assert.match(target, /^(RPC|'\/api\/zec-usd'|`\/api\/content\/\$\{[a-z.]+\}`)$/, target);
+  for (const method of ['zyn_market', 'zyn_curveStats', 'zyn_history', 'zyn_status']) assert.match(jadeJs, new RegExp(`rpc\\('${method}'`));
   assert.match(jadeJs, /credentials: 'omit'/);
   // Every write through Nap Connect, approved in Nap.
   assert.match(jadeJs, /from '\.\/nap-connect\.js'/);
-  for (const method of ['zyn_curveCreate', 'zyn_curveBuy', 'zyn_curveSell', 'zyn_swap', 'zyn_collect']) assert.match(jadeJs, new RegExp(`'${method}'`));
+  for (const method of ['zyn_curveCreate', 'zyn_curveBuy', 'zyn_curveSell', 'zyn_swap', 'zyn_collect', 'zyn_curveHoldings']) assert.match(jadeJs, new RegExp(`'${method}'`));
   assert.doesNotMatch(jadeJs, /window\.zyn/);
+  // Slippage floors ride on both sides of a curve trade.
+  assert.match(jadeJs, /minTokens: decimal\(/);
+  assert.match(jadeJs, /minZec: decimal\(/);
   // The curve is consensus: the page mirrors it, it does not choose it.
   assert.match(jadeJs, /lots: 80_000, lotTokens: 12_500n, baseZat: 7_721n, slopeZat: 1n, graduateAt: 51_098/);
-  // The wallet override is for localhost only.
+  // Chain and wallet overrides are for localhost only.
   assert.match(jadeJs, /LOCAL && params\.get\('nap'\)/);
-  assert.doesNotMatch(jadeHtml, /Illustrative market data|Illustrative quote|seven day price/i);
-  assert.match(jadeHtml, /deterministic bonding curve/i);
+  assert.match(jadeJs, /LOCAL && params\.get\('rpc'\)/);
+  // Pictures are only ever data: images of the four accepted kinds.
+  assert.match(jadeJs, /data:image\\\/\(png\|jpeg\|webp\|gif\);base64/);
+  // The chart library is vendored, not fetched from a CDN.
+  assert.match(jadeJs, /from '\.\/vendor\/lightweight-charts\.js'/);
 });
 
 test('standalone build emits only the dedicated Jade product', () => {
@@ -119,14 +136,16 @@ test('standalone build emits only the dedicated Jade product', () => {
   assert.match(standaloneBuild, /jade\.css/);
   assert.match(standaloneBuild, /jade\.js/);
   assert.match(standaloneBuild, /nap-connect\.js/);
+  assert.match(standaloneBuild, /vendor\/lightweight-charts\.js/);
+  assert.match(standaloneBuild, /LIGHTWEIGHT-CHARTS-LICENSE/);
   assert.match(jadeHtml, /launch\.cavebro\.win/);
-  assert.match(jadeHtml, /value="1,000,000,000" readonly/);
-  assert.match(jadeHtml, /51,098 of 80,000 lots · ~17 ZEC · 47 ZEC FDV/);
+  assert.match(jadeHtml, /1,000,000,000/);
+  assert.match(jadeHtml, /51,098 of 80,000 lots/);
   assert.doesNotMatch(jadeHtml, /stone-fee|stone-dev-buy|660M/);
   // Nap's window must be able to answer the page that opened it.
   assert.match(jadeHeaders, /Cross-Origin-Opener-Policy: same-origin-allow-popups/);
-  assert.match(jadeHeaders, /connect-src https:\/\/zyn-rpc\.cavebro\.win;/);
-  assert.match(jadeHeaders, /chrome-extension:/);
+  assert.match(jadeHeaders, /connect-src 'self' https:\/\/zyn-rpc\.cavebro\.win;/);
+  assert.match(jadeHeaders, /script-src 'self' chrome-extension:/);
   assert.match(jadeHeaders, /frame-ancestors 'none'/);
   assert.match(standaloneBuild, /jade-headers/);
   assert.doesNotMatch(standaloneBuild, /sourceHtml|sourceCss|launchpadMarkup|app\.js/);

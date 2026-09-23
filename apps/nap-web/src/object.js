@@ -402,3 +402,37 @@ export async function objectCall(rpcUrl, method, fields = {}) {
   if (body.error) throw new Error(body.error.message || 'The chain refused');
   return body.result;
 }
+
+/// A launchpad token's picture and description, as the creator attaches
+/// them: canonical JSON (keys in this order), hashed. The content server
+/// recomputes exactly this from what it is sent.
+export function contentBytes({ description = '', image = '' }) {
+  return new TextEncoder().encode(JSON.stringify({ description: String(description), image: String(image), v: 1 }));
+}
+export const contentHash = (content) => sha256(contentBytes(content));
+
+/// Proof that the holder of `secretKey` created `token` with `nonce`
+/// (token = tokenOf(accountOf(publicKey), nonce)) and attaches `hash` to it.
+/// Reveals the creator to whoever keeps the content — the journal already
+/// names them — and nothing else.
+export async function contentProof(secretKey, nonce, token, hash) {
+  const publicKey = await ed.getPublicKeyAsync(secretKey);
+  const message = concatBytes(new TextEncoder().encode('cave.jade.content.v1'), token, hash);
+  const signature = await ed.signAsync(message, secretKey);
+  return { publicKey: hex(publicKey), nonce: hex(nonce), signature: hex(signature) };
+}
+
+/// The content server's check: `proof.publicKey` made `token` (it is
+/// tokenOf(accountOf(key), nonce), the ledger's derivation) and signed
+/// `hash` for it. Shared with the server so both sides derive it one way.
+export async function verifyContentProof(token, hash, proof) {
+  const te = new TextEncoder();
+  const publicKey = unhex(proof.publicKey);
+  const nonce = unhex(proof.nonce);
+  const signature = unhex(proof.signature);
+  if (publicKey.length !== 32 || nonce.length !== 32 || signature.length !== 64) return false;
+  const made = leaf(te.encode('objectvm.token.v1'), accountOf(publicKey), nonce);
+  if (hex(made) !== hex(token)) return false;
+  const message = concatBytes(te.encode('cave.jade.content.v1'), token, hash);
+  try { return await ed.verifyAsync(signature, message, publicKey); } catch { return false; }
+}

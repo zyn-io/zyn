@@ -101,7 +101,9 @@ const METHODS = {
   zyn_nftBuy:    { read: false, run: (p) => app('/api/object/buy', p),    describe: (p) => `Buy this item for ${p.pay || 'the listed price plus fee'} ZEC.zy. It arrives in your wallet.` },
   zyn_nftCancel: { read: false, run: (p) => app('/api/object/cancel', p), describe: () => 'Cancel your listing. The item is yours to move again.' },
   zyn_nftRedeem: { read: false, run: (p) => app('/api/object/redeem', p), describe: () => 'Burn this item for its share of the collection floor. This cannot be undone.' },
-  zyn_collect:   { read: false, run: () => app('/api/object/collect', {}), describe: () => 'Collect everything the market owes you: sale proceeds, refunds, floor shares.' },
+  // Collecting only moves what the ledger already owes this wallet into it,
+  // so a connected site may ask without a prompt (as Nap in the browser does).
+  zyn_collect:   { read: true, mine: true, run: () => app('/api/object/collect', {}) },
   zyn_transfer: { read: false, run: (p) => app('/api/transfer', p), describe: (p) => `Transfer ${p.amount} of asset ${p.asset} to ${String(p.to).slice(0, 12)}…` },
   // A graduated launch's pool (or any pool) on the object ledger.
   zyn_swap:     { read: false, run: (p) => app('/api/object/swap', p), describe: (p) => `Swap ${p.amount} into pool ${String(p.pool).slice(0, 10)}… (at most ${(Number(p.slippageBps ?? 100) / 100)}% below the quote). Swaps in one epoch clear together at one price.` },

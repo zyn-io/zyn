@@ -13,7 +13,7 @@
 // site claims, and the site's claim is checked against it.
 
 import { forgetIdentity, parseAmount, WAD } from './core.js';
-import { hex, nullifierOf, unhex } from './object.js';
+import { contentHash, contentProof, hex, nullifierOf, unhex } from './object.js';
 import * as mk from './market.js';
 import * as ledger from './ledger.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
@@ -133,9 +133,15 @@ export const METHODS = {
     run: async (ctx) => {
       const { curves } = await curveBook(ctx);
       const h = await holdings(ctx);
+      // The tokens this wallet made: its own nonces, turned into token ids.
+      const mine = new Set();
+      const count = ledger.nonceCount(ctx.config, ctx.identity) + ledger.LOOKAHEAD;
+      for (let n = 0; n < count; n++) mine.add(hex(mk.tokenOf(ctx.identity.account, mk.marketNonce(ctx.identity.secretKey, n))));
       return {
+        zec: String(h.balances.get(ctx.config.zecAsset) || 0n),
         holdings: curves.map((c) => ({ token: c.token, symbol: c.symbol, name: c.name, amount: String(h.balances.get(c.token) || 0n) }))
           .filter((x) => x.amount !== '0'),
+        created: curves.filter((c) => mine.has(c.token)).map((c) => ({ token: c.token, symbol: c.symbol, name: c.name })),
       };
     },
   },
@@ -146,6 +152,13 @@ export const METHODS = {
     kind: 'write',
     async prepare(ctx, p) {
       const meta = mk.encodeMeta({ symbol: p.symbol, name: p.name });
+      // Optional picture and description, attached by proof after creation.
+      const description = String(p.description || '').trim();
+      const image = String(p.image || '');
+      if (description.length > 400) throw bad('A description is at most 400 characters');
+      if (image && !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(image)) throw bad('The picture must be a PNG, JPEG, WebP or GIF');
+      if (image.length > 420_000) throw bad('The picture must be under 300 KB');
+      const content = description || image ? { description, image } : null;
       const { terms } = await curveBook(ctx);
       const bond = BigInt(terms.bond || '0');
       return {
@@ -156,7 +169,10 @@ export const METHODS = {
           ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about 17 ZEC.zy raised), into a locked pool`],
           ['Bond', bond ? `${wadText(bond)} ZEC.zy, returned when it graduates` : 'none'],
           ['Your share', terms.fee_bps ? `10% of its trading fees, paid when it graduates` : 'none (no fee is set)'],
+          ...(description ? [['Description', description]] : []),
+          ...(image ? [['Picture', 'shown above, stored by the site that asked; it proves you made the token']] : []),
         ],
+        image: image || null,
         note: 'Anyone can buy it from the next epoch. You own none unless you buy, at the same price as everybody.',
         run: async () => {
           let inputs = [], change = [];
@@ -167,7 +183,10 @@ export const METHODS = {
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.createCurveIntent({
             creator: ctx.identity.account, nonce: n, quote: unhex(ctx.config.zecAsset), meta, inputs, change,
           }));
-          return { token: hex(mk.tokenOf(ctx.identity.account, nonce)) };
+          const token = mk.tokenOf(ctx.identity.account, nonce);
+          if (!content) return { token: hex(token) };
+          const hash = contentHash(content);
+          return { token: hex(token), content: { hash: hex(hash), proof: await contentProof(ctx.identity.secretKey, nonce, token, hash) } };
         },
       };
     },
@@ -214,18 +233,20 @@ export const METHODS = {
       if (tokens % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
       const lots = Number(tokens / mk.LOT);
       const q = mk.previewCurveSell(c.sold, lots, c.fee_bps);
+      const minZec = p.minZec != null ? parseAmount(String(p.minZec)) : 0n;
       return {
         title: `Sell ${tokenText(tokens)} ${c.symbol}`,
         rows: [
           ['If nobody else sells this epoch', `${wadText(q.net)} ZEC.zy`],
           ['Fee', c.fee_bps ? `${wadText(q.fee)} ZEC.zy (${c.fee_bps / 100}%)` : 'none'],
+          ...(minZec ? [['At least', `${wadText(minZec)} ZEC.zy, or the tokens come back`]] : []),
         ],
         note: 'Sellers this epoch share one price, set when it closes. Collect the ZEC.zy once it settles.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.token), tokens);
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.curveTradeIntent({
-            trader: ctx.identity.account, token: unhex(c.token), buy: false, amountIn: tokens, minOut: 0n, inputs, change, nonce: n,
+            trader: ctx.identity.account, token: unhex(c.token), buy: false, amountIn: tokens, minOut: minZec, inputs, change, nonce: n,
           }));
           return { order: hex(mk.curveOrderId(ctx.identity.account, nonce)) };
         },
@@ -393,26 +414,20 @@ export const METHODS = {
     },
   },
 
+  // Collecting only moves what the ledger owes this wallet into it, so a
+  // connected site may ask without an approval each time — trades then
+  // simply arrive, as they do on any launchpad.
   zyn_collect: {
-    kind: 'write',
-    async prepare(ctx) {
+    kind: 'auto',
+    run: async (ctx) => {
       const owed = await ledger.loadOwed(ctx.config, ctx.identity);
-      if (!owed.length) throw bad('Nothing is owed to this wallet right now');
-      const byAsset = new Map();
-      for (const c of owed) byAsset.set(c.asset, (byAsset.get(c.asset) || 0n) + BigInt(c.amount));
-      return {
-        title: `Collect ${owed.length} payment${owed.length === 1 ? '' : 's'}`,
-        rows: [...byAsset].map(([a, v]) => [a === ctx.config.zecAsset ? 'ZEC.zy' : `${a.slice(0, 8)}…`, wadText(v)]),
-        note: 'Sale proceeds, refunds and floor shares the ledger is holding for you.',
-        run: async () => {
-          for (let i = 0; i < owed.length; i += ledger.PER_CLAIM) {
-            await ledger.submitIntent(ctx.config, ctx.identity, mk.claimIntent(mk.redeem(ctx.identity, owed.slice(i, i + ledger.PER_CLAIM))));
-          }
-          return { collected: owed.length };
-        },
-      };
+      for (let i = 0; i < owed.length; i += ledger.PER_CLAIM) {
+        await ledger.submitIntent(ctx.config, ctx.identity, mk.claimIntent(mk.redeem(ctx.identity, owed.slice(i, i + ledger.PER_CLAIM))));
+      }
+      return { collected: owed.length };
     },
   },
+
 };
 
 export { forgetIdentity, hex };

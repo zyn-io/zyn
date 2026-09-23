@@ -2626,6 +2626,14 @@ Without terms mainnet curves charge nothing and need no bond.
 which the store build also uses — build one, deploy it, then the other) and
 deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 
+### Cave Jade: deploy, content store, history (23 Sep 2026)
+
+- **Deploy** from `apps/cave-market/jade-stage` (its `wrangler.toml` binds KV `CAVE_JADE_CONTENT`, id `6fec82c33ade4ebba5836456d67cdb04`; `functions/` are the Pages Functions): `node scripts/build-launchpad.mjs && cd jade-stage && npx wrangler@4.40.0 pages deploy dist --project-name cave-jade --branch main`.
+- **Content** lives at KV `c:<token>`. To hide a token's picture and description: `npx wrangler@4.40.0 kv key put --namespace-id 6fec82c33ade4ebba5836456d67cdb04 hide:<token> 1 --remote`; delete that key to show it again.
+- **Local:** `npx wrangler@4.40.0 pages dev dist --port 8788 --kv CAVE_JADE_CONTENT` in `jade-stage`; a local node has no CORS, so put a proxy in front of it and open `/?network=testnet&rpc=http://127.0.0.1:<proxy>` (the `rpc`/`nap` overrides work on localhost only).
+- **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
+- **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
+
 ## 5f-terdecies. The block servers' HTTP door, for browser Nap (23 Sep 2026)
 
 `zyn-lightd` answers HTTP as well as its TCP frames when `ZYN_LIGHTD_HTTP` is

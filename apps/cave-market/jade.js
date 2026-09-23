@@ -1,12 +1,13 @@
 // Cave Jade — the launchpad (DECISIONS §141).
 //
-// Reads come from the chain's public RPC: the curves, their prices and what
-// they hold are public state, so anyone can walk the yard without a wallet.
+// Reads come from the chain's public RPC: curves, prices, per-epoch fills —
+// anyone can walk the yard without a wallet. Pictures and descriptions come
+// from this site's own store, attached by each coin's creator with a proof.
 // Everything that moves value goes through Nap (Nap Connect), which shows the
-// holder what the chain says and asks them to approve it — in Nap's window,
-// which this page cannot touch.
+// holder what the chain says and asks them to approve it in Nap's window.
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
+import { createChart } from './vendor/lightweight-charts.js';
 
 const XZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 
@@ -16,42 +17,53 @@ const WAD = 10n ** 18n;
 const ZAT = 10_000_000_000n;
 const LOT = CURVE.lotTokens * WAD;
 const BPS = 10_000n;
+const SUPPLY = 1_000_000_000n;
 
 const params = new URLSearchParams(location.search);
 const NETWORK = params.get('network') === 'testnet' ? 'testnet' : 'mainnet';
-const RPC = NETWORK === 'testnet' ? 'https://zyn-rpc.cavebro.win/object' : 'https://zyn-rpc.cavebro.win/';
-/// Only a page served from this machine may point Nap elsewhere (development).
+/// Only a page served from this machine may point elsewhere (development).
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+const RPC = (LOCAL && params.get('rpc')) || (NETWORK === 'testnet' ? 'https://zyn-rpc.cavebro.win/object' : 'https://zyn-rpc.cavebro.win/');
 const NAP = (LOCAL && params.get('nap')) || NAP_WEB;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const short = (value, n = 7) => value?.length > n * 2 ? `${value.slice(0, n)}…${value.slice(-n)}` : (value || '—');
+const short = (value, n = 6) => value?.length > n * 2 ? `${value.slice(0, n)}…${value.slice(-n)}` : (value || '—');
 const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const isInt = (v) => typeof v === 'string' && /^\d{1,40}$/.test(v);
-const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 });
+const now = () => Math.floor(Date.now() / 1000);
 
-/// A WAD amount as a short decimal.
-function wad(raw, places = 8) {
+// ---------------------------------------------------------------------------
+// Numbers.
+
+const num = (raw) => Number(BigInt(raw)) / 1e18;
+function wad(raw, places = 6) {
   const v = BigInt(raw);
-  const frac = (v % WAD).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
-  return `${(v / WAD).toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
+  const neg = v < 0n;
+  const a = neg ? -v : v;
+  const frac = (a % WAD).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
+  return `${neg ? '-' : ''}${(a / WAD).toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
 }
-/// A per-token price, which is tiny: shown with its significant digits.
-function perToken(raw) {
-  const n = Number(BigInt(raw)) / 1e18;
-  return n === 0 ? '0' : n < 1e-6 ? n.toExponential(3) : n.toLocaleString('en-US', { maximumSignificantDigits: 4 });
-}
+const decimal = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, ''); return `${v / WAD}${f ? `.${f}` : ''}`; };
 function parseDecimal(value) {
   const s = String(value || '').trim();
-  if (!/^\d+(\.\d{1,18})?$/.test(s)) throw new Error('Enter a decimal amount');
+  if (!/^\d+(\.\d{1,18})?$/.test(s)) throw new Error('Enter an amount');
   const [w, f = ''] = s.split('.');
   return BigInt(w) * WAD + BigInt(f.padEnd(18, '0'));
 }
+const zecText = (zec) => (zec >= 1000 ? zec.toLocaleString('en-US', { maximumFractionDigits: 0 }) : zec >= 1 ? zec.toLocaleString('en-US', { maximumFractionDigits: 2 }) : zec.toLocaleString('en-US', { maximumSignificantDigits: 3 }));
+const usdText = (usd) => (usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : usd >= 1e3 ? `$${(usd / 1e3).toFixed(1)}K` : `$${usd.toFixed(2)}`);
+function ago(t) {
+  if (!t) return '—';
+  const s = Math.max(0, now() - t);
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
+}
+const pct = (a, b) => (b > 0 ? ((a - b) / b) * 100 : null);
+const changeText = (p) => (p == null ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(p >= 100 || p <= -100 ? 0 : 1)}%`);
 
-// The curve's own arithmetic, for previews. The ledger settles each epoch's
-// orders together at one price, so these are what a lone order gets.
+// The curve's own arithmetic, for previews. Each epoch's orders settle
+// together at one price, so these are what an order gets alone.
 const cost = (q, d) => { const Q = BigInt(q), D = BigInt(d); return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * ZAT; };
 function lotsFor(q, budget, cap) {
   let lo = 0, hi = cap;
@@ -62,8 +74,7 @@ function previewBuy(sold, amountIn, feeBps) {
   const budget = (amountIn * BPS) / (BPS + BigInt(feeBps));
   const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold));
   const paid = cost(sold, lots);
-  const fee = (paid * BigInt(feeBps)) / BPS;
-  return { lots, tokens: BigInt(lots) * LOT, paid, fee };
+  return { lots, tokens: BigInt(lots) * LOT, paid, fee: (paid * BigInt(feeBps)) / BPS };
 }
 function previewSell(sold, lots, feeBps) {
   const n = Math.min(lots, sold);
@@ -71,7 +82,6 @@ function previewSell(sold, lots, feeBps) {
   const fee = (gross * BigInt(feeBps)) / BPS;
   return { gross, fee, net: gross - fee };
 }
-/// A lone swap at the batch price (objectvm::market::clear, one side).
 function poolQuote(pool, sellA, amountIn) {
   const x = BigInt(sellA ? pool.reserve_a : pool.reserve_b);
   const y = BigInt(sellA ? pool.reserve_b : pool.reserve_a);
@@ -88,28 +98,35 @@ function decodeMeta(hexMeta) {
   return /^[A-Z0-9]{1,8}$/.test(symbol) && name ? { symbol, name } : { symbol: '?', name: 'Unnamed stone' };
 }
 
+// ---------------------------------------------------------------------------
+// State.
+
 let curves = [];
 let pools = [];
+let stats = new Map();
 let terms = { set: false, fee_bps: 0, bond: '0' };
+let usd = null;
 let wallet = null;
-let currentStage = 'revealed';
+let mine = null; // { zec, holdings: Map token -> amount, created: [] }
+let sortBy = 'movers';
 let currentCoin = null;
 let tradeSide = 'buy';
+let unit = 'zec';
+let tf = 300;
+let history = [];
+const content = new Map(); // token -> {description, image} | null (none) | 'loading'
 
-// ---------------------------------------------------------------------------
-// The chain.
-
-async function rpc(method) {
+async function rpc(method, fields = {}) {
   const id = crypto.randomUUID();
   const r = await fetch(RPC, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [] }),
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
     credentials: 'omit',
     referrerPolicy: 'no-referrer',
   });
   const body = await r.json();
-  if (body.id !== id || body.error) throw new Error(body.error?.message || 'The chain did not answer');
+  if (body.error) throw new Error(body.error.message || 'The chain did not answer');
   return body.result;
 }
 
@@ -118,27 +135,30 @@ const validCurve = (c) => isHex(c.token) && isHex(c.meta) && c.quote === XZEC &&
 
 async function loadMarket() {
   try {
-    const m = await rpc('zyn_market');
+    const [m, s] = await Promise.all([rpc('zyn_market'), rpc('zyn_curveStats').catch(() => [])]);
     terms = m.curve_terms || terms;
     pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b));
     curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, ...decodeMeta(c.meta) }));
-    $('#gallery-status').textContent = `Live, ${NETWORK}. A stone is its address; names and tickers may repeat.`;
+    stats = new Map((Array.isArray(s) ? s : []).filter((x) => isHex(x.token)).map((x) => [x.token, x]));
+    $('#gallery-status').textContent = curves.length ? `Live, ${NETWORK}. A coin is its address; names and tickers may repeat.` : '';
   } catch (e) {
     $('#gallery-status').textContent = `The chain is not answering: ${e.message}`;
   }
-  renderGallery();
-  renderPreview();
-  if (pathRoute().view === 'coin') renderCoin(pathRoute().asset);
+  render();
 }
 
-const progress = (c) => Math.min(1, c.sold / CURVE.graduateAt);
-const poolOf = (c) => pools.find((p) => p.id === c.pool);
-/// ZEC.zy the stone is set in: the curve's reserve, or its pool's ZEC side.
-function zecSet(c) {
-  if (!c.graduated) return BigInt(c.reserve);
-  const p = poolOf(c);
-  return p ? BigInt(p.a === XZEC ? p.reserve_a : p.reserve_b) : 0n;
+async function loadUsd() {
+  try {
+    const r = await fetch('/api/zec-usd', { credentials: 'omit' });
+    const v = Number((await r.json())?.usd);
+    usd = Number.isFinite(v) && v > 0 ? v : null;
+  } catch { usd = null; }
+  $('#zec-usd').textContent = usd ? `ZEC $${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : 'ZEC';
+  $$('[data-unit="usd"]').forEach((b) => { b.hidden = !usd; });
+  render();
 }
+
+const poolOf = (c) => pools.find((p) => p.id === c.pool);
 /// ZEC.zy per token: the next lot on the curve, or the pool's spot.
 function price(c) {
   const p = c.graduated && poolOf(c);
@@ -146,109 +166,98 @@ function price(c) {
   const [z, t] = p.a === XZEC ? [p.reserve_a, p.reserve_b] : [p.reserve_b, p.reserve_a];
   return (BigInt(z) * WAD) / BigInt(t);
 }
+/// Market cap in ZEC: price per token times the whole supply.
+const mcap = (c) => num(price(c) * SUPPLY);
+const mcapOf = (priceRaw) => num(BigInt(priceRaw) * SUPPLY);
+function zecSet(c) {
+  if (!c.graduated) return BigInt(c.reserve);
+  const p = poolOf(c);
+  return p ? BigInt(p.a === XZEC ? p.reserve_a : p.reserve_b) : 0n;
+}
+const progress = (c) => (c.graduated ? 1 : Math.min(1, c.sold / CURVE.graduateAt));
+const change24 = (c) => { const s = stats.get(c.token); return s?.price_24h ? pct(Number(price(c)), Number(s.price_24h)) : null; };
+const change1h = (c) => { const s = stats.get(c.token); return s?.price_1h ? pct(Number(price(c)), Number(s.price_1h)) : null; };
+const capText = (zec) => (unit === 'usd' && usd ? usdText(zec * usd) : `${zecText(zec)} ZEC`);
+const capBoth = (zec) => `${zecText(zec)} ZEC${usd ? ` · ${usdText(zec * usd)}` : ''}`;
 
 // ---------------------------------------------------------------------------
-// The gallery.
+// Pictures and descriptions.
+
+async function loadContent(token) {
+  if (content.has(token)) return content.get(token);
+  content.set(token, 'loading');
+  try {
+    const r = await fetch(`/api/content/${token}`, { credentials: 'omit' });
+    const v = r.ok ? await r.json() : null;
+    const image = typeof v?.image === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v.image) ? v.image : '';
+    content.set(token, v ? { description: String(v.description || ''), image } : null);
+  } catch { content.set(token, null); }
+  return content.get(token);
+}
+/// What goes inside a coin's square: its picture, or its ticker's first letter.
+function thumbInner(c) {
+  const k = content.get(c.token);
+  return k && k !== 'loading' && k.image ? `<img src="${esc(k.image)}" alt="" />` : `<span>${esc([...c.symbol][0] || '?')}</span>`;
+}
+const thumb = (c) => `<div class="j-thumb">${thumbInner(c)}</div>`;
+
+// ---------------------------------------------------------------------------
+// Coins.
 
 const views = Object.fromEntries($$('[data-view]').map((view) => [view.dataset.view, view]));
-const routeLinks = $$('[data-route]');
-const gallery = $('#coin-gallery');
 const search = $('#gallery-search');
-const sort = $('#gallery-sort');
-const stageButtons = $$('[data-filter]');
-const walletButton = $('#wallet-button');
 
-const stage = (c) => (c.graduated ? 'revealed' : 'trading');
-const stoneMarkup = (c) => `<div class="card-stone" aria-hidden="true"><span>${esc([...c.symbol][0] || '?')}</span></div>`;
-const coinCard = (c) => `
-    <a class="coin-card" href="/coin/${c.token}" data-coin="${c.token}">
-      <div class="coin-title">${stoneMarkup(c)}<div><p>${c.graduated ? 'REVEALED JADE' : 'WINDOW OPEN'}</p><h2>${esc(c.name)}</h2><span>${esc(c.symbol)} / ZEC.zy</span></div></div>
-      <div class="coin-metric"><strong>${perToken(price(c))}</strong><span>ZEC.zy</span></div>
-      <div class="coin-metric"><strong class="positive">${(progress(c) * 100).toFixed(2)}%</strong><span>${compact.format(c.sold)} / ${compact.format(CURVE.graduateAt)} lots</span></div>
-      <div class="coin-metric"><strong>${wad(zecSet(c), 4)} ZEC.zy</strong><span>${c.graduated ? 'in its locked pool' : 'in its curve'}</span></div>
-      <div class="coin-metric"><strong class="mono">${short(c.token)}</strong><span>${c.graduated ? 'pool trading' : 'curve trading'}</span></div>
+function sorted() {
+  const q = search.value.trim().toLocaleLowerCase();
+  let list = curves.filter((c) => !q || `${c.name} ${c.symbol} ${c.token}`.toLocaleLowerCase().includes(q));
+  const st = (c) => stats.get(c.token) || {};
+  if (sortBy === 'near') list = list.filter((c) => !c.graduated);
+  if (sortBy === 'grad') list = list.filter((c) => c.graduated);
+  const by = {
+    movers: (a, b) => Math.abs(change1h(b) ?? change24(b) ?? 0) - Math.abs(change1h(a) ?? change24(a) ?? 0) || (st(b).last_trade_time || 0) - (st(a).last_trade_time || 0),
+    new: (a, b) => (st(b).created_time || b.created_at) - (st(a).created_time || a.created_at),
+    mcap: (a, b) => mcap(b) - mcap(a),
+    last: (a, b) => (st(b).last_trade_time || 0) - (st(a).last_trade_time || 0),
+    near: (a, b) => progress(b) - progress(a),
+    grad: (a, b) => mcap(b) - mcap(a),
+  }[sortBy];
+  return list.sort(by);
+}
+
+const coinCard = (c) => {
+  const s = stats.get(c.token) || {};
+  const ch = change24(c);
+  const k = content.get(c.token);
+  return `<a class="j-card" href="/coin/${c.token}" data-coin="${c.token}">
+      ${thumb(c)}
+      <div class="j-card-body">
+        <h3>${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></h3>
+        ${k && k !== 'loading' && k.description ? `<p class="j-desc">${esc(k.description)}</p>` : ''}
+        <p class="j-card-cap"><b>${esc(capText(mcap(c)))}</b> <span class="${ch == null ? '' : ch >= 0 ? 'up' : 'down'}">${changeText(ch)}</span></p>
+        <div class="j-bar"><i style="width:${(progress(c) * 100).toFixed(1)}%"></i></div>
+        <p class="j-card-meta"><span>${c.graduated ? 'graduated · in its pool' : `${(progress(c) * 100).toFixed(1)}% bonded`}</span><span>${s.created_time ? `made ${ago(s.created_time)}` : ''}${s.last_trade_time ? ` · traded ${ago(s.last_trade_time)}` : ''}</span></p>
+      </div>
     </a>`;
+};
 
 function renderGallery() {
-  const query = search.value.trim().toLocaleLowerCase();
-  const results = curves
-    .filter((c) => currentStage === 'all' || stage(c) === currentStage)
-    .filter((c) => !query || `${c.name} ${c.symbol} ${c.token}`.toLocaleLowerCase().includes(query))
-    .sort((a, b) => sort.value === 'price' ? (price(b) > price(a) ? 1 : -1) : sort.value === 'name' ? a.name.localeCompare(b.name) : progress(b) - progress(a));
-  gallery.innerHTML = results.length ? results.map(coinCard).join('') : `<div class="empty-gallery">${curves.length ? 'No stones match this view.' : 'The yard is empty. Pick the first stone.'}</div>`;
-  const revealed = curves.filter((c) => c.graduated).length;
-  $('#count-revealed').textContent = revealed;
-  $('#count-trading').textContent = curves.length - revealed;
-  $('#count-all').textContent = curves.length;
-  $('#tally-revealed').textContent = revealed;
-  $('#tally-trading').textContent = curves.length - revealed;
-  $('#tally-zec').textContent = `${wad(curves.reduce((s, c) => s + zecSet(c), 0n), 4)} ZEC.zy`;
-}
-
-function pathRoute() {
-  const path = location.pathname.replace(/\/+$/, '') || '/';
-  if (path === '/launch') return { view: 'launch' };
-  const match = path.match(/^\/coin\/([0-9a-f]{64})$/i);
-  return match ? { view: 'coin', asset: match[1].toLowerCase() } : { view: 'gallery' };
-}
-
-function renderCoin(token) {
-  const c = curves.find((x) => x.token === token);
-  if (!c) {
-    currentCoin = null;
-    $('#coin-title').textContent = curves.length ? 'Stone not found' : 'Reading the yard…';
-    return;
+  const list = sorted();
+  $('#coin-gallery').innerHTML = list.length ? list.map(coinCard).join('') : `<div class="j-empty">${curves.length ? 'No coins match.' : 'The yard is empty. <a href="/launch">Place the first stone.</a>'}</div>`;
+  $('#tally-all').textContent = curves.length;
+  $('#tally-grad').textContent = curves.filter((c) => c.graduated).length;
+  $('#tally-zec').textContent = `${wad(curves.reduce((s, c) => s + zecSet(c), 0n), 4)} ZEC`;
+  // Pictures for what is on screen, a few at a time.
+  for (const c of list.slice(0, 48)) {
+    if (!content.has(c.token)) loadContent(c.token).then((k) => { if (k) renderGallery(); });
   }
-  currentCoin = c;
-  $('#coin-crumb').textContent = c.name;
-  $('#coin-title').textContent = c.name;
-  $('#coin-symbol').textContent = `${c.symbol} / ZEC.zy`;
-  $('#coin-stage').textContent = c.graduated ? 'REVEALED JADE / LOCKED POOL' : 'WINDOW OPEN / BONDING CURVE';
-  $('#coin-stone span').textContent = [...c.symbol][0] || '?';
-  $('#coin-price').textContent = `${perToken(price(c))} ZEC.zy`;
-  $('#coin-change').textContent = c.graduated ? 'pool spot' : `${(progress(c) * 100).toFixed(2)}% of the way to its pool`;
-  $('#coin-liquidity').textContent = `${wad(zecSet(c), 4)} ZEC.zy`;
-  $('#coin-pot').textContent = c.graduated ? 'in the pool' : `${wad(c.graduation, 6)} ZEC.zy`;
-  $('#coin-block').textContent = short(c.token, 6);
-  $('#coin-block').title = c.token;
-  const cut = progress(c);
-  $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
-  $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
-  $('#chart-progress').textContent = `${(cut * 100).toFixed(2)}% revealed`;
-  $('#chart-title').textContent = c.graduated ? 'Curve complete. Its pool is live and locked.' : `${c.sold.toLocaleString('en-US')} of ${CURVE.graduateAt.toLocaleString('en-US')} lots found.`;
-  document.title = `${c.name} — Cave Jade`;
-  configureTrade();
 }
 
-function syncRoute({ scroll = true } = {}) {
-  const route = pathRoute();
-  Object.entries(views).forEach(([name, view]) => { view.hidden = name !== route.view; });
-  routeLinks.forEach((link) => link.toggleAttribute('aria-current', link.dataset.route === route.view || (route.view === 'coin' && link.dataset.route === 'gallery')));
-  if (route.view === 'coin') renderCoin(route.asset);
-  else document.title = route.view === 'gallery' ? 'Cave Jade — Revealed Coins' : 'Pick a Stone — Cave Jade';
-  document.body.dataset.route = route.view;
-  if (scroll) window.scrollTo({ top: 0, behavior: 'instant' });
-}
-
-function navigate(path) {
-  history.pushState({}, '', path + location.search);
-  syncRoute();
-}
-
-document.addEventListener('click', (event) => {
-  const link = event.target.closest('a[href^="/"]');
-  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  navigate(link.getAttribute('href'));
-});
-window.addEventListener('popstate', () => syncRoute());
-stageButtons.forEach((button) => button.addEventListener('click', () => {
-  currentStage = button.dataset.filter;
-  stageButtons.forEach((item) => { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); });
+$$('[data-sort]').forEach((b) => b.addEventListener('click', () => {
+  sortBy = b.dataset.sort;
+  $$('[data-sort]').forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-selected', String(x === b)); });
   renderGallery();
 }));
 search.addEventListener('input', renderGallery);
-sort.addEventListener('change', renderGallery);
 document.addEventListener('keydown', (event) => {
   if (event.key === '/' && document.activeElement !== search && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) {
     event.preventDefault();
@@ -257,108 +266,144 @@ document.addEventListener('keydown', (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// The wallet.
+// One coin.
 
-async function pickWallet() {
-  const dialog = $('#jade-wallet');
-  dialog.showModal();
-  const body = $('.jade-wallet-body', dialog);
-  if (wallet) {
-    body.innerHTML = `<p>Connected: <b>${esc(wallet.info.name)}</b></p><p class="mono">${esc(short(wallet.session.account, 8))}</p><button type="button" class="jade-wallet-off">Disconnect</button>`;
-    $('.jade-wallet-off', dialog).onclick = () => { wallet = null; renderWallet(); dialog.close(); };
-    return;
-  }
-  body.innerHTML = '<p>Looking for Nap…</p>';
-  const list = await discover({ web: NAP });
-  body.innerHTML = list.map((w, i) => `<button type="button" class="jade-wallet-option" data-i="${i}"><b>${esc(w.info.name)}</b><small>${esc(w.info.detail || '')}</small></button>`).join('')
-    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shows this page your Zyn account — not your balances or keys. Every trade is approved in Nap.</p>';
-  body.querySelectorAll('[data-i]').forEach((b) => {
-    b.onclick = async () => {
-      const status = $('.jade-wallet-status', dialog);
-      status.textContent = list[b.dataset.i].provider.isNapWeb ? "Nap's window is open — unlock it there and approve." : 'Approve in Nap.';
-      try {
-        wallet = await connect(list[b.dataset.i], { network: NETWORK });
-        wallet.provider.on?.('disconnect', () => { wallet = null; renderWallet(); });
-        dialog.close();
-        renderWallet();
-      } catch (e) { status.textContent = e.code === 4001 ? 'Not connected. Nothing was shared.' : e.message; }
-    };
+let chart = null;
+let candles = null;
+let volume = null;
+
+function ensureChart() {
+  if (chart) return;
+  const el = $('#chart');
+  chart = createChart(el, {
+    autoSize: true,
+    layout: { background: { color: 'transparent' }, textColor: '#3d4a44', fontFamily: 'Jade Sans, sans-serif' },
+    grid: { vertLines: { color: 'rgba(6,17,14,.06)' }, horzLines: { color: 'rgba(6,17,14,.06)' } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(6,17,14,.18)' },
+    rightPriceScale: { borderColor: 'rgba(6,17,14,.18)' },
+    crosshair: { mode: 0 },
   });
+  candles = chart.addCandlestickSeries({ upColor: '#08705c', downColor: '#c0463a', borderVisible: false, wickUpColor: '#08705c', wickDownColor: '#c0463a', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usd ? usd : 1)) , minMove: 1e-9 } });
+  volume = chart.addHistogramSeries({ priceScaleId: '', priceFormat: { type: 'volume' }, color: 'rgba(8,112,92,.25)' });
+  volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 }
 
-function renderWallet() {
-  walletButton.innerHTML = wallet ? `<span></span> ${esc(short(wallet.session.account, 5))}` : '<span></span> Connect wallet';
-  renderPreview();
+/// Candles of market cap, one bucket per `tf` seconds, from the epoch points.
+function drawChart() {
+  if (!currentCoin) return;
+  ensureChart();
+  const factor = unit === 'usd' && usd ? usd : 1;
+  const pts = history.filter((p) => isInt(p.price));
+  const buckets = new Map();
+  let prev = null;
+  for (const p of pts) {
+    const t = Math.floor(p.time / tf) * tf;
+    const v = mcapOf(p.price) * factor;
+    const b = buckets.get(t) || { time: t, open: prev ?? v, high: prev ?? v, low: prev ?? v, close: v, vol: 0 };
+    b.high = Math.max(b.high, v); b.low = Math.min(b.low, v); b.close = v;
+    b.vol += Math.abs(Number(BigInt(p.delta_zec || '0'))) / 1e18;
+    buckets.set(t, b);
+    prev = v;
+  }
+  if (!buckets.size) {
+    const v = mcap(currentCoin) * factor;
+    const t = Math.floor(now() / tf) * tf;
+    buckets.set(t, { time: t, open: v, high: v, low: v, close: v, vol: 0 });
+  }
+  const rows = [...buckets.values()].sort((a, b) => a.time - b.time);
+  candles.setData(rows.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+  volume.setData(rows.map((r) => ({ time: r.time, value: r.vol, color: r.close >= r.open ? 'rgba(8,112,92,.3)' : 'rgba(192,70,58,.3)' })));
+  chart.timeScale().fitContent();
+}
+
+function renderFills() {
+  const moves = history.filter((p) => p.delta_lots !== 0 || (p.delta_zec && p.delta_zec !== '0')).slice(-60).reverse();
+  $('#fills').innerHTML = moves.length ? moves.map((p) => {
+    const buy = p.venue === 'curve' ? p.delta_lots > 0 : BigInt(p.delta_zec) > 0n;
+    const tokens = p.venue === 'curve' ? (BigInt(Math.abs(p.delta_lots)) * CURVE.lotTokens).toLocaleString('en-US') : '—';
+    return `<tr><td>${ago(p.time)}</td><td class="${buy ? 'up' : 'down'}">${buy ? 'Buy' : 'Sell'}</td><td>${tokens}</td><td>${wad(BigInt(p.delta_zec) < 0n ? -BigInt(p.delta_zec) : BigInt(p.delta_zec), 5)}</td><td>${esc(capText(mcapOf(p.price)))}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="j-muted">No fills yet. The first buyers all pay one price.</td></tr>';
+}
+
+async function renderCoin(token, fresh = false) {
+  const c = curves.find((x) => x.token === token);
+  if (!c) {
+    currentCoin = null;
+    $('#coin-title').textContent = curves.length ? 'Coin not found' : 'Reading the yard…';
+    return;
+  }
+  const first = currentCoin?.token !== token;
+  currentCoin = c;
+  const s = stats.get(token) || {};
+  $('#coin-crumb').textContent = c.name;
+  $('#coin-title').textContent = c.name;
+  $('#coin-symbol').textContent = c.symbol;
+  $('#coin-age').textContent = s.created_time ? `made ${ago(s.created_time)}` : `made in epoch ${c.created_at}`;
+  $('#coin-copy').textContent = short(c.token);
+  $('#coin-stage').textContent = c.graduated ? 'GRADUATED · TRADING IN ITS LOCKED POOL' : 'ON ITS BONDING CURVE';
+  $('#coin-mcap').textContent = capBoth(mcap(c));
+  const ch = change24(c);
+  $('#coin-change').textContent = `${changeText(ch)} 24h`;
+  $('#coin-change').className = ch == null ? '' : ch >= 0 ? 'up' : 'down';
+  $('#coin-price').textContent = `${num(price(c)).toExponential(4)} ZEC`;
+  $('#coin-liquidity').textContent = `${wad(zecSet(c), 4)} ZEC.zy ${c.graduated ? 'in its pool' : 'in its curve'}`;
+  $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ZEC.zy`;
+  $('#coin-fee').textContent = c.graduated ? `${poolOf(c)?.fee_bps ?? 30} bps, kept by the pool` : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
+  $('#coin-holders').textContent = c.graduated ? 'private' : `private — ${(100 - (c.sold / CURVE.lots) * 100).toFixed(1)}% of supply is still in the curve`;
+  const cut = progress(c);
+  $('#curve-pct').textContent = `${(cut * 100).toFixed(2)}%`;
+  $('#curve-bar').style.width = `${(cut * 100).toFixed(2)}%`;
+  $('#curve-text').textContent = c.graduated
+    ? 'Graduated. Every unsold lot and everything the curve raised opened a pool whose shares nobody holds.'
+    : `${wad(c.reserve, 4)} ZEC.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold), 3)} ZEC.zy of buying to graduate · it graduates at ~47 ZEC market cap${usd ? ` (${usdText(47 * usd)})` : ''}`;
+  $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
+  $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
+  document.title = `${c.symbol} ${capText(mcap(c))} — Cave Jade`;
+  const k = await loadContent(token);
+  if (currentCoin?.token !== token) return;
+  $('#coin-thumb').innerHTML = thumbInner(c);
+  $('#coin-description').textContent = k && k !== 'loading' && k.description ? k.description : 'No description.';
+  if (first || fresh) {
+    try { history = await rpc('zyn_history', { token }); } catch { history = []; }
+    if (currentCoin?.token !== token) return;
+  }
+  drawChart();
+  renderFills();
   configureTrade();
 }
 
-/// Ask the connected Nap. Called from clicks: Nap in the browser may need to
-/// open its window, and only a click may.
-function ask(method, p) {
-  if (!wallet) { pickWallet(); return Promise.reject(new Error('Connect a wallet first.')); }
-  return wallet.provider.request({ method, params: p });
-}
-
-walletButton.addEventListener('click', pickWallet);
-
-// ---------------------------------------------------------------------------
-// Placing a stone.
-
-const form = $('#stone-form');
-const nameInput = $('#stone-name');
-const symbolInput = $('#stone-symbol');
-const launchButton = $('#launch-stone');
-const validSymbol = (v) => /^[A-Z0-9]{1,8}$/.test(v);
-const validName = (v) => v.length >= 1 && v.length <= 24 && v === v.trim() && /^[\x20-\x7e]+$/.test(v);
-
-function renderPreview() {
-  const symbol = symbolInput.value.trim().toUpperCase() || 'STONE';
-  const ok = validSymbol(symbol) && validName(nameInput.value);
-  $('#preview-name').textContent = nameInput.value.trim() || 'Unnamed stone';
-  $('#preview-symbol').textContent = symbol;
-  $('#preview-letter').textContent = symbol[0] || '?';
-  symbolInput.setAttribute('aria-invalid', String(!validSymbol(symbol)));
-  nameInput.setAttribute('aria-invalid', String(!validName(nameInput.value)));
-  launchButton.disabled = !ok;
-  const bond = BigInt(terms.bond || '0');
-  $('#stone-terms').textContent = terms.set
-    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this stone's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy, returned at graduation.` : 'No bond.'}`
-    : 'No fee and no bond are set on this network yet.';
-  $('#stone-status').textContent = !ok
-    ? 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.'
-    : wallet ? 'Ready: Nap will show you the terms before anything is placed.' : 'Connect a wallet to place it.';
-}
-
-form.querySelectorAll('input').forEach((input) => input.addEventListener('input', renderPreview));
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const symbol = symbolInput.value.trim().toUpperCase();
-  if (!validSymbol(symbol) || !validName(nameInput.value)) return renderPreview();
-  launchButton.disabled = true;
-  try {
-    const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim() });
-    $('#stone-status').textContent = 'Placed. It opens for trading when this epoch seals.';
-    setTimeout(async () => { await loadMarket(); if (isHex(r?.token)) navigate(`/coin/${r.token}`); }, 3000);
-  } catch (e) {
-    $('#stone-status').textContent = e.message;
-  } finally {
-    launchButton.disabled = false;
-  }
+$('#coin-copy').addEventListener('click', async () => {
+  if (!currentCoin) return;
+  try { await navigator.clipboard.writeText(currentCoin.token); $('#coin-copy').textContent = 'copied'; setTimeout(() => { $('#coin-copy').textContent = short(currentCoin.token); }, 1200); } catch { /* the address is on screen */ }
 });
+$$('[data-tf]').forEach((b) => b.addEventListener('click', () => { tf = Number(b.dataset.tf); $$('[data-tf]').forEach((x) => x.classList.toggle('active', x === b)); drawChart(); }));
+$$('[data-unit]').forEach((b) => b.addEventListener('click', () => { unit = b.dataset.unit; $$('[data-unit]').forEach((x) => x.classList.toggle('active', x === b)); render(); }));
 
 // ---------------------------------------------------------------------------
 // Trading.
+
+const heldOf = (token) => (mine?.holdings.get(token) ?? 0n);
 
 function configureTrade() {
   const c = currentCoin;
   if (!c) return;
   const buying = tradeSide === 'buy';
-  $('#trade-label').textContent = buying ? 'You put in' : 'Tokens to return';
   $('#trade-unit').textContent = buying ? 'ZEC.zy' : c.symbol;
-  $('#trade-input').step = buying ? '0.001' : String(CURVE.lotTokens);
-  $('#trade-route').textContent = c.graduated ? 'Locked pool' : 'Bonding curve';
-  $('.trade-submit').textContent = wallet ? (buying ? 'Pick this jade' : 'Return this jade') : 'Connect wallet';
-  $('.trade-submit').disabled = false;
+  const presets = buying
+    ? ['0.01', '0.05', '0.1', '0.5'].map((v) => `<button type="button" data-preset="${v}">${v} ZEC</button>`)
+    : [25, 50, 75, 100].map((p) => `<button type="button" data-pct="${p}">${p}%</button>`);
+  $('#trade-presets').innerHTML = presets.join('');
+  $$('[data-preset]').forEach((b) => b.addEventListener('click', () => { $('#trade-input').value = b.dataset.preset; quote(); }));
+  $$('[data-pct]').forEach((b) => b.addEventListener('click', () => {
+    const lotsHeld = heldOf(c.token) / LOT;
+    const lots = c.graduated ? heldOf(c.token) * BigInt(b.dataset.pct) / 100n : (lotsHeld * BigInt(b.dataset.pct)) / 100n * LOT;
+    $('#trade-input').value = decimal(lots);
+    quote();
+  }));
+  $('#trade-balance').textContent = mine
+    ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol} · ${wad(mine.zec, 4)} ZEC.zy`
+    : 'Connect a wallet to see your balance.';
+  $('.trade-submit').textContent = wallet ? (buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`) : 'Connect wallet';
   quote();
 }
 
@@ -366,7 +411,9 @@ function quote() {
   const c = currentCoin;
   const out = $('#trade-output'), fee = $('#trade-fee'), min = $('#trade-min');
   out.textContent = fee.textContent = min.textContent = '—';
+  $('#trade-status').textContent = '';
   if (!c) return null;
+  const slip = BigInt($('#trade-slip').value);
   try {
     const value = parseDecimal($('#trade-input').value);
     if (c.graduated) {
@@ -374,25 +421,29 @@ function quote() {
       if (!p) throw new Error('Its pool is not visible yet');
       const sellA = tradeSide === 'buy' ? p.a === XZEC : p.a === c.token;
       const q = poolQuote(p, sellA, value);
-      out.textContent = `${wad(q, 6)} ${tradeSide === 'buy' ? c.symbol : 'ZEC.zy'}`;
+      out.textContent = `${wad(q, tradeSide === 'buy' ? 0 : 6)} ${tradeSide === 'buy' ? c.symbol : 'ZEC.zy'}`;
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
-      min.textContent = '1% below, or it comes back';
-      return { kind: 'swap', pool: p.id, sellA, amount: value };
+      min.textContent = `${wad((q * (BPS - slip)) / BPS, tradeSide === 'buy' ? 0 : 6)}`;
+      return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip) };
     }
     if (tradeSide === 'buy') {
       if (value < 100_000n * ZAT) throw new Error('A buy is at least 0.001 ZEC.zy');
       const q = previewBuy(c.sold, value, c.fee_bps);
-      out.textContent = `${Number(q.tokens / WAD).toLocaleString('en-US')} ${c.symbol}`;
+      if (!q.lots) throw new Error('That buys less than one lot of 12,500');
+      const minTokens = ((BigInt(q.lots) * (BPS - slip)) / BPS) * LOT;
+      out.textContent = `${wad(q.tokens, 0)} ${c.symbol}`;
       fee.textContent = c.fee_bps ? `${wad(q.fee, 8)} ZEC.zy` : 'none';
-      min.textContent = 'shared price this epoch';
-      return { kind: 'buy', amount: value };
+      min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
+      return { kind: 'buy', amount: value, minTokens };
     }
-    if (value % LOT !== 0n) throw new Error(`Return whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
+    if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
+    if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
     const q = previewSell(c.sold, Number(value / LOT), c.fee_bps);
+    const minZec = (q.net * (BPS - slip)) / BPS;
     out.textContent = `${wad(q.net, 8)} ZEC.zy`;
     fee.textContent = c.fee_bps ? `${wad(q.fee, 8)} ZEC.zy` : 'none';
-    min.textContent = 'shared price this epoch';
-    return { kind: 'sell', tokens: value };
+    min.textContent = `${wad(minZec, 8)} ZEC.zy`;
+    return { kind: 'sell', tokens: value, minZec };
   } catch (e) {
     $('#trade-status').textContent = e.message;
     return null;
@@ -402,12 +453,36 @@ function quote() {
 $$('[data-trade]').forEach((button) => button.addEventListener('click', () => {
   tradeSide = button.dataset.trade;
   $$('[data-trade]').forEach((item) => item.classList.toggle('active', item === button));
-  $('#trade-input').value = tradeSide === 'buy' ? '0.1' : String(CURVE.lotTokens * 10n);
+  $('#trade-input').value = tradeSide === 'buy' ? '0.1' : '';
   configureTrade();
 }));
-$('#trade-input').addEventListener('input', () => { $('#trade-status').textContent = ''; quote(); });
+$('#trade-input').addEventListener('input', quote);
+$('#trade-slip').addEventListener('change', quote);
 
-const dec = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, ''); return `${v / WAD}${f ? `.${f}` : ''}`; };
+/// After an order: wait for its epoch to seal, collect what it was paid, and
+/// say what arrived. Collecting needs no approval — it only moves what the
+/// ledger owes this wallet into it.
+async function settle(placedEpoch, token) {
+  const before = heldOf(token);
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    let epoch;
+    try { epoch = (await rpc('zyn_status')).epoch; } catch { continue; }
+    if (epoch > placedEpoch) break;
+    $('#trade-status').textContent = `Placed. Settling when epoch ${placedEpoch} seals…`;
+  }
+  try {
+    if (wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen())) {
+      await ask('zyn_collect', {});
+      await loadMine();
+      const got = heldOf(token) - before;
+      $('#trade-status').textContent = got > 0n ? `Filled: +${wad(got, 0)} ${currentCoin?.symbol || ''}. It is in your wallet.` : got < 0n ? 'Filled: sold. The ZEC.zy is in your wallet.' : 'Settled. Nothing filled — your ZEC.zy came back.';
+    } else {
+      $('#trade-status').textContent = "Settled. Open Nap's window to collect it.";
+    }
+  } catch (e) { $('#trade-status').textContent = e.message; }
+  await loadMarket();
+}
 
 $('.trade-submit').addEventListener('click', async () => {
   const c = currentCoin;
@@ -419,12 +494,13 @@ $('.trade-submit').addEventListener('click', async () => {
   button.disabled = true;
   try {
     // Asked before anything is awaited: Nap may need to open its window.
-    const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: dec(q.amount) })
-      : q.kind === 'buy' ? ask('zyn_curveBuy', { token: c.token, amount: dec(q.amount) })
-        : ask('zyn_curveSell', { token: c.token, tokens: dec(q.tokens) });
+    const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
+      : q.kind === 'buy' ? ask('zyn_curveBuy', { token: c.token, amount: decimal(q.amount), minTokens: decimal(q.minTokens) })
+        : ask('zyn_curveSell', { token: c.token, tokens: decimal(q.tokens), minZec: decimal(q.minZec) });
     await pending;
-    $('#trade-status').textContent = 'Placed. It settles when this epoch seals — then collect it in Nap (or press Collect).';
-    $('#trade-collect').hidden = false;
+    const epoch = (await rpc('zyn_status')).epoch;
+    $('#trade-status').textContent = `Placed. Settling when epoch ${epoch} seals…`;
+    settle(epoch, c.token);
   } catch (e) {
     $('#trade-status').textContent = e.message;
   } finally {
@@ -432,19 +508,236 @@ $('.trade-submit').addEventListener('click', async () => {
   }
 });
 
-$('#trade-collect').addEventListener('click', async () => {
+// ---------------------------------------------------------------------------
+// The wallet.
+
+async function pickWallet() {
+  const dialog = $('#jade-wallet');
+  dialog.showModal();
+  const body = dialog.querySelector('.jade-wallet-body');
+  if (wallet) {
+    body.innerHTML = `<p>Connected: <b>${esc(wallet.info.name)}</b></p><p class="mono">${esc(short(wallet.session.account, 8))}</p><button type="button" class="jade-wallet-off">Disconnect</button>`;
+    body.querySelector('.jade-wallet-off').onclick = () => { wallet = null; mine = null; render(); dialog.close(); };
+    return;
+  }
+  body.innerHTML = '<p>Looking for Nap…</p>';
+  const list = await discover({ web: NAP });
+  body.innerHTML = list.map((w, i) => `<button type="button" class="jade-wallet-option" data-i="${i}"><b>${esc(w.info.name)}</b><small>${esc(w.info.detail || '')}</small></button>`).join('')
+    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shows this page your Zyn account — not your balances or keys. Every trade is approved in Nap; settled trades are collected into your wallet automatically.</p>';
+  body.querySelectorAll('[data-i]').forEach((b) => {
+    b.onclick = async () => {
+      const status = body.querySelector('.jade-wallet-status');
+      status.textContent = list[b.dataset.i].provider.isNapWeb ? "Nap's window is open — unlock it there and approve." : 'Approve in Nap.';
+      try {
+        wallet = await connect(list[b.dataset.i], { network: NETWORK });
+        wallet.provider.on?.('disconnect', () => { wallet = null; mine = null; render(); });
+        dialog.close();
+        await loadMine();
+        render();
+      } catch (e) { status.textContent = e.code === 4001 ? 'Not connected. Nothing was shared.' : e.message; }
+    };
+  });
+}
+
+/// Ask the connected Nap. Called from clicks: Nap in the browser may need to
+/// open its window, and only a click may.
+function ask(method, p) {
+  if (!wallet) { pickWallet(); return Promise.reject(new Error('Connect a wallet first.')); }
+  return wallet.provider.request({ method, params: p });
+}
+
+async function loadMine() {
+  if (!wallet || (wallet.provider.isNapWeb && !wallet.provider.isOpen())) return;
   try {
-    await ask('zyn_collect', {});
-    $('#trade-status').textContent = 'Collected. It is in your Nap wallet.';
-    loadMarket();
-  } catch (e) { $('#trade-status').textContent = e.message; }
+    const r = await ask('zyn_curveHoldings', {});
+    mine = {
+      zec: BigInt(isInt(r?.zec) ? r.zec : '0'),
+      holdings: new Map((r?.holdings || []).filter((h) => isHex(h.token) && isInt(h.amount)).map((h) => [h.token, BigInt(h.amount)])),
+      created: (r?.created || []).filter((x) => isHex(x.token)).map((x) => x.token),
+    };
+  } catch { /* keep what we had */ }
+}
+
+$('#wallet-button').addEventListener('click', pickWallet);
+
+function renderWallet() {
+  $('#wallet-button').innerHTML = wallet ? `<span></span> ${esc(short(wallet.session.account, 5))}` : '<span></span> Connect wallet';
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio.
+
+function renderPortfolio() {
+  if (!wallet || !mine) {
+    $('#portfolio-status').textContent = wallet ? "Open Nap's window (press the wallet button) to read your holdings." : 'Connect a wallet to see what you hold and what you made.';
+    $('#held').innerHTML = '';
+    $('#made').innerHTML = '';
+    $('#held-total').textContent = '—';
+    return;
+  }
+  $('#portfolio-status').textContent = `${wad(mine.zec, 4)} ZEC.zy ready to trade.`;
+  let total = 0;
+  const rows = [...mine.holdings].map(([token, amount]) => {
+    const c = curves.find((x) => x.token === token);
+    if (!c) return '';
+    const worth = num((price(c) * amount) / WAD);
+    total += worth;
+    return `<tr><td><a href="/coin/${token}">${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></a></td><td>${wad(amount, 0)}</td><td>${esc(capText(worth))}</td><td><a href="/coin/${token}">Trade →</a></td></tr>`;
+  });
+  $('#held').innerHTML = rows.join('') || '<tr><td colspan="4" class="j-muted">Nothing yet.</td></tr>';
+  $('#held-total').textContent = `worth ~${capText(total)}`;
+  const made = mine.created.map((t) => curves.find((c) => c.token === t)).filter(Boolean);
+  $('#made').innerHTML = made.length ? made.map(coinCard).join('') : '<div class="j-empty">No coins made from this wallet yet. <a href="/launch">Create one.</a></div>';
+}
+
+// ---------------------------------------------------------------------------
+// Create.
+
+const form = $('#stone-form');
+const nameInput = $('#stone-name');
+const symbolInput = $('#stone-symbol');
+const descInput = $('#stone-description');
+const imageInput = $('#stone-image');
+const launchButton = $('#launch-stone');
+let imageData = '';
+const validSymbol = (v) => /^[A-Z0-9]{1,8}$/.test(v);
+const validName = (v) => v.length >= 1 && v.length <= 24 && v === v.trim() && /^[\x20-\x7e]+$/.test(v);
+
+/// Shrink a picture to a square ≤ 512 px and under 300 KB, here, before it
+/// goes anywhere.
+async function shrink(file) {
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(512, Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = side;
+  const scale = Math.max(side / bitmap.width, side / bitmap.height);
+  const w = bitmap.width * scale, h = bitmap.height * scale;
+  canvas.getContext('2d').drawImage(bitmap, (side - w) / 2, (side - h) / 2, w, h);
+  for (const q of [0.9, 0.8, 0.7, 0.55, 0.4, 0.3]) {
+    const url = canvas.toDataURL('image/webp', q);
+    if (url.startsWith('data:image/webp') && url.length <= 400_000) return url;
+    const jpg = canvas.toDataURL('image/jpeg', q);
+    if (jpg.length <= 400_000) return jpg;
+  }
+  throw new Error('That picture will not shrink under 300 KB');
+}
+
+imageInput.addEventListener('change', async () => {
+  const f = imageInput.files?.[0];
+  imageData = '';
+  if (f) {
+    try { imageData = await shrink(f); } catch (e) { $('#stone-status').textContent = e.message; }
+  }
+  renderPreview();
+});
+
+function renderPreview() {
+  const symbol = symbolInput.value.trim().toUpperCase() || 'STONE';
+  const ok = validSymbol(symbol) && validName(nameInput.value);
+  $('#preview-name').textContent = nameInput.value.trim() || 'Unnamed stone';
+  $('#preview-symbol').textContent = symbol;
+  $('#preview-description').textContent = descInput.value.trim() || 'No description.';
+  $('#preview-thumb').innerHTML = imageData ? `<img src="${esc(imageData)}" alt="" />` : `<span id="preview-letter">${esc(symbol[0] || '?')}</span>`;
+  launchButton.disabled = !ok;
+  const bond = BigInt(terms.bond || '0');
+  $('#stone-terms').textContent = terms.set
+    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy, returned at graduation.` : 'No bond.'}`
+    : 'No fee and no bond are set on this network yet.';
+  if (!ok) $('#stone-status').textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
+  else if (!/Created|refused|picture|Picture/.test($('#stone-status').textContent)) $('#stone-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
+}
+
+form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', renderPreview));
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const symbol = symbolInput.value.trim().toUpperCase();
+  if (!validSymbol(symbol) || !validName(nameInput.value)) return renderPreview();
+  launchButton.disabled = true;
+  try {
+    const description = descInput.value.trim();
+    const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim(), description, image: imageData });
+    if (!isHex(r?.token)) throw new Error('Nap did not say which coin it made');
+    let note = 'Created. It opens for trading when this epoch seals.';
+    if (r.content?.proof) {
+      const up = await fetch(`/api/content/${r.token}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: { description, image: imageData }, proof: r.content.proof }),
+      });
+      note += up.ok ? ' Picture and description attached.' : ` The picture was not attached (${(await up.json().catch(() => ({}))).error || up.status}).`;
+      content.delete(r.token);
+    }
+    $('#stone-status').textContent = note;
+    setTimeout(async () => { await loadMarket(); navigate(`/coin/${r.token}`); }, 4000);
+  } catch (e) {
+    $('#stone-status').textContent = e.message;
+  } finally {
+    launchButton.disabled = false;
+  }
 });
 
 // ---------------------------------------------------------------------------
+// Routes.
 
-renderGallery();
-renderPreview();
+function pathRoute() {
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/launch') return { view: 'launch' };
+  if (path === '/portfolio') return { view: 'portfolio' };
+  const match = path.match(/^\/coin\/([0-9a-f]{64})$/i);
+  return match ? { view: 'coin', token: match[1].toLowerCase() } : { view: 'gallery' };
+}
+
+function render() {
+  renderWallet();
+  const route = pathRoute();
+  if (route.view === 'gallery') renderGallery();
+  if (route.view === 'coin') renderCoin(route.token);
+  if (route.view === 'launch') renderPreview();
+  if (route.view === 'portfolio') renderPortfolio();
+}
+
+function syncRoute({ scroll = true } = {}) {
+  const route = pathRoute();
+  Object.entries(views).forEach(([name, view]) => { view.hidden = name !== route.view; });
+  $$('.yard-nav [data-route]').forEach((link) => {
+    if (link.dataset.route === route.view || (route.view === 'coin' && link.dataset.route === 'gallery')) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  document.body.dataset.route = route.view;
+  if (route.view !== 'coin') document.title = { gallery: 'Cave Jade', launch: 'Create a coin — Cave Jade', portfolio: 'Portfolio — Cave Jade' }[route.view];
+  if (route.view === 'coin') renderCoin(route.token, true); else render();
+  if (route.view === 'portfolio') loadMine().then(renderPortfolio);
+  if (scroll) window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function navigate(path) {
+  history_push(path);
+  syncRoute();
+}
+const history_push = (path) => window.history.pushState({}, '', path + location.search);
+
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('a[href^="/"]');
+  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  navigate(link.getAttribute('href'));
+});
+window.addEventListener('popstate', () => syncRoute());
+
+// Live: a coin page every 5 seconds (epochs are about 10), the yard every 20.
+setInterval(async () => {
+  if (document.hidden) return;
+  const route = pathRoute();
+  if (route.view !== 'coin') return;
+  await loadMarket();
+  try { history = await rpc('zyn_history', { token: route.token }); } catch { /* keep */ }
+  drawChart();
+  renderFills();
+}, 5_000);
+setInterval(() => { if (!document.hidden && pathRoute().view !== 'coin') loadMarket(); }, 20_000);
+setInterval(loadUsd, 300_000);
+
 syncRoute({ scroll: false });
 loadMarket();
-setInterval(() => { if (!document.hidden) loadMarket(); }, 30_000);
+loadUsd();
 document.documentElement.dataset.jadeReady = 'true';

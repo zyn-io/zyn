@@ -154,6 +154,7 @@ async function handle({ method, params }) {
   }
   if (method === 'nap_connect') { working_('Connected.'); return session(context()); }
   if (m.kind === 'read') { working_('Answering…'); return m.run(context(), params); }
+  if (m.kind === 'auto') { working_('Collecting what settled…'); const r = await m.run(context(), params); flash(r?.collected ? `Collected ${r.collected}.` : 'Nothing to collect yet.'); return r; }
 
   working_('Checking with the chain…');
   const plan = await m.prepare(context(), params);
@@ -232,6 +233,7 @@ function connectCard() {
 
 function approvalCard(plan) {
   return `<p class="kicker">${esc(new URL(site).host)} ASKS</p><h2>${esc(plan.title)}.</h2>
+    ${plan.image ? `<img class="cn-picture" src="${esc(plan.image)}" alt="The token's picture">` : ''}
     <dl class="rows">${plan.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
     <p class="muted">${esc(plan.note || '')}</p>
     <div class="actions"><button class="quiet" id="no">Reject</button><button class="primary${plan.danger ? ' danger' : ''}" id="yes">Approve <span>→</span></button></div>`;

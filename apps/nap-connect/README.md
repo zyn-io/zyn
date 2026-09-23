@@ -49,11 +49,12 @@ unsupported, `-32602` bad parameters.
 | `zec_pay {uri}` or `{address, amount, memo?}` | connected + approval | `{txid}` (browser) / a job (desktop) |
 | `zyn_nftOffers` | nothing (public order book) | `{offers}` |
 | `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` |
-| `zyn_nftBuy {item, pay}`, `zyn_nftList {asset, price}`, `zyn_nftCancel {asset}`, `zyn_nftRedeem {asset}`, `zyn_collect` | connected + approval | what happened |
+| `zyn_nftBuy {item, pay}`, `zyn_nftList {asset, price}`, `zyn_nftCancel {asset}`, `zyn_nftRedeem {asset}` | connected + approval | what happened |
+| `zyn_collect` | connected (no prompt: it only moves what the ledger already owes you) | what arrived |
 | `zyn_curves` | nothing (public) | `{curves, terms, curve}` |
-| `zyn_curveHoldings` | connected | `{holdings: [{token, symbol, name, amount}]}` |
-| `zyn_curveCreate {symbol, name}` | connected + approval | `{token}` |
-| `zyn_curveBuy {token, amount, minTokens?}`, `zyn_curveSell {token, tokens}`, `zyn_swap {pool, sellA, amount, slippageBps?}` | connected + approval | `{order}` — settles at the seal; collect with `zyn_collect` |
+| `zyn_curveHoldings` | connected | `{zec, holdings: [{token, symbol, name, amount}], created: [{token, symbol, name}]}` — `created` is shown only to its holder |
+| `zyn_curveCreate {symbol, name, description?, image?}` | connected + approval | `{token, content?: {hash, proof}}` — `image` is a PNG/JPEG/WebP/GIF data URL; post `{content, proof}` to your content store, which checks the proof with `verifyContentProof` (nap-web `object.js`) |
+| `zyn_curveBuy {token, amount, minTokens?}`, `zyn_curveSell {token, tokens, minZec?}`, `zyn_swap {pool, sellA, amount, slippageBps?}` | connected + approval | `{order}` — settles at the seal; collect with `zyn_collect` |
 
 Connecting shows the site the Zyn account and a Zcash address — never a
 balance, a note or a key. An unconnected site that asks for anything about

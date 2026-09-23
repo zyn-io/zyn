@@ -523,6 +523,10 @@ fn unjudged_zat(notes: &zyn_custody::shielded::PoolStores, judged: u64) -> u64 {
     total
 }
 
+/// Launchpad price history for charts (`zynzapd::market_history`): derived
+/// from this node's own state after each epoch, kept in the data dir.
+static HISTORY: std::sync::OnceLock<Mutex<zynzapd::market_history::History>> = std::sync::OnceLock::new();
+
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -797,6 +801,25 @@ fn handle(
         // The market's public face: every pool's reserves and every sale's
         // terms and raise. What a market cannot work without, and nothing
         // about who is in it (`objectvm::market`).
+        // A launchpad token's price points, for its chart and fill feed.
+        "zyn_history" => {
+            let Some(token) = field(body, "token").and_then(|h| unhex(&h)).and_then(|v| <[u8; 32]>::try_from(v).ok()) else {
+                return err("zyn_history needs the token's 64-hex address");
+            };
+            let since = field(body, "since").and_then(|s| s.parse().ok()).unwrap_or(0u64);
+            let rows: Vec<String> = HISTORY
+                .get()
+                .and_then(|h| h.lock().ok())
+                .map(|h| h.for_token(&token, since, 5_000).into_iter().map(|p| p.json().to_string()).collect())
+                .unwrap_or_default();
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{}]}}", rows.join(","))
+        }
+        // Per token: first seen, last moved, price an hour and a day ago, a
+        // day's volume. What a gallery sorts by.
+        "zyn_curveStats" => {
+            let stats = HISTORY.get().and_then(|h| h.lock().ok()).map(|h| h.stats(now_secs())).unwrap_or(serde_json::json!([]));
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", stats)
+        }
         "zyn_market" => {
             let n = node.lock().unwrap();
             format!(
@@ -2160,6 +2183,21 @@ fn main() {
         );
     }
     eprintln!("zyn-object-node: state in {}", dir);
+
+    // Chart history: look at the state every couple of seconds and record
+    // what each launchpad token did in the epochs since the last look.
+    {
+        let path = std::path::Path::new(&dir).join(format!("chain-{chain}.history"));
+        let _ = HISTORY.set(Mutex::new(zynzapd::market_history::History::load(Some(&path))));
+        let node = Arc::clone(&node);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let Ok(n) = node.lock() else { continue };
+            if let Some(Ok(mut h)) = HISTORY.get().map(|h| h.lock()) {
+                h.observe(n.state(), now_secs());
+            }
+        });
+    }
 
     // Seal on a timer, so a chain with no traffic still advances and a wallet
     // scanning it sees epochs go by rather than wondering if it is alive.
