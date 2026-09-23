@@ -24,7 +24,7 @@ const SUPPLY: u32 = 4_444;
 /// `02b01b16…`, §142). Pinned
 /// rather than recomputed: the terms must commit to a root someone checked,
 /// not to whatever a rebuild happens to produce today.
-const MANIFEST_ROOT: &str = "1479c184a8f1368d08ebf7a9ec67a691c2cef01265efb2d306f7a294a0e7eecb";
+const MANIFEST_ROOT: &str = "0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426";
 
 /// §64.17, frozen: entry / claim / open mint, in zatoshi.
 const ENTRY: u64 = 1_000_000; // 0.01 ZEC
@@ -136,12 +136,12 @@ mod tests {
         p.validate().expect("valid");
         assert_eq!(
             hex(&p.digest().unwrap()),
-            "d065ee1f1e60b008abb374d706b1d3cb5f5bec449a5caac098e861e07f478154",
+            "a572a74778052829a768adb56f84404353ee5ad188b274b36b5fa58c68500b13",
             "the policy digest is published; moving it silently is the failure"
         );
         assert_eq!(
             hex(&terms(&p).digest()),
-            "2170d45c132963f40b4e2eb512e7238d9c08e6ecf33a80688db198d2a5730396"
+            "f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e"
         );
     }
 
@@ -174,7 +174,7 @@ mod tests {
         let root = cave_randomness::manifest_root(collection_id(), &entries).unwrap();
         assert_eq!(
             hex(&root),
-            "1479c184a8f1368d08ebf7a9ec67a691c2cef01265efb2d306f7a294a0e7eecb",
+            "0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426",
             "the manifest the draw reads must be the one the terms committed to"
         );
         assert_eq!(root, policy().manifest_root);

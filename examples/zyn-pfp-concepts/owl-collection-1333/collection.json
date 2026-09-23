@@ -25,12 +25,12 @@
     "schema": "zyn-cavez-rarity/v1",
     "method": "information content: sum of -log2(share of the 4,444 with that value) over species, background, body, eyes, mouth/beak, headgear and interactive light; ranked highest first, ties by collection index; classes by rank: 1% Mythic, 4% Legendary, 10% Epic, 20% Rare, 30% Uncommon, 35% Common",
     "classes": {
-      "Mythic": 15,
-      "Legendary": 60,
-      "Epic": 129,
-      "Rare": 312,
-      "Uncommon": 413,
-      "Common": 404
+      "Mythic": 12,
+      "Legendary": 62,
+      "Epic": 130,
+      "Rare": 309,
+      "Uncommon": 415,
+      "Common": 405
     }
   },
   "detailedTraitTagging": "complete \u2014 visually categorized"

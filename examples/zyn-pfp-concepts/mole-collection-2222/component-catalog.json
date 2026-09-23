@@ -64155,36 +64155,46 @@
       }
     },
     "1943": {
-      "imageSha256": "e71711405f1164a1eb5a109a0f67b32575fdbafabc57c842485dd7300a4bbf6b",
+      "imageSha256": "1cd2e6c310ee3ce9300f1ff7df9fdd8f06f7ae32dade4cc85e5c77eec6f6b169",
       "background": {
-        "id": "moonlit-shaft",
-        "confidence": "medium",
-        "margin": 0.019642,
-        "runnerUp": "moon-blocks"
+        "id": "obsidian-cavern",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "obsidian-cavern",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "body": {
-        "id": "moonstone-scout",
-        "confidence": "low",
-        "margin": 0.002597,
-        "runnerUp": "midnight-runner"
+        "id": "obsidian-armor",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "obsidian-armor",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "eyes": {
-        "id": "hidden",
-        "confidence": "high",
-        "margin": 0.017251,
-        "runnerUp": "sleepy"
+        "id": "void-eyes",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "void-eyes",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "mouth": {
-        "id": "small-open-o",
-        "confidence": "medium",
-        "margin": 0.003312,
-        "runnerUp": "surprised-ring"
+        "id": "glowing-grin",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "glowing-grin",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "headgear": {
-        "id": "none",
-        "confidence": "low",
-        "margin": 0.002382,
-        "runnerUp": "beanie"
+        "id": "geode-crown",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "geode-crown",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       }
     },
     "1944": {
@@ -69699,36 +69709,46 @@
       }
     },
     "2111": {
-      "imageSha256": "3e7d8b3ccb28c2a07212c228e0153807c693ced89f66fce0c38405ad134446f7",
+      "imageSha256": "2de3b17ccc228aec5a1f4fa8b7c89c910e58b5836d832a2a8148cdc2e87ee8f1",
       "background": {
-        "id": "deep-black",
-        "confidence": "high",
-        "margin": 0.057706,
-        "runnerUp": "gold-vault"
+        "id": "zcash-archive",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "zcash-archive",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "body": {
-        "id": "prism-prospector",
-        "confidence": "high",
-        "margin": 0.026236,
-        "runnerUp": "aurora-suit"
+        "id": "albino-archivist",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "albino-archivist",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "eyes": {
-        "id": "sleepy",
-        "confidence": "high",
-        "margin": 0.017561,
-        "runnerUp": "gold"
+        "id": "monocle",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "monocle",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "mouth": {
-        "id": "surprised-ring",
-        "confidence": "high",
-        "margin": 0.01418,
-        "runnerUp": "small-open-o"
+        "id": "short-pipe",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "short-pipe",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "headgear": {
-        "id": "zyn-cap",
-        "confidence": "high",
-        "margin": 0.075746,
-        "runnerUp": "prism-hardhat"
+        "id": "archivist-hood",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "archivist-hood",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       }
     },
     "2112": {
@@ -70270,36 +70290,46 @@
       }
     },
     "2128": {
-      "imageSha256": "458878e4a6c2fe3098ce96165b3c64224f7be7d789c0d66bd222cd77e05b0bd4",
+      "imageSha256": "83c53cda4a09e9f0969f11aa1bb6cd9b23422730a7b32b733739c10279f37b58",
       "background": {
-        "id": "deep-black",
-        "confidence": "high",
-        "margin": 0.060156,
-        "runnerUp": "gold-vault"
+        "id": "aurora-garden",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "aurora-garden",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "body": {
-        "id": "prism-prospector",
-        "confidence": "high",
-        "margin": 0.034776,
-        "runnerUp": "aurora-suit"
+        "id": "aurora-suit",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "aurora-suit",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "eyes": {
-        "id": "sleepy",
-        "confidence": "high",
-        "margin": 0.018813,
-        "runnerUp": "gold"
+        "id": "aurora",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "aurora",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "mouth": {
-        "id": "surprised-ring",
-        "confidence": "high",
-        "margin": 0.009467,
-        "runnerUp": "small-open-o"
+        "id": "star-mouth",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "star-mouth",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "headgear": {
-        "id": "zyn-cap",
-        "confidence": "high",
-        "margin": 0.060646,
-        "runnerUp": "prism-hardhat"
+        "id": "aurora-helm",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "aurora-helm",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       }
     },
     "2129": {
@@ -70435,36 +70465,46 @@
       }
     },
     "2133": {
-      "imageSha256": "c7cca3f6cbd90cb8976d808966e248e2b7d8414047cd023e13b91ec3de18b528",
+      "imageSha256": "0be17e1c7c36b9498a890fbbc6ebf44285a557bf524409cee07611733a42c40b",
       "background": {
-        "id": "deep-black",
-        "confidence": "high",
-        "margin": 0.054805,
-        "runnerUp": "cyan-cavern"
+        "id": "subterranean-lake",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "subterranean-lake",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "body": {
-        "id": "brown-tunnel-scout",
-        "confidence": "medium",
-        "margin": 0.008523,
-        "runnerUp": "earth-miner"
+        "id": "teal-excavator",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "teal-excavator",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "eyes": {
-        "id": "hidden",
-        "confidence": "low",
-        "margin": 0.001033,
-        "runnerUp": "sleepy"
+        "id": "alert",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "alert",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "mouth": {
-        "id": "side-smirk",
-        "confidence": "low",
-        "margin": 4e-06,
-        "runnerUp": "surprised-ring"
+        "id": "small-open-o",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "small-open-o",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "headgear": {
-        "id": "black-hood",
-        "confidence": "high",
-        "margin": 0.036082,
-        "runnerUp": "beanie"
+        "id": "drill-visor",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "drill-visor",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       }
     },
     "2134": {
@@ -73313,36 +73353,46 @@
       }
     },
     "2219": {
-      "imageSha256": "d0ebe5019fa3fa4d2d73cc643586ca966823dad32e2fe16d3affb1065054b8db",
+      "imageSha256": "ba7d7d0e51c5d2942ff35873265756eebb5cede4fb34988dfdc9ed3c3831113d",
       "background": {
-        "id": "deep-black",
-        "confidence": "medium",
-        "margin": 0.017215,
-        "runnerUp": "cyan-cavern"
+        "id": "lantern-gallery",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "lantern-gallery",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "body": {
-        "id": "moonstone-scout",
-        "confidence": "high",
-        "margin": 0.014582,
-        "runnerUp": "midnight-runner"
+        "id": "solar-driller",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "solar-driller",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "eyes": {
-        "id": "hidden",
-        "confidence": "low",
-        "margin": 0.000954,
-        "runnerUp": "cyan"
+        "id": "alert",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "alert",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "mouth": {
-        "id": "surprised-ring",
-        "confidence": "medium",
-        "margin": 0.007086,
-        "runnerUp": "side-smirk"
+        "id": "neutral-dash",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "neutral-dash",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       },
       "headgear": {
-        "id": "black-hood",
-        "confidence": "medium",
-        "margin": 0.009525,
-        "runnerUp": "beanie"
+        "id": "lantern-helm",
+        "confidence": "human-reviewed",
+        "margin": 1.0,
+        "runnerUp": "lantern-helm",
+        "method": "direct replacement-board visual review",
+        "note": "Specified component verified against the final sliced replacement PNG."
       }
     },
     "2220": {
@@ -73446,7 +73496,10 @@
     }
   },
   "replacementBoard": {
-    "canvas": 34,
+    "canvases": [
+      34,
+      35
+    ],
     "tokens": [
       "0457",
       "1649",
@@ -73456,8 +73509,13 @@
       "2134",
       "2189",
       "2206",
-      "2209"
+      "2209",
+      "1943",
+      "2133",
+      "2219",
+      "2111",
+      "2128"
     ],
-    "method": "direct visual review of newly generated 3x3 atomic replacement board"
+    "method": "direct visual review of newly generated 3x3 atomic replacement boards"
   }
 }

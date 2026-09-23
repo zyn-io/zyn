@@ -2567,5 +2567,60 @@
     "sourceHeight": 137,
     "token": "2209",
     "reason": "visually duplicated portrait; replacement keeps token 2179 as the original"
+  },
+  {
+    "canvas": 28,
+    "cell": 59,
+    "row": 6,
+    "column": 9,
+    "family": "Headgear Reserve",
+    "sourceWidth": 128,
+    "sourceHeight": 132,
+    "token": "1943",
+    "reason": "visually duplicated portrait; replacement keeps token 1887 as the original"
+  },
+  {
+    "canvas": 31,
+    "cell": 40,
+    "row": 4,
+    "column": 10,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 132,
+    "sourceHeight": 144,
+    "token": "2133",
+    "reason": "visually duplicated portrait; replacement keeps token 2110 as the original"
+  },
+  {
+    "canvas": 33,
+    "cell": 6,
+    "row": 1,
+    "column": 6,
+    "family": "Clean Geometry Reserve C",
+    "sourceWidth": 123,
+    "sourceHeight": 140,
+    "token": "2219",
+    "reason": "visually duplicated portrait; replacement keeps token 2095 as the original"
+  },
+  {
+    "canvas": 31,
+    "cell": 18,
+    "row": 2,
+    "column": 8,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 126,
+    "sourceHeight": 142,
+    "token": "2111",
+    "reason": "visually duplicated portrait; replacement keeps token 2097 as the original"
+  },
+  {
+    "canvas": 31,
+    "cell": 35,
+    "row": 4,
+    "column": 5,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 124,
+    "sourceHeight": 144,
+    "token": "2128",
+    "reason": "visually duplicated portrait; replacement keeps token 2097 as the original"
   }
 ]

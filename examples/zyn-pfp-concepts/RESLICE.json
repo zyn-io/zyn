@@ -29139,8 +29139,8 @@
   {
    "image": "mole-collection-2222/images/1943.png",
    "cell": [
-    128,
-    132
+    394,
+    397
    ],
    "gutterTrim": [
     0,
@@ -29149,7 +29149,7 @@
     0
    ],
    "cropOffset": 2,
-   "sha256": "e71711405f1164a1eb5a109a0f67b32575fdbafabc57c842485dd7300a4bbf6b"
+   "sha256": "1cd2e6c310ee3ce9300f1ff7df9fdd8f06f7ae32dade4cc85e5c77eec6f6b169"
   },
   {
    "image": "mole-collection-2222/images/1944.png",
@@ -31659,8 +31659,8 @@
   {
    "image": "mole-collection-2222/images/2111.png",
    "cell": [
-    126,
-    142
+    394,
+    392
    ],
    "gutterTrim": [
     0,
@@ -31668,8 +31668,8 @@
     0,
     0
    ],
-   "cropOffset": 8,
-   "sha256": "3e7d8b3ccb28c2a07212c228e0153807c693ced89f66fce0c38405ad134446f7"
+   "cropOffset": 1,
+   "sha256": "2de3b17ccc228aec5a1f4fa8b7c89c910e58b5836d832a2a8148cdc2e87ee8f1"
   },
   {
    "image": "mole-collection-2222/images/2112.png",
@@ -31914,8 +31914,8 @@
   {
    "image": "mole-collection-2222/images/2128.png",
    "cell": [
-    124,
-    144
+    383,
+    392
    ],
    "gutterTrim": [
     0,
@@ -31923,8 +31923,8 @@
     0,
     0
    ],
-   "cropOffset": 10,
-   "sha256": "458878e4a6c2fe3098ce96165b3c64224f7be7d789c0d66bd222cd77e05b0bd4"
+   "cropOffset": 4,
+   "sha256": "83c53cda4a09e9f0969f11aa1bb6cd9b23422730a7b32b733739c10279f37b58"
   },
   {
    "image": "mole-collection-2222/images/2129.png",
@@ -31989,8 +31989,8 @@
   {
    "image": "mole-collection-2222/images/2133.png",
    "cell": [
-    132,
-    144
+    383,
+    397
    ],
    "gutterTrim": [
     0,
@@ -31998,8 +31998,8 @@
     0,
     0
    ],
-   "cropOffset": 6,
-   "sha256": "c7cca3f6cbd90cb8976d808966e248e2b7d8414047cd023e13b91ec3de18b528"
+   "cropOffset": 7,
+   "sha256": "0be17e1c7c36b9498a890fbbc6ebf44285a557bf524409cee07611733a42c40b"
   },
   {
    "image": "mole-collection-2222/images/2134.png",
@@ -33279,8 +33279,8 @@
   {
    "image": "mole-collection-2222/images/2219.png",
    "cell": [
-    123,
-    140
+    395,
+    397
    ],
    "gutterTrim": [
     0,
@@ -33288,8 +33288,8 @@
     0,
     0
    ],
-   "cropOffset": 8,
-   "sha256": "d0ebe5019fa3fa4d2d73cc643586ca966823dad32e2fe16d3affb1065054b8db"
+   "cropOffset": 1,
+   "sha256": "ba7d7d0e51c5d2942ff35873265756eebb5cede4fb34988dfdc9ed3c3831113d"
   },
   {
    "image": "mole-collection-2222/images/2220.png",

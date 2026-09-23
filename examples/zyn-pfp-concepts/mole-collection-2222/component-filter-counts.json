@@ -5,12 +5,12 @@
     "background": {
       "counts": {
         "ancient-rail": 77,
-        "aurora-garden": 47,
+        "aurora-garden": 48,
         "biolume-fungus": 93,
         "burrow-cross-section": 16,
         "crystal-geode": 40,
         "cyan-cavern": 210,
-        "deep-black": 312,
+        "deep-black": 308,
         "dust-chamber": 390,
         "eclipse-gate": 12,
         "encrypted-mine": 6,
@@ -18,36 +18,36 @@
         "genesis-core": 27,
         "gold-vault": 14,
         "gold-vein": 15,
-        "lantern-gallery": 161,
+        "lantern-gallery": 162,
         "moon-blocks": 3,
-        "moonlit-shaft": 141,
+        "moonlit-shaft": 140,
         "node-chamber": 24,
         "node-reactor": 232,
-        "obsidian-cavern": 52,
+        "obsidian-cavern": 53,
         "prism-archive": 79,
         "prism-quarry": 90,
         "quantum-tunnel": 4,
         "root-network": 15,
         "shielded-pool": 120,
         "shielded-vault-door": 29,
-        "subterranean-lake": 1,
-        "zcash-archive": 2,
+        "subterranean-lake": 2,
+        "zcash-archive": 3,
         "zero-field": 4
       },
       "confidence": {
-        "high": 769,
-        "human-reviewed": 9,
+        "high": 766,
+        "human-reviewed": 14,
         "low": 556,
-        "medium": 888
+        "medium": 886
       }
     },
     "body": {
       "counts": {
-        "albino-archivist": 68,
+        "albino-archivist": 69,
         "ash-surveyor": 198,
-        "aurora-suit": 29,
+        "aurora-suit": 30,
         "biolume-keeper": 8,
-        "brown-tunnel-scout": 282,
+        "brown-tunnel-scout": 281,
         "charcoal-hoodie": 263,
         "copper-engineer": 1,
         "cream-geologist": 29,
@@ -57,28 +57,28 @@
         "genesis-robe": 18,
         "gold-dust-keeper": 45,
         "midnight-runner": 289,
-        "moonstone-scout": 224,
+        "moonstone-scout": 222,
         "moss-burrower": 25,
-        "obsidian-armor": 6,
-        "prism-prospector": 38,
+        "obsidian-armor": 7,
+        "prism-prospector": 36,
         "shielded-white": 1,
         "silver-node-technician": 55,
-        "solar-driller": 2,
-        "teal-excavator": 273,
+        "solar-driller": 3,
+        "teal-excavator": 274,
         "vault-warden": 115,
         "violet-cipher": 24
       },
       "confidence": {
-        "high": 774,
-        "human-reviewed": 9,
-        "low": 556,
-        "medium": 883
+        "high": 771,
+        "human-reviewed": 14,
+        "low": 555,
+        "medium": 882
       }
     },
     "eyes": {
       "counts": {
-        "alert": 6,
-        "aurora": 65,
+        "alert": 8,
+        "aurora": 66,
         "bioluminescent": 83,
         "cipher-crosshair": 2,
         "cyan": 259,
@@ -87,26 +87,26 @@
         "eclipse": 17,
         "geode-lenses": 6,
         "gold": 58,
-        "hidden": 238,
+        "hidden": 235,
         "infrared": 6,
         "laser": 2,
         "luminous-white": 68,
-        "monocle": 40,
+        "monocle": 41,
         "moonlit": 13,
         "node-scan": 501,
         "pixel-shades": 5,
         "prism": 6,
         "round-goggles": 181,
         "scarred": 3,
-        "sleepy": 344,
+        "sleepy": 342,
         "starlight": 1,
         "suspicious": 17,
-        "void-eyes": 12
+        "void-eyes": 13
       },
       "confidence": {
-        "high": 769,
-        "human-reviewed": 13,
-        "low": 553,
+        "high": 766,
+        "human-reviewed": 18,
+        "low": 551,
         "medium": 887
       }
     },
@@ -119,39 +119,39 @@
         "diamond-vent": 1,
         "dust-mask": 16,
         "friendly-smile": 1,
-        "glowing-grin": 1,
+        "glowing-grin": 2,
         "gold-tooth": 38,
-        "neutral-dash": 50,
-        "short-pipe": 15,
-        "side-smirk": 682,
+        "neutral-dash": 51,
+        "short-pipe": 16,
+        "side-smirk": 681,
         "signal-grille": 1,
         "signal-whistle": 62,
         "small-open-o": 611,
-        "star-mouth": 21,
-        "surprised-ring": 587
+        "star-mouth": 22,
+        "surprised-ring": 584
       },
       "confidence": {
-        "high": 773,
-        "human-reviewed": 12,
-        "low": 556,
-        "medium": 881
+        "high": 771,
+        "human-reviewed": 17,
+        "low": 555,
+        "medium": 879
       }
     },
     "headgear": {
       "counts": {
-        "archivist-hood": 22,
-        "aurora-helm": 145,
+        "archivist-hood": 23,
+        "aurora-helm": 146,
         "beanie": 14,
-        "black-hood": 50,
+        "black-hood": 48,
         "cipher-mining-rig": 43,
-        "drill-visor": 41,
+        "drill-visor": 42,
         "genesis-helm": 5,
-        "geode-crown": 64,
-        "lantern-helm": 201,
+        "geode-crown": 65,
+        "lantern-helm": 202,
         "miner-helmet": 293,
         "moon-halo": 20,
         "node-headset": 14,
-        "none": 90,
+        "none": 89,
         "prism-hardhat": 234,
         "prospector-goggles": 225,
         "rail-conductor-cap": 26,
@@ -160,13 +160,13 @@
         "tunnel-lamp": 480,
         "vault-crown": 32,
         "zero-field-halo": 2,
-        "zyn-cap": 137
+        "zyn-cap": 135
       },
       "confidence": {
-        "high": 772,
-        "human-reviewed": 12,
-        "low": 554,
-        "medium": 884
+        "high": 769,
+        "human-reviewed": 17,
+        "low": 553,
+        "medium": 883
       }
     }
   }

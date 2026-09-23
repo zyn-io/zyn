@@ -730,7 +730,7 @@ mod tests {
         // it matches what zyn-cave-manifest hashed into the root.
         assert_eq!(
             hex(&m[&0]),
-            "fdd5ddd8363c800e9f84bff82d8d209d4bfa93f6df82db2a6d5273c0c7595b3b"
+            "13ec006b3d3f21813048be3620342cd60ba8fe9d95971c0bbccd4eb1d1714abe"
         );
     }
 

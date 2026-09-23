@@ -18,7 +18,7 @@ Zyn collection on Zcash.
 - `component-review-overrides.json`: reproducible direct-review corrections for inspected edge cases
 - `component-filter-counts.json`: verified per-category counts for store menus
 - `previews/`: collection overview and boundary QA sheets
-- `previews/qa-duplicate-replacements.png`: the nine reviewed visual-duplicate replacements
+- `previews/qa-duplicate-replacements.png`: all reviewed visual-duplicate replacements
 
 ## Production rule
 
@@ -34,7 +34,8 @@ cells are edge-padded to square and receive one uniform nearest-neighbor resize 
 192×192. The exporter never crops into the portrait and never stretches one axis
 independently.
 
-No rarity tiers or rarity scores are assigned. Metadata exposes `Species`,
+Rarity is derived from the visible filter traits across the complete 4,444-item
+collection and is recalculated after component changes. Metadata exposes `Species`,
 `Visual Family`, `Interactive Light`, `Background`, `Body`, `Eyes`, `Mouth` and
 `Headgear` as store filters, plus a stable `zyn-light-v1` viewer contract.
 Component IDs describe visually reviewed categories in the atomic artwork; they
@@ -43,12 +44,13 @@ remain in the catalog for later audit.
 
 ## Visual duplicate replacements
 
-Canvas 34 is a strict 3 × 3 atomic board generated from the approved Mole
-component vocabulary. It replaces only the later portraits in the visually
-repeated groups: `0457`, `1649`, `1674`, `1727`, `2117`, `2134`, `2189`,
-`2206` and `2209`. The first occurrence in each reported group remains in its
-original slot. The replacement mapping and directly reviewed component tags are
-encoded in the builder, source map and component catalog.
+Canvases 34 and 35 are strict 3 × 3 atomic boards generated from the approved
+Mole component vocabulary. They replace only the later portraits in visually
+repeated groups. The first occurrence in each reported group remains in its
+original slot. Canvas 34 supplies `0457`, `1649`, `1674`, `1727`, `2117`,
+`2134`, `2189`, `2206` and `2209`; canvas 35 supplies `1943`, `2133`, `2219`,
+`2111` and `2128`. The replacement mapping and directly reviewed component
+tags are encoded in the builder, source map and component catalog.
 
 Rebuild with:
 

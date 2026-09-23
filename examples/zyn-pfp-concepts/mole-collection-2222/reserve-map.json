@@ -610,5 +610,41 @@
     "family": "Clean Geometry Reserve C",
     "sourceWidth": 123,
     "sourceHeight": 131
+  },
+  {
+    "canvas": 35,
+    "cell": 6,
+    "row": 2,
+    "column": 3,
+    "family": "Duplicate Replacement Board B",
+    "sourceWidth": 395,
+    "sourceHeight": 392
+  },
+  {
+    "canvas": 35,
+    "cell": 7,
+    "row": 3,
+    "column": 1,
+    "family": "Duplicate Replacement Board B",
+    "sourceWidth": 394,
+    "sourceHeight": 381
+  },
+  {
+    "canvas": 35,
+    "cell": 8,
+    "row": 3,
+    "column": 2,
+    "family": "Duplicate Replacement Board B",
+    "sourceWidth": 383,
+    "sourceHeight": 381
+  },
+  {
+    "canvas": 35,
+    "cell": 9,
+    "row": 3,
+    "column": 3,
+    "family": "Duplicate Replacement Board B",
+    "sourceWidth": 395,
+    "sourceHeight": 381
   }
 ]

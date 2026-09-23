@@ -19425,13 +19425,14 @@
   },
   {
     "id": "MOLE-1943",
-    "canvas": 28,
-    "cell": 59,
-    "row": 6,
-    "column": 9,
-    "family": "Headgear Reserve",
-    "sourceWidth": 128,
-    "sourceHeight": 132
+    "canvas": 35,
+    "cell": 1,
+    "row": 1,
+    "column": 1,
+    "family": "Afterglow and Eclipse",
+    "sourceWidth": 394,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "1887"
   },
   {
     "id": "MOLE-1944",
@@ -21105,13 +21106,14 @@
   },
   {
     "id": "MOLE-2111",
-    "canvas": 31,
-    "cell": 18,
+    "canvas": 35,
+    "cell": 4,
     "row": 2,
-    "column": 8,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 126,
-    "sourceHeight": 142
+    "column": 1,
+    "family": "Archivists and Geologists",
+    "sourceWidth": 394,
+    "sourceHeight": 392,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2112",
@@ -21276,13 +21278,14 @@
   },
   {
     "id": "MOLE-2128",
-    "canvas": 31,
-    "cell": 35,
-    "row": 4,
-    "column": 5,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 124,
-    "sourceHeight": 144
+    "canvas": 35,
+    "cell": 5,
+    "row": 2,
+    "column": 2,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 383,
+    "sourceHeight": 392,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2129",
@@ -21326,13 +21329,14 @@
   },
   {
     "id": "MOLE-2133",
-    "canvas": 31,
-    "cell": 40,
-    "row": 4,
-    "column": 10,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 132,
-    "sourceHeight": 144
+    "canvas": 35,
+    "cell": 2,
+    "row": 1,
+    "column": 2,
+    "family": "Caustics and Veiled Light",
+    "sourceWidth": 383,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "2110"
   },
   {
     "id": "MOLE-2134",
@@ -22190,13 +22194,14 @@
   },
   {
     "id": "MOLE-2219",
-    "canvas": 33,
-    "cell": 6,
+    "canvas": 35,
+    "cell": 3,
     "row": 1,
-    "column": 6,
-    "family": "Clean Geometry Reserve C",
-    "sourceWidth": 123,
-    "sourceHeight": 140
+    "column": 3,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 395,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "2095"
   },
   {
     "id": "MOLE-2220",

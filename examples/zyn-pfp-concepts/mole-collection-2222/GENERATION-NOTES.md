@@ -52,6 +52,7 @@ approved Mole variant study as visual references.
 32. Clean Geometry Reserve B
 33. Clean Geometry Reserve C
 34. Visual Duplicate Replacement Board
+35. Visual Duplicate Replacement Board B
 
 ## Source-board correction
 
@@ -84,6 +85,11 @@ portraits. The first member of each group is retained and the later slots are
 replaced. The new cells use distinct geode, rail, root, cipher, moon, prism,
 shielded, gold-vein and node recipes, and their final component metadata was
 reviewed directly against the sliced PNGs.
+
+A second review found the repeated templates `1887/1943`, `2110/2133`,
+`2095/2219` and `2097/2111/2128`. Canvas 35 replaces the later slots `1943`,
+`2133`, `2219`, `2111` and `2128` with obsidian, teal, solar, archivist and
+aurora component recipes. Its remaining four complete cells stay in reserve.
 
 ## Clean slicing policy
 
