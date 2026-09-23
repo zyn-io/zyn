@@ -277,6 +277,8 @@ pub enum Op {
         creator: AccountId,
         quote: Address,
         fee_bps: u32,
+        /// The most items that will ever exist.
+        cap: u32,
     },
     /// A deposit with the bridge fee taken from it: the vault received
     /// `gross`, the depositor's note is `amount`, the difference goes to the
@@ -290,6 +292,28 @@ pub enum Op {
         nonce: Hash,
         enc: EncryptedNote,
         external_ref: Hash,
+    },
+    /// List an item for sale, paid by claim. The listing publishes the
+    /// item's nullifier, so a buyer can retire it, and names no seller: the
+    /// proceeds go to a claim only the seller's nonce finds.
+    List {
+        seller: AccountId,
+        program: ProgramId,
+        item: Hash,
+        item_nullifier: Hash,
+        price_asset: Address,
+        price_amount: Fixed,
+        expires_at_epoch: u64,
+        nonce: Hash,
+    },
+    /// Mint one item of a registered collection to its buyer. Operator only.
+    MintItem {
+        program: ProgramId,
+        collection: Address,
+        serial: u32,
+        owner: AccountId,
+        nonce: Hash,
+        enc: EncryptedNote,
     },
     /// Burn items for their share of the collection's floor.
     Redeem {
@@ -890,7 +914,16 @@ impl ObjectVm {
         }
         // A collection with terms charges each side `fee_bps` of the price:
         // the seller out of the proceeds, the buyer on top (DECISIONS §69.9).
-        let terms = self.market.collections.get(&item_note.asset).copied();
+        let terms = self.market.terms_for(&item_note.asset).map(|(_, t)| t);
+        let collection = self.market.items.get(&item_note.asset).map(|i| i.collection);
+        // A `List`ed item pays its seller by claim; the buyer's outputs are
+        // the item and their own change, and never name the seller.
+        let listing = self.market.listings.get(item).copied();
+        if let Some(l) = &listing {
+            if *item_nullifier != l.nullifier {
+                return vec![Receipt::Refused("that is not the listed item's nullifier")];
+            }
+        }
         let each = match &terms {
             Some(t) => {
                 if offer.price_asset != t.quote {
@@ -903,7 +936,7 @@ impl ObjectVm {
             }
             None => Fixed::ZERO,
         };
-        if paid < offer.price_amount.0 - each.0 {
+        if listing.is_none() && paid < offer.price_amount.0 - each.0 {
             return vec![Receipt::Refused("the seller was not paid the asking price")];
         }
         if !created.iter().any(|(_, n)| {
@@ -928,10 +961,12 @@ impl ObjectVm {
                 None => return vec![Receipt::Refused("output overflow")],
             };
         }
-        // Both sides' fees leave the traders for the pots.
-        if each.0 > 0 {
+        // Both sides' fees leave the traders for the pots, and a listed
+        // item's proceeds leave them for the seller's claim.
+        let into_market = each.0 * 2 + if listing.is_some() { offer.price_amount.0 - each.0 } else { 0 };
+        if into_market > 0 {
             let q = delta.entry(offer.price_asset).or_insert(0);
-            *q = match q.checked_sub(each.0 * 2) {
+            *q = match q.checked_sub(into_market) {
                 Some(v) => v,
                 None => return vec![Receipt::Refused("fee overflow")],
             };
@@ -956,13 +991,17 @@ impl ObjectVm {
         }
         *self.accounts.entry(*buyer).or_insert(0) += 1;
         self.accounts.entry(offer.seller).or_insert(0);
-        if let (Some(t), true) = (terms, each.0 > 0) {
+        if let (Some(t), Some(coll), true) = (terms, collection, each.0 > 0) {
             let (to_pol, to_floor, to_creator) = market::resale_split(Fixed(each.0 * 2));
             let _ = self.market.to_pol(t.quote, to_pol);
             self.market
                 .collections
-                .insert(item_note.asset, market::CollectionTerms { floor: Fixed(t.floor.0 + to_floor.0), ..t });
+                .insert(coll, market::CollectionTerms { floor: Fixed(t.floor.0 + to_floor.0), ..t });
             self.market.pay(&market::sale_fee_source(item), 0, t.creator, t.quote, to_creator);
+        }
+        if let Some(l) = listing {
+            self.market.listings.remove(item);
+            self.market.pay(&l.source, 0, offer.seller, offer.price_asset, Fixed(offer.price_amount.0 - each.0));
         }
 
         vec![Receipt::Taken {
@@ -1188,6 +1227,54 @@ impl ObjectVm {
     }
 }
 
+impl ObjectVm {
+    /// The checks and the encumbrance every listing shares.
+    fn list(
+        &mut self,
+        seller: &AccountId,
+        item: &Hash,
+        price_asset: &Address,
+        price_amount: &Fixed,
+        expires_at_epoch: &u64,
+    ) -> Result<(), &'static str> {
+
+                let note = match self.live.get(item) {
+                    Some(n) => *n,
+                    None => return Err("no such live object"),
+                };
+                if &note.owner != seller {
+                    return Err("not the seller's object");
+                }
+                if self.offers.contains_key(item) {
+                    return Err("already listed");
+                }
+                if let Some((_, t)) = self.market.terms_for(&note.asset) {
+                    if *price_asset != t.quote {
+                        return Err("this collection trades in its quote asset");
+                    }
+                }
+                // A negative asking price is satisfied by any payment at
+                // all, including none, because the claim path only checks
+                // the seller was paid *at least* this much.
+                if price_amount.0 <= 0 {
+                    return Err("a listing needs a price above nothing");
+                }
+                if *expires_at_epoch < self.epoch {
+                    return Err("already expired");
+                }
+                self.offers.insert(
+                    *item,
+                    Offer {
+                        seller: *seller,
+                        price_asset: *price_asset,
+                        price_amount: *price_amount,
+                        expires_at_epoch: *expires_at_epoch,
+                    },
+                );
+        Ok(())
+    }
+}
+
 impl MicrochainVm for ObjectVm {
     type Intent = Op;
     type Receipt = Receipt;
@@ -1361,39 +1448,16 @@ impl MicrochainVm for ObjectVm {
                 if *program != program::place_offer() {
                     return vec![Receipt::Refused("wrong program for a listing")];
                 }
-                let note = match self.live.get(item) {
-                    Some(n) => *n,
-                    None => return vec![Receipt::Refused("no such live object")],
-                };
-                if &note.owner != seller {
-                    return vec![Receipt::Refused("not the seller's object")];
-                }
-                if self.offers.contains_key(item) {
-                    return vec![Receipt::Refused("already listed")];
-                }
-                if let Some(t) = self.market.collections.get(&note.asset) {
-                    if *price_asset != t.quote {
-                        return vec![Receipt::Refused("this collection trades in its quote asset")];
+                // A collection's items sell through `List`, which pays the
+                // seller by claim and publishes the nullifier the sale needs.
+                if let Some(n) = self.live.get(item) {
+                    if self.market.items.contains_key(&n.asset) {
+                        return vec![Receipt::Refused("list a collection's items with List")];
                     }
                 }
-                // A negative asking price is satisfied by any payment at
-                // all, including none, because the claim path only checks
-                // the seller was paid *at least* this much.
-                if price_amount.0 <= 0 {
-                    return vec![Receipt::Refused("a listing needs a price above nothing")];
+                if let Err(why) = self.list(seller, item, price_asset, price_amount, expires_at_epoch) {
+                    return vec![Receipt::Refused(why)];
                 }
-                if *expires_at_epoch < self.epoch {
-                    return vec![Receipt::Refused("already expired")];
-                }
-                self.offers.insert(
-                    *item,
-                    Offer {
-                        seller: *seller,
-                        price_asset: *price_asset,
-                        price_amount: *price_amount,
-                        expires_at_epoch: *expires_at_epoch,
-                    },
-                );
                 vec![Receipt::Listed { item: *item }]
             }
             Op::CancelOffer {
@@ -1407,6 +1471,7 @@ impl MicrochainVm for ObjectVm {
                 match self.offers.get(item) {
                     Some(o) if &o.seller == seller => {
                         self.offers.remove(item);
+                        self.market.listings.remove(item);
                         vec![Receipt::Delisted { item: *item }]
                     }
                     Some(_) => vec![Receipt::Refused("not the seller's listing")],
@@ -1551,7 +1616,7 @@ impl MicrochainVm for ObjectVm {
                 self.market.schedule = Some(market::FeeSchedule { bridge_bps: *bridge_bps });
                 vec![Receipt::FeesSet { bridge_bps: *bridge_bps }]
             }
-            Op::RegisterCollection { program, asset, creator, quote, fee_bps } => {
+            Op::RegisterCollection { program, asset, creator, quote, fee_bps, cap } => {
                 if *program != program::register_collection() {
                     return vec![Receipt::Refused("wrong program for a collection")];
                 }
@@ -1564,9 +1629,20 @@ impl MicrochainVm for ObjectVm {
                 if self.market.collections.contains_key(asset) {
                     return vec![Receipt::Refused("that collection already has its terms")];
                 }
+                if *cap == 0 {
+                    return vec![Receipt::Refused("a collection has at least one item")];
+                }
                 self.market.collections.insert(
                     *asset,
-                    market::CollectionTerms { creator: *creator, quote: *quote, fee_bps: *fee_bps, floor: Fixed::ZERO },
+                    market::CollectionTerms {
+                        creator: *creator,
+                        quote: *quote,
+                        fee_bps: *fee_bps,
+                        floor: Fixed::ZERO,
+                        cap: *cap,
+                        minted: 0,
+                        outstanding: 0,
+                    },
                 );
                 vec![Receipt::CollectionRegistered { asset: *asset }]
             }
@@ -1582,6 +1658,36 @@ impl MicrochainVm for ObjectVm {
                 }
                 self.credit_deposit(*asset, *gross, *amount, fee, owner, nonce, enc, external_ref)
             }
+            Op::List {
+                seller,
+                program,
+                item,
+                item_nullifier,
+                price_asset,
+                price_amount,
+                expires_at_epoch,
+                nonce,
+            } => {
+                if *program != program::place_offer() {
+                    return vec![Receipt::Refused("wrong program for a listing")];
+                }
+                if self.nullifiers.contains(item_nullifier) || *item_nullifier == [0u8; 32] {
+                    return vec![Receipt::Refused("that nullifier is spent")];
+                }
+                if let Err(why) = self.list(seller, item, price_asset, price_amount, expires_at_epoch) {
+                    return vec![Receipt::Refused(why)];
+                }
+                self.market.listings.insert(
+                    *item,
+                    market::Listing { source: market::listing_source(seller, nonce), nullifier: *item_nullifier },
+                );
+                vec![Receipt::Listed { item: *item }]
+            }
+            Op::MintItem { program, collection, serial, owner, nonce, enc } => one(if *program != program::mint_item() {
+                Err("wrong program for a mint")
+            } else {
+                self.apply_mint_item(collection, *serial, owner, nonce, enc)
+            }),
             Op::Redeem { holder, program, asset, inputs } => one(if *program != program::redeem_item() {
                 Err("wrong program for a redemption")
             } else {
@@ -1672,7 +1778,7 @@ impl MicrochainVm for ObjectVm {
     fn intent_authorities(intent: &Op) -> Vec<AccountId> {
         match intent {
             Op::Spend { spender, .. } => vec![*spender],
-            Op::PlaceOffer { seller, .. } | Op::CancelOffer { seller, .. } => vec![*seller],
+            Op::PlaceOffer { seller, .. } | Op::CancelOffer { seller, .. } | Op::List { seller, .. } => vec![*seller],
             // Only the buyer signs a claim. The seller's consent was given
             // when they listed, and requiring it again would make every sale
             // need them online (§132.2).
@@ -2001,8 +2107,8 @@ impl MicrochainVm for ObjectVm {
             Op::SetFees { program, bridge_bps } => {
                 e.u8(17).bytes(&program.0).u32(*bridge_bps);
             }
-            Op::RegisterCollection { program, asset, creator, quote, fee_bps } => {
-                e.u8(18).bytes(&program.0).bytes(asset).bytes(creator).bytes(quote).u32(*fee_bps);
+            Op::RegisterCollection { program, asset, creator, quote, fee_bps, cap } => {
+                e.u8(18).bytes(&program.0).bytes(asset).bytes(creator).bytes(quote).u32(*fee_bps).u32(*cap);
             }
             Op::DepositWithFee { program, asset, gross, amount, owner, nonce, enc, external_ref } => {
                 e.u8(19)
@@ -2020,6 +2126,28 @@ impl MicrochainVm for ObjectVm {
             Op::Redeem { holder, program, asset, inputs } => {
                 e.u8(20).bytes(holder).bytes(&program.0).bytes(asset);
                 wire::inputs(&mut e, inputs);
+            }
+            Op::List { seller, program, item, item_nullifier, price_asset, price_amount, expires_at_epoch, nonce } => {
+                e.u8(21)
+                    .bytes(seller)
+                    .bytes(&program.0)
+                    .bytes(item)
+                    .bytes(item_nullifier)
+                    .bytes(price_asset)
+                    .fixed(*price_amount)
+                    .u64(*expires_at_epoch)
+                    .bytes(nonce);
+            }
+            Op::MintItem { program, collection, serial, owner, nonce, enc } => {
+                e.u8(22)
+                    .bytes(&program.0)
+                    .bytes(collection)
+                    .u32(*serial)
+                    .bytes(owner)
+                    .bytes(nonce)
+                    .bytes(&enc.epk)
+                    .u32(enc.ciphertext.len() as u32)
+                    .bytes(&enc.ciphertext);
             }
             Op::Seal => {
                 e.u8(0);
@@ -2281,6 +2409,7 @@ impl MicrochainVm for ObjectVm {
                 creator: d.account().ok()?,
                 quote: d.hash().ok()?,
                 fee_bps: d.u32().ok()?,
+                cap: d.u32().ok()?,
             }),
             19 => {
                 let program = ProgramId(d.hash().ok()?);
@@ -2310,6 +2439,27 @@ impl MicrochainVm for ObjectVm {
                 asset: d.hash().ok()?,
                 inputs: wire::read_inputs(d)?,
             }),
+            21 => Some(Op::List {
+                seller: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                item: d.hash().ok()?,
+                item_nullifier: d.hash().ok()?,
+                price_asset: d.hash().ok()?,
+                price_amount: d.fixed().ok()?,
+                expires_at_epoch: d.u64().ok()?,
+                nonce: d.hash().ok()?,
+            }),
+            22 => {
+                let program = ProgramId(d.hash().ok()?);
+                let collection = d.hash().ok()?;
+                let serial = d.u32().ok()?;
+                let owner = d.account().ok()?;
+                let nonce = d.hash().ok()?;
+                let epk = d.hash().ok()?;
+                let n = d.u32().ok()? as usize;
+                let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                Some(Op::MintItem { program, collection, serial, owner, nonce, enc: EncryptedNote { epk, ciphertext } })
+            }
             _ => None,
         }
     }
@@ -2827,6 +2977,31 @@ pub mod ingress {
             enc,
             external_ref: txid,
         })
+    }
+}
+
+/// The primary sale's delivery: an item minted to its buyer as a note sealed
+/// to the viewing key they registered, so their wallet finds it.
+pub mod primary {
+    use super::*;
+    use zyn_vm::note_enc::{seal, StaticSecret};
+
+    pub fn mint_item(
+        vm: &ObjectVm,
+        collection: Address,
+        serial: u32,
+        owner: AccountId,
+        nonce: Hash,
+        ephemeral: StaticSecret,
+    ) -> Result<Op, &'static str> {
+        let to = vm.viewing.get(&owner).copied().ok_or("the buyer has not registered where to be paid")?;
+        let asset = market::item_asset(&collection, serial);
+        let mut plain = Vec::with_capacity(80);
+        plain.extend_from_slice(&asset);
+        plain.extend_from_slice(&market::ITEM_UNIT.0.to_be_bytes());
+        plain.extend_from_slice(&nonce);
+        let enc = seal(&to, ephemeral, &plain).map_err(|_| "cannot seal the item")?;
+        Ok(Op::MintItem { program: program::mint_item(), collection, serial, owner, nonce, enc })
     }
 }
 

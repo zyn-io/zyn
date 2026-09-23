@@ -114,3 +114,19 @@ test('a Withdraw intent encodes to exactly the bytes Rust produces', async () =>
   const bytes = withdrawIntent({ holder: OWNER, inputs, asset: ZEC, amount: W(3), destination: new Uint8Array(32).fill(0xde), outputs: change });
   assert.equal(hex(bytes), v.withdraw);
 });
+
+/// The NFT cycle's bytes and ids, held to Rust's.
+test('item identity, listing sources and the NFT intents match the Rust side', () => {
+  assert.equal(hex(m.itemAsset(TOKEN, 7)), v.item_asset_serial_7);
+  assert.equal(hex(m.listingSource(OWNER, NONCE)), v.listing_source);
+  const item = new Uint8Array(32).fill(0xc1);
+  assert.equal(hex(m.saleFeeSource(item)), v.sale_fee_source);
+  assert.equal(hex(m.redemptionSource(item)), v.redemption_source);
+  assert.equal(hex(m.listIntent({
+    seller: OWNER, item, itemNullifier: new Uint8Array(32).fill(0xd1), priceAsset: ZEC,
+    priceAmount: W(2), expiresAtEpoch: 99_999, nonce: NONCE,
+  })), v.list);
+  assert.equal(hex(m.cancelOfferIntent({ seller: OWNER, item })), v.cancel_offer);
+  assert.equal(hex(m.takeOfferIntent({ buyer: OWNER, item, itemNullifier: new Uint8Array(32).fill(0xd1), payment: inputs, outputs: change })), v.take_offer);
+  assert.equal(hex(m.redeemIntent({ holder: OWNER, collection: TOKEN, inputs })), v.redeem);
+});

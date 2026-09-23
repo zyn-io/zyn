@@ -408,6 +408,17 @@ fn record(pub_log: &mut Published, op: &Op) {
                 add(&c, enc);
             }
         }
+        Op::MintItem { collection, serial, owner, nonce, enc, .. } => {
+            let note = zyn_vm::object::Note {
+                asset: objectvm::market::item_asset(collection, *serial),
+                amount: objectvm::market::ITEM_UNIT,
+                owner: *owner,
+                nonce: *nonce,
+            };
+            if let Ok(c) = zyn_vm::object::commitment(&note) {
+                add(&c, enc);
+            }
+        }
         other => {
             for n in other.retired() {
                 pub_log.nullifiers.push(hex(&n));
@@ -621,13 +632,28 @@ fn handle(
             let rows: Vec<String> = vm
                 .offers
                 .iter()
-                .take(25)
+                .take(1000)
                 .map(|(item, o)| {
+                    let asset = vm.live.get(item).map(|x| x.asset).unwrap_or([0u8; 32]);
+                    let info = vm.market.items.get(&asset);
+                    let fee = vm
+                        .market
+                        .terms_for(&asset)
+                        .and_then(|(_, t)| objectvm::market::fee_of(o.price_amount, t.fee_bps))
+                        .unwrap_or(zyn_vm::Fixed::ZERO);
+                    let listing = vm.market.listings.get(item);
                     format!(
-                        "{{\"item\":\"{}\",\"price_asset\":\"{}\",\"price\":\"{}\",\"expires_at_epoch\":{}}}",
+                        "{{\"item\":\"{}\",\"asset\":\"{}\",\"collection\":\"{}\",\"serial\":{},\"price_asset\":\"{}\",\"price\":\"{}\",\"price_raw\":\"{}\",\"fee_raw\":\"{}\",\"pay_raw\":\"{}\",\"nullifier\":\"{}\",\"expires_at_epoch\":{}}}",
                         hex(item),
+                        hex(&asset),
+                        info.map(|i| hex(&i.collection)).unwrap_or_default(),
+                        info.map(|i| i.serial as i64).unwrap_or(-1),
                         hex(&o.price_asset),
                         o.price_amount,
+                        o.price_amount.0,
+                        fee.0,
+                        o.price_amount.0 + fee.0,
+                        listing.map(|l| hex(&l.nullifier)).unwrap_or_default(),
                         o.expires_at_epoch
                     )
                 })
@@ -636,6 +662,70 @@ fn handle(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"total\":{},\"offers\":[{}]}}}}",
                 vm.offers.len(),
                 rows.join(",")
+            )
+        }
+        // Which collection and serial an item asset is. Public: an item's
+        // identity is in the collection's manifest already.
+        "zyn_items" => {
+            let Some(list) = field(body, "assets") else {
+                return err("no assets");
+            };
+            let n = node.lock().unwrap();
+            let vm = n.state();
+            let mut rows = Vec::new();
+            for a in list.split(',').filter(|s| !s.is_empty()).take(512) {
+                let Some(asset) = unhex(a).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                    return err("an asset is not 32 hex bytes");
+                };
+                if let Some(i) = vm.market.items.get(&asset) {
+                    rows.push(format!(
+                        "{{\"asset\":\"{}\",\"collection\":\"{}\",\"serial\":{}}}",
+                        hex(&asset),
+                        hex(&i.collection),
+                        i.serial
+                    ));
+                }
+            }
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{}]}}", rows.join(","))
+        }
+        // The primary sale's delivery, on the operator's token: mint one item
+        // to a buyer, sealed to the viewing key they registered.
+        "zyn_mintItem" => {
+            match submit_token() {
+                Some(want) if token_matches(&field(body, "token").unwrap_or_default(), want) => {}
+                _ => return err("zyn_mintItem is the operator's and needs the operator's token"),
+            }
+            let (Some(collection), Some(owner)) = (
+                field(body, "collection").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),
+                field(body, "owner").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),
+            ) else {
+                return err("collection and owner are 32 hex bytes");
+            };
+            let Some(serial) = field(body, "serial").and_then(|s| s.parse::<u32>().ok()) else {
+                return err("serial is a number, as a string");
+            };
+            let op = {
+                use rand::RngCore;
+                let (mut nonce, mut eph) = ([0u8; 32], [0u8; 32]);
+                rand::rngs::OsRng.fill_bytes(&mut nonce);
+                rand::rngs::OsRng.fill_bytes(&mut eph);
+                let n = node.lock().unwrap();
+                match objectvm::primary::mint_item(
+                    n.state(),
+                    collection,
+                    serial,
+                    owner,
+                    nonce,
+                    zyn_vm::note_enc::StaticSecret::from(eph),
+                ) {
+                    Ok(op) => op,
+                    Err(e) => return err(e),
+                }
+            };
+            let receipts = apply_operator(&op, node, journal, pub_log, dir, chain);
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"receipts\":\"{}\"}}}}",
+                escape(&format!("{receipts:?}"))
             )
         }
         // The market's public face: every pool's reserves and every sale's
@@ -912,7 +1002,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_viewingKey, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 
@@ -2878,6 +2968,80 @@ mod market_door {
         assert!(v["result"]["receipts"].as_str().unwrap().contains("Claimed"), "{v}");
         let v = r.call(&format!("{{\"method\":\"zyn_claims\",\"ids\":\"{}\"}}", hex(&proceeds)));
         assert_eq!(v["result"].as_array().unwrap().len(), 0, "redeemed once");
+    }
+
+    /// The NFT cycle through the node: mint, a signed listing that names no
+    /// seller, a buyer who pays price plus fee from what `zyn_offers` says,
+    /// and a seller who finds the proceeds by their own nonce.
+    #[test]
+    fn an_item_sells_through_the_door() {
+        let r = rig("nft");
+        let alice = SigningKey::from_bytes(&[31u8; 32]);
+        let bob = SigningKey::from_bytes(&[32u8; 32]);
+        let (a, b) = (account(&alice), account(&bob));
+        const CAVE: [u8; 32] = [0xCA; 32];
+        let view = |k: u8| zyn_vm::note_enc::viewing_public(&zyn_vm::note_enc::StaticSecret::from([k; 32]));
+        r.operator(Op::Register { account: a, program: zyn_vm::program::register_viewing_key(), viewing: view(1) });
+        r.operator(Op::Register { account: b, program: zyn_vm::program::register_viewing_key(), viewing: view(2) });
+        r.operator(Op::Mint { asset: ZEC, amount: Fixed::whole(50), owner: b, nonce: [9; 32] });
+        r.operator(Op::RegisterCollection {
+            program: zyn_vm::program::register_collection(),
+            asset: CAVE,
+            creator: [0x7E; 32],
+            quote: ZEC,
+            fee_bps: 100,
+            cap: 10,
+        });
+        let mint = {
+            let n = r.node.lock().unwrap();
+            objectvm::primary::mint_item(n.state(), CAVE, 4, a, [0x44; 32], zyn_vm::note_enc::StaticSecret::from([5; 32])).unwrap()
+        };
+        r.operator(mint);
+        let asset = market::item_asset(&CAVE, 4);
+        let (item, _) = r.live(&a, asset)[0];
+        let nf = zyn_vm::object::nullifier(&[1; 32], &item);
+
+        let v = r.signed(&alice, Op::List {
+            seller: a,
+            program: zyn_vm::program::place_offer(),
+            item,
+            item_nullifier: nf,
+            price_asset: ZEC,
+            price_amount: Fixed::whole(10),
+            expires_at_epoch: 1_000,
+            nonce: [0x61; 32],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Listed"), "{v}");
+
+        let offers = r.call("{\"method\":\"zyn_offers\"}");
+        let o = &offers["result"]["offers"][0];
+        assert_eq!(o["serial"], 4);
+        assert_eq!(o["collection"], hex(&CAVE));
+        assert_eq!(o["nullifier"], hex(&nf));
+        assert!(!offers.to_string().contains(&hex(&a)), "a listing names no seller");
+        let pay: i128 = o["pay_raw"].as_str().unwrap().parse().unwrap();
+        assert_eq!(pay, Fixed(10_100_000_000_000_000_000).0);
+        let items = r.call(&format!("{{\"method\":\"zyn_items\",\"assets\":\"{}\"}}", hex(&asset)));
+        assert_eq!(items["result"][0]["serial"], 4);
+
+        let (c, _) = r.live(&b, ZEC)[0];
+        let v = r.signed(&bob, Op::TakeOffer {
+            buyer: b,
+            program: zyn_vm::program::take_offer(),
+            item,
+            item_nullifier: nf,
+            payment: vec![(c, zyn_vm::object::nullifier(&[2; 32], &c))],
+            outputs: vec![
+                output(b, asset, market::ITEM_UNIT, 0x81),
+                output(b, ZEC, Fixed(Fixed::whole(50).0 - pay), 0x82),
+            ],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Taken"), "{v}");
+        assert_eq!(r.live(&b, asset).len(), 1, "Bob holds serial 4");
+
+        let proceeds = market::claim_id(&market::listing_source(&a, &[0x61; 32]), 0);
+        let v = r.call(&format!("{{\"method\":\"zyn_claims\",\"ids\":\"{}\"}}", hex(&proceeds)));
+        assert_eq!(v["result"][0]["amount"], Fixed(9_900_000_000_000_000_000).0.to_string());
     }
 
     #[test]

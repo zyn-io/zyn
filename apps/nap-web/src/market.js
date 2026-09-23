@@ -264,3 +264,53 @@ export function decodeMeta(meta) {
   if (!tail(symbol.length, 8) || !tail(8 + name.length, 32)) return null;
   return { symbol, name };
 }
+
+// ---------------------------------------------------------------------------
+// NFTs: every item is its own asset, `item_address(collection, serial)`, so
+// its identity survives every sale and send. A listing names no seller: the
+// proceeds wait as a claim only the seller's nonce finds.
+// ---------------------------------------------------------------------------
+
+const DERIVE_DOMAIN = te.encode('zyn.derive.v1');
+const ADDRESS_SCOPE_V1 = new Uint8Array([...te.encode('zynzap'), 0x00, 0x02]);
+
+/// `zyn_vm::derive`: sha256 over the domain and length-prefixed parts.
+function deriveAddress(program, namespace, seeds) {
+  const parts = [DERIVE_DOMAIN, u32be(program.length), program, u32be(namespace.length), namespace, u32be(seeds.length)];
+  for (const s of seeds) parts.push(u32be(s.length), s);
+  return sha256(concatBytes(...parts));
+}
+
+export const itemAsset = (collection, serial) => deriveAddress(ADDRESS_SCOPE_V1, te.encode('item'), [collection, u32be(serial)]);
+export const listingSource = (seller, nonce) => id('objectvm.listing.v1', seller, nonce);
+export const saleFeeSource = (item) => id('objectvm.sale-fee.v1', item);
+export const redemptionSource = (firstItem) => id('objectvm.redeem.v1', firstItem);
+/// One item is one unit of its own asset.
+export const ITEM_UNIT = WAD;
+
+const PLACE_OFFER = hex(leaf(te.encode('zyn.program.named.v1'), u32be(11), te.encode('place-offer')));
+const CANCEL_OFFER = hex(leaf(te.encode('zyn.program.named.v1'), u32be(12), te.encode('cancel-offer')));
+const TAKE_OFFER = hex(leaf(te.encode('zyn.program.named.v1'), u32be(10), te.encode('take-offer')));
+const REDEEM_ITEM = hex(leaf(te.encode('zyn.program.named.v1'), u32be(11), te.encode('redeem-item')));
+
+export const listIntent = (o) => concatBytes(
+  new Uint8Array([21]), o.seller, unhex(PLACE_OFFER), o.item, o.itemNullifier, o.priceAsset,
+  i128Bytes(o.priceAmount), u64be(o.expiresAtEpoch), o.nonce,
+);
+
+export const cancelOfferIntent = (o) => concatBytes(new Uint8Array([4]), o.seller, unhex(CANCEL_OFFER), o.item);
+
+/// `Op::TakeOffer`: the listed item's nullifier (from `zyn_offers`), the
+/// buyer's payment, and outputs that are the item and the buyer's change.
+export function takeOfferIntent(o) {
+  const payment = [];
+  for (const p of o.payment) payment.push(p.commitment, p.nullifier);
+  const outs = [];
+  for (const x of o.outputs) outs.push(x.note.asset, i128Bytes(x.note.amount), x.note.owner, x.note.nonce, x.enc.epk, u32be(x.enc.ciphertext.length), x.enc.ciphertext);
+  return concatBytes(
+    new Uint8Array([5]), o.buyer, unhex(TAKE_OFFER), o.item, o.itemNullifier,
+    u32be(o.payment.length), u32be(o.outputs.length), ...payment, ...outs,
+  );
+}
+
+export const redeemIntent = (o) => concatBytes(new Uint8Array([20]), o.holder, unhex(REDEEM_ITEM), o.collection, inputs(o.inputs));

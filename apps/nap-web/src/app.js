@@ -546,9 +546,21 @@ async function refreshObject(epoch, announce, active) {
   // its id rather than given a name nobody assigned.
   const zec = config.zecAsset;
   const seen = [...new Set(held.map((h) => h.asset))];
+  // Items are their own assets; the node says which collection and serial.
+  const items = new Map();
+  const others = seen.filter((a) => a !== zec);
+  if (others.length) {
+    try {
+      for (const i of await objectCall(config.rpcUrl, 'zyn_items', { assets: others.slice(0, 500).join(',') })) {
+        if (/^[0-9a-f]{64}$/.test(i.asset) && /^[0-9a-f]{64}$/.test(i.collection) && Number.isSafeInteger(i.serial)) items.set(i.asset, i);
+      }
+    } catch { /* names only: an item still shows, by id */ }
+    if (!active()) return;
+  }
+  const collectionName = (id) => ((config.collections || []).find((c) => String(c.id).toLowerCase() === id) || {}).name || `Collection ${id.slice(0, 6)}`;
   assets = seen.map((id) => ({
     id,
-    symbol: id === zec ? 'ZEC.zy' : `asset ${id.slice(0, 8)}…`,
+    symbol: id === zec ? 'ZEC.zy' : items.has(id) ? `${collectionName(items.get(id).collection)} #${items.get(id).serial}` : `asset ${id.slice(0, 8)}…`,
   }));
   if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });
 

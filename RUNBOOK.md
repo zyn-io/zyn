@@ -2608,9 +2608,14 @@ curl -s -X POST 127.0.0.1:8499 -d "{\"method\":\"zyn_submit\",\"token\":\"$T\",\
 
 - `SetFees {bridge_bps}` — 50 bps is §30's rate. **Testnet 212: set to 50 on
   23 Sep.** Mainnet: not set.
-- `RegisterCollection {asset, creator, quote, fee_bps}` — once per collection,
-  immutable. Cave: 100 bps a side, creator Treasury 26460, quote ZEC.zy.
-  Register before the collection's first listing.
+- `RegisterCollection {asset, creator, quote, fee_bps, cap}` — once per
+  collection, immutable. Cave Collection Z: asset `024277b6…5f1e`, 100 bps a
+  side, creator Treasury 26460, quote ZEC.zy, cap 4444. Register before the
+  first mint.
+- **Delivering an item** (the primary sale): `zyn_mintItem {token, collection,
+  owner, serial}` — serial as a string. The node seals it to the buyer's
+  registered viewing key; the buyer must have registered (Nap does on first
+  open). Each serial mints once, never past the cap.
 
 `zyn_market` shows `fees`, `zyn_pot` and `collections`; check the pot against
 the fees after any credit, withdrawal or sale.

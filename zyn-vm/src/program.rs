@@ -150,6 +150,11 @@ pub fn register_collection() -> ProgramId {
     named(b"register-collection")
 }
 
+/// Mint one item of a registered collection to its buyer: the primary sale.
+pub fn mint_item() -> ProgramId {
+    named(b"mint-item")
+}
+
 /// Burn items for their share of the collection's redemption floor.
 pub fn redeem_item() -> ProgramId {
     named(b"redeem-item")
@@ -191,6 +196,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         configure_fees(),
         register_collection(),
         redeem_item(),
+        mint_item(),
     ]
     .contains(id)
 }
@@ -221,6 +227,7 @@ mod tests {
             configure_fees(),
             register_collection(),
             redeem_item(),
+            mint_item(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

@@ -10,7 +10,7 @@
 // must — the intents — and the public learns pool reserves and sale totals.
 
 import { checkedEpoch, deriveIdentity, forgetIdentity, openSealedWallet, parseAmount } from './core.js';
-import { hex, scan, signedFrame, submitSigned, unhex } from './object.js';
+import { hex, nullifierOf, scan, signedFrame, submitSigned, unhex } from './object.js';
 import * as mk from './market.js';
 import './styles.css';
 import './market.css';
@@ -29,10 +29,10 @@ const PER_CLAIM = 16;
 
 let config;
 let identity = null;
-let view = 'swap';
+let view = 'nfts';
 /// Where to go back to after the wallet opens for an action that needed it.
 let returnTo = 'swap';
-let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], held: [], balances: new Map(), owed: [] };
+let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map() };
 let busy = false;
 let timer = null;
 const ui = { pool: null, sellA: true, slippage: 100 };
@@ -70,8 +70,16 @@ function parse(value) {
   return parseAmount(s);
 }
 
+/// A collection's name as the deployment knows it, else its short id.
+function collectionName(id) {
+  const c = (config.collections || []).find((x) => String(x.id).toLowerCase() === id);
+  return c ? String(c.name) : short(id);
+}
+
 function name(assetHex) {
   if (assetHex === config.zecAsset) return 'ZEC.zy';
+  const item = state.items.get(assetHex);
+  if (item) return `${collectionName(item.collection)} #${item.serial}`;
   const launch = state.launches.find((l) => l.token === assetHex);
   if (launch) return launch.symbol || short(assetHex);
   const pool = state.pools.find((p) => p.lp === assetHex);
@@ -168,7 +176,7 @@ function claimSources(limit) {
   const me = identity.account;
   for (let n = 0; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
-    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce)]) {
+    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce)]) {
       out.push(...mk.claimIds(source).map(hex));
     }
   }
@@ -194,6 +202,9 @@ const isSmall = (v) => Number.isSafeInteger(v) && v >= 0;
 const validPool = (p) => ['id', 'a', 'b', 'lp'].every((k) => isHex(p[k]))
   && ['reserve_a', 'reserve_b', 'shares', 'locked'].every((k) => isInt(p[k]))
   && BigInt(p.reserve_a) > 0n && BigInt(p.reserve_b) > 0n && BigInt(p.shares) > 0n && isSmall(p.fee_bps);
+const validOffer = (o) => ['item', 'asset', 'price_asset'].every((k) => isHex(o[k]))
+  && ['price_raw', 'fee_raw', 'pay_raw'].every((k) => isInt(o[k])) && isSmall(o.expires_at_epoch)
+  && (o.collection === '' || isHex(o.collection)) && (o.nullifier === '' || isHex(o.nullifier)) && Number.isSafeInteger(o.serial);
 const validLaunch = (l) => ['token', 'quote', 'meta'].every((k) => isHex(l[k]))
   && ['total_supply', 'sale_supply', 'pool_supply', 'soft_cap', 'hard_cap', 'raised'].every((k) => isInt(l[k]))
   && ['open', 'graduated', 'failed'].includes(l.state) && isSmall(l.closes_at_epoch) && isSmall(l.pool_bps) && isSmall(l.fee_bps);
@@ -203,10 +214,11 @@ async function refresh(quiet = false) {
     const status = await call('zyn_status');
     const epoch = checkedEpoch(status, config.chain);
     const me = identity;
-    const [market, published, owed] = await Promise.all([
+    const [market, published, owed, offerBook] = await Promise.all([
       call('zyn_market'),
       me ? call('zyn_published') : null,
       me ? loadOwed() : [],
+      call('zyn_offers').catch(() => ({ offers: [] })),
     ]);
     // The wallet may have been locked while this was in flight.
     const mine = me && identity === me;
@@ -221,7 +233,20 @@ async function refresh(quiet = false) {
       held,
       balances,
       owed: mine ? owed : [],
+      offers: (offerBook?.offers || []).filter(validOffer),
+      collections: (market.collections || []).filter((c) => isHex(c.asset) && isHex(c.quote) && isInt(c.floor) && isSmall(c.fee_bps)),
+      items: new Map(),
     };
+    // Which held assets, and which listed ones, are items: asked by asset,
+    // which says nothing an item's own listing or manifest does not.
+    for (const o of state.offers) if (o.serial >= 0) state.items.set(o.asset, { collection: o.collection, serial: o.serial });
+    const unknown = [...new Set(held.map((h) => h.asset))].filter((a) => a !== config.zecAsset && !state.items.has(a));
+    if (unknown.length) {
+      const found = await call('zyn_items', { assets: unknown.slice(0, 500).join(',') }).catch(() => []);
+      for (const i of Array.isArray(found) ? found : []) {
+        if (isHex(i.asset) && isHex(i.collection) && isSmall(i.serial)) state.items.set(i.asset, { collection: i.collection, serial: i.serial });
+      }
+    }
     if (!ui.pool && state.pools.length) ui.pool = state.pools[0].id;
     render();
     if (!quiet) notice(`Up to date at epoch ${epoch}.`);
@@ -324,7 +349,7 @@ function frame() {
         ? `<p class="kicker">TRADING AS</p><b class="mk-account">${short(identity.accountHex)}</b>`
         : '<p class="kicker">BROWSING</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
       <nav id="tabs">
-        ${['swap', 'pools', 'launchpad', 'owed'].map((t) => `<button data-view="${t}">${t === 'owed' ? 'Owed to you' : t[0].toUpperCase() + t.slice(1)}<span class="mk-badge" id="badge-${t}"></span></button>`).join('')}
+        ${['nfts', 'swap', 'pools', 'launchpad', 'owed'].map((t) => `<button data-view="${t}">${t === 'owed' ? 'Owed to you' : t === 'nfts' ? 'NFTs' : t[0].toUpperCase() + t.slice(1)}<span class="mk-badge" id="badge-${t}"></span></button>`).join('')}
       </nav>
       ${identity ? '<button class="quiet" id="lock">Lock</button>' : ''}
     </aside>
@@ -359,7 +384,7 @@ function render() {
   const open = state.launches.filter((l) => l.state === 'open').length;
   $('#badge-launchpad').textContent = open ? String(open) : '';
   if (view === 'wallet' && identity) view = returnTo || 'swap';
-  ({ swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed, wallet: renderWallet })[view]();
+  ({ nfts: renderNfts, swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed, wallet: renderWallet })[view]();
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +689,81 @@ function bindCreateLaunch() {
       }), `Sale open. It closes after epoch ${state.epoch + BigInt(epochs)}; your share arrives under Owed to you then.`);
     } catch (err) { notice(err.message, true); }
   };
+}
+
+// ---------------------------------------------------------------------------
+// NFTs.
+// ---------------------------------------------------------------------------
+
+function renderNfts() {
+  const listed = state.offers.filter((o) => o.serial >= 0);
+  const mineHeld = state.held.filter((h) => state.items.has(h.asset));
+  const myListed = new Set(mineHeld.map((h) => h.commitment).filter((c) => state.offers.some((o) => o.item === c)));
+  const floorOf = (collection) => state.collections.find((c) => c.asset === collection);
+  const card = (o, i) => `<article class="mk-card mk-nft">
+      <header><h3>${esc(collectionName(o.collection))} <span>#${o.serial}</span></h3><span class="mk-pill">listed</span></header>
+      <dl class="mk-facts">
+        <dt>Price</dt><dd>${fmt(BigInt(o.price_raw))} ${esc(name(o.price_asset))}</dd>
+        <dt>Fee</dt><dd>${fmt(BigInt(o.fee_raw))} — half to the ZYN pot, the rest to the floor and creator</dd>
+        <dt>You pay</dt><dd><b>${fmt(BigInt(o.pay_raw))} ${esc(name(o.price_asset))}</b></dd>
+      </dl>
+      ${myListed.has(o.item) ? '<p class="mk-fine">Your listing.</p>' : `<div class="mk-row"><button class="primary mk-act" data-buy="${i}">Buy <span>→</span></button></div>`}
+    </article>`;
+  $('#view').innerHTML = `${heading('NFTS', 'Buy the item,<br><em>not a copy of it.</em>')}
+  <p class="mk-fine mk-lead">Every item is its own asset, so the one you buy is the one that was listed — serial and all. A listing names no seller; their proceeds wait for them as a claim only they can find.</p>
+  <section class="mk-list">${listed.length ? listed.map(card).join('') : '<div class="mk-empty"><p>Nothing listed right now.</p></div>'}</section>
+  ${identity ? `<div class="section-title"><h2>Your items</h2><span>${mineHeld.length}</span></div>
+  <section class="mk-list">${mineHeld.length ? mineHeld.map((h, i) => {
+    const it = state.items.get(h.asset);
+    const f = floorOf(it.collection);
+    const share = f && BigInt(f.outstanding || '0') > 0n ? BigInt(f.floor) / BigInt(f.outstanding) : 0n;
+    const listedHere = myListed.has(h.commitment);
+    return `<article class="mk-card mk-nft">
+      <header><h3>${esc(collectionName(it.collection))} <span>#${it.serial}</span></h3>${listedHere ? '<span class="mk-pill">listed</span>' : ''}</header>
+      ${listedHere ? `<div class="mk-row"><button class="mk-act" data-cancel="${i}">Cancel listing</button></div>` : `<form class="mk-inline" data-list="${i}"><label class="mk-field"><span>List for (${esc(name(f ? f.quote : config.zecAsset))})</span><input name="price" inputmode="decimal" autocomplete="off" placeholder="0.0"></label><button class="primary mk-act" type="submit">List <span>→</span></button></form>`}
+      ${f && !listedHere ? `<p class="mk-fine">Floor: ${fmt(share)} ${esc(name(f.quote))} per item. <button class="mk-act" data-redeem="${i}">Redeem for it</button></p>` : ''}
+    </article>`;
+  }).join('') : '<div class="mk-empty"><p>No items in this wallet.</p></div>'}</section>` : ''}`;
+
+  root.querySelectorAll('[data-buy]').forEach((b) => { b.onclick = async () => {
+    if (!requireWallet()) return;
+    const o = listed[Number(b.dataset.buy)];
+    try {
+      const pay = BigInt(o.pay_raw);
+      const { inputs, change } = mk.fund(identity, state.held, unhex(o.price_asset), pay);
+      const item = mk.selfNote(identity, unhex(o.asset), mk.ITEM_UNIT);
+      await submit(mk.takeOfferIntent({ buyer: identity.account, item: unhex(o.item), itemNullifier: unhex(o.nullifier), payment: inputs, outputs: [item, ...change] }),
+        `Bought ${collectionName(o.collection)} #${o.serial}. It is in your wallet.`);
+    } catch (e) { notice(e.message, true); }
+  }; });
+  root.querySelectorAll('[data-list]').forEach((form) => { form.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!requireWallet()) return;
+    const h = mineHeld[Number(form.dataset.list)];
+    const it = state.items.get(h.asset);
+    const f = floorOf(it.collection);
+    try {
+      const price = parse(form.elements.price.value);
+      const c = unhex(h.commitment);
+      await submit(mk.listIntent({
+        seller: identity.account, item: c, itemNullifier: nullifierOf(identity.nullifier, c),
+        priceAsset: unhex(f ? f.quote : config.zecAsset), priceAmount: price, expiresAtEpoch: 0xffffffffn, nonce: nextNonce(),
+      }), `Listed ${collectionName(it.collection)} #${it.serial}. When it sells, your proceeds appear under Owed to you.`);
+    } catch (err) { notice(err.message, true); }
+  }; });
+  root.querySelectorAll('[data-cancel]').forEach((b) => { b.onclick = async () => {
+    if (!requireWallet()) return;
+    const h = mineHeld[Number(b.dataset.cancel)];
+    await submit(mk.cancelOfferIntent({ seller: identity.account, item: unhex(h.commitment) }), 'Listing cancelled. The item is yours to move again.');
+  }; });
+  root.querySelectorAll('[data-redeem]').forEach((b) => { b.onclick = async () => {
+    if (!requireWallet()) return;
+    const h = mineHeld[Number(b.dataset.redeem)];
+    const it = state.items.get(h.asset);
+    const c = unhex(h.commitment);
+    await submit(mk.redeemIntent({ holder: identity.account, collection: unhex(it.collection), inputs: [{ commitment: c, nullifier: nullifierOf(identity.nullifier, c) }] }),
+      'Redeemed. The item is burned and its share of the floor is under Owed to you.');
+  }; });
 }
 
 // ---------------------------------------------------------------------------

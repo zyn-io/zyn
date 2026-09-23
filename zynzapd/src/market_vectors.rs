@@ -157,12 +157,45 @@ pub fn vectors() -> Vec<(&'static str, String)> {
                 creator: OWNER,
                 quote: ZEC,
                 fee_bps: 100,
+                cap: 4444,
             }),
         ),
         (
             "redeem",
             enc(&Op::Redeem { holder: OWNER, program: program::redeem_item(), asset: TOKEN, inputs: input.clone() }),
         ),
+        (
+            "list",
+            enc(&Op::List {
+                seller: OWNER,
+                program: program::place_offer(),
+                item: [0xC1; 32],
+                item_nullifier: [0xD1; 32],
+                price_asset: ZEC,
+                price_amount: Fixed::whole(2),
+                expires_at_epoch: 99_999,
+                nonce: NONCE,
+            }),
+        ),
+        (
+            "cancel_offer",
+            enc(&Op::CancelOffer { seller: OWNER, program: program::cancel_offer(), item: [0xC1; 32] }),
+        ),
+        (
+            "take_offer",
+            enc(&Op::TakeOffer {
+                buyer: OWNER,
+                program: program::take_offer(),
+                item: [0xC1; 32],
+                item_nullifier: [0xD1; 32],
+                payment: input.clone(),
+                outputs: vec![change()],
+            }),
+        ),
+        ("item_asset_serial_7", hex(&market::item_asset(&TOKEN, 7))),
+        ("listing_source", hex(&market::listing_source(&OWNER, &NONCE))),
+        ("sale_fee_source", hex(&market::sale_fee_source(&[0xC1; 32]))),
+        ("redemption_source", hex(&market::redemption_source(&[0xC1; 32]))),
         (
             "withdraw",
             enc(&Op::Withdraw {

@@ -6292,4 +6292,8 @@ product decision on launches (§137).
 | 138.5 | **Terms are set once.** A holder prices an item against its collection's terms, so they do not move under them; `RegisterCollection` on an existing collection is refused | 🔒 |
 | 138.6 | **The floor is redeemable, or it is not a floor.** `Redeem` burns items for `floor × burned / outstanding`, as a claim | ✅ |
 | 138.7 | **Ceilings in consensus:** 2% bridge, 10% a side on resale | 🔒 |
+| 138.8 | **An item is its own asset, `item_address(collection, serial)`** — the address the manifest commits to (§86.2). §133.3's `asset = collection, amount = 1` made items fungible within a collection: after one sale or send nothing, not even the VM, knew *which* item a holder had. With one asset per item, conservation carries identity through every transfer. Supersedes §133.3 | 🔒 |
+| 138.9 | **The primary sale delivers with `MintItem`**, operator only, sealed to the buyer's registered viewing key (`primary::mint_item`, `zyn_mintItem` on the operator's token). A serial mints once, and never past the collection's **cap**, fixed at registration: minting past what holders were promised dilutes their share of the floor | 🔒 |
+| 138.10 | **Collection items sell through `List`, paid by claim.** The listing publishes the item's nullifier (§132.5) and names no seller; the buyer's outputs are the item and their own change; the seller's proceeds (price less their side of the fee) wait as a claim derived from a nonce only they hold. `PlaceOffer` refuses a collection's items so there is one sale path to get right | ✅ |
+| 138.11 | Items cannot leave for Zcash: they are made on the ledger and nothing in the vault backs them | 🔒 |
 

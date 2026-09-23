@@ -240,6 +240,44 @@ pub struct CollectionTerms {
     /// Held for the collection's holders: any of them may burn items for
     /// `floor × items / outstanding`.
     pub floor: Fixed,
+    /// The most items that will ever exist. Fixed at registration: minting
+    /// past what holders were promised dilutes their share of the floor.
+    pub cap: u32,
+    pub minted: u32,
+    /// Minted and not redeemed — what the floor is shared between.
+    pub outstanding: u32,
+}
+
+/// One item is one unit of its own asset.
+pub const ITEM_UNIT: Fixed = Fixed(zyn_vm::fixed::WAD);
+
+/// An item's own asset: `item_address(collection, serial)`, the same address
+/// the collection's manifest commits to (§86.2). Its own asset rather than a
+/// unit of the collection's, so conservation carries *which* item moved
+/// through every transfer and sale, not merely that one did.
+pub fn item_asset(collection: &Address, serial: u32) -> Address {
+    zyn_vm::item_address(zyn_vm::derive::ADDRESS_SCOPE_V1, collection, serial)
+}
+
+/// Which collection an item belongs to, and its serial.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ItemInfo {
+    pub collection: Address,
+    pub serial: u32,
+}
+
+/// What a listing adds to an offer: where the seller is paid, and the item's
+/// nullifier, published so a buyer can retire it (§132.5).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Listing {
+    pub source: Hash,
+    pub nullifier: Hash,
+}
+
+/// Where a seller's proceeds are claimable: from a nonce only the seller
+/// holds, so the listing names no seller and a stranger cannot find it.
+pub fn listing_source(seller: &AccountId, nonce: &Hash) -> Hash {
+    id(b"objectvm.listing.v1", &[seller, nonce])
 }
 
 /// The fee split of one resale: `(to ZYN pot, to floor, to creator)`, shares
@@ -282,8 +320,12 @@ pub struct Market {
     /// The ZYN liquidity pot: fees the protocol keeps, per asset. Keyless —
     /// no intent spends from it — and public, like every keyless pot (§71.23).
     pub pol: BTreeMap<Address, Fixed>,
-    /// Collections with resale terms, keyed by the collection's asset.
+    /// Collections with resale terms, keyed by the collection's id.
     pub collections: BTreeMap<Address, CollectionTerms>,
+    /// Every item minted, by its asset.
+    pub items: BTreeMap<Address, ItemInfo>,
+    /// Listings made with `List`, by the listed item's commitment.
+    pub listings: BTreeMap<Hash, Listing>,
 }
 
 impl Market {
@@ -296,6 +338,14 @@ impl Market {
             && self.schedule.is_none()
             && self.pol.is_empty()
             && self.collections.is_empty()
+            && self.items.is_empty()
+            && self.listings.is_empty()
+    }
+
+    /// The terms an item trades under, if it is a registered collection's.
+    pub fn terms_for(&self, asset: &Address) -> Option<(Address, CollectionTerms)> {
+        let i = self.items.get(asset)?;
+        Some((i.collection, *self.collections.get(&i.collection)?))
     }
 
     pub fn bridge_bps(&self) -> u32 {
@@ -362,10 +412,12 @@ impl Market {
         Some(t)
     }
 
-    /// Assets the market made rather than received: pool shares and launched
-    /// tokens. They exist only here, so none of them can leave for Zcash.
+    /// Assets the market made rather than received: pool shares, launched
+    /// tokens and collection items. They exist only here, so none of them can leave for Zcash.
     pub fn is_derived(&self, asset: &Address) -> bool {
-        self.launches.contains_key(asset) || self.pools.keys().any(|p| &lp_asset(p) == asset)
+        self.launches.contains_key(asset)
+            || self.items.contains_key(asset)
+            || self.pools.keys().any(|p| &lp_asset(p) == asset)
     }
 
     pub(crate) fn pay(&mut self, source: &Hash, k: u8, owner: AccountId, asset: Address, amount: Fixed) {
@@ -430,13 +482,35 @@ impl Market {
         }
         e.u32(self.collections.len() as u32);
         for (a, c) in &self.collections {
-            e.bytes(a).bytes(&c.creator).bytes(&c.quote).u32(c.fee_bps).fixed(c.floor);
+            e.bytes(a)
+                .bytes(&c.creator)
+                .bytes(&c.quote)
+                .u32(c.fee_bps)
+                .fixed(c.floor)
+                .u32(c.cap)
+                .u32(c.minted)
+                .u32(c.outstanding);
+        }
+        let items: Vec<Hash> = self
+            .items
+            .iter()
+            .map(|(a, i)| id(b"objectvm.item-leaf.v1", &[a, &i.collection, &i.serial.to_be_bytes()]))
+            .collect();
+        let listings: Vec<Hash> = self
+            .listings
+            .iter()
+            .map(|(c, l)| id(b"objectvm.listing-leaf.v1", &[c, &l.source, &l.nullifier]))
+            .collect();
+        // Joined only once there are any, so a market that set fees before
+        // items existed keeps the roots it already sealed (testnet 212).
+        if !items.is_empty() || !listings.is_empty() {
+            e.bytes(&merkle_root(&items)).bytes(&merkle_root(&listings));
         }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET02").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET03").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -489,14 +563,34 @@ impl Market {
         }
         e.u32(self.collections.len() as u32);
         for (a, c) in &self.collections {
-            e.bytes(a).bytes(&c.creator).bytes(&c.quote).u32(c.fee_bps).fixed(c.floor);
+            e.bytes(a)
+                .bytes(&c.creator)
+                .bytes(&c.quote)
+                .u32(c.fee_bps)
+                .fixed(c.floor)
+                .u32(c.cap)
+                .u32(c.minted)
+                .u32(c.outstanding);
+        }
+        e.u32(self.items.len() as u32);
+        for (a, i) in &self.items {
+            e.bytes(a).bytes(&i.collection).u32(i.serial);
+        }
+        e.u32(self.listings.len() as u32);
+        for (c, l) in &self.listings {
+            e.bytes(c).bytes(&l.source).bytes(&l.nullifier);
         }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
-        if d.take_bytes(8).ok()? != b"MARKET02" {
-            return None;
-        }
+        // v2 was saved by nodes that had set a fee schedule before items
+        // existed (testnet 212, 23 Sep); it lacks the supply counters, items
+        // and listings, and reads as a market that had none of them.
+        let v3 = match d.take_bytes(8).ok()? {
+            b"MARKET03" => true,
+            b"MARKET02" => false,
+            _ => return None,
+        };
         let mut m = Market::default();
         for _ in 0..d.u32().ok()? {
             let pid = d.hash().ok()?;
@@ -589,8 +683,21 @@ impl Market {
                     quote: d.hash().ok()?,
                     fee_bps: d.u32().ok()?,
                     floor: d.fixed().ok()?,
+                    cap: if v3 { d.u32().ok()? } else { 0 },
+                    minted: if v3 { d.u32().ok()? } else { 0 },
+                    outstanding: if v3 { d.u32().ok()? } else { 0 },
                 },
             );
+        }
+        if v3 {
+            for _ in 0..d.u32().ok()? {
+                let a = d.hash().ok()?;
+                m.items.insert(a, ItemInfo { collection: d.hash().ok()?, serial: d.u32().ok()? });
+            }
+            for _ in 0..d.u32().ok()? {
+                let c = d.hash().ok()?;
+                m.listings.insert(c, Listing { source: d.hash().ok()?, nullifier: d.hash().ok()? });
+            }
         }
         Some(m)
     }
@@ -1249,26 +1356,27 @@ impl ObjectVm {
     pub(crate) fn apply_redeem(
         &mut self,
         holder: &AccountId,
-        asset: &Address,
+        collection: &Address,
         inputs: &[(Hash, Hash)],
     ) -> Result<Receipt, &'static str> {
-        let terms = *self.market.collections.get(asset).ok_or("that is not a collection with a floor")?;
+        let terms = *self.market.collections.get(collection).ok_or("that is not a collection with a floor")?;
         if inputs.is_empty() || inputs.len() as u32 > self.limits.max_io {
             return Err("redeem between one and max_io items");
         }
-        let mut burned: i128 = 0;
-        let mut seen: Vec<Hash> = Vec::new();
+        let mut burned: Vec<(Hash, Hash, Address)> = Vec::new();
         for (c, n) in inputs {
-            if seen.contains(c) {
+            if burned.iter().any(|(x, _, _)| x == c) {
                 return Err("the same item twice");
             }
-            seen.push(*c);
             let note = self.live.get(c).ok_or("no such live object")?;
             if &note.owner != holder {
                 return Err("not the holder's item");
             }
-            if &note.asset != asset {
+            if self.market.items.get(&note.asset).map(|i| &i.collection) != Some(collection) {
                 return Err("not an item of that collection");
+            }
+            if note.amount != ITEM_UNIT {
+                return Err("an item is one whole unit");
             }
             if self.offers.contains_key(c) {
                 return Err("that object is listed");
@@ -1276,23 +1384,65 @@ impl ObjectVm {
             if self.nullifiers.contains(n) {
                 return Err("already spent");
             }
-            burned = burned.checked_add(note.amount.0).ok_or("overflow")?;
+            burned.push((*c, *n, note.asset));
         }
-        let outstanding = self.issued.get(asset).map(|f| f.0).unwrap_or(0);
-        if outstanding <= 0 || burned > outstanding {
+        let k = burned.len() as u32;
+        if terms.outstanding == 0 || k > terms.outstanding {
             return Err("the collection's supply does not cover that");
         }
-        let payout = zyn_vm::fixed::mul_div(terms.floor.0, burned, outstanding).ok_or("overflow")?;
-        self.burn(*asset, Fixed(burned))?;
-        for (c, n) in inputs {
+        let payout = zyn_vm::fixed::mul_div(terms.floor.0, k as i128, terms.outstanding as i128).ok_or("overflow")?;
+        for (c, n, asset) in &burned {
+            self.burn(*asset, ITEM_UNIT)?;
             self.live.remove(c);
             self.nullifiers.insert(*n);
         }
         *self.accounts.entry(*holder).or_insert(0) += 1;
-        self.market.collections.insert(*asset, CollectionTerms { floor: Fixed(terms.floor.0 - payout), ..terms });
+        self.market.collections.insert(
+            *collection,
+            CollectionTerms { floor: Fixed(terms.floor.0 - payout), outstanding: terms.outstanding - k, ..terms },
+        );
         let source = redemption_source(&inputs[0].0);
         self.market.pay(&source, 0, *holder, terms.quote, Fixed(payout));
         Ok(Receipt::Redeemed { paid: Fixed(payout), source })
+    }
+
+    /// Mint one item of a registered collection to `owner`, as a note they
+    /// can find: the primary sale's delivery.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_mint_item(
+        &mut self,
+        collection: &Address,
+        serial: u32,
+        owner: &AccountId,
+        nonce: &Hash,
+        enc: &zyn_vm::note_enc::EncryptedNote,
+    ) -> Result<Receipt, &'static str> {
+        let terms = *self.market.collections.get(collection).ok_or("register the collection first")?;
+        if serial >= terms.cap {
+            return Err("that serial is beyond the collection's cap");
+        }
+        let asset = item_asset(collection, serial);
+        if self.market.items.contains_key(&asset) || self.issued.contains_key(&asset) {
+            return Err("that item was already minted");
+        }
+        if enc.ciphertext.is_empty() {
+            return Err("an item needs an encrypted note, or its owner cannot find it");
+        }
+        let note = Note { asset, amount: ITEM_UNIT, owner: *owner, nonce: *nonce };
+        let c = commitment(&note).map_err(|_| "an item needs a nonce")?;
+        if self.live.contains_key(&c) {
+            return Err("that object already exists");
+        }
+        self.issue(asset, ITEM_UNIT)?;
+        let position = self.commitments.append(c) as u64;
+        self.live.insert(c, note);
+        self.accounts.entry(*owner).or_insert(0);
+        self.market.items.insert(asset, ItemInfo { collection: *collection, serial });
+        self.market.collections.insert(
+            *collection,
+            CollectionTerms { minted: terms.minted + 1, outstanding: terms.outstanding + 1, ..terms },
+        );
+        Ok(Receipt::Minted { commitment: c, position })
     }
 
     /// Everything that happens at a seal, before the root is taken: every

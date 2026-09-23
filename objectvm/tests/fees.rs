@@ -171,136 +171,189 @@ fn a_withdrawal_pays_the_bridge_fee_on_top() {
     assert_eq!(c.vm.issued[&ZEC], Fixed::whole(5));
 }
 
-fn with_collection(c: &mut Chain, fee_bps: u32, items: u8) -> Vec<Hash> {
+/// Register Cave (cap 3) and mint `items` to Alice the way the primary sale
+/// delivers them: sealed to her registered viewing key.
+fn with_collection(c: &mut Chain, fee_bps: u32, items: u32) -> Vec<Hash> {
     c.ok(Op::RegisterCollection {
         program: program::register_collection(),
         asset: CAVE,
         creator: TREASURY,
         quote: ZEC,
         fee_bps,
+        cap: 3,
     });
-    let mut out = Vec::new();
-    for i in 0..items {
-        let note = Note { asset: CAVE, amount: Fixed(1), owner: ALICE, nonce: [i + 1; 32] };
-        c.ok(Op::Mint { asset: CAVE, amount: Fixed(1), owner: ALICE, nonce: note.nonce });
-        out.push(commitment(&note).unwrap());
-    }
-    out
+    (0..items).map(|serial| mint(c, serial, ALICE)).collect()
 }
 
-/// §69.9 on the object ledger: 250 bps a side on a 10 ZEC sale. The buyer
-/// pays 10.25, the seller gets 9.75, and the 0.5 taken splits 0.25 to the
-/// ZYN pot, 0.2 to the floor and 0.05 to the creator as a claim.
-#[test]
-fn a_resale_pays_the_zyn_pot_the_floor_and_the_creator() {
-    let mut c = Chain::new();
-    c.deposit(BOB, 20);
-    let items = with_collection(&mut c, 250, 3);
-    let item = items[0];
-    c.ok(Op::PlaceOffer {
+/// Mint, and prove the owner's wallet finds it: a scan with their viewing key
+/// over what the chain publishes opens the note to the right item.
+fn mint(c: &mut Chain, serial: u32, to: AccountId) -> Hash {
+    let nonce = c.nonce();
+    let op = objectvm::primary::mint_item(&c.vm, CAVE, serial, to, nonce, StaticSecret::from([0x44; 32])).unwrap();
+    let Op::MintItem { enc, .. } = op.clone() else { unreachable!() };
+    c.ok(op);
+    let asset = market::item_asset(&CAVE, serial);
+    let cm = commitment(&Note { asset, amount: market::ITEM_UNIT, owner: to, nonce }).unwrap();
+    let found = zyn_vm::scan::Scanner::new(StaticSecret::from([to[0]; 32]), [0x31; 32]).scan(
+        &to,
+        &[zyn_vm::scan::PublishedOutput { commitment: cm, enc }],
+        0,
+        &[],
+    );
+    assert_eq!(found.live.len(), 1, "the owner's wallet must find the item");
+    assert_eq!(found.live[0].note.asset, asset);
+    cm
+}
+
+/// List at `whole` ZEC with the item's nullifier published, paid by claim.
+fn list(c: &mut Chain, item: Hash, whole: i64, nonce: Hash) {
+    c.ok(Op::List {
         seller: ALICE,
         program: program::place_offer(),
         item,
+        item_nullifier: nullifier(&[1; 32], &item),
         price_asset: ZEC,
-        price_amount: Fixed::whole(10),
+        price_amount: Fixed::whole(whole),
         expires_at_epoch: 100,
+        nonce,
     });
-    let (bob_c, _) = c.held(BOB, ZEC)[0];
+}
+
+/// The buyer's side: the item to themselves and their change, nothing that
+/// names the seller.
+fn buy(c: &mut Chain, item: Hash, pay_total: Fixed) -> Receipt {
+    let asset = c.vm.live[&item].asset;
+    let (bob_c, bob_note) = c.held(BOB, ZEC)[0];
     let outputs = vec![
-        c.out(ALICE, ZEC, Fixed(9_750_000_000_000_000_000)),
-        c.out(BOB, CAVE, Fixed(1)),
-        c.out(BOB, ZEC, Fixed(20_000_000_000_000_000_000 - 10_250_000_000_000_000_000)),
+        c.out(BOB, asset, market::ITEM_UNIT),
+        c.out(BOB, ZEC, Fixed(bob_note.amount.0 - pay_total.0)),
     ];
-    c.ok(Op::TakeOffer {
+    let listing = c.vm.market.listings[&item];
+    c.apply(Op::TakeOffer {
         buyer: BOB,
         program: program::take_offer(),
         item,
-        item_nullifier: nullifier(&[1; 32], &item),
+        item_nullifier: listing.nullifier,
         payment: vec![(bob_c, nullifier(&[2; 32], &bob_c))],
         outputs,
-    });
-    assert_eq!(c.pot(), Fixed(250_000_000_000_000_000));
-    assert_eq!(c.vm.market.collections[&CAVE].floor, Fixed(200_000_000_000_000_000));
-    let claim = c.vm.market.claims[&market::claim_id(&market::sale_fee_source(&item), 0)];
-    assert_eq!((claim.owner, claim.amount), (TREASURY, Fixed(50_000_000_000_000_000)));
+    })
 }
 
-/// A seller short-changed by more than the fee, and a listing in another
-/// asset, are both refused: neither can be a way around the fee.
+/// The whole cycle. Minted into Alice's wallet (her scan finds it), listed,
+/// bought by Bob at 10 + 0.1 fee, Alice's 9.9 waiting as a claim only her
+/// nonce finds, fees split 0.1 ZYN pot / 0.08 floor / 0.02 creator, and the
+/// item Bob holds is the *same* item — serial 0 — not merely one like it.
 #[test]
-fn the_fee_cannot_be_dodged() {
+fn an_item_is_minted_listed_bought_and_paid_for() {
     let mut c = Chain::new();
     c.deposit(BOB, 20);
-    let items = with_collection(&mut c, 250, 1);
-    let r = c.apply(Op::PlaceOffer {
+    let items = with_collection(&mut c, 100, 2);
+    let item = items[0];
+
+    let nonce = [0x77; 32];
+    list(&mut c, item, 10, nonce);
+    assert!(c.vm.market.listings.contains_key(&item));
+
+    let r = buy(&mut c, item, Fixed(10_100_000_000_000_000_000));
+    assert!(matches!(r, Receipt::Taken { .. }), "{r:?}");
+    assert_eq!(c.held(BOB, market::item_asset(&CAVE, 0)).len(), 1, "Bob holds serial 0 itself");
+    let proceeds = c.vm.market.claims[&market::claim_id(&market::listing_source(&ALICE, &nonce), 0)];
+    assert_eq!((proceeds.owner, proceeds.amount), (ALICE, Fixed(9_900_000_000_000_000_000)));
+    assert_eq!(c.pot(), Fixed(100_000_000_000_000_000));
+    assert_eq!(c.vm.market.collections[&CAVE].floor, Fixed(80_000_000_000_000_000));
+    let creator = c.vm.market.claims[&market::claim_id(&market::sale_fee_source(&item), 0)];
+    assert_eq!((creator.owner, creator.amount), (TREASURY, Fixed(20_000_000_000_000_000)));
+    assert!(!c.vm.market.listings.contains_key(&item));
+
+    // Alice collects her proceeds.
+    let out = c.out(ALICE, ZEC, Fixed(9_900_000_000_000_000_000));
+    c.ok(Op::Claim {
+        owner: ALICE,
+        program: program::claim(),
+        claims: vec![market::claim_id(&market::listing_source(&ALICE, &nonce), 0)],
+        outputs: vec![out],
+    });
+    assert_eq!(c.balance(ALICE, ZEC), Fixed(9_900_000_000_000_000_000));
+}
+
+/// Short-paying, keeping the item's fee, a wrong nullifier, or listing in
+/// another asset: every way around the fee or the seller is refused.
+#[test]
+fn a_sale_cannot_be_dodged() {
+    let mut c = Chain::new();
+    c.deposit(BOB, 20);
+    let items = with_collection(&mut c, 100, 1);
+    let item = items[0];
+    let r = c.apply(Op::List {
         seller: ALICE,
         program: program::place_offer(),
-        item: items[0],
+        item,
+        item_nullifier: nullifier(&[1; 32], &item),
         price_asset: [0x99; 32],
         price_amount: Fixed::whole(10),
         expires_at_epoch: 100,
+        nonce: [1; 32],
     });
     assert_eq!(r, Receipt::Refused("this collection trades in its quote asset"));
-
-    c.ok(Op::PlaceOffer {
+    let r = c.apply(Op::PlaceOffer {
         seller: ALICE,
         program: program::place_offer(),
-        item: items[0],
+        item,
         price_asset: ZEC,
         price_amount: Fixed::whole(10),
         expires_at_epoch: 100,
     });
-    let (bob_c, _) = c.held(BOB, ZEC)[0];
-    // Buyer pays the bare price and keeps the fee: not conserved.
-    let outputs = vec![
-        c.out(ALICE, ZEC, Fixed(9_750_000_000_000_000_000)),
-        c.out(BOB, CAVE, Fixed(1)),
-        c.out(BOB, ZEC, Fixed(10_250_000_000_000_000_000)),
-    ];
-    let r = c.apply(Op::TakeOffer {
-        buyer: BOB,
-        program: program::take_offer(),
-        item: items[0],
-        item_nullifier: nullifier(&[1; 32], &items[0]),
-        payment: vec![(bob_c, nullifier(&[2; 32], &bob_c))],
-        outputs,
-    });
-    assert!(ObjectVm::rejected(&r), "{r:?}");
+    assert_eq!(r, Receipt::Refused("list a collection's items with List"));
+
+    list(&mut c, item, 10, [2; 32]);
+    let r = buy(&mut c, item, Fixed::whole(10));
+    assert!(ObjectVm::rejected(&r), "paying the bare price skips the fee: {r:?}");
 }
 
-/// The floor is only a floor if holders can take it: burning one of three
-/// items pays a third of it.
+/// Cancel lifts the listing and its claim path; the item is Alice's to send,
+/// and a send keeps its identity.
+#[test]
+fn a_listing_is_cancelled_and_the_item_sent_whole() {
+    let mut c = Chain::new();
+    let items = with_collection(&mut c, 100, 1);
+    let item = items[0];
+    list(&mut c, item, 10, [3; 32]);
+    c.ok(Op::CancelOffer { seller: ALICE, program: program::cancel_offer(), item });
+    assert!(c.vm.market.listings.is_empty() && c.vm.offers.is_empty());
+    let asset = market::item_asset(&CAVE, 0);
+    let to_bob = c.out(BOB, asset, market::ITEM_UNIT);
+    c.ok(Op::Spend {
+        spender: ALICE,
+        program: program::private_transfer(),
+        inputs: vec![(item, nullifier(&[1; 32], &item))],
+        outputs: vec![to_bob],
+    });
+    assert_eq!(c.held(BOB, asset).len(), 1);
+    // A send cannot turn serial 0 into serial 1: they are different assets.
+    let bob_item = c.held(BOB, asset)[0].0;
+    let fake = c.out(ALICE, market::item_asset(&CAVE, 1), market::ITEM_UNIT);
+    let r = c.apply(Op::Spend {
+        spender: BOB,
+        program: program::private_transfer(),
+        inputs: vec![(bob_item, nullifier(&[2; 32], &bob_item))],
+        outputs: vec![fake],
+    });
+    assert!(ObjectVm::rejected(&r));
+}
+
+/// The floor is only a floor if holders can take it: after a 60 ZEC sale
+/// (1.2 taken, 0.48 to the floor) Alice burns one of two outstanding items for
+/// half the floor.
 #[test]
 fn a_holder_redeems_items_for_their_share_of_the_floor() {
     let mut c = Chain::new();
-    let items = with_collection(&mut c, 250, 3);
-    // Seed the floor through the one path that funds it: a sale.
     c.deposit(BOB, 100);
-    c.ok(Op::PlaceOffer {
-        seller: ALICE,
-        program: program::place_offer(),
-        item: items[2],
-        price_asset: ZEC,
-        price_amount: Fixed::whole(60),
-        expires_at_epoch: 100,
-    });
-    let (bob_c, _) = c.held(BOB, ZEC)[0];
-    let outputs = vec![
-        // 60 at 250 bps a side: the seller gets 58.5, the buyer pays 61.5.
-        c.out(ALICE, ZEC, Fixed(58_500_000_000_000_000_000)),
-        c.out(BOB, CAVE, Fixed(1)),
-        c.out(BOB, ZEC, Fixed(38_500_000_000_000_000_000)),
-    ];
-    c.ok(Op::TakeOffer {
-        buyer: BOB,
-        program: program::take_offer(),
-        item: items[2],
-        item_nullifier: nullifier(&[1; 32], &items[2]),
-        payment: vec![(bob_c, nullifier(&[2; 32], &bob_c))],
-        outputs,
-    });
+    let items = with_collection(&mut c, 100, 2);
+    list(&mut c, items[1], 60, [4; 32]);
+    let r = buy(&mut c, items[1], Fixed(60_600_000_000_000_000_000));
+    assert!(!ObjectVm::rejected(&r), "{r:?}");
     let floor = c.vm.market.collections[&CAVE].floor;
-    assert_eq!(floor, Fixed(1_200_000_000_000_000_000), "40% of 3.0 taken");
+    assert_eq!(floor, Fixed(480_000_000_000_000_000));
 
     let r = c.ok(Op::Redeem {
         holder: ALICE,
@@ -309,11 +362,39 @@ fn a_holder_redeems_items_for_their_share_of_the_floor() {
         inputs: vec![(items[0], nullifier(&[1; 32], &items[0]))],
     });
     let Receipt::Redeemed { paid, source } = r else { panic!() };
-    assert_eq!(paid, Fixed(400_000_000_000_000_000), "a third of the floor");
-    assert_eq!(c.vm.issued[&CAVE], Fixed(2));
+    assert_eq!(paid, Fixed(240_000_000_000_000_000), "half: one of two outstanding");
     assert_eq!(c.vm.market.claims[&market::claim_id(&source, 0)].owner, ALICE);
-    let CollectionTerms { floor, .. } = c.vm.market.collections[&CAVE];
-    assert_eq!(floor, Fixed(800_000_000_000_000_000));
+    let CollectionTerms { floor, outstanding, .. } = c.vm.market.collections[&CAVE];
+    assert_eq!((floor, outstanding), (Fixed(240_000_000_000_000_000), 1));
+}
+
+/// What holders were promised about supply holds: no minting past the cap,
+/// no serial twice, no item for someone the chain cannot deliver it to, and
+/// no item leaving for Zcash.
+#[test]
+fn supply_is_what_holders_were_promised() {
+    let mut c = Chain::new();
+    with_collection(&mut c, 100, 3);
+    let r = c.apply(Op::MintItem {
+        program: program::mint_item(),
+        collection: CAVE,
+        serial: 3,
+        owner: ALICE,
+        nonce: [5; 32],
+        enc: enc(),
+    });
+    assert_eq!(r, Receipt::Refused("that serial is beyond the collection's cap"));
+    let r = c.apply(Op::MintItem {
+        program: program::mint_item(),
+        collection: CAVE,
+        serial: 0,
+        owner: ALICE,
+        nonce: [6; 32],
+        enc: enc(),
+    });
+    assert_eq!(r, Receipt::Refused("that item was already minted"));
+    assert!(objectvm::primary::mint_item(&c.vm, CAVE, 2, [0x55; 32], [7; 32], StaticSecret::from([1; 32])).is_err());
+    assert!(c.vm.market.is_derived(&market::item_asset(&CAVE, 0)), "items cannot be withdrawn to Zcash");
 }
 
 /// Fees and collections are the operator's to set: neither names an account
@@ -327,6 +408,7 @@ fn only_the_operator_sets_fees_or_terms() {
         creator: TREASURY,
         quote: ZEC,
         fee_bps: 250,
+        cap: 1,
     })
     .is_empty());
     let mut c = Chain::new();
@@ -339,6 +421,7 @@ fn only_the_operator_sets_fees_or_terms() {
         creator: BOB,
         quote: ZEC,
         fee_bps: 0,
+        cap: 10,
     });
     assert_eq!(r, Receipt::Refused("that collection already has its terms"), "terms do not move under holders");
 }
