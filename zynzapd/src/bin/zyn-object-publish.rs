@@ -105,7 +105,7 @@ fn main() -> Result<(), String> {
     // the node serves. An epoch whose records were filed under the wrong
     // number passes the first and fails this — which is how a chain ends up
     // with an anchored root its own intents do not reproduce (A126).
-    let mut replay = <ObjectVm as zyn_vm::spec::MicrochainVm>::genesis(chain, objectvm::Limits { max_io: 16 });
+    let mut replay = <ObjectVm as zyn_vm::spec::MicrochainVm>::genesis(chain, objectvm::Limits { max_io: zynzapd::object_verify::DEFAULT_MAX_IO });
     let mut applied = 0u64;
     for epoch in &epochs {
         let files = journal::files_for(&data_dir, chain, *epoch..=*epoch)

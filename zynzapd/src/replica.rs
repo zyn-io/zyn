@@ -630,8 +630,11 @@ impl Replica {
             }
         }
         // 3. Its own inputs produce it.
+        // Every epoch the verified state has not applied yet, not
+        // `anchor.epochs`: a sequencer restart between a seal and its anchor
+        // undercounts that.
         let last = anchor.checkpoint.epoch;
-        let first = last.saturating_add(1).saturating_sub(anchor.epochs);
+        let first = self.state.epoch();
         let mut files: Vec<EpochFile> = Vec::new();
         for e in first..=last {
             let raw = get(&format!("intents/epoch-{}.intents", e))?;

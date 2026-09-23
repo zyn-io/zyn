@@ -14,6 +14,8 @@
 //!   ZYN_ZEBRA_PORT                                      (18232)
 //!   ZYN_NETWORK        mainnet | testnet                (testnet)
 //!   ZYN_REPLICA_ONCE   verify once and exit             (unset = keep watching)
+//!   ZYN_DA_KEY         opens sealed journals            (unset = cannot read them)
+//!   ZYN_MAX_IO         the chain's I/O limit, part of its root (default 16, as the node)
 //! ```
 //!
 //! # What "verified" means here, exactly
@@ -147,12 +149,23 @@ fn pass(
     // that trusted its own previous state would be trusting a conclusion it
     // is supposed to be re-deriving, and an object ledger's whole history is
     // small enough that there is no reason to.
-    let mut vm = zynzapd::object_verify::fresh(chain);
+    let max_io: u32 = std::env::var("ZYN_MAX_IO")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(zynzapd::object_verify::DEFAULT_MAX_IO);
+    let mut vm = zynzapd::object_verify::fresh(chain, max_io);
     let mut seq = 0u64;
     let mut through = from;
 
+    let key = da_key();
+    // An anchor covers every epoch since the previous one; the first covers
+    // from genesis. Only the anchored epoch's root is in the index -- the
+    // epochs before it are what get the state there.
+    let mut next_epoch = 0u64;
     for e in &entries {
-        match verify_one(agent, mirrors, chain, e, &mut vm, &mut seq, zcash) {
+        let covered = next_epoch..=e.epoch;
+        next_epoch = e.epoch.saturating_add(1);
+        match verify_one(agent, mirrors, chain, e, covered, key.as_ref(), &mut vm, &mut seq, zcash) {
             Verdict::Verified { epoch, root } => {
                 through = epoch;
                 if epoch > from {
@@ -173,6 +186,15 @@ fn pass(
     Ok(through)
 }
 
+
+/// The DA key, when this verifier is one of those allowed to read journals.
+/// Tier 2's sentence is "private from the public; the operator and its
+/// verifiers see activity" — this key is what makes a replica a verifier.
+fn da_key() -> Option<[u8; 32]> {
+    std::env::var("ZYN_DA_KEY")
+        .ok()
+        .and_then(|k| zynzapd::dacrypt::key_from_hex(&k).ok())
+}
 
 /// The Zcash side, if this replica was given a viewing key to use.
 fn build_zcash() -> Option<Zcash> {
@@ -229,28 +251,47 @@ fn fetch(agent: &ureq::Agent, mirrors: &[String], rel: &str) -> Result<Vec<u8>, 
 }
 
 /// Fetch one anchor's epoch and hand it to the verifier.
+#[allow(clippy::too_many_arguments)]
 fn verify_one(
     agent: &ureq::Agent,
     mirrors: &[String],
     chain: u32,
     e: &zynzapd::publish::IndexEntry,
+    covered: std::ops::RangeInclusive<u64>,
+    key: Option<&[u8; 32]>,
     vm: &mut ObjectVm,
     seq: &mut u64,
     zcash: Option<&Zcash>,
 ) -> Verdict {
-    // The same layout the sequencer wrote. A replica reading a different path
+    // The same layout the sequencer wrote: every covered epoch's journal sits
+    // under the anchored epoch's directory. A replica reading a different path
     // would be reading a different chain.
     let dir = zynzapd::publish::rel_dir(chain, e.epoch);
-    let raw = match fetch(agent, mirrors, &format!("{dir}/intents/epoch-{}.intents", e.epoch)) {
-        Ok(b) => b,
-        Err(why) => {
-            return Verdict::Unavailable {
-                epoch: e.epoch,
-                why,
+    let mut epochs = Vec::new();
+    for n in covered {
+        let rel = format!("{dir}/intents/epoch-{n}.intents");
+        let raw = match fetch(agent, mirrors, &rel) {
+            Ok(b) => b,
+            Err(why) => {
+                return Verdict::Unavailable {
+                    epoch: e.epoch,
+                    why: format!("epoch {n}: {why}"),
+                }
+            }
+        };
+        match zynzapd::object_verify::open_journal(raw, &rel, chain, key) {
+            Ok(plain) => epochs.push(plain),
+            // Not a disagreement: the chain may be fine and this verifier is
+            // not one of those allowed to read it.
+            Err(why) => {
+                return Verdict::Unavailable {
+                    epoch: e.epoch,
+                    why: format!("epoch {n}: {why}"),
+                }
             }
         }
-    };
-    match zynzapd::object_verify::verify_epoch(&raw, &e.root, vm, seq) {
+    }
+    match zynzapd::object_verify::verify_anchor(&epochs, &e.root, vm, seq) {
         zynzapd::object_verify::Verdict::Verified { root } => {
             // The replay agrees. Now: does Zcash say this root existed when
             // the chain says it did?

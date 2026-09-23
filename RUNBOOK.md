@@ -2594,6 +2594,46 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-nonies. Sealed journals and the object replica (23 Sep 2026)
+
+Both object ledgers seal their published journals. `ZYN_DA_KEY` (64 hex) is
+in `/etc/zyn/zyn-object.env` on Hetzner and `/etc/zyn/zyn-object-mainnet.env`
+on Contabo; each was generated on its server and has never left it except
+by pipe. Compare keys by fingerprint, never by printing them:
+
+```sh
+grep '^ZYN_DA_KEY=' <file> | cut -d= -f2 | tr -d '\n' | sha256sum | cut -c1-12
+```
+
+(testnet `804d5ff38223`, mainnet `424708a31869`.) A key that is set but
+malformed stops the node; an unset one starts it with a loud
+`journals will be published UNSEALED`.
+
+Contabo's `zyn-object-replica` holds the **testnet** key in
+`/etc/zyn/zyn-object-replica.env` (a drop-in adds the EnvironmentFile). It
+replays from genesis every pass and must print
+`chain 212 verified through epoch N`.
+
+**What an anchor commits:** the seal's *checkpoint* root — the state just
+before the seal advances the epoch — not the state after it. And the I/O
+limit is part of the root: the node's default is 16 (`ZYN_MAX_IO`), and a
+verifier must run the same one or it disagrees with an honest chain.
+
+**A bundle carries every epoch since the previous anchor**, read from the
+ledger, not the anchor's own `epochs` count: a node restarted between a seal
+and its anchor forgets the pending epoch and undercounts. Testnet's first
+anchor (epoch 1) went out covering only epoch 1 that way, and unsealed. It
+was repaired in place:
+
+```sh
+ZYN_DA_KEY=$(grep '^ZYN_DA_KEY=' /etc/zyn/zyn-object.env | cut -d= -f2) \
+ZYN_CHAIN_ID=212 zyn-da-reseal 1 0 /var/lib/zyn-object/da /var/zyn/mirror
+```
+
+`zyn-da-reseal <anchor-epoch> <first-epoch> <dir>…` rewrites only journal
+files; the anchor, snapshot and certificate are untouched, and the replica
+still checks the journal produces them.
+
 ## 5f-septies. Attributions are keyed on the byte order you cannot see (22 Sep 2026)
 
 A shielded deposit with no Zyn memo stops the note-tree walk dead —
