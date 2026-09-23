@@ -399,6 +399,82 @@ fn record(pub_log: &mut Published, op: &Op) {
 /// the envelope check would refuse the frame anyway.
 static REPLAY: std::sync::OnceLock<Mutex<zyn::replay::ReplayIndex>> = std::sync::OnceLock::new();
 
+type AddressRegister = std::sync::Arc<Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>>;
+
+/// Every deposit address this node has handed out, and where the list lives.
+///
+/// An address is a pure function of the account, and the scanner recognised
+/// only those of accounts that had *registered*. Someone who asked for an
+/// address and paid before registering sent ZEC the scanner could not place:
+/// it fell through to the memo rules, had no memo, and stopped the vault's
+/// scan until an operator attributed it by hand — which is what happened on
+/// testnet. Remembering every address given out makes that payment a debt to
+/// its account instead, credited when the account registers.
+static ISSUED: std::sync::OnceLock<(AddressRegister, std::path::PathBuf)> = std::sync::OnceLock::new();
+
+/// Zatoshi the vault holds for other people. Kept current by the anchoring
+/// loop, read by the anchor builder, which refuses a fee that would dip into it.
+static BACKING_FLOOR: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicU64>> = std::sync::OnceLock::new();
+
+/// Deposits the vault holds for accounts that have not registered yet.
+static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Exit destinations holders revealed over RPC, waiting for the settler to
+/// pick them up, and the file they are also written to.
+static NEW_REVEALS: Mutex<Vec<zynzapd::object_exit::Reveal>> = Mutex::new(Vec::new());
+static REVEALS_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+fn issued_path(dir: &str, chain: u32) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(format!("chain-{chain}.deposit-accounts"))
+}
+
+/// Load the accounts that have been given addresses into the scanner's map.
+fn load_issued(register: &AddressRegister, path: &std::path::Path) -> usize {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut map = register.lock().unwrap();
+    let mut n = 0;
+    for line in text.lines() {
+        if let Some(account) = unhex(line.trim()).and_then(|b| <[u8; 32]>::try_from(b).ok()) {
+            map.insert(*zyn_custody::shielded::deposit_index(&account).as_bytes(), account);
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Remember that `account` was given an address, once.
+fn remember_issued(account: &zyn_vm::spec::AccountId) {
+    let Some((register, path)) = ISSUED.get() else {
+        return;
+    };
+    let index = *zyn_custody::shielded::deposit_index(account).as_bytes();
+    let mut map = register.lock().unwrap();
+    if map.get(&index) == Some(account) {
+        return;
+    }
+    map.insert(index, *account);
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{}", hex(account));
+    }
+}
+
+/// The zatoshi the vault holds for others: issued ZEC.zy, exits owed, and
+/// deposits waiting for their account to register.
+fn backing_zat(vm: &ObjectVm, zec: &[u8; 32]) -> u64 {
+    let issued = vm.issued.get(zec).map(|f| (f.0.max(0) / 10_000_000_000) as u64).unwrap_or(0);
+    issued
+        .saturating_add(zynzapd::object_exit::owed(vm, zec))
+        .saturating_add(PENDING_ZAT.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+fn consensus_network(n: zcash_protocol::consensus::NetworkType) -> zcash_protocol::consensus::Network {
+    match n {
+        zcash_protocol::consensus::NetworkType::Main => zcash_protocol::consensus::Network::MainNetwork,
+        _ => zcash_protocol::consensus::Network::TestNetwork,
+    }
+}
+
 /// `valid_until_epoch` from a signed frame: `ZYNAUTH1 ‖ kind ‖ chain u32 ‖
 /// vm_id [32] ‖ valid_until u64 ‖ …`, big-endian. Only called after
 /// `decode_authorized` has accepted the frame, so the layout is known good.
@@ -650,6 +726,7 @@ fn handle(
                 let n = node.lock().unwrap();
                 n.state().viewing.contains_key(&account)
             };
+            remember_issued(&account);
             format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"address\":\"{}\",\"registered\":{},\"note\":\"{}\"}}}}",
                 keys.0.deposit_address(&account, keys.1),
@@ -660,6 +737,59 @@ fn handle(
                     "this account has not registered a viewing key, so a deposit here is held as owed and credited the moment it does"
                 }
             )
+        }
+        // The commitment a withdrawal names, for an address and a salt the
+        // holder chose. A pure function, served here because parsing a
+        // unified address takes the same Zcash libraries the vault pays with;
+        // the address is not stored and says nothing the payout will not.
+        "zyn_exitCommitment" | "zyn_exitReveal" => {
+            let Some(keys) = vault.as_ref() else {
+                return err("this node custodies no vault, so it pays no exits");
+            };
+            let (Some(address), Some(salt)) = (field(body, "address"), field(body, "salt")) else {
+                return err("give an address and a salt");
+            };
+            let Some(salt) = unhex(&salt).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("the salt is not 32 hex bytes");
+            };
+            let Some(dest) = zynzapd::settle::parse_destination(address.trim(), consensus_network(keys.1)) else {
+                return err("not a transparent or unified address for this network");
+            };
+            let commitment = zynzapd::settle::zcash_commitment(&dest, &salt);
+            if method == "zyn_exitCommitment" {
+                return format!(
+                    "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"destination\":\"{}\"}}}}",
+                    hex(&commitment)
+                );
+            }
+            // A reveal is accepted only for an exit already waiting on it, so
+            // this cannot be used to write arbitrary lines into the file the
+            // vault pays from — and a reveal is proof, not instruction: it
+            // must reproduce the commitment the holder already signed.
+            let waiting = {
+                let n = node.lock().unwrap();
+                n.state().exits.iter().any(|e| e.paid_by.is_none() && e.destination == commitment)
+            };
+            if !waiting {
+                return err("no unpaid exit names that address and salt");
+            }
+            let reveal = zynzapd::object_exit::Reveal { address: dest, salt };
+            if let Ok(mut v) = NEW_REVEALS.lock() {
+                if !v.contains(&reveal) {
+                    v.push(reveal);
+                }
+            }
+            if let Some(path) = REVEALS_PATH.get() {
+                use std::io::Write as _;
+                let known = std::fs::read_to_string(path).unwrap_or_default();
+                let line = format!("{} {}", address.trim(), hex(&salt));
+                if !known.lines().any(|l| l.trim() == line) {
+                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                        let _ = writeln!(f, "{line}");
+                    }
+                }
+            }
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"filed\":true}}".to_string()
         }
         // The holders' door. A frame is a signed envelope around one intent,
         // exactly as the journal will record it: `decode_authorized` checks
@@ -728,7 +858,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims and zyn_depositAddress"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 
@@ -1087,6 +1217,15 @@ fn bridge_pass(
     // crash it must be the list of what is owed: a cursor that is behind
     // costs a rescan, and the VM refuses the duplicate credit anyway.
     let _ = std::fs::write(bridge_pending_path(dir, chain), bridge.pending.encode());
+    PENDING_ZAT.store(
+        bridge
+            .pending
+            .debts()
+            .iter()
+            .map(|d| (d.amount.0.max(0) / 10_000_000_000) as u64)
+            .sum(),
+        std::sync::atomic::Ordering::SeqCst,
+    );
     let _ = std::fs::write(
         bridge_cursor_path(dir, chain),
         bridge.watcher.scanned_to().to_string(),
@@ -1459,7 +1598,8 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         public.clone(),
         Some(custodians.clone()),
     )
-    .ok()?;
+    .ok()?
+    .with_backing_floor(BACKING_FLOOR.get_or_init(Default::default).clone());
     let settler = zynzapd::anchor::AnchorSettler::new(
         Zebra::connect(&host, port, auth, network).ok()?,
         builder,
@@ -1477,6 +1617,9 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     let addresses: std::sync::Arc<
         Mutex<std::collections::BTreeMap<[u8; 11], zyn_vm::spec::AccountId>>,
     > = std::sync::Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+    let given = load_issued(&addresses, &issued_path(dir, chain));
+    eprintln!("zyn-object-node: {given} deposit address(es) handed out before, recognised whether or not their account has registered");
+    let _ = ISSUED.set((addresses.clone(), issued_path(dir, chain)));
     // How many blocks one scan step covers before the trees are written down.
     //
     // Smaller is not slower: the work per block is the same, and the batch
@@ -1525,6 +1668,7 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     // its holder says where -- the chain carries a commitment, not an address.
     let exits = {
         let path = env("ZYN_EXIT_REVEALS", "/etc/zyn/zcash-exit-reveals");
+        let _ = REVEALS_PATH.set(std::path::PathBuf::from(&path));
         let path = std::path::Path::new(&path);
         let network_c = match network {
             Network::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
@@ -1987,6 +2131,9 @@ fn main() {
         let pub_log = Arc::clone(&pub_log);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
+            if let (Some(floor), Ok(n)) = (BACKING_FLOOR.get(), node.lock()) {
+                floor.store(backing_zat(n.state(), &zec_asset()), std::sync::atomic::Ordering::SeqCst);
+            }
             match settler.poll_once(&node, now_secs()) {
                 Ok(Some(c)) => {
                     eprintln!(
@@ -2045,6 +2192,9 @@ fn main() {
             // of payouts when notes are scarce -- a chain that cannot anchor
             // is one whose exits nobody can verify anyway.
             if let Some(ex) = exits.as_mut() {
+                for r in NEW_REVEALS.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default() {
+                    ex.add_reveal(r);
+                }
                 let ops = {
                     let vm_ops = node
                         .lock()

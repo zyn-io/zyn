@@ -55,6 +55,7 @@ pub fn vectors() -> Vec<(&'static str, String)> {
         ("program_claim", hex(&program::claim().0)),
         ("program_launch_create", hex(&program::launch_create().0)),
         ("program_launch_commit", hex(&program::launch_commit().0)),
+        ("program_withdraw", hex(&program::withdraw().0)),
         ("pool_id", hex(&pool)),
         ("lp_asset", hex(&market::lp_asset(&pool))),
         ("token_of", hex(&market::token_of(&OWNER, &NONCE))),
@@ -145,6 +146,18 @@ pub fn vectors() -> Vec<(&'static str, String)> {
                 fee_bps: 30,
                 closes_at_epoch: 4321,
                 meta: [0x4d; 32],
+            }),
+        ),
+        (
+            "withdraw",
+            enc(&Op::Withdraw {
+                holder: OWNER,
+                program: program::withdraw(),
+                inputs: input.clone(),
+                asset: ZEC,
+                amount: Fixed::whole(3),
+                destination: [0xDE; 32],
+                outputs: vec![change()],
             }),
         ),
         (

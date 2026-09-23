@@ -106,3 +106,11 @@ test('a launch name round-trips, and anything else does not decode', () => {
   assert.deepEqual(m.decodeMeta(markup).name.startsWith('<img>'), true, 'printable — escaping is the renderer\'s job');
   assert.throws(() => m.encodeMeta({ symbol: 'TOOLONGSYM', name: 'x' }));
 });
+
+/// Leaving is the other half of the bridge, and the same bytes rule applies.
+test('a Withdraw intent encodes to exactly the bytes Rust produces', async () => {
+  const { withdrawIntent, PROGRAM } = await import('../src/object.js');
+  assert.equal(PROGRAM.withdraw, v.program_withdraw);
+  const bytes = withdrawIntent({ holder: OWNER, inputs, asset: ZEC, amount: W(3), destination: new Uint8Array(32).fill(0xde), outputs: change });
+  assert.equal(hex(bytes), v.withdraw);
+});

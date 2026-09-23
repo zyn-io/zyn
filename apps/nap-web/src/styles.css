@@ -35,3 +35,8 @@
 }
 .coin b { display: block; margin-top: 8px; font: 700 30px Bricolage; font-variant-numeric: tabular-nums; }
 .coin > span { font: 11px Mono; color: #747776; white-space: nowrap; }
+
+/* The withdraw card reuses the account card; its inputs sit on the dark ground. */
+.withdraw-input { display: block; width: 100%; margin: 10px 0 0; padding: 12px 13px; border: 1px solid #ffffff2d; border-radius: 8px; background: #121618; color: #fff; font: 14px Mono; }
+.withdraw-input:focus { outline: none; border-color: #e8a916; }
+#withdraw-form .primary { margin-top: 0; }

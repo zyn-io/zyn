@@ -1,5 +1,7 @@
 import QRCode from 'qrcode';
-import { scan as scanObjects } from './object.js';
+import { x25519 } from '@noble/curves/ed25519.js';
+import { scan as scanObjects, objectCall, registerIntent, signedFrame as objectFrame, submitSigned, withdrawIntent } from './object.js';
+import { fund as fundFrom } from './market.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import './styles.css';
@@ -13,6 +15,9 @@ let receiving = [];
 let listings = [];
 let assets = [];
 let holdings = [];
+/// The object ledger's notes this wallet holds, with commitments — what a
+/// withdrawal spends.
+let objectHeld = [];
 let generatedWords = '';
 const giftUrl = new URL(location.href);
 const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || giftUrl.searchParams.get('claim') || '';
@@ -289,10 +294,24 @@ function wallet(message = '') {
       <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork — fetches each item's picture from the gateway, which tells that host your IP, which items you hold, and when. Off by default.</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
       <section class="activity"><div class="section-title"><h2>Account</h2></div><div class="account-card"><div><span>Public account</span><code>${account}</code></div><canvas id="qr" width="164" height="164"></canvas></div></section>
       <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
+      ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Take ZEC out</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">The chain records only a commitment to the address. The vault pays it once two custodians sign; the Zcash network fee comes out of the amount.</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
     </section>
   </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><p class="kicker">RECOVERY</p><h2>The phrase is the wallet.</h2><p>Nap does not store it in this browser. Restore this same phrase, passphrase and account index in browser or desktop Nap to recover <code>${account}</code>.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
   QRCode.toCanvas(root.querySelector('#qr'), account, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
   void loadDepositAddress(identity);
+  root.querySelector('#withdraw-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = root.querySelector('#withdraw-go');
+    button.disabled = true;
+    try {
+      const to = root.querySelector('#withdraw-to').value.trim();
+      if (!to.startsWith(config.zcashPrefix) && !/^t[a-z0-9]/i.test(to)) throw new Error(`That is not a ${config.zcash} address`);
+      await withdrawToZcash(to, root.querySelector('#withdraw-amount').value.trim());
+      note('Withdrawal recorded. The vault pays it once two custodians sign — usually within minutes.');
+      root.querySelector('#withdraw-amount').value = '';
+      refresh(false);
+    } catch (err) { note(err.message, true); } finally { button.disabled = false; }
+  });
   root.querySelector('#copy-account').onclick = async () => { await navigator.clipboard.writeText(account); note('Account ID copied.'); };
   root.querySelector('#receive-link').onclick = () => root.querySelector('.account-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Same origin, same kept key: the market opens it with the same password.
@@ -386,6 +405,62 @@ async function refresh(announce = true) {
 // Asking requires a signature, which the browser wallet can produce and a
 // stranger cannot: issuing an address writes it into the node's scan register,
 // so the public method is gated rather than open (DECISIONS 87.6).
+/// Sign and send an intent through the object ledger's holders' door. A
+/// refusal inside the receipts is an error here too.
+async function submitObject(intent) {
+  const status = await rpc(config.rpcUrl, 'zyn_status');
+  const epoch = checkedEpoch(status, config.chain);
+  const frame = await objectFrame(identity.secretKey, config.chain, epoch + 100n, intent);
+  const result = await submitSigned(config.rpcUrl, frame);
+  const refused = /Refused\("([^"]*)"\)/.exec(String(result?.receipts || ''));
+  if (refused) throw new Error(`The chain refused: ${refused[1]}`);
+  return result;
+}
+
+/// Publish where this account is paid: its viewing key. Public by design —
+/// a payer who cannot read it cannot pay — and it cannot spend anything.
+async function registerObjectAccount(owner) {
+  await submitObject(registerIntent(owner.account, x25519.getPublicKey(owner.viewing)));
+  note('Registered this account to receive ZEC. Deposits to the address below are credited to it.');
+}
+
+const EXITS_KEY = () => `nap.exits.${config.chain}.${identity.accountHex}`;
+const pendingExits = () => { try { return JSON.parse(localStorage.getItem(EXITS_KEY()) || '[]'); } catch { return []; } };
+const savePendingExits = (list) => { try { localStorage.setItem(EXITS_KEY(), JSON.stringify(list)); } catch { /* this session only */ } };
+
+/// Tell the vault where a withdrawal goes, now or on a later visit. The chain
+/// holds only a commitment; until the address and salt are revealed the exit
+/// is owed and cannot be paid. Kept on this device until the node files it.
+async function revealExits() {
+  const left = [];
+  for (const x of pendingExits()) {
+    try {
+      await objectCall(config.rpcUrl, 'zyn_exitReveal', { address: x.address, salt: x.salt });
+    } catch (e) {
+      if (!/no unpaid exit/.test(e.message)) left.push(x);
+    }
+  }
+  savePendingExits(left);
+}
+
+/// ZEC.zy back to Zcash: commit to the address, sign the withdrawal, reveal.
+async function withdrawToZcash(address, amountText) {
+  const zec = config.zecAsset;
+  const raw = parseAmount(amountText);
+  // The vault pays whole zatoshi: at most eight decimals.
+  if (raw % 10_000_000_000n !== 0n) throw new Error('ZEC has eight decimal places');
+  if (raw < 100_000n * 10_000_000_000n) throw new Error('Withdraw at least 0.001 ZEC — the Zcash fee comes out of it');
+  const salt = hex(crypto.getRandomValues(new Uint8Array(32)));
+  const { destination } = await objectCall(config.rpcUrl, 'zyn_exitCommitment', { address, salt });
+  if (!/^[0-9a-f]{64}$/.test(String(destination))) throw new Error('The node did not return a commitment');
+  const { inputs, change } = fundFrom(identity, objectHeld, unhex(zec, 32), raw);
+  // Kept before submitting: if the page closes between the two steps, the
+  // next visit still knows where this exit was meant to go.
+  savePendingExits([...pendingExits(), { address, salt }]);
+  await submitObject(withdrawIntent({ holder: identity.account, inputs, asset: unhex(zec, 32), amount: raw, destination: unhex(destination, 32), outputs: change }));
+  await revealExits();
+}
+
 async function loadDepositAddress(owner) {
   const current = generation;
   const field = root.querySelector('#deposit-address');
@@ -393,10 +468,23 @@ async function loadDepositAddress(owner) {
   const copy = root.querySelector('#copy-deposit');
   if (!field) return;
   try {
-    const status = await rpc(config.rpcUrl, 'zyn_status');
-    if (generation !== current) return;
-    const payload = signedRead(owner, config.chain, checkedEpoch(status, config.chain));
-    const result = await rpc(config.rpcUrl, 'zyn_depositAddress', [hex(payload)]);
+    let result;
+    if (config.kind === 'object') {
+      result = await objectCall(config.rpcUrl, 'zyn_depositAddress', { account: owner.accountHex });
+      if (generation !== current) return;
+      // An address only credits an account that has published where to be
+      // paid. The node now holds such a payment as a debt rather than losing
+      // it, but registering first means it is credited the moment it lands.
+      if (result && result.registered === false && owner.viewing) {
+        await registerObjectAccount(owner);
+        if (generation !== current) return;
+      }
+    } else {
+      const status = await rpc(config.rpcUrl, 'zyn_status');
+      if (generation !== current) return;
+      const payload = signedRead(owner, config.chain, checkedEpoch(status, config.chain));
+      result = await rpc(config.rpcUrl, 'zyn_depositAddress', [hex(payload)]);
+    }
     if (generation !== current) return;
     const address = result?.address;
     if (typeof address !== 'string' || !address) throw new Error('No address returned');
@@ -460,6 +548,8 @@ async function refreshObject(epoch, announce, active) {
   }));
   if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });
 
+  objectHeld = held;
+  void revealExits();
   // `renderCoins` reads decimal strings, and these are WAD BigInts.
   holdings = held.map((h) => ({ asset: h.asset, amount: h.amount.toString() }));
   listings = [];

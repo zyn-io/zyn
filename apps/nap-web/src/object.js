@@ -353,3 +353,52 @@ PROGRAM.privateTransfer = '1bf1117563416d5aea4b85568432f26dd1c13418f440b0095592d
 /// Shared with `market.js`, which encodes the market's intents in the same
 /// wire format.
 export { leaf, concatBytes, i128Bytes, u32be, u64be };
+
+// ---------------------------------------------------------------------------
+// Leaving: ZEC.zy back to Zcash.
+// ---------------------------------------------------------------------------
+
+/// `named("withdraw")`, derived the way `zyn-vm/src/program.rs` names rules.
+PROGRAM.withdraw = hex(leaf(te.encode('zyn.program.named.v1'), u32be(8), te.encode('withdraw')));
+
+const TAG_WITHDRAW = 7;
+
+/// `Op::Withdraw` — retire these notes, record a payout the vault owes, and
+/// take change back. `destination` is the 32-byte commitment to the Zcash
+/// address and a salt only the holder knows, so the chain never carries
+/// where anyone's money went.
+export function withdrawIntent({ holder, inputs, asset, amount, destination, outputs }) {
+  const parts = [
+    new Uint8Array([TAG_WITHDRAW]),
+    holder,
+    unhex(PROGRAM.withdraw),
+    asset,
+    i128Bytes(amount),
+    destination,
+    u32be(inputs.length),
+    u32be(outputs.length),
+  ];
+  for (const i of inputs) parts.push(i.commitment, i.nullifier);
+  for (const o of outputs) {
+    parts.push(o.note.asset, i128Bytes(o.note.amount), o.note.owner, o.note.nonce, o.enc.epk, u32be(o.enc.ciphertext.length), o.enc.ciphertext);
+  }
+  return concatBytes(...parts);
+}
+
+/// A JSON-RPC call with named fields, as the object node reads them, checked
+/// to be the answer to this question.
+export async function objectCall(rpcUrl, method, fields = {}) {
+  const id = crypto.randomUUID();
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
+    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`The chain answered HTTP ${response.status}`);
+  const body = await response.json();
+  if (body.id !== id) throw new Error('The chain answered a different question');
+  if (body.error) throw new Error(body.error.message || 'The chain refused');
+  return body.result;
+}
