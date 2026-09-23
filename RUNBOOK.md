@@ -2827,7 +2827,7 @@ Three shares from the 10 Sep DKG; threshold two.
 |---|---|---|---|
 | `8212` | 01 | **Hetzner**, `zyn-custodian-main`, `127.0.0.1:8210`, `/var/zyn/custody-main` — moved from the Mac on 11 Sep | `zyn-mirror-tunnel` on Contabo, `-L 8212:127.0.0.1:8210` |
 | `8213` | — | **MacBook Air** | reverse tunnel *into* Contabo, key `air-custody-tunnel`, open since 22 Sep 12:36 |
-| `8211` | — | **Windows box** (HP Pro Mini, `192.168.1.21`), inside the WSL distro `zyn` | key `win-custody-tunnel` is authorized; **the distro is stopped, so the tunnel is down** |
+| `8211` | — | **Windows box** (HP Pro Mini, `192.168.1.21`), inside the WSL distro `zyn` | key `win-custody-tunnel` is authorized; up since 23 Sep, in the object ledger's list |
 
 Two of two live shares at threshold two: one outage stops anchoring and exits.
 The third's placement is undecided.
@@ -2876,11 +2876,20 @@ note worth less than an anchor costs (≥20,000 zat: 10,000 self-send +
 every scanner reads as "credited to nobody". A plain send with no memo stops
 the scan instead.
 
-**Custody is at exactly threshold.** `8212` on Contabo is Hetzner's share 01
-tunnelled in (`zyn-mirror-tunnel`, `-L 8212:127.0.0.1:8210`); `8213` is an
-inbound reverse tunnel from another host. `8211` is in the AMM chain's list
-with nothing behind it — no unit, no listener — and is left out of the
-object ledger's. Two of two live shares, threshold two: no redundancy.
+**Custody: all three shares, threshold two (since 23 Sep, 09:30).** `8212` on
+Contabo is Hetzner's share 01 tunnelled in (`zyn-mirror-tunnel`,
+`-L 8212:127.0.0.1:8210`); `8213` is the Air's share 02 (reverse tunnel);
+`8211` is the Windows box's share 03 (`zyn-custody-tunnel-main` in WSL `zyn`,
+`-R 127.0.0.1:8211:127.0.0.1:8210`, checked every two minutes by
+`zyn-tunnel-watch@8211-main-…`). `ZYN_CUSTODIANS=127.0.0.1:8212,127.0.0.1:8211,127.0.0.1:8213`
+in `/etc/zyn/zyn-object-mainnet.env`. One share can be down without stopping
+anchoring or exits.
+
+**The Windows box after its restart (23 Sep):** `zyn-signer` and `zyn-tunnel`
+verified chain 11 and are **disabled** (chain 11 is retired); `zebrad-mainnet`
+restarted on its own and filled D: before, so its restart policy is now `no`
+and it is stopped; both custodians run the current build (the 8 Sep one is
+kept as `zyn-custodian.sep08`).
 
 ## 5f-quater. One signer per machine (22 Sep 2026)
 
