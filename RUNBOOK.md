@@ -2613,6 +2613,15 @@ no anchoring config means a devnet. Credit test ZEC.zy with an operator
 `ingress::credit` builds. Point nap-web's preview at it with
 `NAP_DEV_RPC=http://127.0.0.1:8399`.
 
+**Mainnet 26460 (23 Sep):** node and Windows replica run the curve-aware
+build (backups `/root/zyn-object-node.bak-20260923b` on Contabo,
+`/usr/local/bin/zyn-object-replica.bak-20260923` in WSL `zyn`). Fees, the Cave Z
+registration and curve terms are **not yet set**; the three intents are
+prepared (bridge 50 bps; Cave Z: creator Treasury `b3e4c493…fe99`, quote
+ZEC.zy, 100 bps, cap 4,444; curves 100 bps + 0.05 bond) and go through the
+same operator door as testnet's — token read on the box, never printed.
+Without terms mainnet curves charge nothing and need no bond.
+
 **Jade** builds with `npm run build:launchpad` (to `apps/cave-market/dist`,
 which the store build also uses — build one, deploy it, then the other) and
 deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
