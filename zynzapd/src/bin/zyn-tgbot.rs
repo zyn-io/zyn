@@ -662,12 +662,25 @@ fn main() -> Result<(), String> {
     let watch: Vec<String> = env("ZYN_WATCH")
         .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_else(|| vec![bot.object.clone()]);
+    let mut watchers = Vec::new();
     for url in watch {
         let bot = std::sync::Arc::clone(&bot);
         eprintln!("zyn-tgbot: watching {url}");
-        std::thread::spawn(move || bot.watch(&url));
+        watchers.push(std::thread::spawn(move || bot.watch(&url)));
     }
-    bot.run();
+    // One Telegram bot, two programs: the owner's assistant answers the chat
+    // and this one pushes alerts through the same bot. Only one process may
+    // poll for updates — two pollers take each other's messages and each
+    // sees the other's long poll as a conflict — so with `ZYN_TG_POLL=0`
+    // this bot only speaks, and never listens.
+    if env("ZYN_TG_POLL").as_deref() == Some("0") {
+        eprintln!("zyn-tgbot: push only — not polling; the chat belongs to another program");
+        for w in watchers {
+            let _ = w.join();
+        }
+    } else {
+        bot.run();
+    }
     Ok(())
 }
 
