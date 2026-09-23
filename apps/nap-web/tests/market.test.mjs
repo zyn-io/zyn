@@ -130,3 +130,29 @@ test('item identity, listing sources and the NFT intents match the Rust side', (
   assert.equal(hex(m.takeOfferIntent({ buyer: OWNER, item, itemNullifier: new Uint8Array(32).fill(0xd1), payment: inputs, outputs: change })), v.take_offer);
   assert.equal(hex(m.redeemIntent({ holder: OWNER, collection: TOKEN, inputs })), v.redeem);
 });
+
+// Bonding curves (DECISIONS §141): ids, intents and the curve's own prices,
+// each held to the bytes and numbers objectvm::curve produces.
+test('curve ids and intents match the Rust side', () => {
+  assert.equal(m.MARKET_PROGRAM.curveCreate, v.program_curve_create);
+  assert.equal(m.MARKET_PROGRAM.curveTrade, v.program_curve_trade);
+  assert.equal(hex(m.curveSource(OWNER, NONCE)), v.curve_source);
+  assert.equal(hex(m.curveOrderId(OWNER, NONCE)), v.curve_order_id);
+  assert.equal(hex(m.tokenOf(OWNER, NONCE)), v.curve_token);
+  assert.equal(hex(m.createCurveIntent({ creator: OWNER, nonce: NONCE, quote: ZEC, meta: new Uint8Array(32).fill(0x4d), inputs, change })), v.create_curve);
+  assert.equal(hex(m.curveTradeIntent({ trader: OWNER, token: TOKEN, buy: true, amountIn: m.WAD, minOut: m.LOT, inputs, change, nonce: NONCE })), v.curve_trade);
+});
+
+test('the curve prices lots exactly as the ledger does', () => {
+  assert.equal(m.curveCost(0, m.CURVE.graduateAt).toString(), v.curve_cost_to_graduation);
+  assert.equal(m.curveCost(1000, 50).toString(), v.curve_cost_1000_50);
+  // A lone buy never spends more than it put in, and one more lot is out of reach.
+  const q = m.previewCurveBuy(1234, m.WAD / 10n, 100);
+  assert.ok(q.paid + q.fee <= m.WAD / 10n && q.refund >= 0n);
+  assert.ok(m.curveCost(1234, q.lots + 1) > (m.WAD / 10n) * 10_000n / 10_100n);
+  // Selling what was just bought returns less than it cost (the curve is not a pump).
+  const s = m.previewCurveSell(1234 + q.lots, q.lots, 100);
+  assert.ok(s.net < q.paid + q.fee);
+  // Nothing past graduation.
+  assert.equal(m.previewCurveBuy(m.CURVE.graduateAt, m.WAD, 0).lots, 0);
+});

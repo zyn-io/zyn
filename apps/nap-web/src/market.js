@@ -43,9 +43,11 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['claim', 'claim'],
   ['launchCreate', 'launch-create'],
   ['launchCommit', 'launch-commit'],
+  ['curveCreate', 'curve-create'],
+  ['curveTrade', 'curve-trade'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -117,6 +119,77 @@ export const createLaunchIntent = (o) => concatBytes(
 export const commitIntent = (o) => concatBytes(
   new Uint8Array([TAG.commit]), o.buyer, prog('launchCommit'), o.launch,
   i128Bytes(o.amount), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+
+// ---------------------------------------------------------------------------
+// Bonding curves (objectvm::curve, DECISIONS §141). Every token has the same
+// curve: 80,000 lots of 12,500 tokens, lot i costs 7,721 + i zatoshi, and it
+// graduates at lot 51,098 into a pool whose shares nobody holds.
+// ---------------------------------------------------------------------------
+
+export const CURVE = Object.freeze({
+  lots: 80_000,
+  lotTokens: 12_500n,
+  baseZat: 7_721n,
+  slopeZat: 1n,
+  graduateAt: 51_098,
+  poolFeeBps: 30,
+});
+const ZAT = 10_000_000_000n; // one zatoshi, in the ledger's units
+/// One lot, in the ledger's units (1e18 per token).
+export const LOT = CURVE.lotTokens * WAD;
+/// The smallest buy: 0.001 of the quote asset.
+export const MIN_CURVE_BUY = 100_000n * ZAT;
+
+export const curveSource = (creator, nonce) => id('objectvm.curve.v1', creator, nonce);
+export const curveOrderId = (trader, nonce) => id('objectvm.curve-order.v1', trader, nonce);
+
+/// What lots `[q, q+d)` cost, in the ledger's units — `objectvm::curve::cost`.
+export function curveCost(q, d) {
+  const Q = BigInt(q), D = BigInt(d);
+  return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * ZAT;
+}
+
+/// The most lots `budget` buys from lot `q`, at most `cap`.
+export function lotsFor(q, budget, cap) {
+  let lo = 0, hi = cap;
+  while (lo < hi) {
+    const mid = lo + Math.ceil((hi - lo) / 2);
+    if (curveCost(q, mid) <= budget) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+/// A buy of `amountIn` alone in its batch: lots, what they cost, the fee.
+/// Other buyers in the same epoch share the price, so this is what a buy
+/// gets at best when nobody else buys — a preview, never a promise.
+export function previewCurveBuy(sold, amountIn, feeBps) {
+  const budget = (BigInt(amountIn) * BPS) / (BPS + BigInt(feeBps));
+  const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold));
+  const paid = curveCost(sold, lots);
+  const fee = (paid * BigInt(feeBps)) / BPS;
+  return { lots, tokens: BigInt(lots) * LOT, paid, fee, refund: BigInt(amountIn) - paid - fee };
+}
+
+/// Selling `lots` alone: gross from the curve, the fee, what arrives.
+export function previewCurveSell(sold, lots, feeBps) {
+  const n = Math.min(lots, sold);
+  const gross = n ? curveCost(sold - n, n) : 0n;
+  const fee = (gross * BigInt(feeBps)) / BPS;
+  return { lots: n, gross, fee, net: gross - fee };
+}
+
+/// Price of the next lot, per token, in the ledger's units.
+export const curvePricePerToken = (sold) => curveCost(sold, 1) / CURVE.lotTokens;
+
+export const createCurveIntent = (o) => concatBytes(
+  new Uint8Array([TAG.createCurve]), o.creator, prog('curveCreate'), o.nonce, o.quote, o.meta,
+  inputs(o.inputs || []), outputs(o.change || []),
+);
+
+export const curveTradeIntent = (o) => concatBytes(
+  new Uint8Array([TAG.curveTrade]), o.trader, prog('curveTrade'), o.token, bool(o.buy),
+  i128Bytes(o.amountIn), i128Bytes(o.minOut), o.nonce, inputs(o.inputs), outputs(o.change),
 );
 
 // ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ export function claimSources(identity, limit) {
   const me = identity.account;
   for (let n = 0; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
-    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce)]) {
+    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce)]) {
       out.push(...mk.claimIds(source).map(hex));
     }
   }

@@ -46,6 +46,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
+pub mod curve;
 pub mod market;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
@@ -322,6 +323,35 @@ pub enum Op {
         asset: Address,
         inputs: Vec<(Hash, Hash)>,
     },
+    /// Make a bonding-curve token. The creator pays the bond, if the
+    /// operator set one, and holds nothing else: every token is bought.
+    CreateCurve {
+        creator: AccountId,
+        program: ProgramId,
+        nonce: Hash,
+        quote: Address,
+        meta: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Buy from or sell to a curve; escrowed, settled at the seal.
+    CurveTrade {
+        trader: AccountId,
+        program: ProgramId,
+        token: Address,
+        buy: bool,
+        amount_in: Fixed,
+        min_out: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
+    /// Set what curves charge. Operator only; nothing is charged before it.
+    SetCurveTerms {
+        program: ProgramId,
+        fee_bps: u32,
+        bond: Fixed,
+    },
     Seal,
 }
 
@@ -346,6 +376,8 @@ pub enum Receipt {
     FeesSet { bridge_bps: u32 },
     CollectionRegistered { asset: Address },
     Redeemed { paid: Fixed, source: Hash },
+    CurveCreated { token: Address },
+    CurveTermsSet { fee_bps: u32, bond: Fixed },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -361,6 +393,8 @@ impl Op {
             | Op::RemoveLiquidity { inputs, .. }
             | Op::Swap { inputs, .. }
             | Op::Commit { inputs, .. }
+            | Op::CreateCurve { inputs, .. }
+            | Op::CurveTrade { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
                 item_nullifier,
@@ -389,6 +423,8 @@ impl Op {
             | Op::AddLiquidity { change, .. }
             | Op::RemoveLiquidity { change, .. }
             | Op::Swap { change, .. }
+            | Op::CreateCurve { change, .. }
+            | Op::CurveTrade { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
             _ => Vec::new(),
         }
@@ -1699,6 +1735,33 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_redeem(holder, asset, inputs)
             }),
+            Op::CreateCurve { creator, program, nonce, quote, meta, inputs, change } => {
+                one(if *program != program::curve_create() {
+                    Err("wrong program for a curve")
+                } else {
+                    self.apply_create_curve(creator, nonce, quote, meta, inputs, change)
+                })
+            }
+            Op::CurveTrade { trader, program, token, buy, amount_in, min_out, inputs, change, nonce } => {
+                one(if *program != program::curve_trade() {
+                    Err("wrong program for a curve trade")
+                } else {
+                    self.apply_curve_trade(trader, token, *buy, *amount_in, *min_out, inputs, change, nonce)
+                })
+            }
+            Op::SetCurveTerms { program, fee_bps, bond } => {
+                if *program != program::configure_curves() {
+                    return vec![Receipt::Refused("wrong program for curve terms")];
+                }
+                if *fee_bps > curve::MAX_CURVE_FEE_BPS {
+                    return vec![Receipt::Refused("the curve fee is above the ceiling")];
+                }
+                if bond.0 < 0 || *bond > curve::MAX_BOND {
+                    return vec![Receipt::Refused("the bond is outside what a creator can be asked for")];
+                }
+                self.market.curve_terms = Some(curve::CurveTerms { fee_bps: *fee_bps, bond: *bond });
+                vec![Receipt::CurveTermsSet { fee_bps: *fee_bps, bond: *bond }]
+            }
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -1799,6 +1862,8 @@ impl MicrochainVm for ObjectVm {
             Op::CreateLaunch { creator, .. } => vec![*creator],
             Op::Commit { buyer, .. } => vec![*buyer],
             Op::Redeem { holder, .. } => vec![*holder],
+            Op::CreateCurve { creator, .. } => vec![*creator],
+            Op::CurveTrade { trader, .. } => vec![*trader],
             _ => Vec::new(),
         }
     }
@@ -2155,6 +2220,26 @@ impl MicrochainVm for ObjectVm {
                     .u32(enc.ciphertext.len() as u32)
                     .bytes(&enc.ciphertext);
             }
+            Op::CreateCurve { creator, program, nonce, quote, meta, inputs, change } => {
+                e.u8(23).bytes(creator).bytes(&program.0).bytes(nonce).bytes(quote).bytes(meta);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::CurveTrade { trader, program, token, buy, amount_in, min_out, inputs, change, nonce } => {
+                e.u8(24)
+                    .bytes(trader)
+                    .bytes(&program.0)
+                    .bytes(token)
+                    .bool(*buy)
+                    .fixed(*amount_in)
+                    .fixed(*min_out)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::SetCurveTerms { program, fee_bps, bond } => {
+                e.u8(25).bytes(&program.0).u32(*fee_bps).fixed(*bond);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -2466,6 +2551,35 @@ impl MicrochainVm for ObjectVm {
                 let ciphertext = d.take_bytes(n).ok()?.to_vec();
                 Some(Op::MintItem { program, collection, serial, owner, nonce, enc: EncryptedNote { epk, ciphertext } })
             }
+            23 => Some(Op::CreateCurve {
+                creator: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                nonce: d.hash().ok()?,
+                quote: d.hash().ok()?,
+                meta: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            24 => Some(Op::CurveTrade {
+                trader: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                token: d.hash().ok()?,
+                buy: match d.u8().ok()? {
+                    0 => false,
+                    1 => true,
+                    _ => return None,
+                },
+                amount_in: d.fixed().ok()?,
+                min_out: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            25 => Some(Op::SetCurveTerms {
+                program: ProgramId(d.hash().ok()?),
+                fee_bps: d.u32().ok()?,
+                bond: d.fixed().ok()?,
+            }),
             _ => None,
         }
     }

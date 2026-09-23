@@ -229,15 +229,50 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
             )
         })
         .collect();
+    // Bonding curves: everything the state root already makes public — lots
+    // sold, what the curve holds, what it will graduate with, the next price.
+    // The creator is not here, as with launches.
+    let curves: Vec<String> = vm
+        .market
+        .curves
+        .values()
+        .map(|c| {
+            let pool = objectvm::market::pool_id(&c.token, &c.quote);
+            format!(
+                "{{\"token\":\"{}\",\"quote\":\"{}\",\"meta\":\"{}\",\"created_at\":{},\"fee_bps\":{},\"sold\":{},\"lots\":{},\"graduate_at\":{},\"reserve\":\"{}\",\"graduation\":\"{}\",\"creator_fees\":\"{}\",\"bond\":\"{}\",\"price_per_token\":\"{}\",\"graduated\":{},\"pool\":\"{}\",\"pending\":{}}}",
+                hex(&c.token),
+                hex(&c.quote),
+                hex(&c.meta),
+                c.created_at,
+                c.fee_bps,
+                c.sold,
+                objectvm::curve::LOTS,
+                objectvm::curve::GRADUATE_AT,
+                c.reserve.0,
+                c.graduation.0,
+                c.creator_fees.0,
+                c.bond.0,
+                c.price_per_token().0,
+                c.graduated,
+                if c.graduated { hex(&pool) } else { String::new() },
+                vm.market.curve_orders.iter().filter(|o| o.token == c.token).count()
+            )
+        })
+        .collect();
+    let terms = vm.market.curve_terms.unwrap_or_default();
     format!(
-        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}]}}",
+        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"curve_terms\":{{\"set\":{},\"fee_bps\":{},\"bond\":\"{}\"}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}],\"curves\":[{}]}}",
         vm.epoch,
         epoch_seconds,
         vm.market.bridge_bps(),
+        vm.market.curve_terms.is_some(),
+        terms.fee_bps,
+        terms.bond.0,
         pot.join(","),
         collections.join(","),
         pools.join(","),
-        launches.join(",")
+        launches.join(","),
+        curves.join(",")
     )
 }
 

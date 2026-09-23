@@ -326,6 +326,12 @@ pub struct Market {
     pub items: BTreeMap<Address, ItemInfo>,
     /// Listings made with `List`, by the listed item's commitment.
     pub listings: BTreeMap<Hash, Listing>,
+    /// Bonding-curve tokens, by token (`crate::curve`).
+    pub curves: BTreeMap<Address, crate::curve::Curve>,
+    /// This epoch's curve orders.
+    pub curve_orders: Vec<crate::curve::CurveOrder>,
+    /// What curves charge; absent until the operator sets it.
+    pub curve_terms: Option<crate::curve::CurveTerms>,
 }
 
 impl Market {
@@ -340,6 +346,9 @@ impl Market {
             && self.collections.is_empty()
             && self.items.is_empty()
             && self.listings.is_empty()
+            && self.curves.is_empty()
+            && self.curve_orders.is_empty()
+            && self.curve_terms.is_none()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -409,6 +418,18 @@ impl Market {
                 t = t.checked_add(c.floor.0)?;
             }
         }
+        for c in self.curves.values() {
+            if &c.quote == asset {
+                t = t.checked_add(c.quote_held()?)?;
+            }
+        }
+        for o in &self.curve_orders {
+            let c = self.curves.get(&o.token)?;
+            let escrowed = if o.buy { c.quote } else { c.token };
+            if &escrowed == asset {
+                t = t.checked_add(o.amount_in.0)?;
+            }
+        }
         Some(t)
     }
 
@@ -416,6 +437,7 @@ impl Market {
     /// tokens and collection items. They exist only here, so none of them can leave for Zcash.
     pub fn is_derived(&self, asset: &Address) -> bool {
         self.launches.contains_key(asset)
+            || self.curves.contains_key(asset)
             || self.items.contains_key(asset)
             || self.pools.keys().any(|p| &lp_asset(p) == asset)
     }
@@ -521,11 +543,15 @@ impl Market {
         if !items.is_empty() || !listings.is_empty() {
             e.bytes(&merkle_root(&items)).bytes(&merkle_root(&listings));
         }
+        // Likewise curves: joined once there are any, or terms for them.
+        if !self.curves.is_empty() || !self.curve_orders.is_empty() || self.curve_terms.is_some() {
+            crate::curve::section(&mut e, self.curve_terms, &self.curves, &self.curve_orders);
+        }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET03").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET04").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -595,15 +621,18 @@ impl Market {
         for (c, l) in &self.listings {
             e.bytes(c).bytes(&l.source).bytes(&l.nullifier);
         }
+        crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
         // v2 was saved by nodes that had set a fee schedule before items
         // existed (testnet 212, 23 Sep); it lacks the supply counters, items
         // and listings, and reads as a market that had none of them.
-        let v3 = match d.take_bytes(8).ok()? {
-            b"MARKET03" => true,
-            b"MARKET02" => false,
+        // v3 predates curves and reads as a market with none.
+        let (v3, v4) = match d.take_bytes(8).ok()? {
+            b"MARKET04" => (true, true),
+            b"MARKET03" => (true, false),
+            b"MARKET02" => (false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -713,6 +742,12 @@ impl Market {
                 let c = d.hash().ok()?;
                 m.listings.insert(c, Listing { source: d.hash().ok()?, nullifier: d.hash().ok()? });
             }
+        }
+        if v4 {
+            let (terms, curves, orders) = crate::curve::decode(d)?;
+            m.curve_terms = terms;
+            m.curves = curves;
+            m.curve_orders = orders;
         }
         Some(m)
     }
@@ -1002,9 +1037,11 @@ impl ObjectVm {
     }
 
     /// A claim id not already in use, or a refusal.
-    fn fresh_source(&self, source: &Hash) -> Result<(), &'static str> {
+    pub(crate) fn fresh_source(&self, source: &Hash) -> Result<(), &'static str> {
         if (0..3).any(|k| self.market.claims.contains_key(&claim_id(source, k)))
             || self.market.orders.iter().any(|o| &o.id == source)
+            || self.market.curve_orders.iter().any(|o| &o.id == source)
+            || self.market.curves.values().any(|c| &c.source == source)
             || self.market.commits.contains_key(source)
         {
             return Err("that nonce was already used");
@@ -1012,13 +1049,13 @@ impl ObjectVm {
         Ok(())
     }
 
-    fn issue(&mut self, asset: Address, amount: Fixed) -> Result<(), &'static str> {
+    pub(crate) fn issue(&mut self, asset: Address, amount: Fixed) -> Result<(), &'static str> {
         let s = self.issued.entry(asset).or_insert(Fixed::ZERO);
         s.0 = s.0.checked_add(amount.0).ok_or("supply overflow")?;
         Ok(())
     }
 
-    fn burn(&mut self, asset: Address, amount: Fixed) -> Result<(), &'static str> {
+    pub(crate) fn burn(&mut self, asset: Address, amount: Fixed) -> Result<(), &'static str> {
         let s = self.issued.entry(asset).or_insert(Fixed::ZERO);
         let v = s.0.checked_sub(amount.0).filter(|v| *v >= 0).ok_or("burn exceeds supply")?;
         s.0 = v;
@@ -1052,6 +1089,14 @@ impl ObjectVm {
             || self.market.launches.get(asset_b).is_some_and(|l| l.state != LaunchState::Graduated)
         {
             return Err("that token has not launched yet");
+        }
+        // A curve token's pool is the one it graduates into. Opening it early
+        // would take the pool graduation needs, and the curve could then
+        // never graduate.
+        if self.market.curves.get(asset_a).is_some_and(|c| !c.graduated)
+            || self.market.curves.get(asset_b).is_some_and(|c| !c.graduated)
+        {
+            return Err("that token is still on its curve");
         }
         let pid = pool_id(asset_a, asset_b);
         if self.market.pools.contains_key(&pid) {
@@ -1466,6 +1511,9 @@ impl ObjectVm {
         if self.market.is_empty() {
             return;
         }
+        // Curves first: a curve that graduates this epoch opens its pool
+        // here, and its pool's first swaps are next epoch's.
+        self.settle_curves();
         let orders = std::mem::take(&mut self.market.orders);
         let pools: Vec<Hash> = self.market.pools.keys().copied().collect();
         for pid in pools {

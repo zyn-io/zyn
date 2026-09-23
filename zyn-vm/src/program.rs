@@ -160,6 +160,21 @@ pub fn redeem_item() -> ProgramId {
     named(b"redeem-item")
 }
 
+/// Make a bonding-curve token (DECISIONS §141).
+pub fn curve_create() -> ProgramId {
+    named(b"curve-create")
+}
+
+/// Buy from or sell to a token's bonding curve.
+pub fn curve_trade() -> ProgramId {
+    named(b"curve-trade")
+}
+
+/// Set what curves charge: the trading fee and the creation bond.
+pub fn configure_curves() -> ProgramId {
+    named(b"configure-curves")
+}
+
 /// A program named by its code rather than by a rule the VM knows.
 ///
 /// `code` is the hash of the program as shipped — an rv32im ELF, per §2.5's
@@ -197,6 +212,9 @@ pub fn is_named(id: &ProgramId) -> bool {
         register_collection(),
         redeem_item(),
         mint_item(),
+        curve_create(),
+        curve_trade(),
+        configure_curves(),
     ]
     .contains(id)
 }
@@ -228,6 +246,9 @@ mod tests {
             register_collection(),
             redeem_item(),
             mint_item(),
+            curve_create(),
+            curve_trade(),
+            configure_curves(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {
