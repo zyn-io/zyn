@@ -2594,6 +2594,27 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-duodecies. Fees into the ZYN pot (23 Sep 2026)
+
+Operator intents, sent through `zyn_submit` with the node's `ZYN_SUBMIT_TOKEN`
+(read on the box, never printed). The intent hex for each is in
+`apps/nap-web/tests/object-vectors.json` → `market` for the fixture values;
+build others with `zyn-object-vectors` or `ObjectVm::encode_intent`.
+
+```sh
+T=$(grep '^ZYN_SUBMIT_TOKEN=' /etc/zyn/zyn-object.env | cut -d= -f2-)
+curl -s -X POST 127.0.0.1:8499 -d "{\"method\":\"zyn_submit\",\"token\":\"$T\",\"intent\":\"<hex>\"}"
+```
+
+- `SetFees {bridge_bps}` — 50 bps is §30's rate. **Testnet 212: set to 50 on
+  23 Sep.** Mainnet: not set.
+- `RegisterCollection {asset, creator, quote, fee_bps}` — once per collection,
+  immutable. Cave: 100 bps a side, creator Treasury 26460, quote ZEC.zy.
+  Register before the collection's first listing.
+
+`zyn_market` shows `fees`, `zyn_pot` and `collections`; check the pot against
+the fees after any credit, withdrawal or sale.
+
 ## 5f-undecies. The bridge from the wallet (23 Sep 2026)
 
 **In:** Nap asks `zyn_depositAddress {account}`; if the answer says
