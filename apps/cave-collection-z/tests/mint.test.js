@@ -113,7 +113,7 @@ test('the published terms page carries bytes that reproduce the digest', async (
     .update(len(domain.length)).update(domain)
     .update(len(payload.length)).update(payload)
     .digest('hex');
-  assert.equal(digest, '6649a9636899278e486e42eca4e207caeac71dfcfda76bd3baa0e72526c0fdc4');
+  assert.equal(digest, '7cb6d824212488c5afd4b17f9071ba4b953fb61027432be8d9d28753057422f7');
   assert.ok(page.includes(digest), 'and states the digest it reproduces');
 });
 

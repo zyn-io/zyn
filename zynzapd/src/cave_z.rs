@@ -19,11 +19,12 @@ pub const SYMBOL: &str = "CAVEZ";
 const SUPPLY: u32 = 4_444;
 
 /// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3; moved
-/// 23 Sep 2026 when every item gained its Rarity and Rarity Rank traits, before
-/// any deposit — the 19 Sep terms named `02b01b16…`, §142). Pinned
+/// 23 Sep 2026, before any deposit, when every item gained its Rarity traits
+/// and 1,373 images had their slicing edges repaired — the 19 Sep terms named
+/// `02b01b16…`, §142). Pinned
 /// rather than recomputed: the terms must commit to a root someone checked,
 /// not to whatever a rebuild happens to produce today.
-const MANIFEST_ROOT: &str = "d966e21a190e8e7ab042d8991319eb8c11f76dccbd044012124b7f2929df04d1";
+const MANIFEST_ROOT: &str = "275dd70fe58f84947ff9b906a5628822a65bcd3279f22b4df7beb0979fc8d333";
 
 /// §64.17, frozen: entry / claim / open mint, in zatoshi.
 const ENTRY: u64 = 1_000_000; // 0.01 ZEC
@@ -135,12 +136,12 @@ mod tests {
         p.validate().expect("valid");
         assert_eq!(
             hex(&p.digest().unwrap()),
-            "631df718cd4bbc2116fa15a3666d64a786d8ea3d7d31532662f1e5d9328b7a55",
+            "58390f073822ea4d2736dc0301d1ab0d7f74a4cce7873a813acac41059bd1b53",
             "the policy digest is published; moving it silently is the failure"
         );
         assert_eq!(
             hex(&terms(&p).digest()),
-            "6649a9636899278e486e42eca4e207caeac71dfcfda76bd3baa0e72526c0fdc4"
+            "7cb6d824212488c5afd4b17f9071ba4b953fb61027432be8d9d28753057422f7"
         );
     }
 
@@ -173,7 +174,7 @@ mod tests {
         let root = cave_randomness::manifest_root(collection_id(), &entries).unwrap();
         assert_eq!(
             hex(&root),
-            "d966e21a190e8e7ab042d8991319eb8c11f76dccbd044012124b7f2929df04d1",
+            "275dd70fe58f84947ff9b906a5628822a65bcd3279f22b4df7beb0979fc8d333",
             "the manifest the draw reads must be the one the terms committed to"
         );
         assert_eq!(root, policy().manifest_root);
