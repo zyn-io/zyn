@@ -25,7 +25,8 @@
       "kind": "object",
       "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
       "lightdUrl": "/zec/mainnet",
-      "zecBirthday": 3440000
+      "zecBirthday": 3440000,
+      "launchpadUrl": "https://cave-jade.pages.dev/"
     },
     {
       "id": "testnet",
@@ -40,7 +41,8 @@
       "mediaGateway": "/media",
       "collections": [],
       "lightdUrl": "/zec/testnet",
-      "zecBirthday": 4320000
+      "zecBirthday": 4320000,
+      "launchpadUrl": "https://cave-jade.pages.dev/?network=testnet"
     }
   ],
   "collections": [
@@ -52,5 +54,6 @@
   "kind": "object",
   "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
   "lightdUrl": "/zec/mainnet",
-  "zecBirthday": 3440000
+  "zecBirthday": 3440000,
+  "launchpadUrl": "https://cave-jade.pages.dev/"
 }

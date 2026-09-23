@@ -25,7 +25,7 @@ let identity = null;
 let view = 'swap';
 /// Where to go back to after the wallet opens for an action that needed it.
 let returnTo = 'swap';
-let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map() };
+let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], curves: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map() };
 let busy = false;
 let timer = null;
 const ui = { pool: null, sellA: true, slippage: 100 };
@@ -75,6 +75,8 @@ function name(assetHex) {
   if (item) return `${collectionName(item.collection)} #${item.serial}`;
   const launch = state.launches.find((l) => l.token === assetHex);
   if (launch) return launch.symbol || short(assetHex);
+  const curve = state.curves.find((c) => c.token === assetHex);
+  if (curve) return curve.symbol || short(assetHex);
   const pool = state.pools.find((p) => p.lp === assetHex);
   if (pool) return `LP ${name(pool.a)}/${name(pool.b)}`;
   return short(assetHex);
@@ -138,7 +140,6 @@ function requireWallet() {
 // ---------------------------------------------------------------------------
 
 const call = (method, fields = {}) => ledger.call(config, method, fields);
-const nextNonce = () => ledger.nextNonce(config, identity);
 const loadOwed = () => ledger.loadOwed(config, identity);
 
 const validPool = (p) => ['id', 'a', 'b', 'lp'].every((k) => isHex(p[k]))
@@ -169,6 +170,9 @@ async function refresh(quiet = false) {
       epochSeconds: isSmall(market.epoch_seconds) ? market.epoch_seconds : 0,
       pools: (market.pools || []).filter(validPool).map((p) => ({ ...p, pending: Number(p.pending) || 0 })),
       launches: (market.launches || []).filter(validLaunch).map((l) => ({ ...l, ...(mk.decodeMeta(l.meta) || {}) })),
+      // Bonding-curve tokens (§141): named from their own meta, so a graduated
+      // one reads as its ticker in the pools it trades in.
+      curves: (market.curves || []).filter((c) => isHex(c.token) && isHex(c.meta) && isSmall(c.sold)).map((c) => ({ ...c, ...(mk.decodeMeta(c.meta) || {}) })),
       held,
       balances,
       owed: mine ? owed : [],
@@ -196,12 +200,16 @@ async function refresh(quiet = false) {
 
 /// Sign an intent and hand it to the holders' door. A refusal inside the
 /// receipts is an error here too — the frame was accepted, the intent was not.
+/// `intent` is the bytes, or — for an intent that carries a nonce — a
+/// function from nonce to bytes, so a nonce another device used can be
+/// stepped over.
 async function submit(intent, what) {
   if (busy) return;
   busy = true;
   setBusy(true);
   try {
-    await ledger.submitIntent(config, identity, intent);
+    if (typeof intent === 'function') await ledger.submitFresh(config, identity, intent);
+    else await ledger.submitIntent(config, identity, intent);
     notice(what);
     await refresh(true);
     return true;
@@ -382,8 +390,7 @@ function renderSwap() {
       const raw = parse(amount.value);
       const minOut = mk.withSlippage(mk.quoteAlone(pool, ui.sellA, raw), ui.slippage);
       const { inputs, change } = mk.fund(identity, state.held, unhex(sell), raw);
-      const nonce = nextNonce();
-      await submit(mk.swapIntent({ trader: identity.account, pool: unhex(pool.id), sellA: ui.sellA, amountIn: raw, minOut, inputs, change, nonce }),
+      await submit((nonce) => mk.swapIntent({ trader: identity.account, pool: unhex(pool.id), sellA: ui.sellA, amountIn: raw, minOut, inputs, change, nonce }),
         `Order placed in batch #${state.epoch}. It clears at the seal; collect it under Owed to you.`);
     } catch (err) { notice(err.message, true); }
   };
@@ -470,9 +477,9 @@ function renderPools() {
         const taken = new Set();
         const fa = mk.fund(identity, state.held, unhex(p.a), a, taken);
         const fb = mk.fund(identity, state.held, unhex(p.b), b, taken);
-        await submit(mk.addLiquidityIntent({
+        await submit((nonce) => mk.addLiquidityIntent({
           provider: identity.account, pool: unhex(p.id), amountA: a, amountB: b,
-          minShares: mk.withSlippage(pv.shares, 100), inputs: [...fa.inputs, ...fb.inputs], change: [...fa.change, ...fb.change], nonce: nextNonce(),
+          minShares: mk.withSlippage(pv.shares, 100), inputs: [...fa.inputs, ...fb.inputs], change: [...fa.change, ...fb.change], nonce,
         }), 'Liquidity added. Your shares are under Owed to you.');
       } catch (err) { notice(err.message, true); }
     };
@@ -484,10 +491,10 @@ function renderPools() {
         const s = parse(rm.elements.s.value);
         const shares = BigInt(p.shares);
         const f = mk.fund(identity, state.held, unhex(p.lp), s);
-        await submit(mk.removeLiquidityIntent({
+        await submit((nonce) => mk.removeLiquidityIntent({
           provider: identity.account, pool: unhex(p.id), shares: s,
           minA: mk.withSlippage((s * x) / shares, 100), minB: mk.withSlippage((s * y) / shares, 100),
-          inputs: f.inputs, change: f.change, nonce: nextNonce(),
+          inputs: f.inputs, change: f.change, nonce,
         }), 'Liquidity removed. Both sides are under Owed to you.');
       } catch (err) { notice(err.message, true); }
     };
@@ -506,9 +513,9 @@ function renderPools() {
       const taken = new Set();
       const fa = mk.fund(identity, state.held, unhex(a), amountA, taken);
       const fb = mk.fund(identity, state.held, unhex(b), amountB, taken);
-      await submit(mk.createPoolIntent({
+      await submit((nonce) => mk.createPoolIntent({
         provider: identity.account, assetA: unhex(a), assetB: unhex(b), amountA, amountB, feeBps: Number(f.fee.value),
-        inputs: [...fa.inputs, ...fb.inputs], change: [...fa.change, ...fb.change], nonce: nextNonce(),
+        inputs: [...fa.inputs, ...fb.inputs], change: [...fa.change, ...fb.change], nonce,
       }), 'Pool open. Your shares are under Owed to you.');
     } catch (err) { notice(err.message, true); }
   };
@@ -521,7 +528,11 @@ function renderPools() {
 function renderLaunchpad() {
   const order = { open: 0, graduated: 1, failed: 2 };
   const launches = [...state.launches].sort((p, q) => order[p.state] - order[q.state] || q.closes_at_epoch - p.closes_at_epoch);
+  const jade = config.launchpadUrl ? new URL(config.launchpadUrl) : null;
+  const trading = state.curves.filter((c) => !c.graduated).length;
   $('#view').innerHTML = `${heading('LAUNCHPAD', 'Everyone pays<br><em>the same price.</em>')}
+  ${jade ? `<div class="mk-empty mk-jade"><p><b>Pump-style launches live on Cave Jade.</b> Anyone makes a token; it trades at once on one curve for every token, each epoch at one price, and graduates into a locked pool that trades here. ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
+  <p class="mk-fine mk-lead">Below: fixed-price sales, where everyone who commits before the close pays the same price.</p>
   <section class="mk-list">${launches.length ? launches.map(launchCard).join('') : '<div class="mk-empty"><p>No sales yet. Start the first one below.</p></div>'}</section>
   ${createLaunchForm()}`;
   for (const l of launches) {
@@ -533,7 +544,7 @@ function renderLaunchpad() {
       try {
         const amount = parse(form.elements.amount.value);
         const f = mk.fund(identity, state.held, unhex(l.quote), amount);
-        await submit(mk.commitIntent({ buyer: identity.account, launch: unhex(l.token), amount, inputs: f.inputs, change: f.change, nonce: nextNonce() }),
+        await submit((nonce) => mk.commitIntent({ buyer: identity.account, launch: unhex(l.token), amount, inputs: f.inputs, change: f.change, nonce }),
           `Committed to ${l.symbol || 'the sale'}. At the close your tokens — and any refund — arrive under Owed to you.`);
       } catch (err) { notice(err.message, true); }
     };
@@ -615,8 +626,8 @@ function bindCreateLaunch() {
       if ((poolPct === 0) !== (raisePct === 0)) throw new Error('A pool needs both tokens and part of the raise, or neither');
       const epochs = Number(f.epochs.value);
       if (!Number.isInteger(epochs) || epochs < 1 || epochs > 100000) throw new Error('Open for 1 to 100,000 epochs');
-      await submit(mk.createLaunchIntent({
-        creator: identity.account, nonce: nextNonce(), quote: unhex(config.zecAsset),
+      await submit((nonce) => mk.createLaunchIntent({
+        creator: identity.account, nonce, quote: unhex(config.zecAsset),
         totalSupply: total, saleSupply: pctOf(total, salePct), poolSupply: pctOf(total, poolPct),
         softCap: parse(f.soft.value), hardCap: parse(f.hard.value), poolBps: raisePct * 100, feeBps: Number(f.fee.value),
         closesAtEpoch: state.epoch + BigInt(epochs), meta: mk.encodeMeta({ symbol: f.symbol.value, name: f.name.value }),

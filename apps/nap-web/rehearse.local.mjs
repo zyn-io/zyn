@@ -40,7 +40,8 @@ if (cmd === 'init') {
   const salt = hex(crypto.getRandomValues(new Uint8Array(32)));
   const { destination } = await objectCall(RPC, 'zyn_exitCommitment', { address, salt });
   const { held: h } = await held();
-  const { inputs, change } = fund(id, h, unhex(ZEC), raw);
+  const bps = BigInt(Number((await objectCall(RPC, 'zyn_market'))?.fees?.bridge_bps) || 0);
+  const { inputs, change } = fund(id, h, unhex(ZEC), raw + (raw * bps) / 10_000n);
   console.log('withdraw:', (await submit(withdrawIntent({ holder: id.account, inputs, asset: unhex(ZEC), amount: raw, destination: unhex(destination), outputs: change }))).slice(0, 80));
   console.log('reveal:', JSON.stringify(await objectCall(RPC, 'zyn_exitReveal', { address, salt })));
 }

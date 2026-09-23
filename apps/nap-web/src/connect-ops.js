@@ -159,14 +159,13 @@ export const METHODS = {
         ],
         note: 'Anyone can buy it from the next epoch. You own none unless you buy, at the same price as everybody.',
         run: async () => {
-          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
           let inputs = [], change = [];
           if (bond > 0n) {
             const h = await holdings(ctx);
             ({ inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), bond));
           }
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.createCurveIntent({
-            creator: ctx.identity.account, nonce, quote: unhex(ctx.config.zecAsset), meta, inputs, change,
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.createCurveIntent({
+            creator: ctx.identity.account, nonce: n, quote: unhex(ctx.config.zecAsset), meta, inputs, change,
           }));
           return { token: hex(mk.tokenOf(ctx.identity.account, nonce)) };
         },
@@ -197,9 +196,8 @@ export const METHODS = {
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), amount);
-          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.curveTradeIntent({
-            trader: ctx.identity.account, token: unhex(c.token), buy: true, amountIn: amount, minOut: minLots * mk.LOT, inputs, change, nonce,
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.curveTradeIntent({
+            trader: ctx.identity.account, token: unhex(c.token), buy: true, amountIn: amount, minOut: minLots * mk.LOT, inputs, change, nonce: n,
           }));
           return { order: hex(mk.curveOrderId(ctx.identity.account, nonce)) };
         },
@@ -226,9 +224,8 @@ export const METHODS = {
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.token), tokens);
-          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.curveTradeIntent({
-            trader: ctx.identity.account, token: unhex(c.token), buy: false, amountIn: tokens, minOut: 0n, inputs, change, nonce,
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.curveTradeIntent({
+            trader: ctx.identity.account, token: unhex(c.token), buy: false, amountIn: tokens, minOut: 0n, inputs, change, nonce: n,
           }));
           return { order: hex(mk.curveOrderId(ctx.identity.account, nonce)) };
         },
@@ -256,9 +253,8 @@ export const METHODS = {
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(sold), amountIn);
-          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.swapIntent({
-            trader: ctx.identity.account, pool: unhex(p.pool), sellA, amountIn, minOut, nonce, inputs, change,
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.swapIntent({
+            trader: ctx.identity.account, pool: unhex(p.pool), sellA, amountIn, minOut, nonce: n, inputs, change,
           }));
           return { order: hex(mk.orderId(ctx.identity.account, nonce)) };
         },
@@ -345,9 +341,9 @@ export const METHODS = {
         note: 'The listing names no seller. When it sells, your proceeds wait as a claim only this wallet can find.',
         run: async () => {
           const c = unhex(note.commitment);
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.listIntent({
+          await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.listIntent({
             seller: ctx.identity.account, item: c, itemNullifier: nullifierOf(ctx.identity.nullifier, c),
-            priceAsset: unhex(quote), priceAmount: price, expiresAtEpoch: 0xffffffffn, nonce: ledger.nextNonce(ctx.config, ctx.identity),
+            priceAsset: unhex(quote), priceAmount: price, expiresAtEpoch: 0xffffffffn, nonce: n,
           }));
           return { listed: note.asset };
         },

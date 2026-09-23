@@ -103,6 +103,24 @@ export async function loadHoldings(config, identity, offers) {
   return { held, balances, items };
 }
 
+/// Submit an intent that carries a nonce, taking the next nonce and trying
+/// again whenever the chain says one was already used. A nonce is counted on
+/// this device, so a restored phrase, a second device or a cleared browser
+/// starts the count where another left off — and the chain, which refuses a
+/// reused source, is the only place that knows. Returns the nonce that took.
+export async function submitFresh(config, identity, build, tries = 64) {
+  for (let i = 0; i < tries; i++) {
+    const nonce = nextNonce(config, identity);
+    try {
+      await submitIntent(config, identity, build(nonce));
+      return nonce;
+    } catch (e) {
+      if (!/nonce was already used/.test(String(e.message))) throw e;
+    }
+  }
+  throw new Error('Every nonce tried was already used; this wallet has traded from somewhere else a lot. Try again.');
+}
+
 /// Sign an intent and hand it to the holders' door. A refusal inside the
 /// receipts is an error too — the frame was accepted, the intent was not.
 export async function submitIntent(config, identity, intent) {
