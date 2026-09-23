@@ -139,25 +139,39 @@ await writeFile(
   ].join('\n'),
 );
 
-const from = new URL('../nap/branding/nap-mole-collection-333/out/blobs/', root);
-let names = [];
-try {
-  names = await readdir(from);
-} catch {
-  console.warn('no blobs staged — run apps/nap/branding/nap-mole-collection-333/build_manifests.py');
-}
-if (names.length) {
-  const to = new URL('blobs/', output);
-  await mkdir(to, { recursive: true });
-  let n = 0;
+// Content-addressed blobs: the 333's, and Collection Z's 4,444 (images and
+// manifests, from examples/zyn-pfp-concepts/build_collection_z_manifests.py).
+// Each file is staged only if its bytes hash to its name — it is served as
+// content-addressed, so a file that is not would be a lie with a long cache.
+const sources = [
+  ['../nap/branding/nap-mole-collection-333/out/blobs/', 'apps/nap/branding/nap-mole-collection-333/build_manifests.py'],
+  ['../../examples/zyn-pfp-concepts/out/blobs/', 'examples/zyn-pfp-concepts/build_collection_z_manifests.py'],
+];
+const to = new URL('blobs/', output);
+await mkdir(to, { recursive: true });
+let n = 0;
+for (const [dir, builder] of sources) {
+  const from = new URL(dir, root);
+  let names = [];
+  try {
+    names = await readdir(from);
+  } catch {
+    console.warn(`no blobs staged from ${dir} — run ${builder}`);
+  }
   for (const name of names) {
-    // Only a name that *is* a hash. Anything else here would be served as
-    // though it were content-addressed, and it would not be.
     if (!/^[0-9a-f]{64}$/.test(name)) continue;
+    // Media are named by sha256(bytes); manifests by their leaf hash,
+    // sha256(0x00 || bytes), as the manifest builders write them.
+    const bytes = await readFile(new URL(name, from));
+    const plain = createHash('sha256').update(bytes).digest('hex');
+    const leaf = createHash('sha256').update(Buffer.from([0])).update(bytes).digest('hex');
+    if (plain !== name && leaf !== name) {
+      throw new Error(`${dir}${name} does not hash to its name; refusing to publish it`);
+    }
     await cp(new URL(name, from), new URL(name, to));
     n += 1;
   }
-  console.log(`staged ${n} content-addressed blob(s)`);
 }
+console.log(`staged ${n} content-addressed blob(s)`);
 
 console.log(`Cave Collection Z build: ${fileURLToPath(output)}`);
