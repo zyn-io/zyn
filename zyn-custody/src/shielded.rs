@@ -1119,13 +1119,20 @@ impl Scanner {
                     };
                     s.spend_nullifier(&a.nullifier, self.keys.fvk());
                 }
+                // The same rule as the deposit pass: a payment to an address
+                // this vault handed out belongs to its account, memo or not.
+                // Using the memo-only rule here stopped the tree walk on the
+                // very deposits per-account addresses exist to accept — a
+                // faucet or exchange paying without a memo (23 Sep, testnet).
+                let handed_out = self.addresses.lock().map(|m| m.clone()).unwrap_or_default();
                 deposits.extend(
-                    classify(
+                    classify_addressed(
                         &scanned,
                         spends_ours,
                         self.attributions.get(&txid).copied(),
                         txid,
                         height,
+                        &handed_out,
                     )
                     .map_err(|amount| ScanRangeError::Unattributable {
                         txid,

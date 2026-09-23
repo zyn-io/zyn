@@ -41,6 +41,8 @@ struct Bot {
     zebras: Vec<(String, String)>,
     /// Whether this process polls for updates and so can answer buttons.
     interactive: bool,
+    /// Every chain it watches (`ZYN_WATCH`), which is also what it reports.
+    watching: Vec<String>,
 }
 
 /// An HTTP error names the URL it failed on, and a Telegram URL carries the
@@ -121,8 +123,8 @@ impl Bot {
         v.get("result").cloned().ok_or_else(|| "no result".to_string())
     }
 
-    fn status(&self) -> String {
-        match self.object("zyn_status") {
+    fn status_at(&self, url: &str) -> String {
+        match self.object_at(url, "zyn_status") {
             Ok(s) => render_status(&s, self.chain),
             Err(e) => format!("chain {}: unreachable — {}", self.chain, e),
         }
@@ -218,14 +220,15 @@ impl Bot {
     /// on is the vault's view of Zcash, so that is what this reports. The
     /// command keeps its old name because that is what the muscle memory
     /// types at 3am.
-    fn signers(&self) -> String {
-        let s = match self.object("zyn_status") {
+    fn signers_at(&self, url: &str) -> String {
+        let s = match self.object_at(url, "zyn_status") {
             Ok(s) => s,
             Err(e) => return format!("unreachable — {}", e),
         };
         let u = |k: &str| s.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
         let anchoring = s.get("anchoring").and_then(|x| x.as_str()).unwrap_or("");
-        let mut out = String::from("<b>what the chain rests on</b>\n");
+        let chain = s.get("chain").and_then(|x| x.as_u64()).unwrap_or(0);
+        let mut out = format!("<b>chain {chain}: what it rests on</b>\n");
 
         out.push_str(&if anchoring.starts_with("none") {
             format!("\u{26a0} <b>anchoring</b> — {}\n", anchoring)
@@ -263,8 +266,8 @@ impl Bot {
 
     /// The epoch-to-Zcash mapping, newest last. This is the thing worth being
     /// able to check from a phone: whether roots are still reaching Zcash.
-    fn anchors(&self) -> String {
-        let a = match self.object("zyn_anchors") {
+    fn anchors_at(&self, url: &str) -> String {
+        let a = match self.object_at(url, "zyn_anchors") {
             Ok(v) => v,
             Err(e) => return format!("anchors unavailable — {}", e),
         };
@@ -276,7 +279,8 @@ impl Bot {
             // rather than leaving a bare negative.
             return "no anchors published yet — /signers says what is holding it up".into();
         }
-        let mut out = String::from("<b>recent anchors</b>\n");
+        let chain = self.object_at(url, "zyn_status").ok().and_then(|s| s.get("chain").and_then(|x| x.as_u64())).unwrap_or(0);
+        let mut out = format!("<b>chain {chain}: recent anchors</b>\n");
         for x in rows {
             let g = |k: &str| x.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
             out.push_str(&format!(
@@ -344,8 +348,8 @@ impl Bot {
     /// The AMM had an order book of asset-for-asset offers. This is the Cave
     /// store's listings: one object, one price. Sellers are not shown — a
     /// listing is public, who placed it is not.
-    fn offers(&self) -> String {
-        let v = match self.object("zyn_offers") {
+    fn offers_at(&self, url: &str) -> String {
+        let v = match self.object_at(url, "zyn_offers") {
             Ok(v) => v,
             Err(e) => return format!("offers unavailable — {}", e),
         };
@@ -426,12 +430,17 @@ impl Bot {
         out
     }
 
+    /// One answer per watched chain — testnet and mainnet both, in order.
+    fn each(&self, f: impl Fn(&str) -> String) -> String {
+        self.watching.iter().map(|u| f(u)).collect::<Vec<_>>().join("\n\n")
+    }
+
     fn answer(&self, cmd: &str) -> String {
         match cmd.split_whitespace().next().unwrap_or("").trim_start_matches('/') {
-            "status" | "start" => self.status(),
-            "signers" | "health" => self.signers(),
-            "anchors" => self.anchors(),
-            "offers" => self.offers(),
+            "status" | "start" => self.each(|u| self.status_at(u)),
+            "signers" | "health" => self.each(|u| self.signers_at(u)),
+            "anchors" => self.each(|u| self.anchors_at(u)),
+            "offers" => self.each(|u| self.offers_at(u)),
             "nodes" | "zebra" => self.nodes(),
             "list" | "waitlist" | "whitelist" => self.whitelist(),
             "help" => "/status  epoch, objects, last anchor\n/signers  anchoring + vault note sync\n/list  whitelist applications\n/anchors  recent roots on Zcash\n/offers  resting marketplace listings\n/nodes  zcash mainnet + testnet sync".into(),
@@ -659,7 +668,12 @@ fn main() -> Result<(), String> {
         chain,
         zebras,
         interactive: env("ZYN_TG_POLL").as_deref() != Some("0"),
+        watching: Vec::new(),
     };
+    let mut bot = bot;
+    bot.watching = env("ZYN_WATCH")
+        .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_else(|| vec![bot.object.clone()]);
     let bot = std::sync::Arc::new(bot);
     // Every chain worth being paged about. Testnet's node answers on this box;
     // mainnet's is on Contabo, behind the public gateway's root since the AMM
