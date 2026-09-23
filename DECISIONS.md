@@ -6209,3 +6209,70 @@ derivation constrained inside a proof, which is A108. Until then the honest
 sentence is "anyone can check the ledger accounts for every object it
 created", and that is what the docs should say.
 
+## §137 — A market on the object ledger, hidden from the public (23 Sep 2026)
+
+The §130.11 scope lock said the object ledger would carry transfers and
+listings and nothing else until tier 3. It is lifted by direction: A108 waits
+for funding, and funding waits on something people use — NFTs first, and if
+they do not carry it, launches. So the market is built at tier 2, with the
+same honesty line as everything else: **private from the public, visible to
+the operator.**
+
+### §137.1 — Batches, at the FM-AMM price
+
+A sequencer that sees orders one at a time can reorder them, and on a
+constant-product pool reordering is profit. So a swap is escrowed in the epoch
+it arrives in and every order in a pool clears together at the seal, at
+`p = (y + 2b′)/(x + 2a′)` — the function-maximising AMM (Canidio & Fritsch
+2023; CoW AMM), the price at which the pool's post-trade marginal price equals
+the price it traded at. Order within the batch cannot matter, so there is
+nothing to sandwich; `x′y′ ≥ xy` for every batch (the gap is
+`(x·b′ − y·a′)²`), and each reserve stays above half. The cost is honest and
+visible: a lone order pays roughly twice the constant-product impact, and the
+difference stays with liquidity providers rather than an arbitrageur.
+
+Minimums are refunds, not partial fills: an order the batch price does not
+satisfy is returned whole and the batch repriced without it.
+
+### §137.2 — Claims, because the VM cannot encrypt
+
+A batch settles after the trader has signed and left, and the VM holds no
+randomness and no reason to encrypt a note for anyone. So what the ledger owes
+is a claim — owner, asset, amount — redeemed by its owner with notes they
+encrypted themselves. One redemption path for swaps, refunds, pool shares and
+sale allocations.
+
+A claim's id derives from a nonce in the intent that created it, and the
+wallet derives its nonces from its key and a counter. That is the whole
+discovery mechanism: there is deliberately no "claims for this account",
+because that query would answer anyone who asked.
+
+### §137.3 — Launches sell at one price
+
+The whole supply is issued into escrow. Commitments are private until the
+close; at the close everyone pays the same price, oversubscription is filled
+pro rata and the rest refunded, and under the soft cap everything is refunded
+and the token burned — the creator's share with it. On success part of the
+raise and a token reserve seed a pool whose shares are **all** locked: nobody
+holds them, so nobody can pull the liquidity from under the buyers.
+
+A launch's name is its 32-byte `meta`, read by the wallet as an 8-byte symbol
+and a 24-byte name. On chain and public, so every wallet shows the same name
+without a server; decoded strictly, so a copycat cannot pad their way into
+someone else's.
+
+### §137.4 — What is public, and what the root commits
+
+Public: pool reserves, shares and fee; sale terms and total raised. Committed
+only as blinded leaves: orders, claims, commitments, and who created a sale.
+The market joins `sections()` only once used, so every root and saved state
+from before is byte-identical. Pool shares and launched tokens exist only on
+the ledger and cannot be withdrawn to Zcash.
+
+### §137.5 — Sales need the clock
+
+Epochs advance with traffic, and a sale closes at an epoch — so on a quiet
+chain a sale could stay open forever. While any sale is open, the node seals
+on the clock even with nothing to seal. With none open, it does not, and an
+idle chain does not fill its history with empty epochs.
+

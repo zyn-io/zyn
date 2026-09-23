@@ -2594,6 +2594,46 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-decies. The market (23 Sep 2026)
+
+Pools, batch swaps and token launches live in the object VM (`objectvm::market`)
+and are on every object node from this build on. Nothing turns them on: the
+first `CreatePool` or `CreateLaunch` does, and until then the chain's roots and
+saved state are byte-identical to before.
+
+**What the public sees:** each pool's reserves, shares and fee, and each sale's
+terms and total raised — `zyn_market`. **What it does not:** who traded,
+provided liquidity or committed. Those records sit in the root only as leaves
+blinded by the user's own nonce.
+
+**Rhythm:** a swap is escrowed in the epoch it arrives in and clears at that
+epoch's seal, every order in a pool at one FM-AMM price. Proceeds, refunds,
+pool shares and sale allocations become **claims**; the owner collects them
+with a signed `Claim`. `zyn_claims ids=<hex,…>` answers only for ids, which
+derive from the owner's nonce — there is no "claims for this account".
+
+**Sales close at an epoch, and epochs need to move.** While any sale is open
+the node seals on the clock (`ZYN_EPOCH_SECS`) even when nobody trades, so
+"open for 60 epochs" means at most 60 × that. With no sale open, empty
+epochs are not sealed, as before.
+
+**Front end:** `/market.html` in nap-web, the same origin as the wallet, so it
+opens the kept wallet with the same password and reaches the chain through the
+same `/rpc` route.
+
+**Local devnet** for trying it end to end, without touching either chain:
+
+```sh
+ZYN_CHAIN_ID=26460 ZYN_LISTEN=127.0.0.1:8399 ZYN_DATA_DIR=/tmp/dev \
+ZYN_EPOCH_SECS=15 ZYN_SUBMIT_TOKEN=$(openssl rand -hex 24) zyn-object-node
+cd apps/nap-web && npm run build && NAP_DEV_RPC=http://127.0.0.1:8399 npx vite preview
+```
+
+Fund a devnet wallet with operator `Deposit`s through `zyn_submit` (the token
+above); a `Mint` creates no ciphertext, so a wallet cannot see it. Use
+`vite preview`, not `vite dev`: the dev server injects styles inline and the
+shipped CSP blocks them.
+
 ## 5f-nonies. Sealed journals and the object replica (23 Sep 2026)
 
 Both object ledgers seal their published journals. `ZYN_DA_KEY` (64 hex) is
@@ -3062,8 +3102,12 @@ something real before they are exercised against money.
   `ObjectVm::encode_intent`), `zyn_published` (commitments, ephemeral keys
   and ciphertexts — everything a wallet needs to rebuild itself and nothing
   privileged), `zyn_anchors` (the epoch-to-Zcash index, read from the
-  published index file so it cannot disagree with what a replica serves), and
-  `zyn_offers` (resting listings, sellers omitted).
+  published index file so it cannot disagree with what a replica serves),
+  `zyn_offers` (resting listings, sellers omitted), `zyn_submitSigned` (the
+  holders' door: a signed frame, A145), `zyn_depositAddress`, and since 23
+  Sep `zyn_market` (pools and sales, public) and `zyn_claims` (what is owed,
+  by id only — §5f-decies). `zyn_submit` is the operator's and needs
+  `ZYN_SUBMIT_TOKEN` (A144). Every reply carries the request's own id (A150).
 - **What `zyn_status` reports beyond the counts** (22 Sep, A129):
   `anchored_epoch` / `anchored_height` / `anchor_txid` for the last root that
   landed, and `synced_to` / `sync_target` / `sync_error` for the vault's note
