@@ -11,12 +11,16 @@ initSync({ module: readFileSync(new URL('../../nap-web/src/zec-pkg/nap_zec_bg.wa
 const expectAccount = deriveIdentity(WORDS, '', 0).accountHex;
 const expectZec = new ZecWallet(spendingKeyFromPhrase(WORDS, '', 'testnet', 0), 'testnet').address();
 
+// STORE / NAP point it at deployed sites; the defaults are the local servers.
+const STORE = process.env.STORE || 'http://localhost:4178';
+const NAP = process.env.NAP || 'http://localhost:4179';
+const local = new URL(STORE).hostname === 'localhost';
 const ok = (cond, what) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${what}`); if (!cond) process.exitCode = 1; };
 const browser = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const ctx = await browser.newContext();
 const store = await ctx.newPage();
 store.on('pageerror', (e) => console.log('store error:', e.message));
-await store.goto('http://localhost:4178/?network=testnet&nap=http://localhost:4179#market');
+await store.goto(`${STORE}/?network=testnet${local ? `&nap=${NAP}` : ''}#market`);
 
 // 1. The picker offers Nap in the browser.
 await store.click('.header-wallet');
@@ -28,8 +32,8 @@ ok(names.includes('Nap in the browser'), `picker lists ${JSON.stringify(names)}`
 const [popup] = await Promise.all([ctx.waitForEvent('page'), store.click('.wallet-option:has-text("Nap in the browser")')]);
 popup.on('pageerror', (e) => console.log('popup error:', e.message));
 await popup.waitForSelector('#unlock');
-ok(new URL(popup.url()).origin === 'http://localhost:4179', `Nap's window is on ${new URL(popup.url()).origin}`);
-ok((await popup.textContent('.site')) === 'localhost:4178', `it names the asking site: ${await popup.textContent('.site')}`);
+ok(new URL(popup.url()).origin === new URL(NAP).origin, `Nap's window is on ${new URL(popup.url()).origin}`);
+ok((await popup.textContent('.site')) === new URL(STORE).host, `it names the asking site: ${await popup.textContent('.site')}`);
 
 // 3. Unlock with the test phrase, see the connect card, connect.
 await popup.fill('#words', WORDS);
@@ -56,7 +60,7 @@ ok(Array.isArray(owed.owed), `zyn_owed → ${owed.owed.length} claim(s)`);
 const pay = store.evaluate(() => import('./wallet.js').then((x) => x.ask('zec_pay', { uri: 'zcash:utest1kg3alz8tdck92dc6u9cfxwv24lu9fzwes7k8meeea0u4lmkqp3gkkpp0vq6nafg7lue3lsq0lvjnn9ghdwk5cqrugy4jvvvmw5xmmhsj?amount=0.0001&memo=Q2F2ZSBvcmRlciAjMQ&message=Cave%20test' })).then(() => 'resolved', (e) => `${e.code} ${e.message}`));
 await popup.waitForSelector('#yes');
 const approval = await popup.textContent('main');
-ok(/Pay 0\.0001 ZEC/.test(approval) && /Cave order #1/.test(approval) && /Cave test/.test(approval) && /localhost:4178/i.test(approval), 'approval shows amount, memo, message and the asking site');
+ok(/Pay 0\.0001 ZEC/.test(approval) && /Cave order #1/.test(approval) && /Cave test/.test(approval) && approval.toLowerCase().includes(new URL(STORE).host), 'approval shows amount, memo, message and the asking site');
 await popup.click('#no');
 ok((await pay) === '4001 The holder rejected the request', `rejection reaches the store: ${await pay}`);
 
@@ -69,13 +73,13 @@ ok(unknown === '4200', `an unknown method → ${unknown}`);
 
 // 7. A second window on another origin cannot talk to Nap's window.
 const other = await ctx.newPage();
-await other.goto('http://127.0.0.1:4178/');
+await other.goto(local ? 'http://127.0.0.1:4178/' : 'https://example.com/');
 const stray = await popup.evaluate(() => new Promise((resolve) => {
   let got = false;
   window.addEventListener('message', () => { got = true; });
   setTimeout(() => resolve(document.querySelector('main').textContent), 800);
 }));
-ok(!/127\.0\.0\.1/.test(stray), 'a message from anywhere but the opener is ignored');
+ok(!/127\.0\.0\.1|example\.com/.test(stray), 'a message from anywhere but the opener is ignored');
 
 // 8. Closing Nap's window disconnects the store.
 await popup.close();
