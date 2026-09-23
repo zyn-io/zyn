@@ -462,6 +462,32 @@ static ISSUED: std::sync::OnceLock<(AddressRegister, std::path::PathBuf)> = std:
 /// loop, read by the anchor builder, which refuses a fee that would dip into it.
 static BACKING_FLOOR: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicU64>> = std::sync::OnceLock::new();
 
+/// The height the deposit bridge has judged up to, and the vault's note
+/// stores. Anything the vault received above that height is a deposit nobody
+/// has credited or refused yet, and until then it is not the operator's to
+/// spend: an anchor that paid its fee from one left the vault short of the
+/// deposit it was about to credit (23 Sep, testnet — the bridge was hours
+/// behind, the fee reserve was empty, and two anchors spent from 0.003 ZEC
+/// that arrived meanwhile). `u64::MAX` until a bridge starts: with no bridge
+/// there are no deposits to protect.
+static BRIDGE_JUDGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+static VAULT_NOTES: std::sync::OnceLock<zyn_custody::shielded::PoolStores> = std::sync::OnceLock::new();
+
+/// Zatoshi in vault notes that arrived above `judged`.
+fn unjudged_zat(notes: &zyn_custody::shielded::PoolStores, judged: u64) -> u64 {
+    let mut total: u64 = 0;
+    for pool in [orchard::ValuePool::Orchard, orchard::ValuePool::Ironwood] {
+        if let Ok(store) = notes.of(pool).lock() {
+            for h in store.held() {
+                if h.height > judged {
+                    total = total.saturating_add(h.value());
+                }
+            }
+        }
+    }
+    total
+}
+
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -509,9 +535,14 @@ fn remember_issued(account: &zyn_vm::spec::AccountId) {
 /// deposits waiting for their account to register.
 fn backing_zat(vm: &ObjectVm, zec: &[u8; 32]) -> u64 {
     let issued = vm.issued.get(zec).map(|f| (f.0.max(0) / 10_000_000_000) as u64).unwrap_or(0);
+    let unjudged = VAULT_NOTES
+        .get()
+        .map(|n| unjudged_zat(n, BRIDGE_JUDGED.load(std::sync::atomic::Ordering::SeqCst)))
+        .unwrap_or(0);
     issued
         .saturating_add(zynzapd::object_exit::owed(vm, zec))
         .saturating_add(PENDING_ZAT.load(std::sync::atomic::Ordering::SeqCst))
+        .saturating_add(unjudged)
 }
 
 fn consensus_network(n: zcash_protocol::consensus::NetworkType) -> zcash_protocol::consensus::Network {
@@ -1189,6 +1220,9 @@ fn build_bridge(
         );
     }
 
+    // From here the anchor keeps its hands off anything the bridge has not
+    // reached yet (see `BRIDGE_JUDGED`).
+    BRIDGE_JUDGED.store(from.saturating_sub(1), std::sync::atomic::Ordering::SeqCst);
     eprintln!(
         "zyn-object-node: deposit bridge ON — scanning from {from}, {} debt(s) outstanding, \
          asset {}",
@@ -1239,21 +1273,39 @@ fn refresh_deposit_addresses(
 /// notes the vault still has, so anchors that spent from it are already
 /// accounted for. A range sum is not a balance (see `object_bridge`).
 fn vault_balance(notes: &zyn_custody::shielded::PoolStores) -> Result<zyn_vm::Fixed, String> {
-    let mut total: i128 = 0;
+    let mut held = Vec::new();
     for pool in [
         orchard::ValuePool::Orchard,
         orchard::ValuePool::Ironwood,
     ] {
-        let held = notes
-            .of(pool)
-            .lock()
-            .map_err(|_| "note store lock poisoned".to_string())?
-            .balance();
+        held.push(
+            notes
+                .of(pool)
+                .lock()
+                .map_err(|_| "note store lock poisoned".to_string())?
+                .balance(),
+        );
+    }
+    zatoshi_as_fixed(&held)
+}
+
+/// Zatoshi held, summed, in the ledger's own scale — the one every
+/// attestation and every issued amount is in (`Fixed`, 1e18 per ZEC, so 1e10
+/// per zatoshi). Comparing a raw zatoshi count against those read the vault
+/// as ten billion times poorer than it was, and refused the first real
+/// deposit as an insolvency (23 Sep, testnet).
+fn zatoshi_as_fixed(zatoshi: &[u64]) -> Result<zyn_vm::Fixed, String> {
+    const PER_ZAT: i128 = 10_000_000_000;
+    let mut total: i128 = 0;
+    for z in zatoshi {
         total = total
-            .checked_add(held as i128)
+            .checked_add(*z as i128)
             .ok_or_else(|| "vault balance overflowed".to_string())?;
     }
-    Ok(zyn_vm::Fixed(total))
+    total
+        .checked_mul(PER_ZAT)
+        .map(zyn_vm::Fixed)
+        .ok_or_else(|| "vault balance overflowed".to_string())
 }
 
 /// One pass of the deposit bridge: look at Zcash, credit what is backed.
@@ -1321,9 +1373,11 @@ fn bridge_pass(
         } => {
             // Not a retry. No intent repairs this, and crediting on would
             // deepen a hole rather than fill it.
+            // Both figures, always: which side is short is the whole
+            // diagnosis, and the attestation alone does not say.
             return Err(format!(
-                "INSOLVENT: the vault attests to {observed:?} of asset {} but the ledger \
-                 has issued {issued:?}. Nothing was credited and the cursor did not move",
+                "INSOLVENT: the check saw {observed:?} of asset {} against a vault holding \
+                 {vault:?} and {issued:?} issued. Nothing was credited and the cursor did not move",
                 hex(&asset.unwrap_or(bridge.zec))
             ));
         }
@@ -1797,6 +1851,7 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     // restart inside one throws all of it away -- which is how a catch-up can
     // run for hours and save nothing.
     let step: u64 = env("ZYN_SCAN_STEP", "25").parse().unwrap_or(25).max(1);
+    let _ = VAULT_NOTES.set(notes.clone());
     let scanner = zyn_custody::shielded::Scanner::new(keys.clone(), from_height, step)
         .with_notes(notes.clone())
         .with_attributions(attributions.clone())
@@ -2263,6 +2318,7 @@ fn main() {
                             }
                         }
                         let after = b.watcher.scanned_to();
+                        BRIDGE_JUDGED.store(after, std::sync::atomic::Ordering::SeqCst);
                         // Caught up, or not moving: either way the next thing
                         // worth doing is reading the tip again.
                         if after >= target || after == before {
@@ -2438,6 +2494,29 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deposits_the_bridge_has_not_reached_are_not_the_operators() {
+        // An empty store has nothing unjudged, whatever the height.
+        let notes = zyn_custody::shielded::PoolStores {
+            orchard: std::sync::Arc::new(std::sync::Mutex::new(zyn_custody::notes::NoteStore::new())),
+            ironwood: std::sync::Arc::new(std::sync::Mutex::new(zyn_custody::notes::NoteStore::new())),
+        };
+        assert_eq!(super::unjudged_zat(&notes, 0), 0);
+        assert_eq!(super::unjudged_zat(&notes, u64::MAX), 0);
+        // With no bridge, the judged height stays at MAX and nothing is held back.
+        assert_eq!(super::BRIDGE_JUDGED.load(std::sync::atomic::Ordering::SeqCst), u64::MAX);
+    }
+
+    #[test]
+    fn the_vault_balance_is_in_the_ledgers_scale() {
+        // 0.003 ZEC held, as the bridge's attestation of a 0.003 deposit
+        // states it: the two must compare equal, or every deposit reads as
+        // more than the vault holds.
+        let held = super::zatoshi_as_fixed(&[100_000, 200_000]).unwrap();
+        assert_eq!(held, zyn_vm::Fixed::raw(3_000_000_000_000_000)); // 0.003 × 1e18
+        assert_eq!(super::zatoshi_as_fixed(&[]).unwrap(), zyn_vm::Fixed::ZERO);
+        assert!(super::zatoshi_as_fixed(&[u64::MAX, u64::MAX]).is_ok());
+    }
     use super::*;
 
     /// The status document is hand-rolled JSON, and the one failure mode that
