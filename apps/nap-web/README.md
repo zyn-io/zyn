@@ -1,7 +1,7 @@
 # Nap Web
 
 Browser-first, non-custodial Nap for Zyn accounts, NFT claims, verified media,
-and one-item transfers. It deliberately does **not** claim to implement the
+one-item transfers, and the private market (`/market.html`). It deliberately does **not** claim to implement the
 shielded Zcash wallet in a browser; use desktop Nap for Zcash operations.
 
 ## Run
@@ -19,6 +19,29 @@ third-party runtime scripts, analytics, or remote fonts.
 By default nothing is persisted: the 24-word phrase and its derived Ed25519
 seed exist only in the live page, and locking, closing, or reloading the tab
 forgets them.
+
+## Market
+
+`/market.html` is Nap Market: swap, pools, launchpad and "owed to you" for the
+object ledger (DECISIONS §137). It is a second page of this site rather than a
+second site, so it opens the same kept wallet with the same password, reaches
+the chain through the same `/rpc` route and ships under the same CSP.
+
+- **Swaps are orders in a batch.** They clear at the epoch's seal, every order
+  in a pool at one price; the quote shown is what an order would get alone,
+  and the signed minimum is below it by the chosen tolerance.
+- **What the market owes is collected, not pushed.** Proceeds, refunds, pool
+  shares and allocations are claims. Their ids derive from nonces this wallet
+  derives from its key and a counter (`nap.market.n.<chain>.<account>` in
+  `localStorage` — a counter, not a secret), so a restored wallet finds them
+  again by walking the counter.
+- **Encoders are held to Rust bytes.** `src/market.js` builds every market
+  intent and id; `tests/market.test.mjs` checks each against the `market`
+  section of the shared fixture, which `zyn-object-vectors` prints.
+- **Everything the node says is shape-checked** before it reaches markup, and
+  a launch's creator-chosen name is decoded strictly and escaped.
+
+Try it locally against a devnet node: RUNBOOK §5f-decies.
 
 ## Keeping a wallet on a device
 

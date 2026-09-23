@@ -349,3 +349,7 @@ export function spendIntent(spender, program, inputs, outputs) {
 }
 
 PROGRAM.privateTransfer = '1bf1117563416d5aea4b85568432f26dd1c13418f440b0095592db5cc449fcae';
+
+/// Shared with `market.js`, which encodes the market's intents in the same
+/// wire format.
+export { leaf, concatBytes, i128Bytes, u32be, u64be };
