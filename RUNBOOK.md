@@ -2616,10 +2616,13 @@ no anchoring config means a devnet. Credit test ZEC.zy with an operator
 **Mainnet 26460 (23 Sep):** node and Windows replica run the curve-aware
 build (backups `/root/zyn-object-node.bak-20260923b` on Contabo,
 `/usr/local/bin/zyn-object-replica.bak-20260923` in WSL `zyn`). Fees, the Cave Z
-registration and curve terms are **not yet set**; the three intents are
-prepared (bridge 50 bps; Cave Z: creator Treasury `b3e4c493…fe99`, quote
-ZEC.zy, 100 bps, cap 4,444; curves 100 bps + 0.05 bond) and go through the
-same operator door as testnet's — token read on the box, never printed.
+registration and curve terms were **set on 24 Sep 2026** (receipts `FeesSet
+{bridge_bps: 50}`, `CollectionRegistered` for `024277b6…5f1e` — creator
+Treasury `b3e4c493…fe99`, quote ZEC.zy, 100 bps, cap 4,444 — and
+`CurveTermsSet {fee_bps: 100, bond: 0.05}`), through the same operator door as
+testnet's — token read on the box, never printed. The Windows replica has
+nothing to replay yet: no DA bundle exists until the first anchor, which waits
+on a funded vault.
 Without terms mainnet curves charge nothing and need no bond.
 
 **Jade** builds with `npm run build:launchpad` (to `apps/cave-market/dist`,
