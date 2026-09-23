@@ -2468,5 +2468,104 @@
     "sourceWidth": 134,
     "sourceHeight": 111,
     "reason": "cell row is below 90% of the canvas median height"
+  },
+  {
+    "canvas": 6,
+    "cell": 60,
+    "row": 6,
+    "column": 10,
+    "family": "Afterglow and Eclipse",
+    "sourceWidth": 128,
+    "sourceHeight": 142,
+    "token": "0457",
+    "reason": "visually duplicated portrait; replacement keeps token 0452 as the original"
+  },
+  {
+    "canvas": 24,
+    "cell": 33,
+    "row": 4,
+    "column": 3,
+    "family": "Genesis Core",
+    "sourceWidth": 127,
+    "sourceHeight": 137,
+    "token": "1649",
+    "reason": "visually duplicated portrait; replacement keeps token 1624 as the original"
+  },
+  {
+    "canvas": 24,
+    "cell": 58,
+    "row": 6,
+    "column": 8,
+    "family": "Genesis Core",
+    "sourceWidth": 128,
+    "sourceHeight": 135,
+    "token": "1674",
+    "reason": "visually duplicated portrait; replacement keeps token 1624 as the original"
+  },
+  {
+    "canvas": 25,
+    "cell": 41,
+    "row": 5,
+    "column": 1,
+    "family": "Full-Spectrum Reserve A",
+    "sourceWidth": 127,
+    "sourceHeight": 135,
+    "token": "1727",
+    "reason": "visually duplicated portrait; replacement keeps token 1690 as the original"
+  },
+  {
+    "canvas": 31,
+    "cell": 24,
+    "row": 3,
+    "column": 4,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 127,
+    "sourceHeight": 144,
+    "token": "2117",
+    "reason": "visually duplicated portrait; replacement keeps token 2097 as the original"
+  },
+  {
+    "canvas": 31,
+    "cell": 41,
+    "row": 5,
+    "column": 1,
+    "family": "Clean Geometry Reserve A",
+    "sourceWidth": 128,
+    "sourceHeight": 143,
+    "token": "2134",
+    "reason": "visually duplicated portrait; replacement keeps token 2097 as the original"
+  },
+  {
+    "canvas": 32,
+    "cell": 36,
+    "row": 4,
+    "column": 6,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 138,
+    "sourceHeight": 144,
+    "token": "2189",
+    "reason": "visually duplicated portrait; replacement keeps token 2163 as the original"
+  },
+  {
+    "canvas": 32,
+    "cell": 53,
+    "row": 6,
+    "column": 3,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 132,
+    "sourceHeight": 137,
+    "token": "2206",
+    "reason": "visually duplicated portrait; replacement keeps token 2176 as the original"
+  },
+  {
+    "canvas": 32,
+    "cell": 56,
+    "row": 6,
+    "column": 6,
+    "family": "Clean Geometry Reserve B",
+    "sourceWidth": 138,
+    "sourceHeight": 137,
+    "token": "2209",
+    "reason": "visually duplicated portrait; replacement keeps token 2179 as the original"
   }
 ]

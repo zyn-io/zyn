@@ -18,6 +18,7 @@ Zyn collection on Zcash.
 - `component-review-overrides.json`: reproducible direct-review corrections for inspected edge cases
 - `component-filter-counts.json`: verified per-category counts for store menus
 - `previews/`: collection overview and boundary QA sheets
+- `previews/qa-duplicate-replacements.png`: the nine reviewed visual-duplicate replacements
 
 ## Production rule
 
@@ -39,6 +40,15 @@ No rarity tiers or rarity scores are assigned. Metadata exposes `Species`,
 Component IDs describe visually reviewed categories in the atomic artwork; they
 do not claim composited-layer provenance. Confidence tiers and runner-up matches
 remain in the catalog for later audit.
+
+## Visual duplicate replacements
+
+Canvas 34 is a strict 3 × 3 atomic board generated from the approved Mole
+component vocabulary. It replaces only the later portraits in the visually
+repeated groups: `0457`, `1649`, `1674`, `1727`, `2117`, `2134`, `2189`,
+`2206` and `2209`. The first occurrence in each reported group remains in its
+original slot. The replacement mapping and directly reviewed component tags are
+encoded in the builder, source map and component catalog.
 
 Rebuild with:
 

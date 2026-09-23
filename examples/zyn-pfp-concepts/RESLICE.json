@@ -6849,17 +6849,17 @@
   {
    "image": "mole-collection-2222/images/0457.png",
    "cell": [
-    128,
-    142
+    389,
+    388
    ],
    "gutterTrim": [
     0,
     0,
     0,
-    0
+    1
    ],
-   "cropOffset": 7,
-   "sha256": "fe6d6b60184b77f03f5e0714219881befaa70a9dd3e2186f0814d2ad8b23bb95"
+   "cropOffset": 0,
+   "sha256": "6ba2723a5671ecd385e9a1a4a5dff7b798e87c3655c6f75438662c8f5d2f59d0"
   },
   {
    "image": "mole-collection-2222/images/0458.png",
@@ -24729,8 +24729,8 @@
   {
    "image": "mole-collection-2222/images/1649.png",
    "cell": [
-    127,
-    137
+    385,
+    388
    ],
    "gutterTrim": [
     0,
@@ -24738,8 +24738,8 @@
     0,
     0
    ],
-   "cropOffset": 5,
-   "sha256": "333fdcd1a5eb44944ac86f4bcddfee2eab9b93a0311d9bf2c4fbacd0b5602e74"
+   "cropOffset": 2,
+   "sha256": "0704e6db4ae2b43fb15e23150c5925a626e2847701f03717d5b67a1a428188ed"
   },
   {
    "image": "mole-collection-2222/images/1650.png",
@@ -25104,8 +25104,8 @@
   {
    "image": "mole-collection-2222/images/1674.png",
    "cell": [
-    128,
-    135
+    388,
+    388
    ],
    "gutterTrim": [
     0,
@@ -25113,8 +25113,8 @@
     0,
     0
    ],
-   "cropOffset": 4,
-   "sha256": "9867ab9cbed4f7808c0f0f3e3dbc6a13521b21c4626e8208cb0a14e3dc85b2f2"
+   "cropOffset": 0,
+   "sha256": "16497cdf395f2dd60c280b03958ce18c26c9fa0c60601d50607fc5ebeb2c9e9e"
   },
   {
    "image": "mole-collection-2222/images/1675.png",
@@ -25899,8 +25899,8 @@
   {
    "image": "mole-collection-2222/images/1727.png",
    "cell": [
-    127,
-    135
+    389,
+    386
    ],
    "gutterTrim": [
     0,
@@ -25908,8 +25908,8 @@
     0,
     0
    ],
-   "cropOffset": 4,
-   "sha256": "04ca6524f5d07a8cf9e1d0caadc67adbc6c94640d9d0f245b56b56a8d078c9cd"
+   "cropOffset": 2,
+   "sha256": "59bfe48858da36872a257b1f9a60128e98197cb5d578fd0f0a55ae6b97dac04d"
   },
   {
    "image": "mole-collection-2222/images/1728.png",
@@ -31749,17 +31749,17 @@
   {
    "image": "mole-collection-2222/images/2117.png",
    "cell": [
-    127,
-    144
+    385,
+    386
    ],
    "gutterTrim": [
     0,
-    0,
+    1,
     0,
     0
    ],
-   "cropOffset": 8,
-   "sha256": "b812fb9ba4f9a8b40d97fba1a079f548d819061cefa4572de8af7d89dc96cd2b"
+   "cropOffset": 0,
+   "sha256": "5a95eddb89fd8e52fe3b803c45046b6d00065065f9bea75ff7265f51d6d380f4"
   },
   {
    "image": "mole-collection-2222/images/2118.png",
@@ -32004,8 +32004,8 @@
   {
    "image": "mole-collection-2222/images/2134.png",
    "cell": [
-    128,
-    143
+    388,
+    386
    ],
    "gutterTrim": [
     0,
@@ -32013,8 +32013,8 @@
     0,
     0
    ],
-   "cropOffset": 8,
-   "sha256": "c91e7a343c2e887bf0d6d35ae128f06092f47c9b753b7f69575521925853fb2b"
+   "cropOffset": 1,
+   "sha256": "e0b74b827b309ff014a4a3fe02fb9a9ab32cabb85792b60eed1c9ec59505f96b"
   },
   {
    "image": "mole-collection-2222/images/2135.png",
@@ -32829,8 +32829,8 @@
   {
    "image": "mole-collection-2222/images/2189.png",
    "cell": [
-    138,
-    144
+    389,
+    388
    ],
    "gutterTrim": [
     0,
@@ -32838,8 +32838,8 @@
     0,
     0
    ],
-   "cropOffset": 3,
-   "sha256": "7f72119fbc7fab7335668e578755c178d85bc2fbe884176933f158a3e8e93ae0"
+   "cropOffset": 0,
+   "sha256": "6233ca1adac3ef6051a6ad161d2c73f014e7f30e575312bb5582dc48b748806b"
   },
   {
    "image": "mole-collection-2222/images/2190.png",
@@ -33084,8 +33084,8 @@
   {
    "image": "mole-collection-2222/images/2206.png",
    "cell": [
-    132,
-    137
+    385,
+    388
    ],
    "gutterTrim": [
     0,
@@ -33094,7 +33094,7 @@
     0
    ],
    "cropOffset": 2,
-   "sha256": "c8bf2982f30aa939ffaa9aa5fc44bbaf7bc6fb2f9c94a31708acea6eab441dd7"
+   "sha256": "33cfa9251d6cf95c57c071c1de26e0dc5a2a7a67ddfedf1d254fc943b5a1c786"
   },
   {
    "image": "mole-collection-2222/images/2207.png",
@@ -33129,8 +33129,8 @@
   {
    "image": "mole-collection-2222/images/2209.png",
    "cell": [
-    138,
-    137
+    388,
+    388
    ],
    "gutterTrim": [
     0,
@@ -33139,7 +33139,7 @@
     0
    ],
    "cropOffset": 0,
-   "sha256": "d23740a45f43fcf16dd82a74b3eeb840fb9affb4232ff0d763a8212a888f3806"
+   "sha256": "e95a4635f412f7d49b626ae2b0022cb86570e0e83bb4f9d05fde465a116fefb6"
   },
   {
    "image": "mole-collection-2222/images/2210.png",

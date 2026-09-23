@@ -10,12 +10,12 @@
       192
     ]
   ],
-  "canvasCount": 33,
-  "authoredCellCapacity": 2537,
-  "acceptedUniqueSourceCells": 2290,
+  "canvasCount": 34,
+  "authoredCellCapacity": 2546,
+  "acceptedUniqueSourceCells": 2299,
   "releasedSourceCells": 2222,
   "reserveSourceCells": 68,
-  "rejectedSourceCells": 247,
+  "rejectedSourceCells": 256,
   "sourceGrids": {
     "canvas-01": {
       "columns": 10,
@@ -1062,6 +1062,25 @@
       "medianCellHeight": 144.0,
       "malformedColumns": [],
       "malformedRows": []
+    },
+    "canvas-34": {
+      "columns": 3,
+      "rows": 3,
+      "cellCapacity": 9,
+      "cellWidths": [
+        389,
+        385,
+        388
+      ],
+      "cellHeights": [
+        388,
+        386,
+        388
+      ],
+      "medianCellWidth": 388.0,
+      "medianCellHeight": 388.0,
+      "malformedColumns": [],
+      "malformedRows": []
     }
   },
   "gridPolicy": "detect rendered gutters; never assume requested rows or columns",
@@ -1072,5 +1091,17 @@
   "minimumSourceHeightToWidthRatio": 0.95,
   "internalCropping": false,
   "horizontalOrVerticalStretching": false,
-  "rarityWeights": null
+  "rarityWeights": null,
+  "visualDuplicateReplacementCount": 9,
+  "visualDuplicateReplacementTokens": [
+    "0457",
+    "1649",
+    "1674",
+    "1727",
+    "2117",
+    "2134",
+    "2189",
+    "2206",
+    "2209"
+  ]
 }

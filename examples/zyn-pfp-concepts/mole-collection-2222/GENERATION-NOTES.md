@@ -51,6 +51,7 @@ approved Mole variant study as visual references.
 31. Clean Geometry Reserve A
 32. Clean Geometry Reserve B
 33. Clean Geometry Reserve C
+34. Visual Duplicate Replacement Board
 
 ## Source-board correction
 
@@ -73,6 +74,16 @@ The original release numbers affected by the short-edge-row defect were
 `0161–0170`, `0331–0340`, `0921–0930`, `1061–1070`, `1281–1300`, `1501–1510`,
 `1641–1660`, `1871–1880` and `2111–2120`. Numbering was rebuilt after exclusion,
 so these ranges describe the pre-fix release only.
+
+## Visual duplicate replacement board
+
+After release review, the visually repeated groups `1624/1649/1674`,
+`2097/2117/2134`, `2179/2209`, `1690/1727`, `2163/2189`, `2176/2206` and
+`0452/0457` were reported. Canvas 34 adds nine new, component-directed atomic
+portraits. The first member of each group is retained and the later slots are
+replaced. The new cells use distinct geode, rail, root, cipher, moon, prism,
+shielded, gold-vein and node recipes, and their final component metadata was
+reviewed directly against the sliced PNGs.
 
 ## Clean slicing policy
 

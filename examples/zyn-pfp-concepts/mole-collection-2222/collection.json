@@ -2,11 +2,23 @@
   "name": "Zyn Moles \u2014 Collection 01",
   "species": "Mole",
   "supply": 2222,
-  "canvasCount": 33,
-  "authoredCellCapacity": 2537,
-  "acceptedUniqueSourceCells": 2290,
+  "canvasCount": 34,
+  "authoredCellCapacity": 2546,
+  "acceptedUniqueSourceCells": 2299,
   "reserveSourceCells": 68,
-  "rejectedSourceCells": 247,
+  "rejectedSourceCells": 256,
+  "visualDuplicateReplacementCount": 9,
+  "visualDuplicateReplacementTokens": [
+    "0457",
+    "1649",
+    "1674",
+    "1727",
+    "2117",
+    "2134",
+    "2189",
+    "2206",
+    "2209"
+  ],
   "rendering": "exact full-cell slices, edge-padded to square, uniformly resized",
   "metadataSchema": "zyn-atomic-components/v1",
   "viewerRenderer": "zyn-light-v1",
@@ -25,12 +37,12 @@
     "schema": "zyn-cavez-rarity/v1",
     "method": "information content: sum of -log2(share of the 4,444 with that value) over species, background, body, eyes, mouth/beak, headgear and interactive light; ranked highest first, ties by collection index; classes by rank: 1% Mythic, 4% Legendary, 10% Epic, 20% Rare, 30% Uncommon, 35% Common",
     "classes": {
-      "Mythic": 22,
-      "Legendary": 99,
-      "Epic": 227,
+      "Mythic": 27,
+      "Legendary": 95,
+      "Epic": 229,
       "Rare": 415,
       "Uncommon": 710,
-      "Common": 749
+      "Common": 746
     }
   },
   "detailedTraitTagging": "complete \u2014 visually categorized"
