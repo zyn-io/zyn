@@ -6297,3 +6297,20 @@ product decision on launches (§137).
 | 138.10 | **Collection items sell through `List`, paid by claim.** The listing publishes the item's nullifier (§132.5) and names no seller; the buyer's outputs are the item and their own change; the seller's proceeds (price less their side of the fee) wait as a claim derived from a nonce only they hold. `PlaceOffer` refuses a collection's items so there is one sale path to get right | ✅ |
 | 138.11 | Items cannot leave for Zcash: they are made on the ledger and nothing in the vault backs them | 🔒 |
 
+## §139 — Nap holds ZEC in the browser (23 Sep 2026)
+
+Browser Nap held Zyn tokens and items and sent ZEC holders to desktop Nap for
+Zcash itself. It now holds shielded ZEC the way any Zcash wallet does: sync,
+balance, receive, send.
+
+| # | Decision | |
+|---|---|---|
+| 139.1 | **One wallet core, two builds.** The browser runs the desktop's own `zyn_custody` scanning, note trees and payout builder, compiled to WebAssembly (`apps/nap-web/zec-core`, crate `nap-zec`). No second Zcash implementation in JavaScript. `zyn-custody` gains a default `multicore` feature; the browser build turns it off and proves on one thread | 🔒 |
+| 139.2 | **The page carries the frames; the core decides.** The core builds every `zyn-lightd` request and checks every reply (`lightd::request`/`lightd::decode`, shared with the desktop's TCP client). The page only posts bytes. Nothing it sends names a key or a shielded address | 🔒 |
+| 139.3 | **`zyn-lightd` gets an HTTP door** (`ZYN_LIGHTD_HTTP`): the same request frame as a POST body, the same reply frame back. Loopback only, behind the gateway's TLS, CORS and rate limit; the page reaches it through the same-origin `/zec/<network>` Pages Function, as it reaches `/rpc` | ✅ |
+| 139.4 | **Same phrase, same keys, same state format.** ZIP-32 Orchard account from the BIP-39 seed, exactly as `KeyMaterial::spending_key`; tests on both sides pin the same vectors. The scan state is the desktop's `ZYNWAL01` bytes | 🔒 |
+| 139.5 | **The spending keys are sealed with the rest, never the phrase.** A kept wallet adds both networks' Zcash keys to its sealed record; one sealed before this asks for the phrase once, checks it opens *this* Zyn account, and reseals. The scan state sits in IndexedDB under AES-GCM keyed from the spending key, under a derived name: a locked device shows nothing about its ZEC | 🔒 |
+| 139.6 | **A Zcash address gets a Zcash transaction; a Zyn account gets Zyn tokens and items.** The Zcash section sends only to Zcash addresses and turns a Zyn account id away to Coins/Items. Moving ZEC into Zyn is an ordinary payment to the account's own deposit address ("Pay it from my ZEC") | ✅ |
+| 139.7 | **Proving runs in a Web Worker,** about 21 s for a two-action payment including building the key (measured on testnet, Node, one thread). The page stays live; the send says to keep the tab open | ✅ |
+| 139.8 | **Where a scan starts.** A phrase created in the browser starts at the tip. A restored one starts at the network's `zecBirthday` (config: mainnet 3,440,000, testnet 4,320,000); "Scan from an earlier block" reseeds from any height | ✅ |
+

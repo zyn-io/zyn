@@ -2594,6 +2594,39 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-terdecies. The block servers' HTTP door, for browser Nap (23 Sep 2026)
+
+`zyn-lightd` answers HTTP as well as its TCP frames when `ZYN_LIGHTD_HTTP` is
+set: POST one request frame, get the reply frame back (DECISIONS §139).
+
+- **Hetzner (testnet):** `ZYN_LIGHTD_HTTP=127.0.0.1:8095` in
+  `/etc/zyn/zyn-lightd.env`. TCP stays on `0.0.0.0:8098`.
+- **Contabo (mainnet):** drop-in
+  `/etc/systemd/system/zyn-lightd.service.d/http.conf` with the same port. TCP
+  stays on `127.0.0.1:8097`.
+- Check either: `printf '\001' | curl -s --data-binary @- http://127.0.0.1:8095/ | xxd | head -1`
+  → `00 01…` (mainnet) or `00 02…` (testnet), then the tip.
+
+**Still to route (needs the operator):**
+
+1. Hetzner's `zyn-object-tunnel` gets `-R 127.0.0.1:8595:127.0.0.1:8095` next
+   to its existing forward, so testnet's door appears on Contabo at :8595.
+2. In `zyn-rpc.cavebro.win` on Contabo's nginx, next to `location = /`:
+   `location = /zec` → `proxy_pass http://127.0.0.1:8095/;` and
+   `location = /zec-testnet` → `http://127.0.0.1:8595/`, POST/OPTIONS only,
+   `client_max_body_size 1m`, `proxy_read_timeout 60s`, and the `zynrpc` rate
+   limit.
+3. Deploy nap-web. Its `functions/zec/[[path]].js` maps `/zec/mainnet` →
+   `$ZYN_RPC_URL/zec` and `/zec/testnet` → `/zec-testnet`.
+
+Local testing without any of that: `node relay.mjs 168.119.53.39 8098 18095`
+(HTTP → testnet's public TCP port), then
+`NAP_DEV_ZEC=http://127.0.0.1:18095 npx vite preview`.
+
+**Rebuilding the core:** `apps/nap-web/zec-core/build.sh`. It needs the
+wasm32 target, `wasm-bindgen-cli` 0.2.128 and Homebrew's llvm, and writes
+`apps/nap-web/src/zec-pkg`, which is committed so a Pages build needs no Rust.
+
 ## 5f-duodecies. Fees into the ZYN pot (23 Sep 2026)
 
 Operator intents, sent through `zyn_submit` with the node's `ZYN_SUBMIT_TOKEN`

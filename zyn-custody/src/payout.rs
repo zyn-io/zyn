@@ -600,6 +600,29 @@ impl Payout {
     }
 }
 
+/// A transparent address or a unified address with an Orchard/Ironwood
+/// receiver, for `network`.
+pub fn parse_destination(s: &str, network: Network) -> Option<Destination> {
+    if let Some(t) = transparent_address(s, network) {
+        return Some(Destination::Transparent(t));
+    }
+    use zcash_address::unified::{Container, Encoding, Receiver};
+    let (net, ua) = zcash_address::unified::Address::decode(s).ok()?;
+    let want = match network {
+        Network::MainNetwork => zcash_protocol::consensus::NetworkType::Main,
+        Network::TestNetwork => zcash_protocol::consensus::NetworkType::Test,
+    };
+    if net != want {
+        return None;
+    }
+    let raw = ua.items().into_iter().find_map(|r| match r {
+        Receiver::Orchard(raw) => Some(raw),
+        _ => None,
+    })?;
+    let addr: Option<orchard::Address> = orchard::Address::from_raw_address_bytes(&raw).into();
+    addr.map(Destination::Shielded)
+}
+
 /// Parse a transparent address (`t1…`/`t3…` on mainnet, `tm…`/`t2…` on
 /// testnet) for the given network.
 ///

@@ -3,6 +3,7 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
 import { fund as fundFrom } from './market.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
+import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import './styles.css';
 
@@ -19,6 +20,14 @@ let holdings = [];
 /// withdrawal spends.
 let objectHeld = [];
 let generatedWords = '';
+/// The Zcash wallet for the chosen network: plain shielded ZEC, held the way
+/// any Zcash wallet holds it. Separate from the Zyn account above it on
+/// purpose — a Zcash address gets a Zcash transaction, a Zyn account gets Zyn
+/// tokens and items, and neither is dressed up as the other.
+let zecAccount = null;
+let zecTimer = 0;
+/// A wallet made in this session has no history to scan back through.
+let zecFresh = false;
 const giftUrl = new URL(location.href);
 const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || giftUrl.searchParams.get('claim') || '';
 // Fragment links keep the card secret out of HTTP access logs. Scrub legacy
@@ -30,6 +39,7 @@ let refreshId = 0;
 const artUrls = new Set();
 function clearSession() {
   generation++; refreshId++;
+  clearTimeout(zecTimer); stopZec(); zecAccount = null;
   forgetIdentity(identity); identity = null;
   for (const r of receiving) forgetIdentity(r);
   receiving = []; holdings = []; assets = []; listings = []; generatedWords = '';
@@ -65,7 +75,8 @@ function checkedNetwork(value) {
     throw new Error('Each network must name its Zcash network and address prefix');
   }
   const out = { ...value, collections: Array.isArray(value.collections) ? value.collections : [] };
-  for (const key of ['rpcUrl', 'claimUrl', 'mediaGateway']) {
+  for (const key of ['rpcUrl', 'claimUrl', 'mediaGateway', 'lightdUrl']) {
+    if (key === 'lightdUrl' && !value[key]) continue; // optional: no Zcash wallet on this network
     const url = new URL(value[key], location.origin);
     if (!value[key] || url.origin !== location.origin || url.username || url.password || url.search || url.hash) throw new Error(`${key} must be a same-origin path`);
     out[key] = url.pathname;
@@ -123,6 +134,7 @@ function switchNetwork(id) {
   // Deliberately NOT clearSession(): that forgets the phrase, and the phrase is
   // not what changed. Only the chain's answers are stale.
   holdings = []; assets = [];
+  clearTimeout(zecTimer); stopZec(); zecAccount = null;
   generation++; refreshId++;
   if (identity) { wallet(); refresh(); } else onboarding();
 }
@@ -190,7 +202,7 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
     <section class="entry panel">
       ${mode === 'kept' ? '' : `<div class="tabs"><button data-mode="restore" class="${mode === 'restore' ? 'active' : ''}">Restore</button><button data-mode="create" class="${mode === 'create' ? 'active' : ''}">Create new</button></div>`}
       ${mode === 'kept' ? unlockForm() : (mode === 'restore' ? restoreForm() : createForm())}
-      <div class="scope"><b>Phase 1</b><span>Zyn NFTs and account transfers. Shielded Zcash stays in desktop Nap.</span></div>
+      <div class="scope"><b>Holds</b><span>Shielded ZEC, and Zyn tokens and items. The same phrase opens desktop Nap.</span></div>
     </section>
   </main>`);
   root.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => onboarding(b.dataset.mode));
@@ -226,7 +238,7 @@ function bindCreate() {
     event.preventDefault();
     if (!ack.checked) return;
     try {
-      await unlock(generatedWords, '', 0, root.querySelector('#keep-password')?.value || '');
+      await unlock(generatedWords, '', 0, root.querySelector('#keep-password')?.value || '', true);
       generatedWords = '';
     } catch (e) { root.querySelector('#form-error').textContent = e.message; }
   };
@@ -236,8 +248,12 @@ const knownCollections = () => (config.collections || [])
   .filter((c) => /^[0-9a-f]{64}$/i.test(String(c.id)))
   .map((c) => ({ name: String(c.name || 'Collection'), id: unhex(c.id, 32) }));
 
-async function unlock(words, passphrase, index, keepPassword = '') {
+async function unlock(words, passphrase, index, keepPassword = '', fresh = false) {
   const nextIdentity = deriveIdentity(words, passphrase, index);
+  // The Zcash keys come from the same words, so this is the moment for them
+  // too. If the Zcash code cannot load here, the Zyn wallet still opens and
+  // the Zcash section says why it is missing.
+  try { nextIdentity.zec = await deriveZecKeys(words, passphrase, index); } catch { nextIdentity.zec = undefined; }
   // Derived here because this is the only moment the phrase exists. A kept
   // wallet stores these too — without them, a reopened wallet cannot see what
   // its owner bought.
@@ -255,7 +271,7 @@ async function unlock(words, passphrase, index, keepPassword = '') {
       if (!keepWallet(kept)) kept = null;
     } catch (e) { kept = null; throw e; }
   }
-  clearSession(); identity = nextIdentity; receiving = nextReceiving;
+  clearSession(); identity = nextIdentity; receiving = nextReceiving; zecFresh = fresh;
   root.querySelectorAll('textarea,input').forEach((el) => { if (el.type !== 'checkbox') el.value = ''; });
   wallet(kept ? 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.' : '');
   refresh();
@@ -283,17 +299,18 @@ function wallet(message = '') {
   shell(`<main class="wallet">
     <aside class="rail">
       <div><p class="kicker">YOUR ZYN ACCOUNT</p><button class="account-copy" id="copy-account"><b>${short(account)}</b><span>Copy full ID</span></button></div>
-      <nav><button class="active">Pocket</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="recovery-link">Recovery</button></nav>
+      <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="recovery-link">Recovery</button></nav>
       <button class="quiet" id="forget">${keptWallet() ? 'Lock' : 'Lock &amp; forget key'}</button>
     </aside>
     <section class="content">
       <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh">↻ Refresh</button></div>
       <div class="notice ${message ? 'show' : ''}" id="notice">${escapeHtml(message)}</div>
       ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD DETECTED</p><h2>Your mole is waiting.</h2><p>The coordinator sees this public account ID—not your phrase or key.</p></div><button id="claim">Claim gift <span>→</span></button></section>` : ''}
+      ${zecSection()}
       <section><div class="section-title"><h2>Coins</h2><span id="coin-count">—</span></div><div class="coins" id="coins"><div class="skeleton"></div></div></section>
       <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork — fetches each item's picture from the gateway, which tells that host your IP, which items you hold, and when. Off by default.</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
       <section class="activity"><div class="section-title"><h2>Account</h2></div><div class="account-card"><div><span>Public account</span><code>${account}</code></div><canvas id="qr" width="164" height="164"></canvas></div></section>
-      <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
+      <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button> <button class="quiet" id="deposit-from-zec">Pay it from my ZEC →</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
       ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Take ZEC out</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">The chain records only a commitment to the address. The vault pays it once two custodians sign; the Zcash network fee comes out of the amount, and any bridge fee is added on top.</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
     </section>
   </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><p class="kicker">RECOVERY</p><h2>The phrase is the wallet.</h2><p>Nap does not store it in this browser. Restore this same phrase, passphrase and account index in browser or desktop Nap to recover <code>${account}</code>.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
@@ -321,9 +338,225 @@ function wallet(message = '') {
   // Locking returns to whatever this device can actually offer: a password if
   // the wallet is kept here, the phrase if it is not.
   root.querySelector('#forget').onclick = () => { clearSession(); onboarding(keptWallet() ? 'kept' : 'restore'); };
-  root.querySelector('#refresh').onclick = refresh;
+  root.querySelector('#refresh').onclick = () => { refresh(); zecSync(); };
+  root.querySelector('#zec-link').onclick = () => root.querySelector('#zec').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  root.querySelector('#deposit-from-zec').onclick = () => {
+    const address = root.querySelector('#deposit-address').textContent.trim();
+    if (!address.startsWith(config.zcashPrefix)) { note('The deposit address has not arrived yet.', true); return; }
+    const to = root.querySelector('#zec-to');
+    if (!to) { note('Open your Zcash wallet first.', true); return; }
+    to.value = address;
+    root.querySelector('#zec').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    root.querySelector('#zec-amount').focus();
+  };
+  bindZec();
   root.querySelector('#claim')?.addEventListener('click', claimGift);
 }
+// ---------------------------------------------------------------------------
+// Zcash: plain shielded ZEC, synced, received and sent from this tab.
+// ---------------------------------------------------------------------------
+
+const zecNetwork = () => (config.zcashPrefix === 'u1' ? 'mainnet' : 'testnet');
+const ZAT = 100_000_000n;
+/// Zatoshi as ZEC, exactly: never through a float.
+function zecText(zat) {
+  const v = BigInt(zat);
+  const frac = (v % ZAT).toString().padStart(8, '0').replace(/0+$/, '');
+  return `${v / ZAT}${frac ? `.${frac}` : ''}`;
+}
+function zatOf(text) {
+  if (!/^\d+(\.\d{1,8})?$/.test(text)) throw new Error('Enter an amount in ZEC, up to eight decimals');
+  const [whole, frac = ''] = text.split('.');
+  const zat = BigInt(whole) * ZAT + BigInt(frac.padEnd(8, '0'));
+  if (zat <= 0n) throw new Error('Enter an amount above zero');
+  if (zat > 21_000_000n * ZAT) throw new Error('That is more ZEC than exists');
+  return Number(zat);
+}
+
+function zecSection() {
+  if (!identity.zec) {
+    const kept = !!keptWallet();
+    return `<section class="zec" id="zec"><div class="section-title"><h2>Zcash</h2><span>not on this device yet</span></div>
+      <form class="account-card zec-add" id="zec-add"><div><span>Add your Zcash wallet</span><p class="muted">This device holds your Zyn keys but not your Zcash keys — it was set up before Nap held ZEC in the browser. Enter your recovery phrase once to add them${kept ? '; your device password seals them with the rest' : ''}.</p>
+        <label class="visually-hidden" for="zec-add-words">Recovery phrase</label><textarea id="zec-add-words" class="withdraw-input" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="24-word recovery phrase"></textarea>
+        <label class="visually-hidden" for="zec-add-pass">Passphrase</label><input id="zec-add-pass" class="withdraw-input" type="password" autocomplete="off" placeholder="Passphrase, if you used one">
+        ${kept ? '<label class="visually-hidden" for="zec-add-device">Device password</label><input id="zec-add-device" class="withdraw-input" type="password" autocomplete="current-password" placeholder="This device\'s password">' : ''}
+      </div><div><button class="primary" type="submit">Add Zcash <span>→</span></button></div></form></section>`;
+  }
+  return `<section class="zec" id="zec"><div class="section-title"><h2>Zcash</h2><span id="zec-sync">Opening…</span></div>
+    <div class="zec-balance"><div><b id="zec-total">—</b><span>ZEC</span></div><p id="zec-detail" class="zec-detail">Shielded. Only this phrase can see it.</p></div>
+    <div class="account-card"><div><span>Your Zcash address</span><code id="zec-address">Opening…</code><p class="muted">A shielded address. Pay it from any Zcash wallet or exchange that sends shielded; what arrives is visible only to this phrase.</p><button class="quiet" id="zec-copy" hidden>Copy address</button></div><canvas id="zec-qr" width="164" height="164"></canvas></div>
+    <form class="account-card" id="zec-send"><div><span>Send ZEC</span>
+      <label class="visually-hidden" for="zec-to">Zcash address</label><input id="zec-to" class="withdraw-input" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…">
+      <label class="visually-hidden" for="zec-amount">Amount</label><input id="zec-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC">
+      <label class="visually-hidden" for="zec-memo">Memo</label><input id="zec-memo" class="withdraw-input" maxlength="512" autocomplete="off" placeholder="Memo (optional, shielded addresses only)">
+      <p class="muted" id="zec-send-note">A Zcash transaction from this wallet. The network fee is added on top. Proving it takes about half a minute on this device; keep the tab open.</p></div>
+      <div><button class="primary" type="submit" id="zec-go" disabled>Review <span>→</span></button></div></form>
+    <ul class="zec-notes" id="zec-notes"></ul></section>`;
+}
+
+function zecStatus(text, bad = false) {
+  const el = root.querySelector('#zec-sync');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('bad', bad);
+}
+
+let zecQrFor = '';
+function renderZec(v) {
+  const el = root.querySelector('#zec');
+  if (!el || !v) return;
+  const held = v.balance.orchard + v.balance.ironwood;
+  root.querySelector('#zec-total').textContent = zecText(held);
+  const parts = [];
+  if (v.balance.inFlight) parts.push(`${zecText(v.balance.inFlight)} ZEC on its way (change from a send, back after 3 blocks)`);
+  if (v.balance.orchard && v.balance.ironwood) parts.push(`Ironwood ${zecText(v.balance.ironwood)} · Orchard ${zecText(v.balance.orchard)}`);
+  root.querySelector('#zec-detail').textContent = parts.join(' · ') || 'Shielded. Only this phrase can see it.';
+  const address = root.querySelector('#zec-address');
+  address.textContent = v.address;
+  root.querySelector('#zec-copy').hidden = false;
+  if (zecQrFor !== v.address || !root.querySelector('#zec-qr').dataset.drawn) {
+    zecQrFor = v.address;
+    QRCode.toCanvas(root.querySelector('#zec-qr'), v.address, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
+    root.querySelector('#zec-qr').dataset.drawn = '1';
+  }
+  root.querySelector('#zec-go').disabled = held === 0;
+  if (v.syncedTo >= 0) zecStatus(`synced to block ${v.syncedTo.toLocaleString('en-US')}`);
+  const notes = root.querySelector('#zec-notes');
+  notes.innerHTML = v.notes.length
+    ? v.notes.slice(0, 12).map((n) => `<li><b>${escapeHtml(zecText(n.zatoshi))} ZEC</b><span>received at block ${Number(n.height).toLocaleString('en-US')}</span><code>${escapeHtml(short(n.txid))}</code></li>`).join('')
+    : `<li class="zec-empty">Nothing received since block ${Number(v.birthday).toLocaleString('en-US')}. <button type="button" class="quiet" id="zec-rescan">Scan from an earlier block…</button></li>`;
+  root.querySelector('#zec-rescan')?.addEventListener('click', zecRescan);
+}
+
+async function zecStart() {
+  if (!root.querySelector('#zec') || !identity) return;
+  if (!identity.zec) return;
+  if (!config.lightdUrl) { zecStatus('no block server for this network', true); return; }
+  const net = zecNetwork(), current = generation;
+  const account = new ZecAccount({ sk: identity.zec[net], network: net, url: config.lightdUrl, birthday: config.zecBirthday });
+  zecAccount = account;
+  try {
+    zecStatus('opening…');
+    const view = await account.open({ fresh: zecFresh });
+    zecFresh = false;
+    if (current !== generation || zecAccount !== account) return;
+    renderZec(view);
+    await zecSync();
+  } catch (e) {
+    if (current === generation) zecStatus(e.message, true);
+  }
+}
+
+async function zecSync() {
+  const account = zecAccount, current = generation;
+  if (!account) return;
+  clearTimeout(zecTimer);
+  try {
+    const view = await account.sync((s) => {
+      if (current !== generation) return;
+      if (s.to) zecStatus(`scanning ${Number(s.at).toLocaleString('en-US')} of ${Number(s.to).toLocaleString('en-US')}`);
+      for (const e of s.events || []) {
+        if (e.kind === 'received') note(`Received ${zecText(e.zatoshi)} ZEC${e.memo ? ` — “${e.memo}”` : ''}.`);
+      }
+    });
+    if (current === generation && zecAccount === account) renderZec(view);
+  } catch (e) {
+    if (current === generation) zecStatus(e.message, true);
+  } finally {
+    // Zcash makes a block about every 75 seconds; asking more often finds nothing.
+    if (current === generation && zecAccount === account) zecTimer = setTimeout(zecSync, 75_000);
+  }
+}
+
+async function zecRescan() {
+  const answer = prompt('Scan from which block height? Earlier finds older payments and takes longer.', String(config.zecBirthday || ''));
+  if (answer === null) return;
+  const height = Number(answer.trim());
+  if (!Number.isInteger(height) || height < 1) { note('A block height is a whole number.', true); return; }
+  try {
+    zecStatus('starting over…');
+    renderZec(await zecAccount.rescanFrom(height));
+    await zecSync();
+  } catch (e) { zecStatus(e.message, true); }
+}
+
+function bindZec() {
+  const add = root.querySelector('#zec-add');
+  if (add) {
+    add.onsubmit = async (e) => {
+      e.preventDefault();
+      const button = add.querySelector('.primary');
+      button.disabled = true;
+      try {
+        const words = add.querySelector('#zec-add-words').value;
+        const passphrase = add.querySelector('#zec-add-pass').value;
+        // The phrase must be this wallet's: the Zyn account it derives has to
+        // be the one already open, or these would be someone else's keys.
+        const check = deriveIdentity(words, passphrase, identity.accountIndex);
+        const same = check.accountHex === identity.accountHex;
+        forgetIdentity(check);
+        if (!same) throw new Error('That phrase opens a different wallet than this one.');
+        const keys = await deriveZecKeys(words, passphrase, identity.accountIndex);
+        const device = add.querySelector('#zec-add-device');
+        if (device) {
+          // Opening the current record proves the password before it seals anything new.
+          await openSealedWallet(keptWallet(), device.value);
+          identity.zec = keys;
+          if (!keepWallet(await sealWallet(identity, receiving, device.value, identity.accountIndex))) throw new Error('Could not save to this device; Zcash works until you lock.');
+        } else identity.zec = keys;
+        add.querySelectorAll('textarea,input').forEach((el) => { el.value = ''; });
+        zecFresh = false;
+        wallet('Zcash added. It scans from a recent block; use “Scan from an earlier block” if your ZEC is older.');
+        refresh(false);
+      } catch (err) { note(err.message, true); button.disabled = false; }
+    };
+    return;
+  }
+  const form = root.querySelector('#zec-send');
+  if (!form) return;
+  root.querySelector('#zec-copy').onclick = async () => {
+    await navigator.clipboard.writeText(root.querySelector('#zec-address').textContent);
+    note('Zcash address copied.');
+  };
+  const go = root.querySelector('#zec-go');
+  const disarm = () => { delete go.dataset.armed; go.innerHTML = 'Review <span>→</span>'; };
+  form.querySelectorAll('input').forEach((el) => { el.oninput = disarm; });
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const to = root.querySelector('#zec-to').value.trim();
+      const memo = root.querySelector('#zec-memo').value;
+      if (/^[0-9a-f]{64}$/i.test(to)) throw new Error('That is a Zyn account. This sends ZEC on Zcash; to pay a Zyn account, send ZEC.zy or an item from Coins and Items below.');
+      const transparent = /^t[a-z0-9]{20,}$/i.test(to);
+      if (!to.startsWith(config.zcashPrefix) && !transparent) throw new Error(`That is not a ${config.zcash} address.`);
+      if (transparent && memo) throw new Error('A memo only reaches a shielded address.');
+      const zat = zatOf(root.querySelector('#zec-amount').value.trim());
+      if (!go.dataset.armed) {
+        go.dataset.armed = '1';
+        go.innerHTML = `Confirm: send ${escapeHtml(zecText(zat))} ZEC <span>→</span>`;
+        note(`To ${short(to)}. A Zcash transaction cannot be undone.`);
+        return;
+      }
+      go.disabled = true;
+      const view = await zecAccount.send(to, zat, memo, (s) => {
+        if (s.proving) zecStatus('proving the transaction… about half a minute');
+        else if (s.to) zecStatus(`scanning ${Number(s.at).toLocaleString('en-US')} of ${Number(s.to).toLocaleString('en-US')}`);
+      });
+      renderZec(view);
+      form.reset();
+      note(`Sent ${zecText(zat)} ZEC. Transaction ${view.txid}.`);
+    } catch (err) {
+      note(err.message, true);
+      zecStatus('ready');
+    } finally {
+      disarm();
+      go.disabled = false;
+    }
+  };
+  void zecStart();
+}
+
 function note(text, bad = false) {
   const el = root.querySelector('#notice');
   if (!el) return;

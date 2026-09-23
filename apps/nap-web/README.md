@@ -2,8 +2,14 @@
 
 Browser-first, non-custodial Nap for Zyn accounts, NFT claims, verified media,
 one-item transfers, ZEC in and out of the object ledger (deposit address,
-Take ZEC out), and the market (`/market.html`). It deliberately does **not** claim to implement the
-shielded Zcash wallet in a browser; use desktop Nap for Zcash operations.
+Take ZEC out), the market (`/market.html`) — and a shielded **Zcash wallet**:
+the desktop wallet's own core (`zec-core/`, Rust → WebAssembly) syncs, receives
+and proves payments in a Web Worker, reaching the block server through the
+same-origin `/zec/<network>` function (DECISIONS §139). The same phrase opens
+the same ZEC in desktop Nap.
+
+`src/zec-pkg/` is built output, committed so the site builds without Rust;
+regenerate it with `zec-core/build.sh` after touching `zyn-custody`.
 
 ## Run
 

@@ -673,28 +673,9 @@ pub fn zcash_commitment(address: &ZcashDestination, salt: &[u8; 32]) -> [u8; 32]
     }
 }
 
-/// A transparent address or a unified address with an Orchard/Ironwood
-/// receiver, for `network`.
-pub fn parse_destination(s: &str, network: Network) -> Option<ZcashDestination> {
-    if let Some(t) = payout::transparent_address(s, network) {
-        return Some(ZcashDestination::Transparent(t));
-    }
-    use zcash_address::unified::{Container, Encoding, Receiver};
-    let (net, ua) = zcash_address::unified::Address::decode(s).ok()?;
-    let want = match network {
-        Network::MainNetwork => zcash_protocol::consensus::NetworkType::Main,
-        Network::TestNetwork => zcash_protocol::consensus::NetworkType::Test,
-    };
-    if net != want {
-        return None;
-    }
-    let raw = ua.items().into_iter().find_map(|r| match r {
-        Receiver::Orchard(raw) => Some(raw),
-        _ => None,
-    })?;
-    let addr: Option<orchard::Address> = orchard::Address::from_raw_address_bytes(&raw).into();
-    addr.map(ZcashDestination::Shielded)
-}
+/// Moved to `zyn_custody::payout` so the browser wallet parses recipients
+/// with the same code; re-exported for existing callers.
+pub use zyn_custody::payout::parse_destination;
 
 /// `<account-hex> <transparent-address> <salt-hex>` per line.
 pub fn load_zcash_reveals(path: &Path, network: Network) -> Result<Vec<ZcashReveal>, String> {

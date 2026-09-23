@@ -127,6 +127,11 @@ export async function sealWallet(identity, receiving, password, accountIndex = 0
     // a device that does not hold the phrase can find them.
     ov: identity.viewing ? hex(identity.viewing) : undefined,
     on: identity.nullifier ? hex(identity.nullifier) : undefined,
+    // The Zcash spending keys, one per network (ZIP-32, the desktop's path).
+    // Also underivable without the phrase, and they control real ZEC: a
+    // cracked record costs these too, which is why sealing is opt-in.
+    zm: identity.zec?.mainnet ? hex(identity.zec.mainnet) : undefined,
+    zt: identity.zec?.testnet ? hex(identity.zec.testnet) : undefined,
   }));
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -168,6 +173,9 @@ export async function openSealedWallet(blob, password) {
   // control still works.
   if (bundle.ov) identity.viewing = unhex(bundle.ov, 32);
   if (bundle.on) identity.nullifier = unhex(bundle.on, 32);
+  // Likewise the Zcash keys: a record sealed before the browser held ZEC
+  // opens without them, and the wallet asks for the phrase once to add them.
+  if (bundle.zm && bundle.zt) identity.zec = { mainnet: unhex(bundle.zm, 32), testnet: unhex(bundle.zt, 32) };
   const receiving = (bundle.r || []).map((r) => ({
     ...identityFromSecretKey(unhex(r.k, 32), blob.accountIndex),
     collection: unhex(r.c, 32),
@@ -316,4 +324,6 @@ export function checkedEpoch(status, chain) {
 
 export function forgetIdentity(identity) {
   identity?.secretKey?.fill(0);
+  identity?.zec?.mainnet?.fill(0);
+  identity?.zec?.testnet?.fill(0);
 }

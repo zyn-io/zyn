@@ -41,3 +41,21 @@
 .withdraw-input:focus { outline: none; border-color: #e8a916; }
 #withdraw-form .primary { margin-top: 0; }
 .coin-send { padding: 4px 0; font: 700 13px Plex; color: #1f2428; }
+
+/* Zcash: the balance is the one big number on the pocket; everything else
+   reuses the account card. */
+.zec { margin-bottom: 60px; }
+.zec .section-title span.bad { color: #c95545; }
+.zec-balance { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 26px 0 4px; }
+.zec-balance b { font: 700 clamp(44px, 6vw, 72px)/1 Bricolage; font-variant-numeric: tabular-nums; }
+.zec-balance span { font: 13px Mono; margin-left: 10px; color: #a56b00; }
+.zec-detail { margin: 0; font: 12px Mono; color: #6d716f; }
+.zec-notes { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 1px; }
+.zec-notes li { display: grid; grid-template-columns: minmax(120px, auto) 1fr auto; gap: 16px; align-items: baseline; padding: 12px 2px; border-bottom: 1px solid #1f24281f; font-size: 13px; }
+.zec-notes li b { font-variant-numeric: tabular-nums; }
+.zec-notes li span { color: #6d716f; }
+.zec-notes li code { font: 11px Mono; color: #6d716f; }
+.zec-notes li.zec-empty { display: block; color: #6d716f; }
+#zec-send .primary, #zec-add .primary { margin-top: 0; }
+.zec-add textarea { resize: vertical; font: 13px/1.5 Mono; }
+@media (max-width: 800px) { .zec-notes li { grid-template-columns: 1fr; gap: 4px; } }
