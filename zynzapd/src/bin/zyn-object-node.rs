@@ -1333,6 +1333,12 @@ fn bridge_pass(
     let observed = scanner
         .observe(zebra, from)
         .map_err(|e| format!("scan failed: {e:?}"))?;
+    // `poll` moves the watcher on — its height, the txids it has reported,
+    // its credit index — before anything here decides whether to credit. A
+    // pass refused below must put all of that back, or the deposit it refused
+    // is marked seen and never offered again: a refusal meant to wait became
+    // one that skipped (23 Sep, testnet, 0.003 TAZ).
+    let before = bridge.watcher.clone();
     let mut actions = bridge
         .watcher
         .poll(&observed)
@@ -1342,12 +1348,21 @@ fn bridge_pass(
     // watcher's attestation: that sums one scan range (see `object_bridge`).
     // This figure accounts for the anchors that spent from the vault, which
     // is the whole reason a range sum cannot stand in for it.
-    let vault = vault_balance(notes)?;
+    let vault = match vault_balance(notes) {
+        Ok(v) => v,
+        Err(e) => {
+            bridge.watcher = before;
+            return Err(e);
+        }
+    };
 
     // Retries go down the same road as live credits, deliberately: a retry
     // with its own path would be a path nothing tests.
     let decided = {
-        let n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
+        let Ok(n) = node.lock() else {
+            bridge.watcher = before;
+            return Err("node lock poisoned".to_string());
+        };
         let vm = n.state();
         refresh_deposit_addresses(&bridge.addresses, vm);
         actions.extend(bridge.pending.replayable(vm));
@@ -1371,10 +1386,12 @@ fn bridge_pass(
             observed,
             issued,
         } => {
-            // Not a retry. No intent repairs this, and crediting on would
-            // deepen a hole rather than fill it.
-            // Both figures, always: which side is short is the whole
-            // diagnosis, and the attestation alone does not say.
+            // No intent repairs this, and crediting on would deepen a hole
+            // rather than fill it. The watcher goes back to where this pass
+            // began, so the same range is judged again once the vault covers
+            // it. Both figures in the message, always: which side is short
+            // is the whole diagnosis.
+            bridge.watcher = before;
             return Err(format!(
                 "INSOLVENT: the check saw {observed:?} of asset {} against a vault holding \
                  {vault:?} and {issued:?} issued. Nothing was credited and the cursor did not move",
@@ -1382,6 +1399,7 @@ fn bridge_pass(
             ));
         }
         zynzapd::object_bridge::Pass::Unverifiable { asset } => {
+            bridge.watcher = before;
             return Err(format!(
                 "a deposit arrived in asset {} whose backing this bridge cannot check. \
                  Nothing was credited",
