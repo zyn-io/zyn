@@ -39,6 +39,8 @@ struct Bot {
     chain: u32,
     /// `(label, host:port)` for each Zcash node worth watching.
     zebras: Vec<(String, String)>,
+    /// Whether this process polls for updates and so can answer buttons.
+    interactive: bool,
 }
 
 /// An HTTP error names the URL it failed on, and a Telegram URL carries the
@@ -79,17 +81,20 @@ impl Bot {
         })
     }
 
+    /// Buttons only when this bot reads its own updates. A button press goes
+    /// to whichever program polls the bot; in push-only mode that is another
+    /// program, so a button here would spin and answer nothing.
     fn say(&self, chat: i64, text: &str) {
-        self.call(
-            "sendMessage",
-            serde_json::json!({
-                "chat_id": chat,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": true,
-                "reply_markup": Self::keyboard(),
-            }),
-        );
+        let mut body = serde_json::json!({
+            "chat_id": chat,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": true,
+        });
+        if self.interactive {
+            body["reply_markup"] = Self::keyboard();
+        }
+        self.call("sendMessage", body);
     }
 
     /// Height, epoch, and — the number that mattered on 9 Sep — how far the
@@ -653,6 +658,7 @@ fn main() -> Result<(), String> {
         object,
         chain,
         zebras,
+        interactive: env("ZYN_TG_POLL").as_deref() != Some("0"),
     };
     let bot = std::sync::Arc::new(bot);
     // Every chain worth being paged about. Testnet's node answers on this box;
@@ -673,7 +679,7 @@ fn main() -> Result<(), String> {
     // poll for updates — two pollers take each other's messages and each
     // sees the other's long poll as a conflict — so with `ZYN_TG_POLL=0`
     // this bot only speaks, and never listens.
-    if env("ZYN_TG_POLL").as_deref() == Some("0") {
+    if !bot.interactive {
         eprintln!("zyn-tgbot: push only — not polling; the chat belongs to another program");
         for w in watchers {
             let _ = w.join();
