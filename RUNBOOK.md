@@ -2594,6 +2594,29 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-undecies. The bridge from the wallet (23 Sep 2026)
+
+**In:** Nap asks `zyn_depositAddress {account}`; if the answer says
+`registered: false` it signs a `Register` first. The node appends every account
+it gives an address to `<data>/chain-<id>.deposit-accounts` and recognises
+those addresses from then on, registered or not — a payment before registering
+waits as a debt (`chain-<id>.pending`) and is credited when the account
+registers. It no longer falls through to the memo rules and stops the scan.
+
+**Out:** Nap picks a random salt, asks `zyn_exitCommitment {address, salt}`,
+signs `Withdraw` naming that commitment, then sends `zyn_exitReveal {address,
+salt}`. The node accepts a reveal only when an unpaid exit already carries the
+commitment, hands it to the exit settler and appends `<address> <salt>` to
+`ZYN_EXIT_REVEALS`. The wallet keeps unrevealed exits in `localStorage` and
+retries on every refresh. The Zcash fee comes out of the payout.
+
+**Anchors never spend backing.** The anchor builder refuses unless the vault
+holds issued ZEC.zy + unpaid exits + waiting deposits + 20,000 zat. The
+difference is the **fee reserve**, topped up with memo `ZYN1:` + 64 zeros
+(credited to nobody). Without one the node logs `anchoring paused: … top up the
+fee reserve by at least N zat` — deposits and exits still work, roots just are
+not carried to Zcash until it is funded.
+
 ## 5f-decies. The market (23 Sep 2026)
 
 Pools, batch swaps and token launches live in the object VM (`objectvm::market`)

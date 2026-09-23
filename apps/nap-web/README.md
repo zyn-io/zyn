@@ -1,7 +1,8 @@
 # Nap Web
 
 Browser-first, non-custodial Nap for Zyn accounts, NFT claims, verified media,
-one-item transfers, and the private market (`/market.html`). It deliberately does **not** claim to implement the
+one-item transfers, ZEC in and out of the object ledger (deposit address,
+Take ZEC out), and the market (`/market.html`). It deliberately does **not** claim to implement the
 shielded Zcash wallet in a browser; use desktop Nap for Zcash operations.
 
 ## Run
