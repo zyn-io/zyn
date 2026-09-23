@@ -2607,17 +2607,22 @@ set: POST one request frame, get the reply frame back (DECISIONS §139).
 - Check either: `printf '\001' | curl -s --data-binary @- http://127.0.0.1:8095/ | xxd | head -1`
   → `00 01…` (mainnet) or `00 02…` (testnet), then the tip.
 
-**Still to route (needs the operator):**
+**Routed 23 Sep:**
 
-1. Hetzner's `zyn-object-tunnel` gets `-R 127.0.0.1:8595:127.0.0.1:8095` next
-   to its existing forward, so testnet's door appears on Contabo at :8595.
-2. In `zyn-rpc.cavebro.win` on Contabo's nginx, next to `location = /`:
-   `location = /zec` → `proxy_pass http://127.0.0.1:8095/;` and
-   `location = /zec-testnet` → `http://127.0.0.1:8595/`, POST/OPTIONS only,
-   `client_max_body_size 1m`, `proxy_read_timeout 60s`, and the `zynrpc` rate
-   limit.
-3. Deploy nap-web. Its `functions/zec/[[path]].js` maps `/zec/mainnet` →
+1. Hetzner's `zyn-object-tunnel` carries `-R 127.0.0.1:8595:127.0.0.1:8095`
+   beside the RPC forward, so testnet's door is on Contabo at :8595 (the
+   `hetzner-object-tunnel` key has no listen restriction). Backup of the old
+   unit: `/root/zyn-object-tunnel.service.bak-20260923` on Hetzner.
+2. `zyn-rpc.cavebro.win` on Contabo's nginx: `location = /zec` → :8095
+   (mainnet), `location = /zec-testnet` → :8595, POST/OPTIONS only, 1 MB
+   bodies, 60 s reads, own rate zone `zynzec` (20 r/s, burst 60;
+   `/etc/nginx/conf.d/zyn-zec-limits.conf`), since all browser traffic
+   comes from Cloudflare's few addresses. Backup:
+   `/root/zyn-rpc.nginx.bak-20260923`.
+3. nap-web deployed; `functions/zec/[[path]].js` maps `/zec/mainnet` →
    `$ZYN_RPC_URL/zec` and `/zec/testnet` → `/zec-testnet`.
+
+Check from anywhere: `printf '\001' | curl -s --data-binary @- https://nap.cavebro.win/zec/mainnet | xxd | head -1`.
 
 Local testing without any of that: `node relay.mjs 168.119.53.39 8098 18095`
 (HTTP → testnet's public TCP port), then
