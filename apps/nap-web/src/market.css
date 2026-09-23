@@ -126,3 +126,7 @@
   .mk-leg-row input, .mk-leg-row output { font-size: 28px; }
 }
 @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* Browsing without a wallet: the open button sits where the account would. */
+.mk-open { margin: 10px 0 4px; }
+.mk-entry { border-radius: 16px; padding: 36px 34px; }

@@ -30,6 +30,8 @@ const PER_CLAIM = 16;
 let config;
 let identity = null;
 let view = 'swap';
+/// Where to go back to after the wallet opens for an action that needed it.
+let returnTo = 'swap';
 let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], held: [], balances: new Map(), owed: [] };
 let busy = false;
 let timer = null;
@@ -114,9 +116,20 @@ const keptWallet = () => { try { return JSON.parse(read(KEPT_KEY) || 'null'); } 
 function lock() {
   forgetIdentity(identity);
   identity = null;
-  state = { epoch: 0n, pools: [], launches: [], held: [], balances: new Map(), owed: [] };
-  clearInterval(timer);
-  locked();
+  state = { ...state, held: [], balances: new Map(), owed: [] };
+  frame();
+  render();
+}
+
+/// The market is public; only acting needs a key. Returns whether a wallet
+/// is open, and when it is not, sends the holder to open one and back.
+function requireWallet() {
+  if (identity) return true;
+  if (view !== 'wallet') returnTo = view;
+  view = 'wallet';
+  render();
+  notice('Open your wallet to do that. Browsing needs nothing; signing needs your key.');
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,12 +199,20 @@ const validLaunch = (l) => ['token', 'quote', 'meta'].every((k) => isHex(l[k]))
   && ['open', 'graduated', 'failed'].includes(l.state) && isSmall(l.closes_at_epoch) && isSmall(l.pool_bps) && isSmall(l.fee_bps);
 
 async function refresh(quiet = false) {
-  if (!identity) return;
   try {
     const status = await call('zyn_status');
     const epoch = checkedEpoch(status, config.chain);
-    const [market, published, owed] = await Promise.all([call('zyn_market'), call('zyn_published'), loadOwed()]);
-    const { held, balances } = scan(published, { secret: identity.viewing, nkey: identity.nullifier, owner: identity.account });
+    const me = identity;
+    const [market, published, owed] = await Promise.all([
+      call('zyn_market'),
+      me ? call('zyn_published') : null,
+      me ? loadOwed() : [],
+    ]);
+    // The wallet may have been locked while this was in flight.
+    const mine = me && identity === me;
+    const { held, balances } = mine && published
+      ? scan(published, { secret: me.viewing, nkey: me.nullifier, owner: me.account })
+      : { held: [], balances: new Map() };
     state = {
       epoch,
       epochSeconds: isSmall(market.epoch_seconds) ? market.epoch_seconds : 0,
@@ -199,7 +220,7 @@ async function refresh(quiet = false) {
       launches: (market.launches || []).filter(validLaunch).map((l) => ({ ...l, ...(mk.decodeMeta(l.meta) || {}) })),
       held,
       balances,
-      owed,
+      owed: mine ? owed : [],
     };
     if (!ui.pool && state.pools.length) ui.pool = state.pools[0].id;
     render();
@@ -250,23 +271,22 @@ function shell(content) {
   <footer><span>Keys stay in this tab. Orders clear together, once an epoch.</span><span>Nap Market · Zyn</span></footer>`;
 }
 
-function locked(error = '') {
+/// Opening the wallet, as a view inside the market rather than a gate in
+/// front of it.
+function renderWallet(error = '') {
   const kept = keptWallet();
-  shell(`<main class="onboard mk-onboard">
-    <section class="intro">
-      <p class="eyebrow">PRIVATE MARKET / OBJECT LEDGER</p>
-      <h1>Nobody<br><em>cuts in line.</em></h1>
-      <p class="lede">Swaps clear together at one price at the end of each epoch, so there is no queue to jump. Launches sell at one price to everyone. Who traded is not shown to the public; the operator sees it today, and the plan is that one day nobody does.</p>
-      <div class="promise"><span>BATCH</span><p><b>Nothing to sandwich.</b><br>Every order in an epoch pays the same price, so where yours sits in the batch cannot matter.</p></div>
-      <div class="promise"><span>CLAIM</span><p><b>Yours to collect.</b><br>What you are owed is findable only with your key.</p></div>
-    </section>
-    <section class="entry panel">
+  $('#view').innerHTML = `<div class="mk-grid mk-unlock">
+    <section class="entry panel mk-entry">
       ${kept ? `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>` : ''}
       <form id="phrase-form" ${kept ? 'hidden' : ''}><p class="kicker">RECOVERY PHRASE</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="4" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label><div class="split"><label>Passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account<input id="account-index" type="number" min="0" value="0"></label></div><button class="primary" type="submit">Open <span>→</span></button></form>
       <p class="error" id="form-error" role="alert">${esc(error)}</p>
-      <div class="scope"><b>${esc(config.network)}</b><span>The market reads the same account as your wallet. Nothing new is stored here.</span></div>
+      <div class="scope"><b>${esc(config.network)}</b><span>The same account as your wallet. The key stays in this tab; nothing new is stored.</span></div>
     </section>
-  </main>`);
+    <aside class="mk-card mk-side">
+      <div class="mk-explain"><h3>Why the market needs your key</h3><p>Only to sign. Prices, pools and sales are public and need nothing. An order, liquidity, a commitment or a collection is signed here by your key and sent as it is; balances are read by opening your own notes, and what you are owed is found by ids only your key derives.</p></div>
+      <div class="mk-explain"><h3>Nobody cuts in line</h3><p>Every order in an epoch clears at one price, so where yours sits in the batch cannot matter. Who traded is not shown to the public; the operator sees it today, and the plan is that one day nobody does.</p></div>
+    </aside>
+  </div>`;
   $('#use-phrase')?.addEventListener('click', (e) => { e.preventDefault(); $('#phrase-form').hidden = false; $('#kept-form').hidden = true; });
   $('#kept-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -287,31 +307,34 @@ function locked(error = '') {
 
 function begin(id) {
   if (!id.viewing || !id.nullifier) {
-    locked('This kept wallet predates the object ledger. Open it with the recovery phrase once.');
+    renderWallet('This kept wallet predates the object ledger. Open it with the recovery phrase once.');
     return;
   }
   identity = id;
+  view = returnTo || 'swap';
   frame();
+  render();
   refresh();
-  clearInterval(timer);
-  timer = setInterval(() => { if (!document.hidden && !busy) refresh(true); }, 20000);
 }
 
 function frame() {
   shell(`<main class="wallet mk">
     <aside class="rail">
-      <div><p class="kicker">TRADING AS</p><b class="mk-account">${short(identity.accountHex)}</b><p class="mk-epoch" id="epoch">epoch —</p></div>
+      <div>${identity
+        ? `<p class="kicker">TRADING AS</p><b class="mk-account">${short(identity.accountHex)}</b>`
+        : '<p class="kicker">BROWSING</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
       <nav id="tabs">
         ${['swap', 'pools', 'launchpad', 'owed'].map((t) => `<button data-view="${t}">${t === 'owed' ? 'Owed to you' : t[0].toUpperCase() + t.slice(1)}<span class="mk-badge" id="badge-${t}"></span></button>`).join('')}
       </nav>
-      <button class="quiet" id="lock">Lock</button>
+      ${identity ? '<button class="quiet" id="lock">Lock</button>' : ''}
     </aside>
     <section class="content">
       <div class="notice" id="notice" role="status"></div>
       <div id="view"></div>
     </section>
   </main>`);
-  $('#lock').onclick = lock;
+  $('#lock')?.addEventListener('click', lock);
+  $('#open-wallet')?.addEventListener('click', () => { if (view !== 'wallet') returnTo = view; view = 'wallet'; render(); });
   root.querySelectorAll('#tabs [data-view]').forEach((b) => { b.onclick = () => { view = b.dataset.view; render(); }; });
 }
 
@@ -328,14 +351,15 @@ function setBusy(on) {
 }
 
 function render() {
-  if (!identity || !$('#view')) return;
+  if (!$('#view')) return;
   $('#epoch').textContent = `epoch ${state.epoch}`;
   root.querySelectorAll('#tabs [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   const owedBadge = $('#badge-owed');
   owedBadge.textContent = state.owed.length ? String(state.owed.length) : '';
   const open = state.launches.filter((l) => l.state === 'open').length;
   $('#badge-launchpad').textContent = open ? String(open) : '';
-  ({ swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed })[view]();
+  if (view === 'wallet' && identity) view = returnTo || 'swap';
+  ({ swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed, wallet: renderWallet })[view]();
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +382,7 @@ function renderSwap() {
     <form class="mk-card mk-swap" id="swap-form">
       <label class="mk-field"><span>Pair</span><select id="pool-pick">${pools.map((p) => `<option value="${p.id}" ${p.id === pool.id ? 'selected' : ''}>${esc(name(p.a))} / ${esc(name(p.b))}</option>`).join('')}</select></label>
       <div class="mk-leg">
-        <div class="mk-leg-top"><span>You sell</span><button type="button" class="mk-max" id="max">Balance ${fmt(balance(sell))}</button></div>
+        <div class="mk-leg-top"><span>You sell</span>${identity ? `<button type="button" class="mk-max" id="max">Balance ${fmt(balance(sell))}</button>` : '<span>open your wallet to trade</span>'}</div>
         <div class="mk-leg-row"><input id="amount" inputmode="decimal" autocomplete="off" placeholder="0.0"><b>${esc(name(sell))}</b></div>
       </div>
       <button type="button" class="mk-flip" id="flip" aria-label="Swap direction">⇅</button>
@@ -388,12 +412,13 @@ function renderSwap() {
     $('#impact').textContent = raw > 0n && spot > 0n ? `${fmt(((spot - q) * 10000n) / spot * mk.WAD / 100n, 2)}% below spot` : '';
   };
   amount.oninput = update;
-  $('#max').onclick = () => { amount.value = fmt(balance(sell), 18).replace(/,/g, ''); update(); };
+  if ($('#max')) $('#max').onclick = () => { amount.value = fmt(balance(sell), 18).replace(/,/g, ''); update(); };
   $('#flip').onclick = () => { ui.sellA = !ui.sellA; renderSwap(); };
   $('#pool-pick').onchange = (e) => { ui.pool = e.target.value; renderSwap(); };
   root.querySelectorAll('[data-slip]').forEach((b) => { b.onclick = () => { ui.slippage = Number(b.dataset.slip); root.querySelectorAll('[data-slip]').forEach((x) => x.classList.toggle('on', x === b)); update(); }; });
   $('#swap-form').onsubmit = async (e) => {
     e.preventDefault();
+    if (!requireWallet()) return;
     try {
       const raw = parse(amount.value);
       const minOut = mk.withSlippage(mk.quoteAlone(pool, ui.sellA, raw), ui.slippage);
@@ -479,6 +504,7 @@ function renderPools() {
     };
     add.onsubmit = async (e) => {
       e.preventDefault();
+      if (!requireWallet()) return;
       try {
         const a = parse(add.elements.a.value), b = parse(add.elements.b.value);
         const pv = mk.liquidityPreview(p, a, b);
@@ -494,6 +520,7 @@ function renderPools() {
     const rm = $(`#remove-${p.id}`);
     rm.onsubmit = async (e) => {
       e.preventDefault();
+      if (!requireWallet()) return;
       try {
         const s = parse(rm.elements.s.value);
         const shares = BigInt(p.shares);
@@ -509,6 +536,7 @@ function renderPools() {
 
   $('#create-pool').onsubmit = async (e) => {
     e.preventDefault();
+    if (!requireWallet()) return;
     const f = e.target.elements;
     try {
       let a = f.a.value, b = f.b.value;
@@ -542,6 +570,7 @@ function renderLaunchpad() {
     if (!form) continue;
     form.onsubmit = async (e) => {
       e.preventDefault();
+      if (!requireWallet()) return;
       try {
         const amount = parse(form.elements.amount.value);
         const f = mk.fund(identity, state.held, unhex(l.quote), amount);
@@ -618,6 +647,7 @@ function bindCreateLaunch() {
   preview();
   form.onsubmit = async (e) => {
     e.preventDefault();
+    if (!requireWallet()) return;
     try {
       const total = parse(f.total.value);
       const salePct = Number(f.sale.value), poolPct = Number(f.pool.value), raisePct = Number(f.pool_raise.value);
@@ -641,6 +671,12 @@ function bindCreateLaunch() {
 // ---------------------------------------------------------------------------
 
 function renderOwed() {
+  if (!identity) {
+    $('#view').innerHTML = `${heading('OWED TO YOU', 'Settled,<br><em>waiting for you.</em>')}
+    <div class="mk-empty"><p>What the market owes you is found with your key, and only with it — there is no way to look it up for an account. Open your wallet to see it.</p><button class="mk-act" id="owed-open">Open wallet →</button></div>`;
+    $('#owed-open').onclick = () => requireWallet();
+    return;
+  }
   const byAsset = new Map();
   for (const c of state.owed) byAsset.set(c.asset, (byAsset.get(c.asset) || 0n) + BigInt(c.amount));
   $('#view').innerHTML = `${heading('OWED TO YOU', 'Settled,<br><em>waiting for you.</em>')}
@@ -649,6 +685,7 @@ function renderOwed() {
   <button class="primary mk-act mk-collect" id="collect">Collect all ${state.owed.length} <span>→</span></button>`
     : '<div class="mk-empty"><p>Nothing owed right now. Orders settle at the end of the epoch they were placed in.</p></div>'}`;
   $('#collect')?.addEventListener('click', async () => {
+    if (!requireWallet()) return;
     const all = [...state.owed];
     for (let i = 0; i < all.length; i += PER_CLAIM) {
       const batch = all.slice(i, i + PER_CLAIM);
@@ -664,7 +701,10 @@ root.addEventListener('click', (e) => { if (e.target.closest('#refresh')) refres
 (async () => {
   try {
     config = await loadConfig();
-    locked();
+    frame();
+    render();
+    refresh(true);
+    timer = setInterval(() => { if (!document.hidden && !busy) refresh(true); }, 20000);
   } catch (e) {
     root.innerHTML = `<main class="fatal"><img src="/nap-mark.png" alt=""><h1>Market unavailable.</h1><p>${esc(e.message)}</p></main>`;
   }
