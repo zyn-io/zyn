@@ -148,6 +148,21 @@ pub fn vectors() -> Vec<(&'static str, String)> {
                 meta: [0x4d; 32],
             }),
         ),
+        ("set_fees", enc(&Op::SetFees { program: program::configure_fees(), bridge_bps: 50 })),
+        (
+            "register_collection",
+            enc(&Op::RegisterCollection {
+                program: program::register_collection(),
+                asset: TOKEN,
+                creator: OWNER,
+                quote: ZEC,
+                fee_bps: 100,
+            }),
+        ),
+        (
+            "redeem",
+            enc(&Op::Redeem { holder: OWNER, program: program::redeem_item(), asset: TOKEN, inputs: input.clone() }),
+        ),
         (
             "withdraw",
             enc(&Op::Withdraw {

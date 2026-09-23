@@ -1449,7 +1449,13 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             let wallet = crate::object_client::scan(&host, &me, vk.clone(), nk).map_err(|e| e.to_string())?;
             let mine = zyn_vm::note_enc::viewing_public(&vk);
             let zec = swapvm::types::XZEC;
-            let (inputs, outputs) = crate::object_client::fund(&wallet, &nk, me, &mine, zec, amount)?;
+            // The bridge fee rides on top and stays in the ZYN pot.
+            let bps = crate::object_client::call(&host, "zyn_market", json!({}))?
+                .pointer("/fees/bridge_bps")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let fee = objectvm::market::fee_of(amount, bps as u32).ok_or("fee overflow")?;
+            let (inputs, outputs) = crate::object_client::fund(&wallet, &nk, me, &mine, zec, zyn_vm::Fixed(amount.0 + fee.0))?;
             crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Withdraw {
                 holder: me,
                 program: zyn_vm::program::withdraw(),

@@ -139,6 +139,22 @@ pub fn launch_commit() -> ProgramId {
     named(b"launch-commit")
 }
 
+/// Set the chain's fee schedule. The operator's act, recorded like any other,
+/// so every replica charges exactly what the chain charged.
+pub fn configure_fees() -> ProgramId {
+    named(b"configure-fees")
+}
+
+/// Give a collection its resale terms: creator, quote asset and fee.
+pub fn register_collection() -> ProgramId {
+    named(b"register-collection")
+}
+
+/// Burn items for their share of the collection's redemption floor.
+pub fn redeem_item() -> ProgramId {
+    named(b"redeem-item")
+}
+
 /// A program named by its code rather than by a rule the VM knows.
 ///
 /// `code` is the hash of the program as shipped — an rv32im ELF, per §2.5's
@@ -172,6 +188,9 @@ pub fn is_named(id: &ProgramId) -> bool {
         claim(),
         launch_create(),
         launch_commit(),
+        configure_fees(),
+        register_collection(),
+        redeem_item(),
     ]
     .contains(id)
 }
@@ -199,6 +218,9 @@ mod tests {
             claim(),
             launch_create(),
             launch_commit(),
+            configure_fees(),
+            register_collection(),
+            redeem_item(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

@@ -263,6 +263,41 @@ pub enum Op {
         change: Vec<Output>,
         nonce: Hash,
     },
+    /// Set what the chain charges. Operator only; nothing is charged before it.
+    SetFees {
+        program: ProgramId,
+        bridge_bps: u32,
+    },
+    /// Give a collection resale terms and a redemption floor. Operator only,
+    /// once per collection: holders price items against these terms, so they
+    /// do not move under them.
+    RegisterCollection {
+        program: ProgramId,
+        asset: Address,
+        creator: AccountId,
+        quote: Address,
+        fee_bps: u32,
+    },
+    /// A deposit with the bridge fee taken from it: the vault received
+    /// `gross`, the depositor's note is `amount`, the difference goes to the
+    /// ZYN pot. Issued supply rises by `gross`, because the vault holds it.
+    DepositWithFee {
+        program: ProgramId,
+        asset: Address,
+        gross: Fixed,
+        amount: Fixed,
+        owner: AccountId,
+        nonce: Hash,
+        enc: EncryptedNote,
+        external_ref: Hash,
+    },
+    /// Burn items for their share of the collection's floor.
+    Redeem {
+        holder: AccountId,
+        program: ProgramId,
+        asset: Address,
+        inputs: Vec<(Hash, Hash)>,
+    },
     Seal,
 }
 
@@ -284,6 +319,9 @@ pub enum Receipt {
     Claimed { created: Vec<Hash> },
     Launched { token: Address },
     Committed { commit: Hash },
+    FeesSet { bridge_bps: u32 },
+    CollectionRegistered { asset: Address },
+    Redeemed { paid: Fixed, source: Hash },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -298,7 +336,8 @@ impl Op {
             | Op::AddLiquidity { inputs, .. }
             | Op::RemoveLiquidity { inputs, .. }
             | Op::Swap { inputs, .. }
-            | Op::Commit { inputs, .. } => inputs,
+            | Op::Commit { inputs, .. }
+            | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
                 item_nullifier,
                 payment,
@@ -849,7 +888,22 @@ impl ObjectVm {
                 };
             }
         }
-        if paid < offer.price_amount.0 {
+        // A collection with terms charges each side `fee_bps` of the price:
+        // the seller out of the proceeds, the buyer on top (DECISIONS §69.9).
+        let terms = self.market.collections.get(&item_note.asset).copied();
+        let each = match &terms {
+            Some(t) => {
+                if offer.price_asset != t.quote {
+                    return vec![Receipt::Refused("this collection trades in its quote asset")];
+                }
+                match market::fee_of(offer.price_amount, t.fee_bps) {
+                    Some(f) => f,
+                    None => return vec![Receipt::Refused("fee overflow")],
+                }
+            }
+            None => Fixed::ZERO,
+        };
+        if paid < offer.price_amount.0 - each.0 {
             return vec![Receipt::Refused("the seller was not paid the asking price")];
         }
         if !created.iter().any(|(_, n)| {
@@ -874,6 +928,14 @@ impl ObjectVm {
                 None => return vec![Receipt::Refused("output overflow")],
             };
         }
+        // Both sides' fees leave the traders for the pots.
+        if each.0 > 0 {
+            let q = delta.entry(offer.price_asset).or_insert(0);
+            *q = match q.checked_sub(each.0 * 2) {
+                Some(v) => v,
+                None => return vec![Receipt::Refused("fee overflow")],
+            };
+        }
         if delta.values().any(|d| *d != 0) {
             return vec![Receipt::Refused("value not conserved")];
         }
@@ -894,6 +956,14 @@ impl ObjectVm {
         }
         *self.accounts.entry(*buyer).or_insert(0) += 1;
         self.accounts.entry(offer.seller).or_insert(0);
+        if let (Some(t), true) = (terms, each.0 > 0) {
+            let (to_pol, to_floor, to_creator) = market::resale_split(Fixed(each.0 * 2));
+            let _ = self.market.to_pol(t.quote, to_pol);
+            self.market
+                .collections
+                .insert(item_note.asset, market::CollectionTerms { floor: Fixed(t.floor.0 + to_floor.0), ..t });
+            self.market.pay(&market::sale_fee_source(item), 0, t.creator, t.quote, to_creator);
+        }
 
         vec![Receipt::Taken {
             item: *item,
@@ -1003,8 +1073,13 @@ impl ObjectVm {
                 None => return vec![Receipt::Refused("output overflow")],
             };
         }
+        // The bridge fee rides on top of what leaves, and stays behind in
+        // the ZYN pot — still issued, still backed, just no longer anyone's.
+        let Some(fee) = market::fee_of(*amount, self.market.bridge_bps()) else {
+            return vec![Receipt::Refused("fee overflow")];
+        };
         let leaving = delta.entry(*asset).or_insert(0);
-        *leaving = match leaving.checked_sub(amount.0) {
+        *leaving = match leaving.checked_sub(amount.0).and_then(|v| v.checked_sub(fee.0)) {
             Some(v) => v,
             None => return vec![Receipt::Refused("withdrawal overflow")],
         };
@@ -1027,6 +1102,7 @@ impl ObjectVm {
             self.commitments.append(c);
             self.live.insert(c, note);
         }
+        let _ = self.market.to_pol(*asset, fee);
         self.exits.push(PendingExit {
             asset: *asset,
             amount: *amount,
@@ -1039,6 +1115,75 @@ impl ObjectVm {
         vec![Receipt::Withdrawing {
             amount: *amount,
             destination: *destination,
+        }]
+    }
+}
+
+impl ObjectVm {
+    /// Credit one deposit: `amount` to its owner as a note, `fee` to the ZYN
+    /// pot, and issued supply up by `gross` — what the vault actually holds.
+    #[allow(clippy::too_many_arguments)]
+    fn credit_deposit(
+        &mut self,
+        asset: Address,
+        gross: Fixed,
+        amount: Fixed,
+        fee: Fixed,
+        owner: &AccountId,
+        nonce: &Hash,
+        enc: &EncryptedNote,
+        external_ref: &Hash,
+    ) -> Vec<Receipt> {
+        let asset = &asset;
+        let amount = &amount;
+        if *external_ref == [0u8; 32] {
+            return vec![Receipt::Refused("a deposit names the transaction behind it")];
+        }
+        // A deposit nobody can find is a deposit nobody can spend. The
+        // VM cannot check that the ciphertext opens to this note — it
+        // holds no viewing key — but it can refuse an absent one.
+        if enc.ciphertext.is_empty() {
+            return vec![Receipt::Refused("a deposit needs an encrypted note")];
+        }
+        if self.deposits.contains(external_ref) {
+            return vec![Receipt::Refused("that deposit was already credited")];
+        }
+        let note = Note {
+            asset: *asset,
+            amount: *amount,
+            owner: *owner,
+            nonce: *nonce,
+        };
+        let c = match commitment(&note) {
+            Ok(c) => c,
+            Err(_) => return vec![Receipt::Refused("a deposit needs a nonce and a value")],
+        };
+        if self.live.contains_key(&c) {
+            return vec![Receipt::Refused("that object already exists")];
+        }
+        if self
+            .market
+            .pol
+            .get(asset)
+            .map_or(0, |p| p.0)
+            .checked_add(fee.0)
+            .is_none()
+        {
+            return vec![Receipt::Refused("pot overflow")];
+        }
+        let supply = self.issued.entry(*asset).or_insert(Fixed::ZERO);
+        *supply = match supply.0.checked_add(gross.0) {
+            Some(v) => Fixed(v),
+            None => return vec![Receipt::Refused("supply overflow")],
+        };
+        let position = self.commitments.append(c) as u64;
+        self.live.insert(c, note);
+        self.deposits.insert(*external_ref);
+        self.accounts.entry(*owner).or_insert(0);
+        let _ = self.market.to_pol(*asset, fee);
+        vec![Receipt::Deposited {
+            commitment: c,
+            position,
         }]
     }
 }
@@ -1198,44 +1343,12 @@ impl MicrochainVm for ObjectVm {
                 if *program != program::deposit() {
                     return vec![Receipt::Refused("wrong program for a deposit")];
                 }
-                if *external_ref == [0u8; 32] {
-                    return vec![Receipt::Refused("a deposit names the transaction behind it")];
+                // Once the bridge charges, a credit that skips the fee is a
+                // free channel around it.
+                if self.market.bridge_bps() > 0 {
+                    return vec![Receipt::Refused("the bridge charges a fee; credit it with DepositWithFee")];
                 }
-                // A deposit nobody can find is a deposit nobody can spend. The
-                // VM cannot check that the ciphertext opens to this note — it
-                // holds no viewing key — but it can refuse an absent one.
-                if enc.ciphertext.is_empty() {
-                    return vec![Receipt::Refused("a deposit needs an encrypted note")];
-                }
-                if self.deposits.contains(external_ref) {
-                    return vec![Receipt::Refused("that deposit was already credited")];
-                }
-                let note = Note {
-                    asset: *asset,
-                    amount: *amount,
-                    owner: *owner,
-                    nonce: *nonce,
-                };
-                let c = match commitment(&note) {
-                    Ok(c) => c,
-                    Err(_) => return vec![Receipt::Refused("a deposit needs a nonce and a value")],
-                };
-                if self.live.contains_key(&c) {
-                    return vec![Receipt::Refused("that object already exists")];
-                }
-                let supply = self.issued.entry(*asset).or_insert(Fixed::ZERO);
-                *supply = match supply.0.checked_add(amount.0) {
-                    Some(v) => Fixed(v),
-                    None => return vec![Receipt::Refused("supply overflow")],
-                };
-                let position = self.commitments.append(c) as u64;
-                self.live.insert(c, note);
-                self.deposits.insert(*external_ref);
-                self.accounts.entry(*owner).or_insert(0);
-                vec![Receipt::Deposited {
-                    commitment: c,
-                    position,
-                }]
+                self.credit_deposit(*asset, *amount, *amount, Fixed::ZERO, owner, nonce, enc, external_ref)
             }
             Op::PlaceOffer {
                 seller,
@@ -1257,6 +1370,11 @@ impl MicrochainVm for ObjectVm {
                 }
                 if self.offers.contains_key(item) {
                     return vec![Receipt::Refused("already listed")];
+                }
+                if let Some(t) = self.market.collections.get(&note.asset) {
+                    if *price_asset != t.quote {
+                        return vec![Receipt::Refused("this collection trades in its quote asset")];
+                    }
                 }
                 // A negative asking price is satisfied by any payment at
                 // all, including none, because the claim path only checks
@@ -1423,6 +1541,52 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_commit(buyer, launch, *amount, inputs, change, nonce)
             }),
+            Op::SetFees { program, bridge_bps } => {
+                if *program != program::configure_fees() {
+                    return vec![Receipt::Refused("wrong program for fees")];
+                }
+                if *bridge_bps > market::MAX_BRIDGE_BPS {
+                    return vec![Receipt::Refused("the bridge fee is above the ceiling")];
+                }
+                self.market.schedule = Some(market::FeeSchedule { bridge_bps: *bridge_bps });
+                vec![Receipt::FeesSet { bridge_bps: *bridge_bps }]
+            }
+            Op::RegisterCollection { program, asset, creator, quote, fee_bps } => {
+                if *program != program::register_collection() {
+                    return vec![Receipt::Refused("wrong program for a collection")];
+                }
+                if *fee_bps > market::MAX_COLLECTION_FEE_BPS {
+                    return vec![Receipt::Refused("the resale fee is above the ceiling")];
+                }
+                if asset == quote {
+                    return vec![Receipt::Refused("a collection is not priced in itself")];
+                }
+                if self.market.collections.contains_key(asset) {
+                    return vec![Receipt::Refused("that collection already has its terms")];
+                }
+                self.market.collections.insert(
+                    *asset,
+                    market::CollectionTerms { creator: *creator, quote: *quote, fee_bps: *fee_bps, floor: Fixed::ZERO },
+                );
+                vec![Receipt::CollectionRegistered { asset: *asset }]
+            }
+            Op::DepositWithFee { program, asset, gross, amount, owner, nonce, enc, external_ref } => {
+                if *program != program::deposit() {
+                    return vec![Receipt::Refused("wrong program for a deposit")];
+                }
+                let Some(fee) = market::fee_of(*gross, self.market.bridge_bps()) else {
+                    return vec![Receipt::Refused("fee overflow")];
+                };
+                if gross.0 <= 0 || amount.0 != gross.0 - fee.0 || amount.0 <= 0 {
+                    return vec![Receipt::Refused("the credit is not the deposit less the bridge fee")];
+                }
+                self.credit_deposit(*asset, *gross, *amount, fee, owner, nonce, enc, external_ref)
+            }
+            Op::Redeem { holder, program, asset, inputs } => one(if *program != program::redeem_item() {
+                Err("wrong program for a redemption")
+            } else {
+                self.apply_redeem(holder, asset, inputs)
+            }),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -1522,6 +1686,7 @@ impl MicrochainVm for ObjectVm {
             Op::Claim { owner, .. } => vec![*owner],
             Op::CreateLaunch { creator, .. } => vec![*creator],
             Op::Commit { buyer, .. } => vec![*buyer],
+            Op::Redeem { holder, .. } => vec![*holder],
             _ => Vec::new(),
         }
     }
@@ -1833,6 +1998,29 @@ impl MicrochainVm for ObjectVm {
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
             }
+            Op::SetFees { program, bridge_bps } => {
+                e.u8(17).bytes(&program.0).u32(*bridge_bps);
+            }
+            Op::RegisterCollection { program, asset, creator, quote, fee_bps } => {
+                e.u8(18).bytes(&program.0).bytes(asset).bytes(creator).bytes(quote).u32(*fee_bps);
+            }
+            Op::DepositWithFee { program, asset, gross, amount, owner, nonce, enc, external_ref } => {
+                e.u8(19)
+                    .bytes(&program.0)
+                    .bytes(asset)
+                    .fixed(*gross)
+                    .fixed(*amount)
+                    .bytes(owner)
+                    .bytes(nonce)
+                    .bytes(external_ref)
+                    .bytes(&enc.epk)
+                    .u32(enc.ciphertext.len() as u32)
+                    .bytes(&enc.ciphertext);
+            }
+            Op::Redeem { holder, program, asset, inputs } => {
+                e.u8(20).bytes(holder).bytes(&program.0).bytes(asset);
+                wire::inputs(&mut e, inputs);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -2082,6 +2270,45 @@ impl MicrochainVm for ObjectVm {
                 nonce: d.hash().ok()?,
                 inputs: wire::read_inputs(d)?,
                 change: wire::read_outputs(d)?,
+            }),
+            17 => Some(Op::SetFees {
+                program: ProgramId(d.hash().ok()?),
+                bridge_bps: d.u32().ok()?,
+            }),
+            18 => Some(Op::RegisterCollection {
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                creator: d.account().ok()?,
+                quote: d.hash().ok()?,
+                fee_bps: d.u32().ok()?,
+            }),
+            19 => {
+                let program = ProgramId(d.hash().ok()?);
+                let asset = d.hash().ok()?;
+                let gross = d.fixed().ok()?;
+                let amount = d.fixed().ok()?;
+                let owner = d.account().ok()?;
+                let nonce = d.hash().ok()?;
+                let external_ref = d.hash().ok()?;
+                let epk = d.hash().ok()?;
+                let n = d.u32().ok()? as usize;
+                let ciphertext = d.take_bytes(n).ok()?.to_vec();
+                Some(Op::DepositWithFee {
+                    program,
+                    asset,
+                    gross,
+                    amount,
+                    owner,
+                    nonce,
+                    enc: EncryptedNote { epk, ciphertext },
+                    external_ref,
+                })
+            }
+            20 => Some(Op::Redeem {
+                holder: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
             }),
             _ => None,
         }
@@ -2561,6 +2788,15 @@ pub mod ingress {
             .copied()
             .ok_or(IngressError::NoViewingKey)?;
 
+        // With a bridge fee set, the depositor's note is the deposit less
+        // the fee, and the credit says both so the VM can check the split.
+        let gross = amount;
+        let fee = crate::market::fee_of(gross, vm.market.bridge_bps()).ok_or(IngressError::AmountNotPositive)?;
+        let amount = Fixed(gross.0 - fee.0);
+        if amount.0 <= 0 {
+            return Err(IngressError::AmountNotPositive);
+        }
+
         // What the holder needs to spend it: the asset, the amount, and the
         // nonce. Not the owner — they know who they are, and a ciphertext
         // that names its recipient would say so to anyone who cracked one.
@@ -2570,6 +2806,18 @@ pub mod ingress {
         plain.extend_from_slice(&nonce);
         let enc = seal(&to, ephemeral, &plain).map_err(|_| IngressError::AmountNotPositive)?;
 
+        if fee.0 > 0 {
+            return Ok(Op::DepositWithFee {
+                program: program::deposit(),
+                asset,
+                gross,
+                amount,
+                owner: account,
+                nonce,
+                enc,
+                external_ref: txid,
+            });
+        }
         Ok(Op::Deposit {
             program: program::deposit(),
             asset,

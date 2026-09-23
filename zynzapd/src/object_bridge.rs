@@ -169,7 +169,8 @@ pub fn decide(
 /// rather than assuming it keeps the debt bookkeeping honest if that changes.
 fn external_ref_of(op: &objectvm::Op) -> Option<[u8; 32]> {
     match op {
-        objectvm::Op::Deposit { external_ref, .. } => Some(*external_ref),
+        objectvm::Op::Deposit { external_ref, .. }
+        | objectvm::Op::DepositWithFee { external_ref, .. } => Some(*external_ref),
         _ => None,
     }
 }

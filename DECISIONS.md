@@ -6276,3 +6276,20 @@ chain a sale could stay open forever. While any sale is open, the node seals
 on the clock even with nothing to seal. With none open, it does not, and an
 idle chain does not fill its history with empty epochs.
 
+## §138 — The bridge fee and the NFT resale fee feed the ZYN pot (23 Sep 2026)
+
+The object ledger (§130) carried value but none of the fee rail the account
+ledger had (§68.6, §69.9). The two parts of it that are not trading fees are
+brought across unchanged in shape; the launchpad and pool fees wait for the
+product decision on launches (§137).
+
+| # | Decision | |
+|---|---|---|
+| 138.1 | **Nothing is charged until the operator sets it.** `SetFees` and `RegisterCollection` are operator intents, journalled like any other, so every replica charges exactly what the chain charged — and a chain that never set them replays byte-identically | 🔒 |
+| 138.2 | **The bridge fee is `bridge_bps` on a deposit, taken from it, and on a withdrawal, added on top** (§30's 50 bps is the starting rate). The fee is ZEC.zy that stays issued and backed and belongs to the ZYN pot. A deposit credited without the fee is refused once one is set | ✅ |
+| 138.3 | **The ZYN pot is keyless and public** (§71.23): no intent spends from it, and `zyn_market` reports it beside the schedule so the fee can be checked against what was kept. It is the object ledger's future-ZYN-POL pot (§68.6); its release is §71.22's open question, unchanged | 🔒 |
+| 138.4 | **A registered collection charges `fee_bps` on each side of a resale, in its quote asset** — the buyer on top, the seller out of the proceeds, so the listed price is the price — split 50% ZYN pot, 40% the collection's redemption floor, 10% creator (§69.9), remainder to the pot. Cave collections: 100 bps a side, creator Treasury 26460 | ✅ |
+| 138.5 | **Terms are set once.** A holder prices an item against its collection's terms, so they do not move under them; `RegisterCollection` on an existing collection is refused | 🔒 |
+| 138.6 | **The floor is redeemable, or it is not a floor.** `Redeem` burns items for `floor × burned / outstanding`, as a claim | ✅ |
+| 138.7 | **Ceilings in consensus:** 2% bridge, 10% a side on resale | 🔒 |
+

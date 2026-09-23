@@ -205,10 +205,37 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
             )
         })
         .collect();
+    // What the chain charges and what it has kept — public, like every
+    // keyless pot, so anyone can check the fee against the pot.
+    let pot: Vec<String> = vm
+        .market
+        .pol
+        .iter()
+        .map(|(a, v)| format!("{{\"asset\":\"{}\",\"amount\":\"{}\"}}", hex(a), v.0))
+        .collect();
+    let collections: Vec<String> = vm
+        .market
+        .collections
+        .iter()
+        .map(|(a, c)| {
+            format!(
+                "{{\"asset\":\"{}\",\"creator\":\"{}\",\"quote\":\"{}\",\"fee_bps\":{},\"floor\":\"{}\",\"outstanding\":\"{}\"}}",
+                hex(a),
+                hex(&c.creator),
+                hex(&c.quote),
+                c.fee_bps,
+                c.floor.0,
+                vm.issued.get(a).map(|f| f.0).unwrap_or(0)
+            )
+        })
+        .collect();
     format!(
-        "{{\"epoch\":{},\"epoch_seconds\":{},\"pools\":[{}],\"launches\":[{}]}}",
+        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}]}}",
         vm.epoch,
         epoch_seconds,
+        vm.market.bridge_bps(),
+        pot.join(","),
+        collections.join(","),
         pools.join(","),
         launches.join(",")
     )
@@ -356,6 +383,14 @@ fn record(pub_log: &mut Published, op: &Op) {
     };
     match op {
         Op::Deposit {
+            asset,
+            amount,
+            owner,
+            nonce,
+            enc,
+            ..
+        }
+        | Op::DepositWithFee {
             asset,
             amount,
             owner,

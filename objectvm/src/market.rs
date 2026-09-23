@@ -214,6 +214,59 @@ pub struct Commitment {
     pub amount: Fixed,
 }
 
+/// What the chain charges, set by the operator with `SetFees`. Absent until
+/// then, so a chain that never set it charges nothing and replays unchanged.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct FeeSchedule {
+    /// Charged on a deposit (taken from it) and on a withdrawal (on top).
+    pub bridge_bps: u32,
+}
+
+/// The ceiling on the bridge fee: 2%.
+pub const MAX_BRIDGE_BPS: u32 = 200;
+/// The ceiling on a collection's resale fee, per side: 10%.
+pub const MAX_COLLECTION_FEE_BPS: u32 = 1_000;
+
+/// A collection's resale terms (DECISIONS §69.9, carried to the object
+/// ledger). Each side of a sale pays `fee_bps` of the price in `quote` — the
+/// buyer on top, the seller out of the proceeds, so the listed price is the
+/// price — and the total splits 50% to the ZYN liquidity pot, 40% to this
+/// collection's redemption floor and 10% to its creator.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CollectionTerms {
+    pub creator: AccountId,
+    pub quote: Address,
+    pub fee_bps: u32,
+    /// Held for the collection's holders: any of them may burn items for
+    /// `floor × items / outstanding`.
+    pub floor: Fixed,
+}
+
+/// The fee split of one resale: `(to ZYN pot, to floor, to creator)`, shares
+/// rounded down and the remainder to the ZYN pot (§69.27's rule).
+pub fn resale_split(taken: Fixed) -> (Fixed, Fixed, Fixed) {
+    let to_floor = Fixed(taken.0 * 40 / 100);
+    let to_creator = Fixed(taken.0 * 10 / 100);
+    (Fixed(taken.0 - to_floor.0 - to_creator.0), to_floor, to_creator)
+}
+
+/// A fee of `bps` on `amount`, rounded down.
+pub fn fee_of(amount: Fixed, bps: u32) -> Option<Fixed> {
+    zyn_vm::fixed::mul_div(amount.0, bps as i128, BPS).map(Fixed)
+}
+
+/// Where the creator's share of one sale is claimable: derived from the item,
+/// which the listing made public, so the creator can find it without asking.
+pub fn sale_fee_source(item: &Hash) -> Hash {
+    id(b"objectvm.sale-fee.v1", &[item])
+}
+
+/// Where a redemption's proceeds are claimable: derived from the first item
+/// burned, which only its holder knew.
+pub fn redemption_source(first_item: &Hash) -> Hash {
+    id(b"objectvm.redeem.v1", &[first_item])
+}
+
 /// Everything the market holds between an intent and its settlement.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Market {
@@ -225,6 +278,12 @@ pub struct Market {
     /// Keyed by token.
     pub launches: BTreeMap<Address, Launch>,
     pub commits: BTreeMap<Hash, Commitment>,
+    pub schedule: Option<FeeSchedule>,
+    /// The ZYN liquidity pot: fees the protocol keeps, per asset. Keyless —
+    /// no intent spends from it — and public, like every keyless pot (§71.23).
+    pub pol: BTreeMap<Address, Fixed>,
+    /// Collections with resale terms, keyed by the collection's asset.
+    pub collections: BTreeMap<Address, CollectionTerms>,
 }
 
 impl Market {
@@ -234,6 +293,21 @@ impl Market {
             && self.claims.is_empty()
             && self.launches.is_empty()
             && self.commits.is_empty()
+            && self.schedule.is_none()
+            && self.pol.is_empty()
+            && self.collections.is_empty()
+    }
+
+    pub fn bridge_bps(&self) -> u32 {
+        self.schedule.map(|s| s.bridge_bps).unwrap_or(0)
+    }
+
+    pub(crate) fn to_pol(&mut self, asset: Address, amount: Fixed) -> Option<()> {
+        if amount.0 > 0 {
+            let p = self.pol.entry(asset).or_insert(Fixed::ZERO);
+            p.0 = p.0.checked_add(amount.0)?;
+        }
+        Some(())
     }
 
     /// How much of `asset` the market is holding for somebody.
@@ -277,6 +351,14 @@ impl Market {
                 t = t.checked_add(c.amount.0)?;
             }
         }
+        if let Some(p) = self.pol.get(asset) {
+            t = t.checked_add(p.0)?;
+        }
+        for c in self.collections.values() {
+            if &c.quote == asset {
+                t = t.checked_add(c.floor.0)?;
+            }
+        }
         Some(t)
     }
 
@@ -286,7 +368,7 @@ impl Market {
         self.launches.contains_key(asset) || self.pools.keys().any(|p| &lp_asset(p) == asset)
     }
 
-    fn pay(&mut self, source: &Hash, k: u8, owner: AccountId, asset: Address, amount: Fixed) {
+    pub(crate) fn pay(&mut self, source: &Hash, k: u8, owner: AccountId, asset: Address, amount: Fixed) {
         if amount.0 > 0 {
             self.claims.insert(claim_id(source, k), Claim { owner, asset, amount });
         }
@@ -340,11 +422,21 @@ impl Market {
             .bytes(&merkle_root(&claims))
             .bytes(&merkle_root(&commits))
             .bytes(&merkle_root(&creators));
+        // Fees, the pot and collection terms: public, because what the chain
+        // charges and what it keeps are things anyone should be able to check.
+        e.u32(self.bridge_bps()).u32(self.pol.len() as u32);
+        for (a, v) in &self.pol {
+            e.bytes(a).fixed(*v);
+        }
+        e.u32(self.collections.len() as u32);
+        for (a, c) in &self.collections {
+            e.bytes(a).bytes(&c.creator).bytes(&c.quote).u32(c.fee_bps).fixed(c.floor);
+        }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET01").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET02").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -390,10 +482,19 @@ impl Market {
         for (i, c) in &self.commits {
             e.bytes(i).bytes(&c.launch).bytes(&c.owner).fixed(c.amount);
         }
+        e.bool(self.schedule.is_some()).u32(self.bridge_bps());
+        e.u32(self.pol.len() as u32);
+        for (a, v) in &self.pol {
+            e.bytes(a).fixed(*v);
+        }
+        e.u32(self.collections.len() as u32);
+        for (a, c) in &self.collections {
+            e.bytes(a).bytes(&c.creator).bytes(&c.quote).u32(c.fee_bps).fixed(c.floor);
+        }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
-        if d.take_bytes(8).ok()? != b"MARKET01" {
+        if d.take_bytes(8).ok()? != b"MARKET02" {
             return None;
         }
         let mut m = Market::default();
@@ -470,6 +571,24 @@ impl Market {
                     launch: d.hash().ok()?,
                     owner: d.account().ok()?,
                     amount: d.fixed().ok()?,
+                },
+            );
+        }
+        let has = d.u8().ok()? == 1;
+        let bridge_bps = d.u32().ok()?;
+        m.schedule = has.then_some(FeeSchedule { bridge_bps });
+        for _ in 0..d.u32().ok()? {
+            m.pol.insert(d.hash().ok()?, d.fixed().ok()?);
+        }
+        for _ in 0..d.u32().ok()? {
+            let a = d.hash().ok()?;
+            m.collections.insert(
+                a,
+                CollectionTerms {
+                    creator: d.account().ok()?,
+                    quote: d.hash().ok()?,
+                    fee_bps: d.u32().ok()?,
+                    floor: d.fixed().ok()?,
                 },
             );
         }
@@ -1123,6 +1242,57 @@ impl ObjectVm {
         );
         self.market.launches.insert(*launch, Launch { raised, ..l });
         Ok(Receipt::Committed { commit: cid })
+    }
+
+    /// Burn items for their share of the collection's redemption floor:
+    /// `floor × burned / outstanding`, rounded down, as a claim.
+    pub(crate) fn apply_redeem(
+        &mut self,
+        holder: &AccountId,
+        asset: &Address,
+        inputs: &[(Hash, Hash)],
+    ) -> Result<Receipt, &'static str> {
+        let terms = *self.market.collections.get(asset).ok_or("that is not a collection with a floor")?;
+        if inputs.is_empty() || inputs.len() as u32 > self.limits.max_io {
+            return Err("redeem between one and max_io items");
+        }
+        let mut burned: i128 = 0;
+        let mut seen: Vec<Hash> = Vec::new();
+        for (c, n) in inputs {
+            if seen.contains(c) {
+                return Err("the same item twice");
+            }
+            seen.push(*c);
+            let note = self.live.get(c).ok_or("no such live object")?;
+            if &note.owner != holder {
+                return Err("not the holder's item");
+            }
+            if &note.asset != asset {
+                return Err("not an item of that collection");
+            }
+            if self.offers.contains_key(c) {
+                return Err("that object is listed");
+            }
+            if self.nullifiers.contains(n) {
+                return Err("already spent");
+            }
+            burned = burned.checked_add(note.amount.0).ok_or("overflow")?;
+        }
+        let outstanding = self.issued.get(asset).map(|f| f.0).unwrap_or(0);
+        if outstanding <= 0 || burned > outstanding {
+            return Err("the collection's supply does not cover that");
+        }
+        let payout = zyn_vm::fixed::mul_div(terms.floor.0, burned, outstanding).ok_or("overflow")?;
+        self.burn(*asset, Fixed(burned))?;
+        for (c, n) in inputs {
+            self.live.remove(c);
+            self.nullifiers.insert(*n);
+        }
+        *self.accounts.entry(*holder).or_insert(0) += 1;
+        self.market.collections.insert(*asset, CollectionTerms { floor: Fixed(terms.floor.0 - payout), ..terms });
+        let source = redemption_source(&inputs[0].0);
+        self.market.pay(&source, 0, *holder, terms.quote, Fixed(payout));
+        Ok(Receipt::Redeemed { paid: Fixed(payout), source })
     }
 
     /// Everything that happens at a seal, before the root is taken: every
