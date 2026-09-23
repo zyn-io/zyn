@@ -980,7 +980,7 @@ $('od-get').onclick = () => run($('od-get'), 'Asking…', async () => {
 });
 $('os-send').onclick = () => run($('os-send'), 'Sending…', async () => {
   const to = $('os-to').value.trim(), asset = $('os-asset').value, amount = $('os-amount').value.trim();
-  if (!/^[0-9a-f]{64}$/i.test(to) || !amount) throw new Error('recipient (64 hex) and amount are required');
+  if (!to || !amount) throw new Error('a recipient and an amount are required');
   const ok = await confirmDialog('Send on Zyn', [['To', to], ['Asset', asset === ZEC_ZY ? 'ZEC.zy' : asset], ['Amount', amount]]);
   if (!ok) return;
   await api('/api/object/send', { to: to.toLowerCase(), asset, amount });

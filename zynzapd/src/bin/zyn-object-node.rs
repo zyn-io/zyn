@@ -882,6 +882,31 @@ fn handle(
                 }
             )
         }
+        // Which Zyn account a Zcash address belongs to, when it is one of the
+        // deposit addresses this vault handed out. What lets a wallet pay a
+        // Zyn account by the one address its owner shares for everything:
+        // ZEC sent there from Zcash is a deposit, and ZEC.zy or an item sent
+        // to it from Zyn is a private transfer to the same account.
+        "zyn_resolveAddress" => {
+            let Some(keys) = vault.as_ref() else {
+                return err("this node custodies no vault, so it hands out no addresses");
+            };
+            let Some(address) = field(body, "address") else {
+                return err("no address");
+            };
+            let account = match zynzapd::settle::parse_destination(address.trim(), consensus_network(keys.1)) {
+                Some(zynzapd::settle::ZcashDestination::Shielded(a)) => keys
+                    .0
+                    .index_of_address(&a)
+                    .and_then(|i| ISSUED.get().and_then(|(reg, _)| reg.lock().ok().and_then(|m| m.get(&i).copied()))),
+                Some(_) => None,
+                None => return err("not a transparent or unified address for this network"),
+            };
+            match account {
+                Some(a) => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"account\":\"{}\"}}}}", hex(&a)),
+                None => "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"account\":null}}".to_string(),
+            }
+        }
         // The commitment a withdrawal names, for an address and a salt the
         // holder chose. A pure function, served here because parsing a
         // unified address takes the same Zcash libraries the vault pays with;
@@ -1002,7 +1027,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 

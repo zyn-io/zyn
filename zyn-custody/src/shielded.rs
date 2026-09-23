@@ -131,6 +131,11 @@ impl VaultKeys {
             .map(|i| *i.as_bytes())
     }
 
+    /// The diversifier index of one of this key's own addresses, if it is one.
+    pub fn index_of_address(&self, address: &orchard::Address) -> Option<[u8; 11]> {
+        self.plain_ivk.diversifier_index(address).map(|i| *i.as_bytes())
+    }
+
     /// A unified address to hand a depositor.
     ///
     /// Orchard-only on purpose. A unified address containing a Sapling
@@ -1553,6 +1558,19 @@ mod deposit_address_tests {
                 "never the vault's own index"
             );
         }
+    }
+
+    /// The address an account shares resolves back to that account's index,
+    /// and a stranger's address resolves to nothing.
+    #[test]
+    fn a_deposit_address_resolves_to_its_account_index() {
+        let k = keys();
+        let account = [7u8; 32];
+        let addr = k.fvk.address_at(deposit_index(&account), Scope::External);
+        assert_eq!(k.index_of_address(&addr), Some(*deposit_index(&account).as_bytes()));
+        let other = VaultKeys::from_spending_key([0x42u8; 32]).expect("a valid spending key");
+        let stranger = other.fvk.address_at(deposit_index(&account), Scope::External);
+        assert_eq!(k.index_of_address(&stranger), None, "another vault's address is not ours");
     }
 
     /// The round trip that makes ownership checkable: derive an account's

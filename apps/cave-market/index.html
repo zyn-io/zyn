@@ -117,6 +117,7 @@
 
         <section class="market-catalog" aria-labelledby="listings-title">
           <div class="catalog-head"><div><p class="section-kicker"><span>LISTINGS</span> / ALL CHAMBERS</p><h2 id="listings-title">Market floor</h2></div><div class="catalog-metrics"><span><b>0</b> live listings</span><span><b>—</b> floor</span><span><b>0 ZEC</b> volume</span></div></div>
+          <p class="trade-note" id="trade-note-market" role="status" hidden></p>
           <div class="sealed-catalog">
             <div class="sealed-mark" aria-hidden="true"><img src="./assets/cave-mark.svg" alt="" /></div>
             <p class="section-kicker"><span>PRE-MINT</span> / INVENTORY CONCEALED</p>
@@ -300,6 +301,7 @@
           <button type="button" class="gallery-view active" disabled aria-label="Grid view">▦</button>
           <button type="button" class="gallery-view" disabled aria-label="List view">☷</button>
         </div>
+        <p class="trade-note" id="trade-note-portfolio" role="status" hidden></p>
         <div class="portfolio-gallery">
           <div class="gallery-grid" aria-hidden="true"><span style="--slot:0"><i></i></span><span style="--slot:1"><i></i></span><span style="--slot:2"><i></i></span><span style="--slot:3"><i></i></span><span style="--slot:4"><i></i></span><span style="--slot:5"><i></i></span></div>
           <div class="gallery-empty">
@@ -341,5 +343,6 @@
     </dialog>
 
     <script type="module" src="./app.js?v=20260913-signal1"></script>
+    <script type="module" src="./trade.js?v=20260923-object1"></script>
   </body>
 </html>

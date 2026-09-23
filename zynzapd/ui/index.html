@@ -308,7 +308,7 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
   </section>
   <section class="full">
     <h2>Send <small id="send-unit"></small></h2>
-    <div class="row"><input class="grow mono" id="send-to" placeholder="recipient address" autocomplete="off" spellcheck="false"></div>
+    <div class="row"><input class="grow mono" id="send-to" placeholder="Zcash address, or a Zyn account (arrives as ZEC.zy)" autocomplete="off" spellcheck="false"></div>
     <div class="row"><input class="grow num" id="send-amount" placeholder="amount" inputmode="decimal"><button class="btn small" id="send-max" type="button">Max</button><button class="btn primary" id="send">Send</button></div>
     <textarea id="send-memo" placeholder="memo (optional, only the recipient can read it)"></textarea>
     <div class="hint">Shielded to shielded, from the Ironwood pool, in a v6 transaction. The network fee comes out of your balance; proving takes about a minute.</div>
@@ -386,7 +386,7 @@ dialog .d-foot { padding: 12px 18px; border-top: 1px solid var(--line); display:
     <div class="hint">Your own Zcash address for this account — pay it from any wallet, no memo. It arrives as ZEC.zy.</div>
     <div class="addr"><code id="od-addr">—</code><button class="btn small" id="od-get">Show address</button></div>
     <h3 class="sub">Send to a Zyn account</h3>
-    <div class="row"><input class="grow mono" id="os-to" placeholder="recipient account id (64 hex)" spellcheck="false"></div>
+    <div class="row"><input class="grow mono" id="os-to" placeholder="Zyn account (64 hex) or Zcash address" spellcheck="false"></div>
     <div class="row"><select id="os-asset" style="width:auto"></select><input class="grow num" id="os-amount" placeholder="amount" inputmode="decimal"><button class="btn primary" id="os-send">Send</button></div>
     <h3 class="sub">Take ZEC out</h3>
     <div class="row"><input class="grow mono" id="ow-to" placeholder="Zcash address (blank: this wallet)" spellcheck="false"></div>
@@ -1515,7 +1515,7 @@ $('od-get').onclick = () => run($('od-get'), 'Asking…', async () => {
 });
 $('os-send').onclick = () => run($('os-send'), 'Sending…', async () => {
   const to = $('os-to').value.trim(), asset = $('os-asset').value, amount = $('os-amount').value.trim();
-  if (!/^[0-9a-f]{64}$/i.test(to) || !amount) throw new Error('recipient (64 hex) and amount are required');
+  if (!to || !amount) throw new Error('a recipient and an amount are required');
   const ok = await confirmDialog('Send on Zyn', [['To', to], ['Asset', asset === ZEC_ZY ? 'ZEC.zy' : asset], ['Amount', amount]]);
   if (!ok) return;
   await api('/api/object/send', { to: to.toLowerCase(), asset, amount });

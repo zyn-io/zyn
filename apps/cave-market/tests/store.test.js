@@ -125,3 +125,19 @@ test('standalone build emits only the dedicated Jade product', () => {
   assert.match(standaloneBuild, /jade-headers/);
   assert.doesNotMatch(standaloneBuild, /sourceHtml|sourceCss|launchpadMarkup|app\.js/);
 });
+
+test('trading goes through Nap and nowhere else', async () => {
+  const { readFileSync } = await import('node:fs');
+  const trade = readFileSync(new URL('../trade.js', import.meta.url), 'utf8');
+  // The page asks nothing of the network itself: every read and write is a
+  // provider request, and every write is one Nap asks the holder to approve.
+  assert.doesNotMatch(trade, /fetch\(|XMLHttpRequest|WebSocket/);
+  for (const m of ['zyn_nftOffers', 'zyn_nftItems', 'zyn_owed', 'zyn_nftList', 'zyn_nftBuy', 'zyn_nftCancel', 'zyn_nftRedeem', 'zyn_collect']) {
+    assert.match(trade, new RegExp(m));
+  }
+  // What the provider says is shape-checked and escaped before it is shown.
+  assert.match(trade, /isHex\(o\.item\)/);
+  assert.match(trade, /esc\(itemName/);
+  assert.match(html, /trade\.js/);
+});
+

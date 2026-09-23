@@ -669,3 +669,22 @@ body[data-view="launch"] footer span:last-child { color: var(--zec); }
   .policy-seal { margin-inline: auto; }
   .policy-name { margin: 0 auto 22px; text-align: center; }
 }
+
+/* Trading, when Nap is present. Cards follow the catalog's own palette. */
+.trade-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; margin-top: 18px; }
+.trade-card { border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 14px; background: rgba(255,255,255,.03); display: grid; gap: 10px; }
+.trade-art { aspect-ratio: 1; display: grid; place-items: center; background: rgba(0,0,0,.35); border-radius: 10px; }
+.trade-art img { width: 46%; opacity: .8; }
+.trade-card h3 { margin: 0; font-size: 1rem; }
+.trade-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: .85rem; }
+.trade-card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.trade-action { border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 999px; padding: 8px 14px; cursor: pointer; font: inherit; }
+.trade-action:not(.ghost) { background: #e8c46a; color: #070807; border-color: #e8c46a; }
+.trade-action:disabled { opacity: .5; cursor: progress; }
+.trade-list { display: flex; gap: 8px; align-items: end; }
+.trade-list label { display: grid; gap: 4px; flex: 1; font-size: .75rem; }
+.trade-list input { background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.2); border-radius: 8px; color: inherit; padding: 8px; font: inherit; }
+.trade-state { margin: 0; font-size: .8rem; opacity: .75; }
+.trade-owed { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px dashed rgba(232,196,106,.6); border-radius: 12px; }
+.trade-note { margin: 10px 0; padding: 10px 12px; border-left: 3px solid #6ad4a0; background: rgba(106,212,160,.08); }
+.trade-note[data-tone="bad"] { border-color: #e56b5b; background: rgba(229,107,91,.08); }

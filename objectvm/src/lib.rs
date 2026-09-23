@@ -1674,6 +1674,12 @@ impl MicrochainVm for ObjectVm {
                 if self.nullifiers.contains(item_nullifier) || *item_nullifier == [0u8; 32] {
                     return vec![Receipt::Refused("that nullifier is spent")];
                 }
+                let source = market::listing_source(seller, nonce);
+                if self.market.listings.values().any(|l| l.source == source)
+                    || self.market.claims.contains_key(&market::claim_id(&source, 0))
+                {
+                    return vec![Receipt::Refused("that nonce is in use; list with a fresh one")];
+                }
                 if let Err(why) = self.list(seller, item, price_asset, price_amount, expires_at_epoch) {
                     return vec![Receipt::Refused(why)];
                 }

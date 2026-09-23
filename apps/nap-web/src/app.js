@@ -561,6 +561,7 @@ async function refreshObject(epoch, announce, active) {
   assets = seen.map((id) => ({
     id,
     symbol: id === zec ? 'ZEC.zy' : items.has(id) ? `${collectionName(items.get(id).collection)} #${items.get(id).serial}` : `asset ${id.slice(0, 8)}…`,
+    item: items.has(id),
   }));
   if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });
 
@@ -577,7 +578,7 @@ async function refreshObject(epoch, announce, active) {
 function renderCoins() {
   const coins = holdings
     .map((h) => ({ ...h, meta: assets.find((a) => a.id === h.asset) }))
-    .filter((h) => h.meta && !h.meta.content && decimalRaw(h.amount) > 0n);
+    .filter((h) => h.meta && !h.meta.content && !h.meta.item && decimalRaw(h.amount) > 0n);
 
   const deposit = assets.find((a) => a.symbol === 'ZEC.zy');
   if (deposit && !coins.some((c) => c.asset === deposit.id)) {
@@ -600,12 +601,23 @@ function renderItems() {
   // still the holder's — it is one cancellation away — so hiding it would be
   // telling them it is gone.
   const held = holdings.map((h) => ({ ...h, meta: assets.find((a) => a.id === h.asset) }))
-    .filter((h) => h.meta?.content && decimalRaw(h.amount) > 0n);
+    .filter((h) => (h.meta?.content || h.meta?.item) && decimalRaw(h.amount) > 0n);
   const resting = listings
     .map((o) => ({ asset: o.offerAsset, amount: o.offerAmount, owner: o.owner, via: o.via,
                    meta: assets.find((a) => a.id === o.offerAsset), listing: o }))
     .filter((h) => h.meta?.content);
   const list = [...held, ...resting];
+  // On the object ledger an item is shown and sent here; listing, buying and
+  // redeeming are the Cave store's.
+  if (config.kind === 'object') {
+    root.querySelector('#item-count').textContent = String(held.length);
+    root.querySelector('#items').innerHTML = held.length ? held.map((h, i) => `<article class="item" data-index="${i}"><div class="art"><img src="/nap-mark.png" alt=""></div><div><p class="kicker">ITEM</p><h3>${escapeHtml(h.meta.symbol)}</h3><p class="media-status">Trade it in the Cave store.</p><button>Send →</button></div></article>`).join('') : '<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Items you buy in the Cave store appear here.</p></div>';
+    root.querySelectorAll('.item').forEach((el) => {
+      const h = held[Number(el.dataset.index)];
+      el.querySelector('button').onclick = () => openObjectSend({ asset: h.asset, amount: h.amount, meta: h.meta });
+    });
+    return;
+  }
   root.querySelector('#item-count').textContent = String(list.length);
   root.querySelector('#items').innerHTML = list.length ? list.map((h, i) => `<article class="item" data-index="${i}"><div class="art" data-content="${escapeHtml(h.meta.content)}"><img src="/nap-mark.png" alt="Generic placeholder; artwork not verified"></div><div><p class="kicker">ITEM · #${escapeHtml(h.asset)}</p><h3>${escapeHtml(h.meta.symbol || `Item ${h.asset}`)}</h3><p class="media-status">${h.listing ? `Listed · ${escapeHtml(readableAmount(h.listing.wantAmount))} ZEC.zy` : 'Artwork not verified'}</p><button>Review & send →</button> <button data-list>${h.listing ? 'Cancel listing' : 'List for sale'} →</button></div></article>`).join('') : `<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Claim a gift or receive a Zyn item at the account below.</p></div>`;
   root.querySelectorAll('.item').forEach((el) => {
@@ -765,7 +777,9 @@ function openObjectSend(coin) {
   const current = generation;
   let reviewed = null;
   const dialog = root.querySelector('#send-dialog');
-  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>To another Zyn account.</h2><p class="muted">The chain records that notes were spent and created — not who sent, who received, or how much. Transfers cannot be undone.</p><form><label>Recipient Zyn account<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="64 hex characters"></label><label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label><div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
+  const isItem = !!coin.meta.item;
+  const isZec = coin.asset === config.zecAsset;
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>${isItem ? 'Send this item.' : 'Send.'}</h2><p class="muted">To a Zyn account id, or to a Zcash address. A Zcash address that belongs to a Zyn account is paid on Zyn, privately and at once${isZec ? '; any other Zcash address is paid on Zcash, as a withdrawal' : isItem ? '; an item cannot leave for any other Zcash address' : ''}. Transfers cannot be undone.</p><form><label>Recipient<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Zyn account (64 hex) or ${escapeHtml(config.zcashPrefix)}…"></label>${isItem ? '<input id="send-amount" type="hidden" value="1">' : '<label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>'}<div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
   dialog.querySelector('.x').onclick = () => dialog.close();
   dialog.querySelector('form').onsubmit = async (event) => {
     event.preventDefault();
@@ -773,19 +787,44 @@ function openObjectSend(coin) {
     const error = dialog.querySelector('.error');
     button.disabled = true;
     try {
-      const to = unhex(dialog.querySelector('#send-to').value.trim(), 32);
+      const raw = dialog.querySelector('#send-to').value.trim();
       const amount = parseAmount(dialog.querySelector('#send-amount').value.trim());
-      if (to.every((b) => b === 0) || hex(to) === identity.accountHex) throw new Error('Choose a different, nonzero recipient account');
+      // Who this is, decided before anything is signed: a Zyn account, a
+      // Zcash address that belongs to one, or a Zcash address outside Zyn.
+      let to = null, external = null;
+      if (/^[0-9a-f]{64}$/i.test(raw)) {
+        to = unhex(raw.toLowerCase(), 32);
+      } else if (raw.startsWith(config.zcashPrefix) || /^t[a-z0-9]{20,}$/i.test(raw)) {
+        const r = await objectCall(config.rpcUrl, 'zyn_resolveAddress', { address: raw });
+        if (r && /^[0-9a-f]{64}$/.test(String(r.account))) to = unhex(r.account, 32);
+        else external = raw;
+      } else {
+        throw new Error(`That is neither a Zyn account nor a ${config.zcash} address`);
+      }
+      if (external && !isZec) throw new Error(isItem ? 'An item cannot leave Zyn. Send it to a Zyn account, or to a Zcash address that belongs to one.' : 'Only ZEC.zy can be paid to an outside Zcash address.');
+      if (to && (to.every((b) => b === 0) || hex(to) === identity.accountHex)) throw new Error('Choose a different, nonzero recipient');
+      const key = `${to ? hex(to) : external}:${amount}`;
       if (!reviewed) {
-        reviewed = `${hex(to)}:${amount}`;
-        dialog.querySelector('#send-to').value = hex(to);
+        reviewed = key;
         dialog.querySelectorAll('input').forEach((el) => { el.readOnly = true; });
-        button.textContent = `Confirm: send ${readableAmount(dialog.querySelector('#send-amount').value.trim())} ${coin.meta.symbol}`;
+        button.textContent = external
+          ? `Confirm: withdraw ${readableAmount(String(amount / WAD))}${amount % WAD ? '…' : ''} ZEC to Zcash`
+          : `Confirm: send ${isItem ? 'the item' : `${readableAmount(dialog.querySelector('#send-amount').value.trim())} ${coin.meta.symbol}`} on Zyn`;
         button.disabled = false;
-        error.textContent = 'Check all 64 recipient characters above. Close to edit.';
+        error.textContent = external
+          ? 'An outside Zcash address: this leaves Zyn as a withdrawal. The bridge fee is added and the Zcash network fee comes out of it.'
+          : `Paying Zyn account ${hex(to).slice(0, 10)}…${hex(to).slice(-6)} privately. Close to edit.`;
         return;
       }
-      if (`${hex(to)}:${amount}` !== reviewed) throw new Error('Details changed; close and review again');
+      if (key !== reviewed) throw new Error('Details changed; close and review again');
+      if (external) {
+        await withdrawToZcash(external, dialog.querySelector('#send-amount').value.trim());
+        if (generation !== current) return;
+        dialog.close();
+        note('Withdrawal recorded. The vault pays it once two custodians sign.');
+        refresh(false);
+        return;
+      }
       const { viewing } = await objectCall(config.rpcUrl, 'zyn_viewingKey', { account: hex(to) });
       if (generation !== current) return;
       const asset = unhex(coin.asset, 32);

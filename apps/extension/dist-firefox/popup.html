@@ -309,7 +309,7 @@ html, body { width: 420px; min-height: 560px; } main { padding: 14px; grid-templ
   </section>
   <section class="full">
     <h2>Send <small id="send-unit"></small></h2>
-    <div class="row"><input class="grow mono" id="send-to" placeholder="recipient address" autocomplete="off" spellcheck="false"></div>
+    <div class="row"><input class="grow mono" id="send-to" placeholder="Zcash address, or a Zyn account (arrives as ZEC.zy)" autocomplete="off" spellcheck="false"></div>
     <div class="row"><input class="grow num" id="send-amount" placeholder="amount" inputmode="decimal"><button class="btn small" id="send-max" type="button">Max</button><button class="btn primary" id="send">Send</button></div>
     <textarea id="send-memo" placeholder="memo (optional, only the recipient can read it)"></textarea>
     <div class="hint">Shielded to shielded, from the Ironwood pool, in a v6 transaction. The network fee comes out of your balance; proving takes about a minute.</div>
@@ -387,7 +387,7 @@ html, body { width: 420px; min-height: 560px; } main { padding: 14px; grid-templ
     <div class="hint">Your own Zcash address for this account — pay it from any wallet, no memo. It arrives as ZEC.zy.</div>
     <div class="addr"><code id="od-addr">—</code><button class="btn small" id="od-get">Show address</button></div>
     <h3 class="sub">Send to a Zyn account</h3>
-    <div class="row"><input class="grow mono" id="os-to" placeholder="recipient account id (64 hex)" spellcheck="false"></div>
+    <div class="row"><input class="grow mono" id="os-to" placeholder="Zyn account (64 hex) or Zcash address" spellcheck="false"></div>
     <div class="row"><select id="os-asset" style="width:auto"></select><input class="grow num" id="os-amount" placeholder="amount" inputmode="decimal"><button class="btn primary" id="os-send">Send</button></div>
     <h3 class="sub">Take ZEC out</h3>
     <div class="row"><input class="grow mono" id="ow-to" placeholder="Zcash address (blank: this wallet)" spellcheck="false"></div>

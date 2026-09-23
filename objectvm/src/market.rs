@@ -420,9 +420,24 @@ impl Market {
             || self.pools.keys().any(|p| &lp_asset(p) == asset)
     }
 
+    /// Owe `amount` under a claim id. An existing claim for the same owner and
+    /// asset grows rather than being replaced: two wallets of one holder can
+    /// reuse a nonce, and an overwrite would silently lose the first debt.
     pub(crate) fn pay(&mut self, source: &Hash, k: u8, owner: AccountId, asset: Address, amount: Fixed) {
-        if amount.0 > 0 {
-            self.claims.insert(claim_id(source, k), Claim { owner, asset, amount });
+        if amount.0 <= 0 {
+            return;
+        }
+        let id = claim_id(source, k);
+        match self.claims.get_mut(&id) {
+            Some(c) if c.owner == owner && c.asset == asset => c.amount = Fixed(c.amount.0.saturating_add(amount.0)),
+            Some(_) => {
+                // A different owner or asset under one id cannot be derived by
+                // honest wallets; keep the first debt and record nothing new
+                // rather than overwrite it.
+            }
+            None => {
+                self.claims.insert(id, Claim { owner, asset, amount });
+            }
         }
     }
 

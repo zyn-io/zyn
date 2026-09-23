@@ -53,6 +53,16 @@ const METHODS = {
   zyn_receivingPay: { read: false, run: (p) => app('/api/receiving/pay', p), describe: (p) => `Pay ${p.amount} ZEC.zy for your place in this collection. Signed now, sent by the sale.` },
   zyn_receivingRead: { read: false, run: (p) => app('/api/receiving/read', p), describe: () => 'Prove your payment for this collection. The site learns this collection account\'s balance and nothing else.' },
   zyn_zyn:      { read: true,  run: async () => (await app('/api/overview')).zyn },
+  // The object ledger's NFT cycle, for the Cave store. Reads are public or
+  // the holder's own; every write is signed in the desktop app after approval.
+  zyn_nftItems:  { read: true,  run: () => app('/api/object/items') },
+  zyn_nftOffers: { read: true,  run: () => app('/api/object/offers') },
+  zyn_owed:      { read: true,  run: () => app('/api/object/owed') },
+  zyn_nftList:   { read: false, run: (p) => app('/api/object/list', p),   describe: (p) => `List this item for ${p.price} ZEC.zy. Buyers pay the price plus the collection fee; your proceeds wait for you to collect.` },
+  zyn_nftBuy:    { read: false, run: (p) => app('/api/object/buy', p),    describe: (p) => `Buy this item for ${p.pay || 'the listed price plus fee'} ZEC.zy. It arrives in your wallet.` },
+  zyn_nftCancel: { read: false, run: (p) => app('/api/object/cancel', p), describe: () => 'Cancel your listing. The item is yours to move again.' },
+  zyn_nftRedeem: { read: false, run: (p) => app('/api/object/redeem', p), describe: () => 'Burn this item for its share of the collection floor. This cannot be undone.' },
+  zyn_collect:   { read: false, run: () => app('/api/object/collect', {}), describe: () => 'Collect everything the market owes you: sale proceeds, refunds, floor shares.' },
   zyn_transfer: { read: false, run: (p) => app('/api/transfer', p), describe: (p) => `Transfer ${p.amount} of asset ${p.asset} to ${String(p.to).slice(0, 12)}…` },
   zyn_swap:     { read: false, run: (p) => app('/api/swap', p),     describe: (p) => `Swap ${p.amount} of asset ${p.asset_in} for asset ${p.asset_out} (1% below quote at worst)` },
   zyn_deposit:  { read: false, run: (p) => app('/api/deposit', p),  describe: (p) => `Deposit ${p.amount} from the Zcash wallet to the vault` },

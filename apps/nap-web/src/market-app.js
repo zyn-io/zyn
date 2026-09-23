@@ -29,7 +29,7 @@ const PER_CLAIM = 16;
 
 let config;
 let identity = null;
-let view = 'nfts';
+let view = 'swap';
 /// Where to go back to after the wallet opens for an action that needed it.
 let returnTo = 'swap';
 let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map() };
@@ -349,7 +349,7 @@ function frame() {
         ? `<p class="kicker">TRADING AS</p><b class="mk-account">${short(identity.accountHex)}</b>`
         : '<p class="kicker">BROWSING</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
       <nav id="tabs">
-        ${['nfts', 'swap', 'pools', 'launchpad', 'owed'].map((t) => `<button data-view="${t}">${t === 'owed' ? 'Owed to you' : t === 'nfts' ? 'NFTs' : t[0].toUpperCase() + t.slice(1)}<span class="mk-badge" id="badge-${t}"></span></button>`).join('')}
+        ${['swap', 'pools', 'launchpad', 'owed'].map((t) => `<button data-view="${t}">${t === 'owed' ? 'Owed to you' : t[0].toUpperCase() + t.slice(1)}<span class="mk-badge" id="badge-${t}"></span></button>`).join('')}
       </nav>
       ${identity ? '<button class="quiet" id="lock">Lock</button>' : ''}
     </aside>
@@ -384,7 +384,7 @@ function render() {
   const open = state.launches.filter((l) => l.state === 'open').length;
   $('#badge-launchpad').textContent = open ? String(open) : '';
   if (view === 'wallet' && identity) view = returnTo || 'swap';
-  ({ nfts: renderNfts, swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed, wallet: renderWallet })[view]();
+  ({ swap: renderSwap, pools: renderPools, launchpad: renderLaunchpad, owed: renderOwed, wallet: renderWallet })[view]();
 }
 
 // ---------------------------------------------------------------------------
@@ -689,81 +689,6 @@ function bindCreateLaunch() {
       }), `Sale open. It closes after epoch ${state.epoch + BigInt(epochs)}; your share arrives under Owed to you then.`);
     } catch (err) { notice(err.message, true); }
   };
-}
-
-// ---------------------------------------------------------------------------
-// NFTs.
-// ---------------------------------------------------------------------------
-
-function renderNfts() {
-  const listed = state.offers.filter((o) => o.serial >= 0);
-  const mineHeld = state.held.filter((h) => state.items.has(h.asset));
-  const myListed = new Set(mineHeld.map((h) => h.commitment).filter((c) => state.offers.some((o) => o.item === c)));
-  const floorOf = (collection) => state.collections.find((c) => c.asset === collection);
-  const card = (o, i) => `<article class="mk-card mk-nft">
-      <header><h3>${esc(collectionName(o.collection))} <span>#${o.serial}</span></h3><span class="mk-pill">listed</span></header>
-      <dl class="mk-facts">
-        <dt>Price</dt><dd>${fmt(BigInt(o.price_raw))} ${esc(name(o.price_asset))}</dd>
-        <dt>Fee</dt><dd>${fmt(BigInt(o.fee_raw))} — half to the ZYN pot, the rest to the floor and creator</dd>
-        <dt>You pay</dt><dd><b>${fmt(BigInt(o.pay_raw))} ${esc(name(o.price_asset))}</b></dd>
-      </dl>
-      ${myListed.has(o.item) ? '<p class="mk-fine">Your listing.</p>' : `<div class="mk-row"><button class="primary mk-act" data-buy="${i}">Buy <span>→</span></button></div>`}
-    </article>`;
-  $('#view').innerHTML = `${heading('NFTS', 'Buy the item,<br><em>not a copy of it.</em>')}
-  <p class="mk-fine mk-lead">Every item is its own asset, so the one you buy is the one that was listed — serial and all. A listing names no seller; their proceeds wait for them as a claim only they can find.</p>
-  <section class="mk-list">${listed.length ? listed.map(card).join('') : '<div class="mk-empty"><p>Nothing listed right now.</p></div>'}</section>
-  ${identity ? `<div class="section-title"><h2>Your items</h2><span>${mineHeld.length}</span></div>
-  <section class="mk-list">${mineHeld.length ? mineHeld.map((h, i) => {
-    const it = state.items.get(h.asset);
-    const f = floorOf(it.collection);
-    const share = f && BigInt(f.outstanding || '0') > 0n ? BigInt(f.floor) / BigInt(f.outstanding) : 0n;
-    const listedHere = myListed.has(h.commitment);
-    return `<article class="mk-card mk-nft">
-      <header><h3>${esc(collectionName(it.collection))} <span>#${it.serial}</span></h3>${listedHere ? '<span class="mk-pill">listed</span>' : ''}</header>
-      ${listedHere ? `<div class="mk-row"><button class="mk-act" data-cancel="${i}">Cancel listing</button></div>` : `<form class="mk-inline" data-list="${i}"><label class="mk-field"><span>List for (${esc(name(f ? f.quote : config.zecAsset))})</span><input name="price" inputmode="decimal" autocomplete="off" placeholder="0.0"></label><button class="primary mk-act" type="submit">List <span>→</span></button></form>`}
-      ${f && !listedHere ? `<p class="mk-fine">Floor: ${fmt(share)} ${esc(name(f.quote))} per item. <button class="mk-act" data-redeem="${i}">Redeem for it</button></p>` : ''}
-    </article>`;
-  }).join('') : '<div class="mk-empty"><p>No items in this wallet.</p></div>'}</section>` : ''}`;
-
-  root.querySelectorAll('[data-buy]').forEach((b) => { b.onclick = async () => {
-    if (!requireWallet()) return;
-    const o = listed[Number(b.dataset.buy)];
-    try {
-      const pay = BigInt(o.pay_raw);
-      const { inputs, change } = mk.fund(identity, state.held, unhex(o.price_asset), pay);
-      const item = mk.selfNote(identity, unhex(o.asset), mk.ITEM_UNIT);
-      await submit(mk.takeOfferIntent({ buyer: identity.account, item: unhex(o.item), itemNullifier: unhex(o.nullifier), payment: inputs, outputs: [item, ...change] }),
-        `Bought ${collectionName(o.collection)} #${o.serial}. It is in your wallet.`);
-    } catch (e) { notice(e.message, true); }
-  }; });
-  root.querySelectorAll('[data-list]').forEach((form) => { form.onsubmit = async (e) => {
-    e.preventDefault();
-    if (!requireWallet()) return;
-    const h = mineHeld[Number(form.dataset.list)];
-    const it = state.items.get(h.asset);
-    const f = floorOf(it.collection);
-    try {
-      const price = parse(form.elements.price.value);
-      const c = unhex(h.commitment);
-      await submit(mk.listIntent({
-        seller: identity.account, item: c, itemNullifier: nullifierOf(identity.nullifier, c),
-        priceAsset: unhex(f ? f.quote : config.zecAsset), priceAmount: price, expiresAtEpoch: 0xffffffffn, nonce: nextNonce(),
-      }), `Listed ${collectionName(it.collection)} #${it.serial}. When it sells, your proceeds appear under Owed to you.`);
-    } catch (err) { notice(err.message, true); }
-  }; });
-  root.querySelectorAll('[data-cancel]').forEach((b) => { b.onclick = async () => {
-    if (!requireWallet()) return;
-    const h = mineHeld[Number(b.dataset.cancel)];
-    await submit(mk.cancelOfferIntent({ seller: identity.account, item: unhex(h.commitment) }), 'Listing cancelled. The item is yours to move again.');
-  }; });
-  root.querySelectorAll('[data-redeem]').forEach((b) => { b.onclick = async () => {
-    if (!requireWallet()) return;
-    const h = mineHeld[Number(b.dataset.redeem)];
-    const it = state.items.get(h.asset);
-    const c = unhex(h.commitment);
-    await submit(mk.redeemIntent({ holder: identity.account, collection: unhex(it.collection), inputs: [{ commitment: c, nullifier: nullifierOf(identity.nullifier, c) }] }),
-      'Redeemed. The item is burned and its share of the floor is under Owed to you.');
-  }; });
 }
 
 // ---------------------------------------------------------------------------
