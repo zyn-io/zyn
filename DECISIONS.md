@@ -6360,3 +6360,16 @@ tokens in 16 days, 18 graduated, 244 of the rest under 1% sold, 24 h volume
 | 141.12 | **Pictures and descriptions are off chain, attached once by the creator with a proof.** Nap returns, with a new token, an ed25519 signature over `"cave.jade.content.v1" ‖ token ‖ sha256({description, image, v:1})`; Jade's store (Pages Function + KV) checks that the key's account and nonce derive the token, keeps the first attachment only, limits size and type (data-URL PNG/JPEG/WebP/GIF, ≤300 KB after shrinking in the browser; 400 chars), rate-limits by IP, and has an operator hide list. The chain carries only the ticker and name | ✅ |
 | 141.13 | **Trades carry floors and settle themselves.** Buys send `minTokens`, sells `minZec` (slippage 1–10%); after the seal the page calls `zyn_collect`, which Nap now serves to a connected site without a prompt — it only moves what the ledger already owes the holder. `zyn_curveHoldings` adds the ZEC.zy balance and, for its holder only, the tokens they made | ✅ |
 
+## §142 — Rarity classes for Collection Z (23 Sep 2026)
+
+The 4,444 had no rarity (`collection.json` said "none; controlled family distribution only"). The user asked for classes where the traits are the clue, and approved these after seeing each class as a grid.
+
+| # | Decision | |
+|---|---|---|
+| 142.1 | **Scored from traits alone:** an item's score is Σ −log₂(share of the 4,444 with that value) over Species, Background, Body, Eyes, Mouth/Beak (one slot), Headgear, Interactive Light. Visual Family is left out — it names a production batch, not something a holder sees | ✅ |
+| 142.2 | **Classes by rank, fixed sizes:** Mythic 44 (1%), Legendary 178 (4%), Epic 445 (10%), Rare 888 (20%), Uncommon 1,334 (30%), Common 1,555 (35%); ties by collection index. Species spread: Mythic 22 Mole / 20 Owl / 2 Moth | ✅ |
+| 142.3 | **Moths are not rarer by traits.** Moths have far fewer variants per slot (9 bodies against the moles' 22), so each moth trait is widely shared and cancels the species' scarcity — 45% of moths land in Common against 34% of moles. Accepted as what the traits say | ✅ |
+| 142.4 | **Rarity is in the committed metadata:** `Rarity` and `Rarity Rank` attributes enter each manifest preimage. The manifest root moves `02b01b16…` → `d966e21a190e8e7ab042d8991319eb8c11f76dccbd044012124b7f2929df04d1`; policy digest → `631df718…7a55`; terms digest `159b454e…` → `6649a9636899278e486e42eca4e207caeac71dfcfda76bd3baa0e72526c0fdc4`. Item addresses and the collection id do not move (they derive from the index). Done before any entry existed; the terms page says so | ✅ |
+| 142.5 | **Rarity cannot go stale silently:** `tools/assign_rarity.py` derives it; the store validator refuses metadata whose rarity no longer matches its tags; `RARITY.json` is the copy kept in git | ✅ |
+| 142.6 | **Known weak spot:** 34 items hold a trait seen on ≤3 items, several tagged at low confidence (mole mouths "Friendly Smile", "Glowing Grin"; "Zero Field Halo"), and they dominate Mythic. A human look at those 34 before the sale would stop a mislabel from minting a Mythic | ⏳ |
+

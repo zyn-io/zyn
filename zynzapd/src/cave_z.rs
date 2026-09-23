@@ -18,10 +18,12 @@ use std::collections::BTreeMap;
 pub const SYMBOL: &str = "CAVEZ";
 const SUPPLY: u32 = 4_444;
 
-/// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3). Pinned
+/// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3; moved
+/// 23 Sep 2026 when every item gained its Rarity and Rarity Rank traits, before
+/// any deposit — the 19 Sep terms named `02b01b16…`, §142). Pinned
 /// rather than recomputed: the terms must commit to a root someone checked,
 /// not to whatever a rebuild happens to produce today.
-const MANIFEST_ROOT: &str = "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19";
+const MANIFEST_ROOT: &str = "d966e21a190e8e7ab042d8991319eb8c11f76dccbd044012124b7f2929df04d1";
 
 /// §64.17, frozen: entry / claim / open mint, in zatoshi.
 const ENTRY: u64 = 1_000_000; // 0.01 ZEC
@@ -133,12 +135,12 @@ mod tests {
         p.validate().expect("valid");
         assert_eq!(
             hex(&p.digest().unwrap()),
-            "12da4f1b1052660d5496207eefa0231801dcad04d6a85b77db0134883500abaf",
+            "631df718cd4bbc2116fa15a3666d64a786d8ea3d7d31532662f1e5d9328b7a55",
             "the policy digest is published; moving it silently is the failure"
         );
         assert_eq!(
             hex(&terms(&p).digest()),
-            "159b454efe0bfe7778f58924e6e2951d7e585e918a9a7d94bbab8e69ae016267"
+            "6649a9636899278e486e42eca4e207caeac71dfcfda76bd3baa0e72526c0fdc4"
         );
     }
 
@@ -171,7 +173,7 @@ mod tests {
         let root = cave_randomness::manifest_root(collection_id(), &entries).unwrap();
         assert_eq!(
             hex(&root),
-            "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19",
+            "d966e21a190e8e7ab042d8991319eb8c11f76dccbd044012124b7f2929df04d1",
             "the manifest the draw reads must be the one the terms committed to"
         );
         assert_eq!(root, policy().manifest_root);

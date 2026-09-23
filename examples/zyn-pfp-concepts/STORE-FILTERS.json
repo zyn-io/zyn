@@ -9,6 +9,14 @@
       "Moth": 889,
       "Owl": 1333
     },
+    "Rarity": {
+      "Mythic": 44,
+      "Legendary": 178,
+      "Epic": 445,
+      "Rare": 888,
+      "Uncommon": 1334,
+      "Common": 1555
+    },
     "Interactive Light": {
       "Afterglow": 206,
       "Aurora": 170,
