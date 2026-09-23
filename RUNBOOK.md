@@ -3164,7 +3164,7 @@ something real before they are exercised against money.
   `zyn_offers` (resting listings, sellers omitted), `zyn_submitSigned` (the
   holders' door: a signed frame, A145), `zyn_depositAddress`, and since 23
   Sep `zyn_market` (pools and sales, public) and `zyn_claims` (what is owed,
-  by id only — §5f-decies). `zyn_submit` is the operator's and needs
+  by id only — §5f-decies). Also `zyn_resolveAddress` (the Zyn account behind a vault deposit address), `zyn_viewingKey`, `zyn_items`, `zyn_exitCommitment`, `zyn_exitReveal`, and on the operator's token `zyn_mintItem`. `zyn_submit` is the operator's and needs
   `ZYN_SUBMIT_TOKEN` (A144). Every reply carries the request's own id (A150).
 - **What `zyn_status` reports beyond the counts** (22 Sep, A129):
   `anchored_epoch` / `anchored_height` / `anchor_txid` for the last root that
