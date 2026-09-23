@@ -278,7 +278,7 @@
           <div class="term-table">
             <div><span>Collection</span><b class="hash">024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e</b></div>
             <div><span>Supply</span><b>4,444</b></div>
-            <div><span>Manifest root</span><b class="hash">275dd70fe58f84947ff9b906a5628822a65bcd3279f22b4df7beb0979fc8d333</b></div>
+            <div><span>Manifest root</span><b class="hash">7fd4283f8cd062bee4fc1cd1c8c4907b28acedd81e9eb7f9f126f27617fa2438</b></div>
             <div><span>Quantity</span><b>Weighted — 80% one item, 19% two, 1% three, per entry</b></div>
             <div><span>Identity</span><b>Concealed shuffle</b></div>
             <div><span>Close</span><b>Announced, with at least 1,152 blocks' notice</b></div>
@@ -290,14 +290,14 @@
             <div><span>Claim window</span><b>16,128 blocks after the close</b></div>
             <div><span>Split of one entry</span><b>900,000 zatoshi to the collection's pool, 100,000 to the treasury</b></div>
             <div><span>Treasury</span><b class="hash">b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99</b></div>
-            <div><span>Policy digest</span><b class="hash">58390f073822ea4d2736dc0301d1ab0d7f74a4cce7873a813acac41059bd1b53</b></div>
-            <div><span>Terms digest</span><b class="hash">7cb6d824212488c5afd4b17f9071ba4b953fb61027432be8d9d28753057422f7</b></div>
+            <div><span>Policy digest</span><b class="hash">a180a8cdfac51accdf0b873ba596acaf9dc8875230629a58ce46b057730ba9f4</b></div>
+            <div><span>Terms digest</span><b class="hash">a124489b1dabcefc2cc54575af51d76edf4afd865e4cc8a71530c752cc2e7af3</b></div>
           </div>
 
           <p class="smallprint" style="margin-top:18px;max-width:66ch">
             <strong>Revised 23 Sep 2026, before the door opened.</strong> Every item gained two traits,
-            Rarity and Rarity Rank, and 1,373 images had slicing defects at their edges repaired
-            (dark gutter lines, streaked padding), which changed the manifest root and so both digests. The version
+            Rarity and Rarity Rank, and 3,555 Mole and Owl images were re-cut square from their source
+            boards (no streaked padding or gutter lines; 12 Moth edges repaired), which changed the manifest root and so both digests. The version
             published on 19 Sep named root <span class="hash">02b01b16…8f19</span> and terms digest
             <span class="hash">159b454e…6267</span>; no entry was ever made against it.
           </p>
@@ -317,10 +317,10 @@
           These are the canonical bytes — <strong>187 of them</strong>, the exact input the digest is
           taken over. Nothing else goes in.
         </p>
-        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f763158390f073822ea4d2736
-dc0301d1ab0d7f74a4cce7873a813acac41059bd1b53024277b607ce4edbf78f
-e2855aba562096d00264729168bd0ddea71bdf5b5f1e275dd70fe58f84947ff9
-b906a5628822a65bcd3279f22b4df7beb0979fc8d333b3e4c493bb7934927026
+        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f7631a180a8cdfac51accdf0b
+873ba596acaf9dc8875230629a58ce46b057730ba9f4024277b607ce4edbf78f
+e2855aba562096d00264729168bd0ddea71bdf5b5f1e7fd4283f8cd062bee4fc
+1cd1c8c4907b28acedd81e9eb7f9f126f27617fa2438b3e4c493bb7934927026
 0f7d2e2882b4f1a736348935493331e18c95098cfe990000000000000f424000
 0000000007a1200000000000144b500000000600003f00000003e8</div>
         <button class="act ghost" id="copy-bytes" type="button" style="margin-top:14px">Copy the bytes</button>
@@ -339,7 +339,7 @@ h = sha256()
 h.update(len(domain).to_bytes(4, "big"));  h.update(domain)
 h.update(len(payload).to_bytes(4, "big")); h.update(payload)
 print(h.hexdigest())
-# 7cb6d824212488c5afd4b17f9071ba4b953fb61027432be8d9d28753057422f7</pre>
+# a124489b1dabcefc2cc54575af51d76edf4afd865e4cc8a71530c752cc2e7af3</pre>
       </section>
 
       <div class="not-yet">

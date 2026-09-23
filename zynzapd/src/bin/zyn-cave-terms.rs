@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(hex(&p.collection_id), "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e");
         assert_eq!(
             hex(&p.manifest_root),
-            "275dd70fe58f84947ff9b906a5628822a65bcd3279f22b4df7beb0979fc8d333"
+            "7fd4283f8cd062bee4fc1cd1c8c4907b28acedd81e9eb7f9f126f27617fa2438"
         );
         assert_eq!(p.supply, 4_444);
         // The draw recorded on 9 Sep, and the reservation it forces.
