@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
-import { fund as fundFrom } from './market.js';
+import { decodeMeta, fund as fundFrom } from './market.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
@@ -804,10 +804,21 @@ async function refreshObject(epoch, announce, active) {
     } catch { /* names only: an item still shows, by id */ }
     if (!active()) return;
   }
+  // Launchpad tokens name themselves: their ticker is in the curve's meta.
+  const tickers = new Map();
+  if (others.some((a) => !items.has(a))) {
+    try {
+      for (const c of (await objectCall(config.rpcUrl, 'zyn_market')).curves || []) {
+        const m = /^[0-9a-f]{64}$/.test(c.token) && typeof c.meta === 'string' ? decodeMeta(c.meta) : null;
+        if (m) tickers.set(c.token, m.symbol);
+      }
+    } catch { /* names only */ }
+    if (!active()) return;
+  }
   const collectionName = (id) => ((config.collections || []).find((c) => String(c.id).toLowerCase() === id) || {}).name || `Collection ${id.slice(0, 6)}`;
   assets = seen.map((id) => ({
     id,
-    symbol: id === zec ? 'ZEC.zy' : items.has(id) ? `${collectionName(items.get(id).collection)} #${items.get(id).serial}` : `asset ${id.slice(0, 8)}…`,
+    symbol: id === zec ? 'ZEC.zy' : items.has(id) ? `${collectionName(items.get(id).collection)} #${items.get(id).serial}` : tickers.get(id) || `asset ${id.slice(0, 8)}…`,
     item: items.has(id),
   }));
   if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });

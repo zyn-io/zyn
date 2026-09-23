@@ -195,7 +195,14 @@ const METHODS = {
   zyn_nftRedeem: { read: false, run: (p) => app('/api/object/redeem', p), describe: () => 'Burn this item for its share of the collection floor. This cannot be undone.' },
   zyn_collect:   { read: false, run: () => app('/api/object/collect', {}), describe: () => 'Collect everything the market owes you: sale proceeds, refunds, floor shares.' },
   zyn_transfer: { read: false, run: (p) => app('/api/transfer', p), describe: (p) => `Transfer ${p.amount} of asset ${p.asset} to ${String(p.to).slice(0, 12)}…` },
-  zyn_swap:     { read: false, run: (p) => app('/api/swap', p),     describe: (p) => `Swap ${p.amount} of asset ${p.asset_in} for asset ${p.asset_out} (1% below quote at worst)` },
+  // A graduated launch's pool (or any pool) on the object ledger.
+  zyn_swap:     { read: false, run: (p) => app('/api/object/swap', p), describe: (p) => `Swap ${p.amount} into pool ${String(p.pool).slice(0, 10)}… (at most ${(Number(p.slippageBps ?? 100) / 100)}% below the quote). Swaps in one epoch clear together at one price.` },
+  // The launchpad (DECISIONS §141): one curve for every token.
+  zyn_curves:        { read: true, run: () => app('/api/object/curves') },
+  zyn_curveHoldings: { read: true, mine: true, run: () => app('/api/object/curve-holdings') },
+  zyn_curveCreate:   { read: false, run: (p) => app('/api/object/curve/create', p), describe: (p) => `Create the token ${String(p.symbol).toUpperCase()} ("${p.name}"). All 1B tokens are sold on its curve or put in its locked pool; you get none unless you buy. A bond, if this network sets one, comes back at graduation.` },
+  zyn_curveBuy:      { read: false, run: (p) => app('/api/object/curve/buy', p), describe: (p) => `Buy token ${String(p.token).slice(0, 10)}… with ${p.amount} ZEC.zy. Everyone buying this epoch pays one price; the fee is on top and anything unspent comes back.` },
+  zyn_curveSell:     { read: false, run: (p) => app('/api/object/curve/sell', p), describe: (p) => `Sell ${p.tokens} of token ${String(p.token).slice(0, 10)}… back to its curve. Sellers this epoch share one price; the fee comes out of the proceeds.` },
   zyn_deposit:  { read: false, run: (p) => app('/api/deposit', p),  describe: (p) => `Deposit ${p.amount} from the Zcash wallet to the vault` },
   zyn_withdraw: { read: false, run: (p) => app('/api/withdraw', p), describe: (p) => `Withdraw ${p.amount} ZEC.zy to the bound wallet` },
   zyn_bind:     { read: false, run: () => app('/api/bind', {}),      describe: () => 'Bind Zyn exits to your Nap Wallet address' },

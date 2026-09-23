@@ -1505,7 +1505,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     expires_at_epoch: u32::MAX as u64,
                     nonce,
                 }) {
-                    Err(e) if e.contains("nonce is in use") => continue,
+                    Err(e) if e.contains("nonce was already used") => continue,
                     other => {
                         other?;
                         return Ok(json!({ "listed": true }));
@@ -1525,6 +1525,110 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 item: note.commitment,
             })?;
             Ok(json!({ "cancelled": true }))
+        }
+        // The launchpad (DECISIONS §141) and graduated pools, for the
+        // extension's provider: the same methods Nap in the browser serves.
+        ("GET", "/api/object/curves") => {
+            let (host, _) = object_target(app);
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            Ok(json!({ "curves": m.get("curves").cloned().unwrap_or(json!([])), "terms": m.get("curve_terms").cloned().unwrap_or(json!({})) }))
+        }
+        ("GET", "/api/object/curve-holdings") => {
+            let (host, _) = object_target(app);
+            let s = object_session(app, &host)?;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let mut out = Vec::new();
+            for c in m.get("curves").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(token) = c.get("token").and_then(Value::as_str).and_then(|t| unhex32(t).ok()) else { continue };
+                let held: i128 = s.wallet.live.iter().filter(|o| o.note.asset == token).map(|o| o.note.amount.0).sum();
+                if held > 0 {
+                    out.push(json!({ "token": hex(&token), "meta": c.get("meta"), "amount": held.to_string() }));
+                }
+            }
+            Ok(json!({ "holdings": out }))
+        }
+        ("POST", "/api/object/curve/create") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let meta = curve_meta(str_of(input, "symbol")?, str_of(input, "name")?)?;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let bond: i128 = m.pointer("/curve_terms/bond").and_then(Value::as_str).and_then(|b| b.parse().ok()).unwrap_or(0);
+            let zec = XZEC;
+            let (inputs, change) = if bond > 0 {
+                crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, zec, zyn_vm::Fixed(bond))?
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::CreateCurve {
+                creator: s.me,
+                program: zyn_vm::program::curve_create(),
+                nonce,
+                quote: zec,
+                meta,
+                inputs: inputs.clone(),
+                change: change.clone(),
+            })?;
+            Ok(json!({ "token": hex(&objectvm::market::token_of(&s.me, &nonce)) }))
+        }
+        ("POST", "/api/object/curve/buy") | ("POST", "/api/object/curve/sell") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let buy = path == "/api/object/curve/buy";
+            let token = unhex32(str_of(input, "token")?.trim()).map_err(|_| "the token is not a 64-hex asset")?;
+            let amount = crate::object_client::parse_amount(str_of(input, if buy { "amount" } else { "tokens" })?)?;
+            if !buy && amount.0 % objectvm::curve::LOT.0 != 0 {
+                return Err("sell whole lots of 12,500 tokens".into());
+            }
+            let zec = XZEC;
+            let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, if buy { zec } else { token }, amount)?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::CurveTrade {
+                trader: s.me,
+                program: zyn_vm::program::curve_trade(),
+                token,
+                buy,
+                amount_in: amount,
+                min_out: zyn_vm::Fixed::ZERO,
+                inputs: inputs.clone(),
+                change: change.clone(),
+                nonce,
+            })?;
+            Ok(json!({ "order": hex(&objectvm::curve::curve_order_id(&s.me, &nonce)) }))
+        }
+        ("POST", "/api/object/swap") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let pool_id = str_of(input, "pool")?.trim().to_lowercase();
+            let sell_a = input.get("sellA").and_then(Value::as_bool).ok_or("sellA is required")?;
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            let slippage = input.get("slippageBps").and_then(Value::as_u64).filter(|b| *b <= 1000).unwrap_or(100) as i128;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let p = m
+                .get("pools")
+                .and_then(Value::as_array)
+                .and_then(|a| a.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(&pool_id)).cloned())
+                .ok_or("no such pool")?;
+            let num = |k: &str| -> Result<i128, String> { p.get(k).and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or_else(|| format!("the pool has no {k}")) };
+            let fee = p.get("fee_bps").and_then(Value::as_i64).unwrap_or(0) as i128;
+            let (x, y) = if sell_a { (num("reserve_a")?, num("reserve_b")?) } else { (num("reserve_b")?, num("reserve_a")?) };
+            // A lone order at the batch price (objectvm::market::clear), less slippage.
+            let a = amount.0 * (10_000 - fee) / 10_000;
+            let quote = zyn_vm::fixed::mul_div(a, y, x + 2 * a).ok_or("quote overflow")?;
+            let min_out = zyn_vm::Fixed(quote * (10_000 - slippage) / 10_000);
+            let sold = unhex32(p.get(if sell_a { "a" } else { "b" }).and_then(Value::as_str).unwrap_or("")).map_err(|_| "bad pool asset")?;
+            let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, sold, amount)?;
+            let pool = unhex32(&pool_id).map_err(|_| "bad pool id")?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::Swap {
+                trader: s.me,
+                program: zyn_vm::program::amm_swap(),
+                pool,
+                sell_a,
+                amount_in: amount,
+                min_out,
+                inputs: inputs.clone(),
+                change: change.clone(),
+                nonce,
+            })?;
+            Ok(json!({ "order": hex(&objectvm::market::order_id(&s.me, &nonce)) }))
         }
         ("POST", "/api/object/buy") => {
             let (host, chain) = object_target(app);
@@ -2706,7 +2810,43 @@ fn next_market_nonce(app: &App, chain: u32) -> Result<[u8; 32], String> {
 
 /// Everything owed to this wallet: every claim its nonces can derive, asked
 /// for by id, since there is no "claims for this account" to ask.
+/// Submit an intent that carries a nonce, stepping past any nonce another
+/// Nap of the same holder already used — the chain refuses a reused source.
+/// Returns the nonce that took.
+fn submit_fresh(app: &App, host: &str, chain: u32, build: impl Fn([u8; 32]) -> objectvm::Op) -> Result<[u8; 32], String> {
+    for _ in 0..64 {
+        let nonce = next_market_nonce(app, chain)?;
+        match crate::object_client::submit(host, chain, &app.key(), build(nonce)) {
+            Err(e) if e.contains("nonce was already used") => continue,
+            other => {
+                other?;
+                return Ok(nonce);
+            }
+        }
+    }
+    Err("every nonce tried was already used".into())
+}
+
+/// A launchpad token's 32 bytes of meta: the ticker in the first 8 (1–8
+/// capitals or digits), the name in the other 24 (plain printable text),
+/// zero-padded — the browser wallet's `encodeMeta`, byte for byte.
+fn curve_meta(symbol: &str, name: &str) -> Result<[u8; 32], String> {
+    let sym = symbol.trim().to_uppercase();
+    let name = name.trim();
+    if sym.is_empty() || sym.len() > 8 || !sym.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+        return Err("a ticker is 1-8 letters or digits".into());
+    }
+    if name.is_empty() || name.len() > 24 || !name.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return Err("a name is 1-24 plain characters".into());
+    }
+    let mut meta = [0u8; 32];
+    meta[..sym.len()].copy_from_slice(sym.as_bytes());
+    meta[8..8 + name.len()].copy_from_slice(name.as_bytes());
+    Ok(meta)
+}
+
 fn owed_claims(app: &App, host: &str, chain: u32) -> Result<Vec<Value>, String> {
+    use objectvm::curve::{curve_order_id, curve_source};
     use objectvm::market::{claim_id, commit_id, launch_source, liquidity_id, listing_source, order_id};
     let key = app.key();
     let me = account(&key);
@@ -2714,7 +2854,15 @@ fn owed_claims(app: &App, host: &str, chain: u32) -> Result<Vec<Value>, String> 
     let mut ids = Vec::new();
     for n in 0..used + 24 {
         let nonce = market_nonce(&key, n);
-        for source in [order_id(&me, &nonce), liquidity_id(&me, &nonce), commit_id(&me, &nonce), launch_source(&me, &nonce), listing_source(&me, &nonce)] {
+        for source in [
+            order_id(&me, &nonce),
+            liquidity_id(&me, &nonce),
+            commit_id(&me, &nonce),
+            launch_source(&me, &nonce),
+            listing_source(&me, &nonce),
+            curve_order_id(&me, &nonce),
+            curve_source(&me, &nonce),
+        ] {
             for k in 0..3 {
                 ids.push(hex(&claim_id(&source, k)));
             }
@@ -3461,5 +3609,21 @@ mod gate_tests {
         assert_eq!(super::OBJECT_CHAIN, 212);
         assert_eq!(super::OBJECT_CHAIN_MAINNET, 26460);
         assert_ne!(super::DEFAULT_OBJECT_NODE, super::DEFAULT_OBJECT_NODE_MAINNET);
+    }
+}
+
+#[cfg(test)]
+mod curve_meta_tests {
+    /// The same bytes the browser's `encodeMeta` writes (apps/nap-web
+    /// market.js): a token made from desktop Nap must read back on Jade.
+    #[test]
+    fn meta_is_ticker_then_name_zero_padded() {
+        let m = super::curve_meta("ztest", " Zyn Test Stone ").unwrap();
+        assert_eq!(&m[..8], b"ZTEST\0\0\0");
+        assert_eq!(&m[8..22], b"Zyn Test Stone");
+        assert!(m[22..].iter().all(|b| *b == 0));
+        assert!(super::curve_meta("TOO-LONG1", "x").is_err());
+        assert!(super::curve_meta("OK", &"n".repeat(25)).is_err());
+        assert!(super::curve_meta("OK", "tab\there").is_err());
     }
 }
