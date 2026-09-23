@@ -61,7 +61,7 @@
           <span>Specimen / market</span><span>ZEC / token</span><span>Progress</span><span>ZEC setting</span><span>Address</span>
         </div>
         <div class="coin-gallery" id="coin-gallery" aria-live="polite"></div>
-        <p class="prototype-note" id="gallery-status">Waiting for the Nap Wallet provider. No public RPC is contacted by this page.</p>
+        <p class="prototype-note" id="gallery-status">Reading the yard from the chain…</p>
       </section>
 
       <section class="launch-view" data-view="launch" hidden aria-labelledby="launch-title">
@@ -81,17 +81,14 @@
           <form class="stone-form" id="stone-form" novalidate>
             <div class="panel-label"><span>ROUGH CERTIFICATE</span><b>LOCAL DRAFT</b></div>
             <div class="form-fields">
-              <label class="wide"><span>Stone name</span><input id="stone-name" type="text" value="Verdant Echo" maxlength="96" autocomplete="off" /></label>
-              <label><span>Ticker · exact Unicode</span><div><input id="stone-symbol" type="text" value="VECHO" autocomplete="off" /><b>≤32 bytes</b></div></label>
-              <label><span>Fixed supply</span><div><input id="stone-supply" type="text" value="1,000,000,000" readonly /><b>8 decimals</b></div></label>
-              <label><span>Trading fee</span><div><input id="stone-fee" type="number" value="1" min="0.5" max="3" step="0.01" /><b>%</b></div></label>
-              <label><span>Optional dev buy</span><div><input id="stone-dev-buy" type="number" value="0" min="0" max="50000000" step="0.00000001" /><b>tokens · max 5%</b></div></label>
-              <label><span>Maximum dev-buy cost</span><div><input id="stone-max-zec" type="number" value="0" min="0" step="0.000000000000000001" /><b>ZEC.zy</b></div></label>
-              <label class="wide"><span>Inscription</span><textarea id="stone-description" rows="4" maxlength="180">A private coordination coin looking for its market.</textarea></label>
+              <label class="wide"><span>Stone name</span><input id="stone-name" type="text" value="Verdant Echo" maxlength="24" autocomplete="off" /></label>
+              <label><span>Ticker</span><div><input id="stone-symbol" type="text" value="VECHO" maxlength="8" autocomplete="off" /><b>1–8 letters or digits</b></div></label>
+              <label><span>Fixed supply</span><div><input id="stone-supply" type="text" value="1,000,000,000" readonly /><b>all to buyers</b></div></label>
+              <p class="wide stone-terms" id="stone-terms">Reading this network's terms…</p>
             </div>
             <div class="fixed-seal"><i aria-hidden="true">玉</i><div><strong>One stone. One supply.</strong><p>No creator mint, rebasing, or supply edits after the rough enters the yard.</p></div><b>SEALED</b></div>
-            <div class="form-actions"><button id="save-stone" type="button">Keep in satchel</button><button id="launch-stone" type="submit" disabled>Place in the yard</button></div>
-            <p id="stone-status" aria-live="polite">This draft exists only in your browser session.</p>
+            <div class="form-actions"><button id="launch-stone" type="submit" disabled>Place in the yard</button></div>
+            <p id="stone-status" aria-live="polite">Nothing is placed until you approve it in Nap.</p>
           </form>
 
           <aside class="stone-preview" aria-label="Rough stone preview">
@@ -99,7 +96,6 @@
             <div class="stone-object" aria-hidden="true"><div class="stone-core"><span id="preview-letter">V</span></div><i></i><i></i><i></i></div>
             <p id="preview-symbol">VECHO</p>
             <h2 id="preview-name">Verdant Echo</h2>
-            <p id="preview-description">A private coordination coin looking for its market.</p>
             <dl><div><dt>Supply</dt><dd id="preview-supply">1B</dd></div><div><dt>Quote</dt><dd>ZEC.zy</dd></div><div><dt>Stage</dt><dd>Rough</dd></div><div><dt>Cut</dt><dd>Curve v1</dd></div></dl>
           </aside>
 
@@ -107,10 +103,11 @@
             <div class="panel-label"><span>YARD LAW</span><b>IMMUTABLE</b></div>
             <h2>No one knows the jade before the market does.</h2>
             <ul>
-              <li><span>Skin</span><strong>Manifest hash onchain</strong></li>
-              <li><span>Window</span><strong>Open bonding curve</strong></li>
-              <li><span>Reveal</span><strong>660M sold · 100 ZEC FDV</strong></li>
-              <li><span>Setting</span><strong>Locked ZynZap liquidity</strong></li>
+              <li><span>Name</span><strong>Ticker and name onchain</strong></li>
+              <li><span>Window</span><strong>One curve for every stone</strong></li>
+              <li><span>Reveal</span><strong>51,098 of 80,000 lots · ~17 ZEC · 47 ZEC FDV</strong></li>
+              <li><span>Setting</span><strong>Locked pool, no one holds its shares</strong></li>
+              <li><span>Fair</span><strong>Each epoch clears at one price</strong></li>
               <li><span>Return</span><strong>Curve sells stay open</strong></li>
             </ul>
           </aside>
@@ -136,29 +133,35 @@
               <path class="chart-line" d="M54 342 L870 64"/>
               <circle class="chart-end" id="chart-point" cx="54" cy="342" r="7"/>
             </svg>
-            <div class="chart-dates"><span>0 sold</span><span id="chart-progress">0% revealed</span><span>660M sold</span></div>
+            <div class="chart-dates"><span>0 lots</span><span id="chart-progress">0% revealed</span><span>51,098 lots</span></div>
           </section>
 
           <aside class="trade-ticket">
             <div class="trade-tabs"><button class="active" type="button" data-trade="buy">Pick</button><button type="button" data-trade="sell">Return</button></div>
-            <label><span id="trade-label">Exact token amount</span><div><input id="trade-input" type="number" min="0" step="0.00000001" value="1000000" /><b id="trade-unit">TOKEN</b></div></label>
+            <label><span id="trade-label">You put in</span><div><input id="trade-input" type="number" min="0" step="0.001" value="0.1" /><b id="trade-unit">ZEC.zy</b></div></label>
             <div class="trade-rate"><span id="trade-output-label">Quote</span><strong id="trade-output">—</strong></div>
             <dl><div><dt>Venue</dt><dd id="trade-route">Curve</dd></div><div><dt>Trading fee</dt><dd id="trade-fee">—</dd></div><div><dt>Limit</dt><dd id="trade-min">—</dd></div></dl>
-            <button class="trade-submit" type="button" disabled>Connect wallet to pick</button>
-            <p id="trade-status">Quotes come from the node through Nap Wallet; the page never contacts a public RPC.</p>
+            <button class="trade-submit" type="button">Connect wallet</button>
+            <button class="trade-collect" id="trade-collect" type="button" hidden>Collect what settled</button>
+            <p id="trade-status">Quotes are what you get if nobody else trades this epoch; everyone in an epoch shares one price.</p>
           </aside>
         </div>
 
         <section class="specimen-ledger" aria-label="Coin details">
           <article><span>Liquidity setting</span><strong id="coin-liquidity">18.4 ZEC.zy</strong><small>protocol locked</small></article>
           <article><span>Fixed supply</span><strong id="coin-supply">1B</strong><small>mint closed</small></article>
-          <article><span>Creator</span><strong id="coin-holders">—</strong><small>account address</small></article>
+          <article><span>Graduation pot</span><strong id="coin-pot">—</strong><small>fees kept for its pool</small></article>
           <article><span>Asset</span><strong id="coin-block">—</strong><small>immutable identity</small></article>
         </section>
       </section>
     </main>
 
+    <dialog class="jade-wallet" id="jade-wallet" aria-labelledby="jade-wallet-title">
+      <form method="dialog"><button class="jade-wallet-x" aria-label="Close">×</button></form>
+      <p class="eyebrow">WALLET</p><h2 id="jade-wallet-title">Connect Nap.</h2>
+      <div class="jade-wallet-body"></div>
+    </dialog>
     <footer><span>Cave Jade / launch.cavebro.win</span><span>Rough → Window → Reveal</span><a href="https://cavebro.win">Cave ecosystem ↗</a></footer>
-    <script type="module" src="/jade.js?v=20260913-jade-yard2"></script>
+    <script type="module" src="/jade.js?v=20260923-curves1"></script>
   </body>
 </html>

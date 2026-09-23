@@ -94,16 +94,22 @@ test('standalone fungible product uses the jade-yard identity and phase-one rule
   assert.doesNotMatch(jadeHtml, /Cave Signal|Make the market move|landing page/i);
 });
 
-test('Jade reads live launches only through the injected provider', () => {
+test('Jade reads the public yard from the chain and acts only through Nap (§141)', () => {
   assert.match(jadeJs, /renderGallery/);
   assert.match(jadeJs, /renderPreview/);
   assert.match(jadeJs, /\[0-9a-f\]\{64\}/);
-  assert.match(jadeJs, /Nothing was published/);
-  assert.match(jadeJs, /window\.zyn/);
-  for (const method of ['zyn_curves', 'zyn_curve', 'zyn_curveQuote', 'zyn_launchCurve', 'zyn_buyCurve', 'zyn_sellCurve', 'zyn_quote', 'zyn_swap']) {
-    assert.match(jadeJs, new RegExp(method));
-  }
-  assert.doesNotMatch(jadeJs, /fetch\(/);
+  // One fetch: the chain's public market, with no credentials.
+  assert.equal((jadeJs.match(/fetch\(/g) || []).length, 1);
+  assert.match(jadeJs, /rpc\('zyn_market'\)/);
+  assert.match(jadeJs, /credentials: 'omit'/);
+  // Every write through Nap Connect, approved in Nap.
+  assert.match(jadeJs, /from '\.\/nap-connect\.js'/);
+  for (const method of ['zyn_curveCreate', 'zyn_curveBuy', 'zyn_curveSell', 'zyn_swap', 'zyn_collect']) assert.match(jadeJs, new RegExp(`'${method}'`));
+  assert.doesNotMatch(jadeJs, /window\.zyn/);
+  // The curve is consensus: the page mirrors it, it does not choose it.
+  assert.match(jadeJs, /lots: 80_000, lotTokens: 12_500n, baseZat: 7_721n, slopeZat: 1n, graduateAt: 51_098/);
+  // The wallet override is for localhost only.
+  assert.match(jadeJs, /LOCAL && params\.get\('nap'\)/);
   assert.doesNotMatch(jadeHtml, /Illustrative market data|Illustrative quote|seven day price/i);
   assert.match(jadeHtml, /deterministic bonding curve/i);
 });
@@ -112,16 +118,16 @@ test('standalone build emits only the dedicated Jade product', () => {
   assert.match(standaloneBuild, /jade\.html/);
   assert.match(standaloneBuild, /jade\.css/);
   assert.match(standaloneBuild, /jade\.js/);
+  assert.match(standaloneBuild, /nap-connect\.js/);
   assert.match(jadeHtml, /launch\.cavebro\.win/);
   assert.match(jadeHtml, /value="1,000,000,000" readonly/);
-  assert.match(jadeHtml, /Ticker · exact Unicode/);
-  assert.match(jadeHtml, /660M sold · 100 ZEC FDV/);
-  assert.match(jadeJs, /feeBps: Math\.round/);
-  assert.match(jadeJs, /bytes\.length <= 32/);
-  assert.match(jadeJs, /0\.009 seeds the pair and 0\.001 goes to Treasury 26460/);
-  assert.match(jadeJs, /OFFICIAL_ASSETS/);
-  assert.match(jadeHeaders, /connect-src 'none'/);
+  assert.match(jadeHtml, /51,098 of 80,000 lots · ~17 ZEC · 47 ZEC FDV/);
+  assert.doesNotMatch(jadeHtml, /stone-fee|stone-dev-buy|660M/);
+  // Nap's window must be able to answer the page that opened it.
+  assert.match(jadeHeaders, /Cross-Origin-Opener-Policy: same-origin-allow-popups/);
+  assert.match(jadeHeaders, /connect-src https:\/\/zyn-rpc\.cavebro\.win;/);
   assert.match(jadeHeaders, /chrome-extension:/);
+  assert.match(jadeHeaders, /frame-ancestors 'none'/);
   assert.match(standaloneBuild, /jade-headers/);
   assert.doesNotMatch(standaloneBuild, /sourceHtml|sourceCss|launchpadMarkup|app\.js/);
 });

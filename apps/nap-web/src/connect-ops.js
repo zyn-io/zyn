@@ -63,6 +63,31 @@ function heldItem(h, asset) {
   return { note, item };
 }
 
+// ---------------------------------------------------------------------------
+// Bonding curves (objectvm::curve, DECISIONS §141).
+// ---------------------------------------------------------------------------
+
+const isInt = (v) => typeof v === 'string' && /^\d{1,40}$/.test(v);
+const validCurve = (c) => isHex(c.token) && isHex(c.quote) && isHex(c.meta)
+  && ['reserve', 'graduation', 'creator_fees', 'bond', 'price_per_token'].every((k) => isInt(c[k]))
+  && Number.isSafeInteger(c.sold) && c.sold >= 0 && typeof c.graduated === 'boolean';
+
+async function curveBook(ctx) {
+  const market = await ledger.call(ctx.config, 'zyn_market');
+  const curves = (market.curves || []).filter(validCurve).map((c) => ({ ...c, ...(mk.decodeMeta(c.meta) || { symbol: '?', name: 'Unnamed' }) }));
+  return { market, curves, terms: market.curve_terms || { set: false, fee_bps: 0, bond: '0' } };
+}
+
+async function oneCurve(ctx, token) {
+  if (!isHex(token)) throw bad('token must be 64 hex characters');
+  const { market, curves, terms } = await curveBook(ctx);
+  const c = curves.find((x) => x.token === token);
+  if (!c) throw bad('No token on a curve has that address');
+  return { market, c, terms };
+}
+
+const tokenText = (raw) => { const v = BigInt(raw) / WAD; return v.toLocaleString('en-US'); };
+
 export const METHODS = {
   nap_connect: { kind: 'connect' },
   nap_session: { kind: 'session' },
@@ -99,7 +124,147 @@ export const METHODS = {
     run: async (ctx) => ({ owed: (await ledger.loadOwed(ctx.config, ctx.identity)).map((r) => ({ id: r.id, asset: r.asset, amount: r.amount })) }),
   },
 
+  zyn_curves: {
+    kind: 'public',
+    run: async (ctx) => { const { curves, terms } = await curveBook(ctx); return { curves, terms, curve: mk.CURVE }; },
+  },
+  zyn_curveHoldings: {
+    kind: 'read',
+    run: async (ctx) => {
+      const { curves } = await curveBook(ctx);
+      const h = await holdings(ctx);
+      return {
+        holdings: curves.map((c) => ({ token: c.token, symbol: c.symbol, name: c.name, amount: String(h.balances.get(c.token) || 0n) }))
+          .filter((x) => x.amount !== '0'),
+      };
+    },
+  },
+
   // --- writes ---------------------------------------------------------------
+
+  zyn_curveCreate: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const meta = mk.encodeMeta({ symbol: p.symbol, name: p.name });
+      const { terms } = await curveBook(ctx);
+      const bond = BigInt(terms.bond || '0');
+      return {
+        title: `Create ${String(p.symbol).toUpperCase()}`,
+        rows: [
+          ['Name', String(p.name).trim()],
+          ['Supply', '1,000,000,000 — all sold on the curve or put in its pool; none to you'],
+          ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about 17 ZEC.zy raised), into a locked pool`],
+          ['Bond', bond ? `${wadText(bond)} ZEC.zy, returned when it graduates` : 'none'],
+          ['Your share', terms.fee_bps ? `10% of its trading fees, paid when it graduates` : 'none (no fee is set)'],
+        ],
+        note: 'Anyone can buy it from the next epoch. You own none unless you buy, at the same price as everybody.',
+        run: async () => {
+          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
+          let inputs = [], change = [];
+          if (bond > 0n) {
+            const h = await holdings(ctx);
+            ({ inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), bond));
+          }
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.createCurveIntent({
+            creator: ctx.identity.account, nonce, quote: unhex(ctx.config.zecAsset), meta, inputs, change,
+          }));
+          return { token: hex(mk.tokenOf(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_curveBuy: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const { c } = await oneCurve(ctx, p.token);
+      if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
+      const amount = parseAmount(String(p.amount ?? ''));
+      if (amount < mk.MIN_CURVE_BUY) throw bad('A buy is at least 0.001 ZEC.zy');
+      const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps);
+      if (q.lots === 0) throw bad('That buys less than one lot at the current price');
+      const minLots = p.minTokens != null ? BigInt(parseAmount(String(p.minTokens))) / mk.LOT : 0n;
+      return {
+        title: `Buy ${c.symbol} with ${wadText(amount)} ZEC.zy`,
+        rows: [
+          ['Token', `${c.name} (${c.symbol})`],
+          ['If nobody else buys this epoch', `${tokenText(q.tokens)} tokens`],
+          ['Fee', c.fee_bps ? `${wadText(q.fee)} ZEC.zy (${c.fee_bps / 100}%)` : 'none'],
+          ['Unspent', `${wadText(q.refund)} ZEC.zy comes back`],
+          ...(minLots ? [['At least', `${tokenText(minLots * mk.LOT)} tokens, or the whole buy comes back`]] : []),
+        ],
+        note: 'Everyone buying this epoch pays one price, set when it closes; nobody can buy ahead of you. Collect the tokens once it settles.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), amount);
+          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.curveTradeIntent({
+            trader: ctx.identity.account, token: unhex(c.token), buy: true, amountIn: amount, minOut: minLots * mk.LOT, inputs, change, nonce,
+          }));
+          return { order: hex(mk.curveOrderId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_curveSell: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const { c } = await oneCurve(ctx, p.token);
+      if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
+      const tokens = parseAmount(String(p.tokens ?? ''));
+      if (tokens % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
+      const lots = Number(tokens / mk.LOT);
+      const q = mk.previewCurveSell(c.sold, lots, c.fee_bps);
+      return {
+        title: `Sell ${tokenText(tokens)} ${c.symbol}`,
+        rows: [
+          ['If nobody else sells this epoch', `${wadText(q.net)} ZEC.zy`],
+          ['Fee', c.fee_bps ? `${wadText(q.fee)} ZEC.zy (${c.fee_bps / 100}%)` : 'none'],
+        ],
+        note: 'Sellers this epoch share one price, set when it closes. Collect the ZEC.zy once it settles.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.token), tokens);
+          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.curveTradeIntent({
+            trader: ctx.identity.account, token: unhex(c.token), buy: false, amountIn: tokens, minOut: 0n, inputs, change, nonce,
+          }));
+          return { order: hex(mk.curveOrderId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_swap: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      if (!isHex(p.pool)) throw bad('pool must be 64 hex characters');
+      const market = await ledger.call(ctx.config, 'zyn_market');
+      const pool = (market.pools || []).find((x) => x.id === p.pool);
+      if (!pool) throw bad('No such pool');
+      const sellA = !!p.sellA;
+      const amountIn = parseAmount(String(p.amount ?? ''));
+      const quote = mk.quoteAlone(pool, sellA, amountIn);
+      const slippage = Number.isInteger(p.slippageBps) && p.slippageBps >= 0 && p.slippageBps <= 1000 ? p.slippageBps : 100;
+      const minOut = mk.withSlippage(quote, slippage);
+      const sold = sellA ? pool.a : pool.b;
+      return {
+        title: `Swap in pool ${p.pool.slice(0, 8)}…`,
+        rows: [['You put in', wadText(amountIn)], ['If nobody else trades this epoch', wadText(quote)], ['At least', `${wadText(minOut)} (${slippage / 100}% slippage)`]],
+        note: 'Swaps in one epoch clear together at one price.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(sold), amountIn);
+          const nonce = ledger.nextNonce(ctx.config, ctx.identity);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.swapIntent({
+            trader: ctx.identity.account, pool: unhex(p.pool), sellA, amountIn, minOut, nonce, inputs, change,
+          }));
+          return { order: hex(mk.orderId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
 
   zec_pay: {
     kind: 'write',
@@ -127,8 +292,8 @@ export const METHODS = {
         ],
         note: 'A Zcash transaction from this wallet. Proving it takes about half a minute; keep this window open.',
         run: async (onStep) => {
-          await ctx.zec();
-          const v = await ctx.zecAccount().send(req.address, req.zatoshi, req.memo, onStep);
+          const account = await ctx.zecReady();
+          const v = await account.send(req.address, req.zatoshi, req.memo, onStep);
           return { txid: v.txid };
         },
       };

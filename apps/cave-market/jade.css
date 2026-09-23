@@ -287,3 +287,18 @@ footer a { color: #d8e6e0; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Nap Connect: the wallet dialog, the terms line and the collect button. */
+.stone-terms { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--jade, #06483d); }
+.trade-collect { width: 100%; margin-top: 10px; padding: 11px; border: 1px solid var(--jade, #06483d); background: transparent; color: var(--jade, #06483d); font: inherit; cursor: pointer; }
+.jade-wallet { width: min(420px, calc(100% - 32px)); padding: 26px; border: 1px solid #2c6b58; background: #031b17; color: #e6f5ee; }
+.jade-wallet::backdrop { background: #000a; }
+.jade-wallet h2 { margin: 6px 0 16px; }
+.jade-wallet-x { position: absolute; top: 10px; right: 14px; border: 0; background: none; color: inherit; font-size: 24px; cursor: pointer; }
+.jade-wallet-body { display: grid; gap: 10px; }
+.jade-wallet-option { display: grid; gap: 3px; width: 100%; padding: 13px 14px; border: 1px solid #2c6b58; background: #06251f; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.jade-wallet-option:hover, .jade-wallet-option:focus-visible { border-color: #35d8a0; outline: none; }
+.jade-wallet-option small { color: #9fd9c3; }
+.jade-wallet-status { min-height: 18px; margin: 0; font-size: 13px; color: #35d8a0; }
+.jade-wallet-fine { margin: 0; font-size: 12px; color: #9fd9c3; }
+.jade-wallet-off { padding: 10px; border: 1px solid #2c6b58; background: none; color: inherit; font: inherit; cursor: pointer; }

@@ -6335,3 +6335,24 @@ share ZIP-321 payment requests.
 | 140.6 | **ZEC requests are ZIP-321** (`zec_pay {uri}`), single-recipient; a multi-payment or unknown `req-` request is refused whole. One parser (`nap-web/src/zip321.js`) serves the browser wallet, its Send field and the extension build | ✅ |
 | 140.7 | **The Cave store connects through Nap Connect:** a header button and picker (extension, Nap in the browser). It reads only the public order book itself (`zyn_offers`, no credentials) so anyone can browse; everything about the holder goes through their Nap. A localhost-only `?nap=` override exists for development and is not read on the real domain | ✅ |
 
+## §141 — Pump.fun-style launches on the object ledger (23 Sep 2026)
+
+The user chose a pump.fun-style launchpad and adopted the fee package. Studied
+first: pump.fun's virtual constant product, §69's linear curve, and shld.fun,
+a live launchpad on Zcash. Its "ZSA" tokens are not native assets but an
+operator-kept ledger whose events ride ordinary Ironwood payments — 332
+tokens in 16 days, 18 graduated, 244 of the rest under 1% sold, 24 h volume
+7.5 ZEC (99% one token), no creator rewards, 3% buy fee.
+
+| # | Decision | |
+|---|---|---|
+| 141.1 | **One curve for every token, in consensus** (`objectvm::curve`): 1B supply in 80,000 lots of 12,500; lot i costs 7,721 + i zatoshi; graduation at lot 51,098 — 17.00005 ZEC raised, 47 ZEC FDV, 7.62× from the start, pump.fun's shape in dollars at today's ZEC. A creator cannot tune it against buyers | 🔒 |
+| 141.2 | **Linear, not virtual constant product, because of batches.** With each epoch's buys at the average price over the lots they take, the raise to graduate is exactly the integral however the flow arrives, so the pool (the unsold 28,902 lots and everything raised) opens within 0.0011% of the curve's last price. Virtual constant product under FM-AMM batching makes the raise path-dependent (20–42 ZEC for a 20 ZEC target) | 🔒 |
+| 141.3 | **Each epoch settles at the seal, sells then buys, each side at one average price, buyers pro rata by budget.** Order is the VM's rule, never arrival, so neither the sequencer nor a bot gains by ordering; one epoch can never buy past graduation, and the crossing epoch fills to the end and refunds the rest. Every rounding favours the curve: the reserve always covers buying back every lot sold | 🔒 |
+| 141.4 | **Tokens exist only as bought:** issued on a buy, burned on a sell, the remainder issued into the pool at graduation. No creator allocation; the creator buys like anyone | ✅ |
+| 141.5 | **Fees (adopted package), operator-set with `SetCurveTerms`, fixed per token at creation:** a fee on the quote side of every curve trade (on top of a buy, out of a sell), split 50% ZYN pot / 40% the token's graduation liquidity / 10% creator; a creation bond. Creator share and bond are paid only at graduation. Ceilings 2% and 1 ZEC.zy. Graduated pools 30 bps, kept by the pool. **Testnet 212: 100 bps, no bond (23 Sep). Mainnet: not set** | ✅ |
+| 141.6 | **Graduation is atomic:** a locked pool (every share, nobody holds any), the creator's escrow and bond paid, the curve closed. The graduation pot joins the pool, which opens slightly above the curve's last price — buyers' fees deepen the market rather than the operator | 🔒 |
+| 141.7 | **A curve token cannot be pooled before graduation** — the pool it graduates into cannot be squatted — **nor withdrawn** (it is derived) | 🔒 |
+| 141.8 | **Nap-only.** Tokens live on Zyn and no other Zcash wallet can show them, so there is no "buy from any wallet" path. Sites reach Nap through Nap Connect: `zyn_curves` (public), `zyn_curveHoldings`, `zyn_curveCreate`, `zyn_curveBuy`, `zyn_curveSell`, `zyn_swap`, `zyn_collect` | ✅ |
+| 141.9 | **Cave Jade is the launchpad's site:** the public yard read straight from the chain (anyone can browse), every write through Nap. Its COOP becomes `same-origin-allow-popups` so Nap's window can answer; `connect-src` admits only the chain's RPC. §69.35's provider-only rule is superseded for public reads | ✅ |
+

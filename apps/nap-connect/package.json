@@ -6,7 +6,8 @@
   "description": "How a site finds a Nap wallet and talks to it.",
   "scripts": {
     "e2e": "node tests/web.e2e.mjs",
-    "e2e:extension": "node tests/extension.e2e.mjs"
+    "e2e:extension": "node tests/extension.e2e.mjs",
+    "e2e:jade": "node tests/jade.e2e.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1"

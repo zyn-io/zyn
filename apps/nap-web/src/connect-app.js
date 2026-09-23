@@ -75,14 +75,18 @@ function context() {
   return {
     config,
     identity,
+    // The address, from the keys alone.
     zec: hasZec ? async () => {
-      if (!zecAccount) {
-        zecAccount = new ZecAccount({ sk: identity.zec[zecNet()], network: zecNet(), url: config.lightdUrl, birthday: config.zecBirthday });
-        zecView = await zecAccount.open();
-      }
+      if (!zecAccount) zecAccount = new ZecAccount({ sk: identity.zec[zecNet()], network: zecNet(), url: config.lightdUrl, birthday: config.zecBirthday });
+      if (!zecView) zecView = await zecAccount.peek();
       return zecView;
     } : null,
-    zecAccount: () => zecAccount,
+    // A wallet ready to pay: seeded and synced, which needs the block server.
+    zecReady: hasZec ? async () => {
+      if (!zecAccount) zecAccount = new ZecAccount({ sk: identity.zec[zecNet()], network: zecNet(), url: config.lightdUrl, birthday: config.zecBirthday });
+      zecView = await zecAccount.open();
+      return zecAccount;
+    } : null,
   };
 }
 

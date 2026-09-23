@@ -15,6 +15,7 @@ await Promise.all([
   writeFile(new URL('index.html', output), html),
   writeFile(new URL('jade.css', output), css),
   writeFile(new URL('jade.js', output), js),
+  cp(new URL('nap-connect.js', root), new URL('nap-connect.js', output)),
   writeFile(new URL('_redirects', output), '/* /index.html 200\n'),
   cp(new URL('jade-headers', root), new URL('_headers', output)),
   cp(new URL('assets/fonts/DM-Sans.ttf', root), new URL('assets/fonts/DM-Sans.ttf', output)),

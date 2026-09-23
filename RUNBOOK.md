@@ -2594,6 +2594,29 @@ Ironwood note* while the money sits there. Each batch is persisted, so a
 restart resumes rather than starting again — catch-up from the vault's birth
 is hours, not minutes. **Do not quote a completion time for it.**
 
+## 5f-quaterdecies. The launchpad: curve terms, testnet, a local devnet (23 Sep 2026)
+
+**Terms** (operator, `zyn_submit` with the node's token, never printed): intent
+`25 ‖ program("configure-curves") ‖ fee_bps u32 ‖ bond i128` (DECISIONS §141.5).
+Testnet 212 has 100 bps and no bond. Ceilings: 2%, 1 ZEC.zy. A token keeps the
+fee in force when it was made.
+
+**Replicas must understand ops 23–25 before any curve intent reaches their
+chain**, or they stop verifying at the first one. Contabo's testnet replica was
+updated 23 Sep (backup `/root/zyn-object-replica.bak-20260923`).
+
+**A local devnet for the whole life** (graduation needs ~17 ZEC.zy, more than
+testnet faucets give): run `zyn-object-node` with `ZYN_CHAIN_ID=212`, its own
+`ZYN_DATA_DIR`, and a `ZYN_SUBMIT_TOKEN` of 32+ characters (shorter is refused);
+no anchoring config means a devnet. Credit test ZEC.zy with an operator
+`Deposit` (op 6) sealed to the account's viewing key — the same shape
+`ingress::credit` builds. Point nap-web's preview at it with
+`NAP_DEV_RPC=http://127.0.0.1:8399`.
+
+**Jade** builds with `npm run build:launchpad` (to `apps/cave-market/dist`,
+which the store build also uses — build one, deploy it, then the other) and
+deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
+
 ## 5f-terdecies. The block servers' HTTP door, for browser Nap (23 Sep 2026)
 
 `zyn-lightd` answers HTTP as well as its TCP frames when `ZYN_LIGHTD_HTTP` is

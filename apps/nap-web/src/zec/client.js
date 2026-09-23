@@ -137,12 +137,20 @@ export class ZecAccount {
     this.saving = this.saving.then(() => saveState(this.sk, this.network, copy));
   }
 
-  /// `fresh` is true for a wallet made today: nothing can have been paid to
-  /// it before now, so it starts at the tip rather than scanning back.
-  async open({ fresh = false } = {}) {
+  /// The wallet from its keys and whatever state this device kept — no
+  /// network. Enough for the address, which is all connecting to a site needs;
+  /// a block server that is down must not stop anyone connecting.
+  async peek() {
     await ask('endpoint', [this.url]);
     const state = await loadState(this.sk, this.network);
     this.view = await ask('open', [this.sk, this.network, state]);
+    return this.view;
+  }
+
+  /// `fresh` is true for a wallet made today: nothing can have been paid to
+  /// it before now, so it starts at the tip rather than scanning back.
+  async open({ fresh = false } = {}) {
+    await this.peek();
     if (!this.view.hasState) {
       this.view = await ask('seed', [fresh ? null : this.birthday]);
       this.keep(this.view.state);

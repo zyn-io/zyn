@@ -50,6 +50,10 @@ unsupported, `-32602` bad parameters.
 | `zyn_nftOffers` | nothing (public order book) | `{offers}` |
 | `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` |
 | `zyn_nftBuy {item, pay}`, `zyn_nftList {asset, price}`, `zyn_nftCancel {asset}`, `zyn_nftRedeem {asset}`, `zyn_collect` | connected + approval | what happened |
+| `zyn_curves` | nothing (public) | `{curves, terms, curve}` |
+| `zyn_curveHoldings` | connected | `{holdings: [{token, symbol, name, amount}]}` |
+| `zyn_curveCreate {symbol, name}` | connected + approval | `{token}` |
+| `zyn_curveBuy {token, amount, minTokens?}`, `zyn_curveSell {token, tokens}`, `zyn_swap {pool, sellA, amount, slippageBps?}` | connected + approval | `{order}` — settles at the seal; collect with `zyn_collect` |
 
 Connecting shows the site the Zyn account and a Zcash address — never a
 balance, a note or a key. An unconnected site that asks for anything about
