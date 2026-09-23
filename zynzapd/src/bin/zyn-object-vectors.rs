@@ -161,6 +161,24 @@ fn main() {
     println!("    \"vm_id\": \"{}\",", hex(&auth.vm_id));
     println!("    \"payload\": \"{}\",", hex(&payload));
     println!("    \"frame\": \"{}\"", hex(&zyn_vm::verify::encode_authorized::<objectvm::ObjectVm>(&authorized)));
+    println!("  }},");
+
+    // The market: program ids, derived ids, and one of every intent, with a
+    // fixed change note so the browser can rebuild each byte for byte.
+    let c = zynzapd::market_vectors::change();
+    println!("  \"market\": {{");
+    println!("    \"zec\": \"{}\",", hex(&zynzapd::market_vectors::ZEC));
+    println!("    \"token\": \"{}\",", hex(&zynzapd::market_vectors::TOKEN));
+    println!("    \"owner\": \"{}\",", hex(&zynzapd::market_vectors::OWNER));
+    println!("    \"nonce\": \"{}\",", hex(&zynzapd::market_vectors::NONCE));
+    println!("    \"change_nonce\": \"{}\",", hex(&c.note.nonce));
+    println!("    \"change_epk\": \"{}\",", hex(&c.enc.epk));
+    println!("    \"change_ciphertext\": \"{}\",", hex(&c.enc.ciphertext));
+    let v = zynzapd::market_vectors::vectors();
+    for (i, (k, val)) in v.iter().enumerate() {
+        let comma = if i + 1 == v.len() { "" } else { "," };
+        println!("    \"{k}\": \"{val}\"{comma}");
+    }
     println!("  }}");
     println!("}}");
 }

@@ -209,3 +209,15 @@ fn the_pinned_signed_frame_still_matches() {
         field(signed, "frame")
     );
 }
+
+/// Every market id and intent still encodes to the bytes the browser is held
+/// to. A program id or tag that moved would have the wallet sign intents the
+/// VM runs under a different rule, or refuses.
+#[test]
+fn the_market_vectors_still_match() {
+    let j = fixture();
+    let section = &j[j.find("\"market\"").expect("the fixture has a market section")..];
+    for (name, want) in zynzapd::market_vectors::vectors() {
+        assert_eq!(field(section, name), want, "{name} moved");
+    }
+}

@@ -122,6 +122,23 @@ pub fn take_offer() -> ProgramId {
     named(b"take-offer")
 }
 
+/// Redeem what the ledger owes an account — a swap's proceeds, a refund, a
+/// launch allocation — into objects its owner encrypted for themselves.
+pub fn claim() -> ProgramId {
+    named(b"claim")
+}
+
+/// Open a token sale: issue a token into escrow against a raise.
+pub fn launch_create() -> ProgramId {
+    named(b"launch-create")
+}
+
+/// Commit to a sale. Escrowed until the sale closes, then allocated at one
+/// price for everybody or refunded.
+pub fn launch_commit() -> ProgramId {
+    named(b"launch-commit")
+}
+
 /// A program named by its code rather than by a rule the VM knows.
 ///
 /// `code` is the hash of the program as shipped — an rv32im ELF, per §2.5's
@@ -152,6 +169,9 @@ pub fn is_named(id: &ProgramId) -> bool {
         deposit(),
         register_viewing_key(),
         settle_exit(),
+        claim(),
+        launch_create(),
+        launch_commit(),
     ]
     .contains(id)
 }
@@ -176,6 +196,9 @@ mod tests {
             deposit(),
             register_viewing_key(),
             settle_exit(),
+            claim(),
+            launch_create(),
+            launch_commit(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

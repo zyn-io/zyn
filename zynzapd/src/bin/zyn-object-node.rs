@@ -153,6 +153,66 @@ fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
     (vm.chain_id == chain).then_some(vm)
 }
 
+/// Pools and sales, public by design. Amounts are raw WAD integers as
+/// strings: a wallet computes prices from them in `BigInt` and must never
+/// round a reserve through a double.
+fn market_json(vm: &ObjectVm) -> String {
+    use objectvm::market::{lp_asset, LaunchState};
+    let pools: Vec<String> = vm
+        .market
+        .pools
+        .iter()
+        .map(|(id, p)| {
+            format!(
+                "{{\"id\":\"{}\",\"a\":\"{}\",\"b\":\"{}\",\"reserve_a\":\"{}\",\"reserve_b\":\"{}\",\"shares\":\"{}\",\"locked\":\"{}\",\"fee_bps\":{},\"lp\":\"{}\",\"pending\":{}}}",
+                hex(id),
+                hex(&p.a),
+                hex(&p.b),
+                p.reserve_a.0,
+                p.reserve_b.0,
+                p.shares.0,
+                p.locked.0,
+                p.fee_bps,
+                hex(&lp_asset(id)),
+                vm.market.orders.iter().filter(|o| &o.pool == id).count()
+            )
+        })
+        .collect();
+    let launches: Vec<String> = vm
+        .market
+        .launches
+        .iter()
+        .map(|(t, l)| {
+            format!(
+                "{{\"token\":\"{}\",\"quote\":\"{}\",\"total_supply\":\"{}\",\"sale_supply\":\"{}\",\"pool_supply\":\"{}\",\"soft_cap\":\"{}\",\"hard_cap\":\"{}\",\"pool_bps\":{},\"fee_bps\":{},\"closes_at_epoch\":{},\"meta\":\"{}\",\"raised\":\"{}\",\"state\":\"{}\"}}",
+                hex(t),
+                hex(&l.quote),
+                l.total_supply.0,
+                l.sale_supply.0,
+                l.pool_supply.0,
+                l.soft_cap.0,
+                l.hard_cap.0,
+                l.pool_bps,
+                l.fee_bps,
+                l.closes_at_epoch,
+                hex(&l.meta),
+                l.raised.0,
+                match l.state {
+                    LaunchState::Open => "open",
+                    LaunchState::Graduated => "graduated",
+                    LaunchState::Failed => "failed",
+                }
+            )
+        })
+        .collect();
+    format!(
+        "{{\"epoch\":{},\"pools\":[{}],\"launches\":[{}]}}",
+        vm.epoch,
+        pools.join(","),
+        launches.join(",")
+    )
+}
+
 /// The one-line JSON the status op answers with.
 /// The recent anchors this node has published, oldest first.
 ///
@@ -312,33 +372,16 @@ fn record(pub_log: &mut Published, op: &Op) {
                 add(&c, enc);
             }
         }
-        Op::Spend { inputs, outputs, .. } | Op::Withdraw { inputs, outputs, .. } => {
-            for (_, n) in inputs {
-                pub_log.nullifiers.push(hex(n));
+        other => {
+            for n in other.retired() {
+                pub_log.nullifiers.push(hex(&n));
             }
-            for o in outputs {
+            for o in other.created() {
                 if let Ok(c) = zyn_vm::object::commitment(&o.note) {
                     add(&c, &o.enc);
                 }
             }
         }
-        Op::TakeOffer {
-            item_nullifier,
-            payment,
-            outputs,
-            ..
-        } => {
-            pub_log.nullifiers.push(hex(item_nullifier));
-            for (_, n) in payment {
-                pub_log.nullifiers.push(hex(n));
-            }
-            for o in outputs {
-                if let Ok(c) = zyn_vm::object::commitment(&o.note) {
-                    add(&c, &o.enc);
-                }
-            }
-        }
-        _ => {}
     }
 }
 
@@ -480,6 +523,43 @@ fn handle(
             format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"total\":{},\"offers\":[{}]}}}}",
                 vm.offers.len(),
+                rows.join(",")
+            )
+        }
+        // The market's public face: every pool's reserves and every sale's
+        // terms and raise. What a market cannot work without, and nothing
+        // about who is in it (`objectvm::market`).
+        "zyn_market" => {
+            let n = node.lock().unwrap();
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}",
+                market_json(n.state())
+            )
+        }
+        // What the ledger owes, by claim id. Ids derive from a nonce only
+        // the owner holds, so this answers the owner and nobody else — there
+        // is deliberately no "claims for this account" to ask.
+        "zyn_claims" => {
+            let Some(list) = field(body, "ids") else {
+                return err("no ids");
+            };
+            let n = node.lock().unwrap();
+            let mut rows = Vec::new();
+            for id in list.split(',').filter(|s| !s.is_empty()).take(256) {
+                let Some(key) = unhex(id).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                    return err("an id is not 32 hex bytes");
+                };
+                if let Some(c) = n.state().market.claims.get(&key) {
+                    rows.push(format!(
+                        "{{\"id\":\"{}\",\"asset\":\"{}\",\"amount\":\"{}\"}}",
+                        hex(&key),
+                        hex(&c.asset),
+                        c.amount.0
+                    ));
+                }
+            }
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{}]}}",
                 rows.join(",")
             )
         }
@@ -647,7 +727,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers and zyn_depositAddress"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims and zyn_depositAddress"
     )
 }
 
@@ -1465,11 +1545,29 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         confirmations,
         settler,
         da_dir: std::path::PathBuf::from(env("ZYN_DA_DIR", &format!("{dir}/da"))),
-        da_key: std::env::var("ZYN_DA_KEY")
-            .ok()
-            .and_then(|k| zynzapd::dacrypt::key_from_hex(&k).ok()),
+        da_key: da_key(),
         data_dir: std::path::PathBuf::from(dir),
     })
+}
+
+/// The key the published journals are sealed under. A key that is set but
+/// unreadable stops the node: falling back to publishing in the clear would
+/// hand every holder's intents to the public.
+fn da_key() -> Option<[u8; 32]> {
+    let v = std::env::var("ZYN_DA_KEY").ok().filter(|s| !s.trim().is_empty());
+    match v {
+        None => {
+            eprintln!("zyn-object-node: no ZYN_DA_KEY — journals will be published UNSEALED");
+            None
+        }
+        Some(v) => match zynzapd::dacrypt::key_from_hex(v.trim()) {
+            Ok(k) => Some(k),
+            Err(_) => {
+                eprintln!("zyn-object-node: ZYN_DA_KEY is set but is not 64 hex characters; refusing to start");
+                std::process::exit(2);
+            }
+        },
+    }
 }
 
 /// Write both note trees where the next boot will look for them.
@@ -1492,7 +1590,10 @@ fn main() {
     let listen = env("ZYN_LISTEN", "127.0.0.1:8399");
     let dir = env("ZYN_DATA_DIR", "./object-data");
     let epoch_secs: u64 = env("ZYN_EPOCH_SECS", "10").parse().unwrap_or(10);
-    let max_io: u32 = env("ZYN_MAX_IO", "16").parse().unwrap_or(16);
+    let max_io: u32 = std::env::var("ZYN_MAX_IO")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(zynzapd::object_verify::DEFAULT_MAX_IO);
 
     // Anchoring is opt-in and all-or-nothing. Without a vault to pay from and
     // a Zcash node to watch, a root reaches nothing and the banner below says
@@ -2334,5 +2435,219 @@ mod signed_door {
         r.node.lock().unwrap().submit_operator(ObjectVm::seal_intent(), now_secs());
         let v = r.submit(&register_frame(&key, &key, 0));
         assert!(v["error"]["message"].as_str().unwrap_or_default().contains("Expired"), "wrong reason: {v}");
+    }
+}
+
+#[cfg(test)]
+mod market_door {
+    //! The market through the node: signed intents in, public state and
+    //! claims out, and every created object published for its owner to find.
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use objectvm::market;
+    use zyn_vm::auth::{signing_payload, Authorization};
+    use zyn_vm::spec::MicrochainVm;
+    use zyn_vm::verify::{authorize_intent, encode_authorized, Credential};
+    use zyn_vm::Fixed;
+
+    const CHAIN: u32 = 212;
+    const ZEC: [u8; 32] = [0x10; 32];
+    const USD: [u8; 32] = [0xF0; 32];
+
+    struct Rig {
+        node: Arc<Mutex<Node<ObjectVm>>>,
+        journal: Arc<Mutex<Journal>>,
+        pub_log: Arc<Mutex<Published>>,
+        sync: Arc<Mutex<SyncProgress>>,
+        dir: String,
+    }
+
+    fn rig(name: &str) -> Rig {
+        let dir = std::env::temp_dir().join(format!("zyn-market-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = REPLAY.set(Mutex::new(zyn::replay::ReplayIndex::default()));
+        let policy = EpochPolicy {
+            intents_per_epoch: 1_000,
+            epochs_per_anchor: u64::MAX,
+            max_seconds_per_epoch: 3600,
+            max_seconds_per_anchor: u64::MAX,
+        };
+        Rig {
+            node: Arc::new(Mutex::new(Node::new(
+                CHAIN,
+                objectvm::Limits { max_io: 8 },
+                policy,
+                Economics::flat(1),
+            ))),
+            journal: Arc::new(Mutex::new(Journal::open(&dir, CHAIN).unwrap())),
+            pub_log: Arc::new(Mutex::new(Published::default())),
+            sync: Arc::new(Mutex::new(SyncProgress::default())),
+            dir: dir.to_string_lossy().to_string(),
+        }
+    }
+
+    impl Rig {
+        fn call(&self, body: &str) -> serde_json::Value {
+            let out = handle(
+                body, &self.node, &self.journal, false, &self.pub_log, &self.dir, CHAIN, None,
+                &self.sync, None,
+            );
+            serde_json::from_str(&out).expect("JSON")
+        }
+
+        fn signed(&self, key: &SigningKey, intent: Op) -> serde_json::Value {
+            let auth = Authorization {
+                chain_id: CHAIN,
+                vm_id: zyn_vm::zvm::vm_id::<ObjectVm>(),
+                valid_until_epoch: 1_000,
+            };
+            let cred = Credential::Ed25519 {
+                key: key.verifying_key().to_bytes(),
+                signature: key.sign(&signing_payload::<ObjectVm>(&auth, &intent)).to_bytes(),
+            };
+            let a = {
+                let n = self.node.lock().unwrap();
+                authorize_intent::<ObjectVm>(&[cred], &auth, intent, n.state()).expect("authorizes")
+            };
+            self.call(&format!(
+                "{{\"method\":\"zyn_submitSigned\",\"frame\":\"{}\"}}",
+                hex(&encode_authorized::<ObjectVm>(&a))
+            ))
+        }
+
+        fn operator(&self, op: Op) {
+            let r = apply_operator(&op, &self.node, &self.journal, &self.pub_log, &self.dir, CHAIN);
+            assert!(!r.iter().any(ObjectVm::rejected), "{r:?}");
+        }
+
+        fn live(&self, owner: &[u8; 32], asset: [u8; 32]) -> Vec<([u8; 32], zyn_vm::object::Note)> {
+            let n = self.node.lock().unwrap();
+            n.state()
+                .live
+                .iter()
+                .filter(|(_, v)| &v.owner == owner && v.asset == asset)
+                .map(|(c, v)| (*c, *v))
+                .collect()
+        }
+    }
+
+    fn account(key: &SigningKey) -> [u8; 32] {
+        zyn_vm::auth::account_of(zyn_vm::auth::Scheme::Ed25519, key.verifying_key().as_bytes())
+    }
+
+    fn output(owner: [u8; 32], asset: [u8; 32], amount: Fixed, nonce: u8) -> objectvm::Output {
+        use zyn_vm::note_enc::{seal, viewing_public, StaticSecret};
+        objectvm::Output {
+            note: zyn_vm::object::Note { asset, amount, owner, nonce: [nonce; 32] },
+            enc: seal(&viewing_public(&StaticSecret::from([1; 32])), StaticSecret::from([nonce; 32]), b"x").unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_pool_and_a_swap_through_the_door() {
+        let r = rig("swap");
+        let alice = SigningKey::from_bytes(&[21u8; 32]);
+        let bob = SigningKey::from_bytes(&[22u8; 32]);
+        let (a, b) = (account(&alice), account(&bob));
+        for (owner, asset, n) in [(a, ZEC, 1u8), (a, USD, 2), (b, ZEC, 3)] {
+            r.operator(Op::Mint { asset, amount: Fixed::whole(100), owner, nonce: [n; 32] });
+        }
+
+        let ins: Vec<_> = [r.live(&a, ZEC), r.live(&a, USD)]
+            .concat()
+            .into_iter()
+            .map(|(c, _)| (c, zyn_vm::object::nullifier(&[1; 32], &c)))
+            .collect();
+        let v = r.signed(&alice, Op::CreatePool {
+            provider: a,
+            program: zyn_vm::program::add_liquidity(),
+            asset_a: ZEC,
+            asset_b: USD,
+            amount_a: Fixed::whole(100),
+            amount_b: Fixed::whole(100),
+            fee_bps: 30,
+            inputs: ins,
+            change: vec![],
+            nonce: [0x51; 32],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Pooled"), "{v}");
+
+        let pool = market::pool_id(&ZEC, &USD);
+        let (c, _) = r.live(&b, ZEC)[0];
+        let v = r.signed(&bob, Op::Swap {
+            trader: b,
+            program: zyn_vm::program::amm_swap(),
+            pool,
+            sell_a: true,
+            amount_in: Fixed::whole(40),
+            min_out: Fixed::ZERO,
+            inputs: vec![(c, zyn_vm::object::nullifier(&[2; 32], &c))],
+            change: vec![output(b, ZEC, Fixed::whole(60), 0x61)],
+            nonce: [0x52; 32],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Ordered"), "{v}");
+
+        // Bob's change is published for him to find, and his input retired.
+        {
+            let p = r.pub_log.lock().unwrap();
+            let change = zyn_vm::object::commitment(&output(b, ZEC, Fixed::whole(60), 0x61).note).unwrap();
+            assert!(p.outputs.iter().any(|(cm, _, _)| cm == &hex(&change)));
+            assert!(p.nullifiers.contains(&hex(&zyn_vm::object::nullifier(&[2; 32], &c))));
+        }
+
+        let m = r.call("{\"method\":\"zyn_market\"}");
+        assert_eq!(m["result"]["pools"][0]["pending"], 1, "{m}");
+        assert_eq!(m["result"]["pools"][0]["reserve_a"], Fixed::whole(100).0.to_string());
+
+        r.operator(ObjectVm::seal_intent());
+        let m = r.call("{\"method\":\"zyn_market\"}");
+        assert_eq!(m["result"]["pools"][0]["pending"], 0);
+        assert_eq!(m["result"]["pools"][0]["reserve_a"], Fixed::whole(140).0.to_string());
+
+        // Bob, and only somebody holding his nonce, finds what he is owed.
+        let proceeds = market::claim_id(&market::order_id(&b, &[0x52; 32]), 0);
+        let v = r.call(&format!("{{\"method\":\"zyn_claims\",\"ids\":\"{}\"}}", hex(&proceeds)));
+        let row = &v["result"][0];
+        assert_eq!(row["asset"], hex(&USD));
+        let owed: i128 = row["amount"].as_str().unwrap().parse().unwrap();
+        assert!(owed > 0);
+
+        let v = r.signed(&bob, Op::Claim {
+            owner: b,
+            program: zyn_vm::program::claim(),
+            claims: vec![proceeds],
+            outputs: vec![output(b, USD, Fixed(owed), 0x71)],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Claimed"), "{v}");
+        let v = r.call(&format!("{{\"method\":\"zyn_claims\",\"ids\":\"{}\"}}", hex(&proceeds)));
+        assert_eq!(v["result"].as_array().unwrap().len(), 0, "redeemed once");
+    }
+
+    /// Only the account an intent names can sign it — including a claim,
+    /// which would otherwise let anyone who learned an id collect it.
+    #[test]
+    fn a_claim_needs_its_owners_signature() {
+        let r = rig("claimsig");
+        let bob = SigningKey::from_bytes(&[23u8; 32]);
+        let eve = SigningKey::from_bytes(&[24u8; 32]);
+        let intent = Op::Claim {
+            owner: account(&bob),
+            program: zyn_vm::program::claim(),
+            claims: vec![[1; 32]],
+            outputs: vec![output(account(&eve), USD, Fixed::whole(1), 0x72)],
+        };
+        let auth = Authorization {
+            chain_id: CHAIN,
+            vm_id: zyn_vm::zvm::vm_id::<ObjectVm>(),
+            valid_until_epoch: 1_000,
+        };
+        let cred = Credential::Ed25519 {
+            key: eve.verifying_key().to_bytes(),
+            signature: eve.sign(&signing_payload::<ObjectVm>(&auth, &intent)).to_bytes(),
+        };
+        let n = r.node.lock().unwrap();
+        let refused = authorize_intent::<ObjectVm>(&[cred], &auth, intent, n.state());
+        assert!(format!("{refused:?}").contains("MissingSignature"), "{refused:?}");
     }
 }

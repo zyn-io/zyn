@@ -46,6 +46,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
+pub mod market;
+
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
 use zyn_vm::note_enc::{EncryptedNote, ViewingKey};
@@ -176,6 +178,91 @@ pub enum Op {
         /// Price to the seller, item to the buyer, change to the buyer.
         outputs: Vec<Output>,
     },
+    /// Open a pool for a pair of assets with its first liquidity.
+    CreatePool {
+        provider: AccountId,
+        program: ProgramId,
+        /// The lower asset in byte order; `asset_b` the higher.
+        asset_a: Address,
+        asset_b: Address,
+        amount_a: Fixed,
+        amount_b: Fixed,
+        fee_bps: u32,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        /// The provider's secret; their claims derive from it.
+        nonce: Hash,
+    },
+    /// Add to a pool at its current ratio. Shares and any excess come back
+    /// as claims.
+    AddLiquidity {
+        provider: AccountId,
+        program: ProgramId,
+        pool: Hash,
+        amount_a: Fixed,
+        amount_b: Fixed,
+        min_shares: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
+    /// Burn shares for their part of both reserves, as claims.
+    RemoveLiquidity {
+        provider: AccountId,
+        program: ProgramId,
+        pool: Hash,
+        shares: Fixed,
+        min_a: Fixed,
+        min_b: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
+    /// Sell into a pool's batch. Escrowed now, priced at the seal.
+    Swap {
+        trader: AccountId,
+        program: ProgramId,
+        pool: Hash,
+        sell_a: bool,
+        amount_in: Fixed,
+        min_out: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
+    /// Turn claims into objects the owner encrypted for themselves.
+    Claim {
+        owner: AccountId,
+        program: ProgramId,
+        claims: Vec<Hash>,
+        outputs: Vec<Output>,
+    },
+    /// Open a token sale.
+    CreateLaunch {
+        creator: AccountId,
+        program: ProgramId,
+        nonce: Hash,
+        quote: Address,
+        total_supply: Fixed,
+        sale_supply: Fixed,
+        pool_supply: Fixed,
+        soft_cap: Fixed,
+        hard_cap: Fixed,
+        pool_bps: u32,
+        fee_bps: u32,
+        closes_at_epoch: u64,
+        meta: Hash,
+    },
+    /// Commit to a sale.
+    Commit {
+        buyer: AccountId,
+        program: ProgramId,
+        launch: Address,
+        amount: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
     Seal,
 }
 
@@ -190,8 +277,115 @@ pub enum Receipt {
     Listed { item: Hash },
     Delisted { item: Hash },
     Taken { item: Hash, created: Vec<Hash> },
+    /// Liquidity went in; `source` is what its claims derive from.
+    Pooled { pool: Hash, shares: Fixed, source: Hash },
+    Unpooled { pool: Hash, source: Hash },
+    Ordered { order: Hash },
+    Claimed { created: Vec<Hash> },
+    Launched { token: Address },
+    Committed { commit: Hash },
     Refused(&'static str),
     Sealed(Checkpoint),
+}
+
+impl Op {
+    /// The nullifiers this intent publishes when it is applied.
+    pub fn retired(&self) -> Vec<Hash> {
+        let pairs: &[(Hash, Hash)] = match self {
+            Op::Spend { inputs, .. }
+            | Op::Withdraw { inputs, .. }
+            | Op::CreatePool { inputs, .. }
+            | Op::AddLiquidity { inputs, .. }
+            | Op::RemoveLiquidity { inputs, .. }
+            | Op::Swap { inputs, .. }
+            | Op::Commit { inputs, .. } => inputs,
+            Op::TakeOffer {
+                item_nullifier,
+                payment,
+                ..
+            } => {
+                let mut v = vec![*item_nullifier];
+                v.extend(payment.iter().map(|(_, n)| *n));
+                return v;
+            }
+            _ => &[],
+        };
+        pairs.iter().map(|(_, n)| *n).collect()
+    }
+
+    /// The objects this intent creates, each with the ciphertext its owner
+    /// finds it by. A wallet discovers nothing a node does not publish, so
+    /// every intent that creates one has to be here.
+    pub fn created(&self) -> Vec<&Output> {
+        match self {
+            Op::Spend { outputs, .. }
+            | Op::Withdraw { outputs, .. }
+            | Op::TakeOffer { outputs, .. }
+            | Op::Claim { outputs, .. } => outputs.iter().collect(),
+            Op::CreatePool { change, .. }
+            | Op::AddLiquidity { change, .. }
+            | Op::RemoveLiquidity { change, .. }
+            | Op::Swap { change, .. }
+            | Op::Commit { change, .. } => change.iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn one(r: Result<Receipt, &'static str>) -> Vec<Receipt> {
+    vec![r.unwrap_or_else(Receipt::Refused)]
+}
+
+/// The two shapes every market intent carries: objects consumed and change.
+mod wire {
+    use super::*;
+
+    pub fn inputs(e: &mut Encoder, inputs: &[(Hash, Hash)]) {
+        e.u32(inputs.len() as u32);
+        for (c, n) in inputs {
+            e.bytes(c).bytes(n);
+        }
+    }
+
+    pub fn outputs(e: &mut Encoder, outputs: &[Output]) {
+        e.u32(outputs.len() as u32);
+        for o in outputs {
+            e.bytes(&o.note.asset)
+                .fixed(o.note.amount)
+                .bytes(&o.note.owner)
+                .bytes(&o.note.nonce)
+                .bytes(&o.enc.epk)
+                .u32(o.enc.ciphertext.len() as u32)
+                .bytes(&o.enc.ciphertext);
+        }
+    }
+
+    pub fn read_inputs(d: &mut Decoder) -> Option<Vec<(Hash, Hash)>> {
+        let n = d.u32().ok()? as usize;
+        let mut v = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            v.push((d.hash().ok()?, d.hash().ok()?));
+        }
+        Some(v)
+    }
+
+    pub fn read_outputs(d: &mut Decoder) -> Option<Vec<Output>> {
+        let n = d.u32().ok()? as usize;
+        let mut v = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            let note = Note {
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                owner: d.account().ok()?,
+                nonce: d.hash().ok()?,
+            };
+            let epk = d.hash().ok()?;
+            let len = d.u32().ok()? as usize;
+            let ciphertext = d.take_bytes(len).ok()?.to_vec();
+            v.push(Output { note, enc: EncryptedNote { epk, ciphertext } });
+        }
+        Some(v)
+    }
 }
 
 /// An exit the vault has been told to pay, and has not yet.
@@ -284,6 +478,8 @@ pub struct ObjectVm {
     /// listing nobody can see is not a listing (§132.4). It names the object,
     /// never the owner.
     pub offers: BTreeMap<Hash, Offer>,
+    /// Pools, this epoch's orders, what is owed, and sales (`market`).
+    pub market: market::Market,
 }
 
 impl ObjectVm {
@@ -738,6 +934,12 @@ impl ObjectVm {
         if *destination == [0u8; 32] {
             return vec![Receipt::Refused("a withdrawal needs a destination")];
         }
+        // Pool shares and launched tokens were made here and nothing in the
+        // vault backs them. Letting one "leave" would record a debt in an
+        // asset the vault does not hold.
+        if self.market.is_derived(asset) {
+            return vec![Receipt::Refused("only deposited assets leave for Zcash")];
+        }
         if inputs.is_empty() {
             return vec![Receipt::Refused("a withdrawal consumes something")];
         }
@@ -867,6 +1069,7 @@ impl MicrochainVm for ObjectVm {
             deposits: BTreeSet::new(),
             exits: Vec::new(),
             viewing: BTreeMap::new(),
+            market: market::Market::default(),
         }
     }
 
@@ -1100,7 +1303,130 @@ impl MicrochainVm for ObjectVm {
                 payment,
                 outputs,
             } => self.apply_take(buyer, program, item, item_nullifier, payment, outputs),
+            Op::CreatePool {
+                provider,
+                program,
+                asset_a,
+                asset_b,
+                amount_a,
+                amount_b,
+                fee_bps,
+                inputs,
+                change,
+                nonce,
+            } => one(if *program != program::add_liquidity() {
+                Err("wrong program for a pool")
+            } else {
+                self.apply_create_pool(
+                    provider, asset_a, asset_b, *amount_a, *amount_b, *fee_bps, inputs, change, nonce,
+                )
+            }),
+            Op::AddLiquidity {
+                provider,
+                program,
+                pool,
+                amount_a,
+                amount_b,
+                min_shares,
+                inputs,
+                change,
+                nonce,
+            } => one(if *program != program::add_liquidity() {
+                Err("wrong program for liquidity")
+            } else {
+                self.apply_add_liquidity(
+                    provider, pool, *amount_a, *amount_b, *min_shares, inputs, change, nonce,
+                )
+            }),
+            Op::RemoveLiquidity {
+                provider,
+                program,
+                pool,
+                shares,
+                min_a,
+                min_b,
+                inputs,
+                change,
+                nonce,
+            } => one(if *program != program::remove_liquidity() {
+                Err("wrong program for liquidity")
+            } else {
+                self.apply_remove_liquidity(provider, pool, *shares, *min_a, *min_b, inputs, change, nonce)
+            }),
+            Op::Swap {
+                trader,
+                program,
+                pool,
+                sell_a,
+                amount_in,
+                min_out,
+                inputs,
+                change,
+                nonce,
+            } => one(if *program != program::amm_swap() {
+                Err("wrong program for a swap")
+            } else {
+                self.apply_swap(trader, pool, *sell_a, *amount_in, *min_out, inputs, change, nonce)
+            }),
+            Op::Claim {
+                owner,
+                program,
+                claims,
+                outputs,
+            } => one(if *program != program::claim() {
+                Err("wrong program for a claim")
+            } else {
+                self.apply_claim(owner, claims, outputs)
+            }),
+            Op::CreateLaunch {
+                creator,
+                program,
+                nonce,
+                quote,
+                total_supply,
+                sale_supply,
+                pool_supply,
+                soft_cap,
+                hard_cap,
+                pool_bps,
+                fee_bps,
+                closes_at_epoch,
+                meta,
+            } => one(if *program != program::launch_create() {
+                Err("wrong program for a launch")
+            } else {
+                self.apply_create_launch(
+                    creator,
+                    nonce,
+                    quote,
+                    *total_supply,
+                    *sale_supply,
+                    *pool_supply,
+                    *soft_cap,
+                    *hard_cap,
+                    *pool_bps,
+                    *fee_bps,
+                    *closes_at_epoch,
+                    meta,
+                )
+            }),
+            Op::Commit {
+                buyer,
+                program,
+                launch,
+                amount,
+                inputs,
+                change,
+                nonce,
+            } => one(if *program != program::launch_commit() {
+                Err("wrong program for a commitment")
+            } else {
+                self.apply_commit(buyer, launch, *amount, inputs, change, nonce)
+            }),
             Op::Seal => {
+                // Batches clear and sales settle inside the epoch they belong
+                // to, so the root this seal commits already includes them.
+                self.settle_market();
                 let state_root = self.state_root();
                 let cp = Checkpoint {
                     chain_id: self.chain_id,
@@ -1126,7 +1452,7 @@ impl MicrochainVm for ObjectVm {
     /// already existed, which is how `collection.rs` was added without
     /// disturbing roots anyone had already committed to.
     fn sections(&self) -> Vec<Hash> {
-        vec![
+        let mut s = vec![
             self.header_leaf(),
             merkle_root(&self.account_leaves()),
             self.commitments.root(),
@@ -1134,7 +1460,13 @@ impl MicrochainVm for ObjectVm {
             self.supply_leaf(),
             self.offers_leaf(),
             merkle_root(&self.live_commitments()),
-        ]
+        ];
+        // Only once there is a market: a chain that never used one keeps the
+        // roots it already anchored.
+        if !self.market.is_empty() {
+            s.push(self.market.leaf());
+        }
+        s
     }
 
     fn is_seal(intent: &Op) -> bool {
@@ -1183,6 +1515,13 @@ impl MicrochainVm for ObjectVm {
             Op::TakeOffer { buyer, .. } => vec![*buyer],
             Op::Withdraw { holder, .. } => vec![*holder],
             Op::Register { account, .. } => vec![*account],
+            Op::CreatePool { provider, .. }
+            | Op::AddLiquidity { provider, .. }
+            | Op::RemoveLiquidity { provider, .. } => vec![*provider],
+            Op::Swap { trader, .. } => vec![*trader],
+            Op::Claim { owner, .. } => vec![*owner],
+            Op::CreateLaunch { creator, .. } => vec![*creator],
+            Op::Commit { buyer, .. } => vec![*buyer],
             _ => Vec::new(),
         }
     }
@@ -1343,6 +1682,156 @@ impl MicrochainVm for ObjectVm {
                 txid,
             } => {
                 e.u8(9).bytes(&program.0).u32(*index).bytes(txid);
+            }
+            Op::CreatePool {
+                provider,
+                program,
+                asset_a,
+                asset_b,
+                amount_a,
+                amount_b,
+                fee_bps,
+                inputs,
+                change,
+                nonce,
+            } => {
+                e.u8(10)
+                    .bytes(provider)
+                    .bytes(&program.0)
+                    .bytes(asset_a)
+                    .bytes(asset_b)
+                    .fixed(*amount_a)
+                    .fixed(*amount_b)
+                    .u32(*fee_bps)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::AddLiquidity {
+                provider,
+                program,
+                pool,
+                amount_a,
+                amount_b,
+                min_shares,
+                inputs,
+                change,
+                nonce,
+            } => {
+                e.u8(11)
+                    .bytes(provider)
+                    .bytes(&program.0)
+                    .bytes(pool)
+                    .fixed(*amount_a)
+                    .fixed(*amount_b)
+                    .fixed(*min_shares)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::RemoveLiquidity {
+                provider,
+                program,
+                pool,
+                shares,
+                min_a,
+                min_b,
+                inputs,
+                change,
+                nonce,
+            } => {
+                e.u8(12)
+                    .bytes(provider)
+                    .bytes(&program.0)
+                    .bytes(pool)
+                    .fixed(*shares)
+                    .fixed(*min_a)
+                    .fixed(*min_b)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::Swap {
+                trader,
+                program,
+                pool,
+                sell_a,
+                amount_in,
+                min_out,
+                inputs,
+                change,
+                nonce,
+            } => {
+                e.u8(13)
+                    .bytes(trader)
+                    .bytes(&program.0)
+                    .bytes(pool)
+                    .bool(*sell_a)
+                    .fixed(*amount_in)
+                    .fixed(*min_out)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::Claim {
+                owner,
+                program,
+                claims,
+                outputs,
+            } => {
+                e.u8(14).bytes(owner).bytes(&program.0).u32(claims.len() as u32);
+                for c in claims {
+                    e.bytes(c);
+                }
+                wire::outputs(&mut e, outputs);
+            }
+            Op::CreateLaunch {
+                creator,
+                program,
+                nonce,
+                quote,
+                total_supply,
+                sale_supply,
+                pool_supply,
+                soft_cap,
+                hard_cap,
+                pool_bps,
+                fee_bps,
+                closes_at_epoch,
+                meta,
+            } => {
+                e.u8(15)
+                    .bytes(creator)
+                    .bytes(&program.0)
+                    .bytes(nonce)
+                    .bytes(quote)
+                    .fixed(*total_supply)
+                    .fixed(*sale_supply)
+                    .fixed(*pool_supply)
+                    .fixed(*soft_cap)
+                    .fixed(*hard_cap)
+                    .u32(*pool_bps)
+                    .u32(*fee_bps)
+                    .u64(*closes_at_epoch)
+                    .bytes(meta);
+            }
+            Op::Commit {
+                buyer,
+                program,
+                launch,
+                amount,
+                inputs,
+                change,
+                nonce,
+            } => {
+                e.u8(16)
+                    .bytes(buyer)
+                    .bytes(&program.0)
+                    .bytes(launch)
+                    .fixed(*amount)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
             }
             Op::Seal => {
                 e.u8(0);
@@ -1506,6 +1995,94 @@ impl MicrochainVm for ObjectVm {
                 index: d.u32().ok()?,
                 txid: d.hash().ok()?,
             }),
+            10 => Some(Op::CreatePool {
+                provider: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                asset_a: d.hash().ok()?,
+                asset_b: d.hash().ok()?,
+                amount_a: d.fixed().ok()?,
+                amount_b: d.fixed().ok()?,
+                fee_bps: d.u32().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            11 => Some(Op::AddLiquidity {
+                provider: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                pool: d.hash().ok()?,
+                amount_a: d.fixed().ok()?,
+                amount_b: d.fixed().ok()?,
+                min_shares: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            12 => Some(Op::RemoveLiquidity {
+                provider: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                pool: d.hash().ok()?,
+                shares: d.fixed().ok()?,
+                min_a: d.fixed().ok()?,
+                min_b: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            13 => Some(Op::Swap {
+                trader: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                pool: d.hash().ok()?,
+                sell_a: match d.u8().ok()? {
+                    0 => false,
+                    1 => true,
+                    _ => return None,
+                },
+                amount_in: d.fixed().ok()?,
+                min_out: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            14 => {
+                let owner = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let n = d.u32().ok()? as usize;
+                let mut claims = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    claims.push(d.hash().ok()?);
+                }
+                Some(Op::Claim {
+                    owner,
+                    program,
+                    claims,
+                    outputs: wire::read_outputs(d)?,
+                })
+            }
+            15 => Some(Op::CreateLaunch {
+                creator: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                nonce: d.hash().ok()?,
+                quote: d.hash().ok()?,
+                total_supply: d.fixed().ok()?,
+                sale_supply: d.fixed().ok()?,
+                pool_supply: d.fixed().ok()?,
+                soft_cap: d.fixed().ok()?,
+                hard_cap: d.fixed().ok()?,
+                pool_bps: d.u32().ok()?,
+                fee_bps: d.u32().ok()?,
+                closes_at_epoch: d.u64().ok()?,
+                meta: d.hash().ok()?,
+            }),
+            16 => Some(Op::Commit {
+                buyer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                launch: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
             _ => None,
         }
     }
@@ -1567,6 +2144,11 @@ impl MicrochainVm for ObjectVm {
                 .bytes(&o.price_asset)
                 .fixed(o.price_amount)
                 .u64(o.expires_at_epoch);
+        }
+        // Appended only when there is one, so a state saved before the market
+        // existed and one that never used it encode identically.
+        if !self.market.is_empty() {
+            self.market.encode(&mut e);
         }
         e.finish().to_vec()
     }
@@ -1648,7 +2230,16 @@ impl MicrochainVm for ObjectVm {
                 },
             );
         }
+        let market = if d.remaining() > 0 {
+            market::Market::decode(&mut d)?
+        } else {
+            market::Market::default()
+        };
+        if d.remaining() > 0 {
+            return None;
+        }
         Some(ObjectVm {
+            market,
             chain_id,
             epoch,
             seq,
@@ -1700,7 +2291,14 @@ impl MicrochainVm for ObjectVm {
     /// there is no readable amount left to sum.
     fn conserved(&self) -> Result<(), &'static str> {
         for (asset, issued) in &self.issued {
-            let held = self.held(asset).ok_or("held overflow")?;
+            // Live objects, plus what the market holds for somebody: pool
+            // reserves, orders in the batch, claims not yet redeemed, sales
+            // in escrow.
+            let held = self
+                .held(asset)
+                .and_then(|h| h.0.checked_add(self.market.holdings(asset)?))
+                .map(Fixed)
+                .ok_or("held overflow")?;
             if held != *issued {
                 return Err("live objects do not sum to issued supply");
             }

@@ -25,6 +25,7 @@ pub mod object_exit;
 pub mod object_verify;
 pub mod object_ingress;
 pub mod object_keys;
+pub mod market_vectors;
 pub mod receive;
 pub mod replica;
 pub mod reveal;
