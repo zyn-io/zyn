@@ -454,10 +454,24 @@ impl Bot {
         let mut prev: Option<serde_json::Value> = None;
         let mut down = false;
         loop {
-            match self.object_at(url, "zyn_status") {
+            // A node restarted for a deploy is down for seconds; one look that
+            // lands in that window is not an outage. Look again shortly before
+            // saying so — a real outage is still reported within half a minute.
+            let seen = self.object_at(url, "zyn_status").or_else(|_| {
+                std::thread::sleep(Duration::from_secs(20));
+                self.object_at(url, "zyn_status")
+            });
+            // Named by chain once it has answered, rather than by an address
+            // that means nothing on a phone.
+            let label = prev
+                .as_ref()
+                .and_then(|p| p.get("chain").and_then(|c| c.as_u64()))
+                .map(|c| format!("chain {c}"))
+                .unwrap_or_else(|| url.to_string());
+            match seen {
                 Ok(now) => {
                     if down {
-                        self.tell(&format!("\u{2713} {url}: reachable again"));
+                        self.tell(&format!("\u{2713} {label}: reachable again"));
                         down = false;
                     }
                     // The first look compares against a baseline that differs
@@ -476,7 +490,7 @@ impl Bot {
                 // itself gets muted.
                 Err(e) => {
                     if !down {
-                        self.tell(&format!("\u{26a0} {url}: unreachable — {e}"));
+                        self.tell(&format!("\u{26a0} {label}: unreachable — {}", redact(&e, &self.token)));
                         down = true;
                     }
                 }
