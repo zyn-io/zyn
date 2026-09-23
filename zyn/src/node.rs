@@ -550,6 +550,21 @@ impl<V: MicrochainVm> Node<V> {
         self.seal(now)
     }
 
+    /// Seal on the clock alone, even an epoch nobody wrote to, once the
+    /// policy's epoch length has passed.
+    ///
+    /// For an application whose state changes with time rather than with
+    /// traffic — a sale that closes at an epoch has to *reach* that epoch, and
+    /// on a quiet chain epochs otherwise stand still. The caller decides when
+    /// that applies; an idle chain with nothing waiting should not fill its
+    /// history with empty epochs.
+    pub fn seal_on_clock(&mut self, now: u64) -> Option<Checkpoint> {
+        if now.saturating_sub(self.sealed_at) < self.policy.max_seconds_per_epoch {
+            return None;
+        }
+        self.seal(now)
+    }
+
     /// Anchor now regardless of policy, for the same reason.
     pub fn anchor_now(&mut self, now: u64) -> Option<Anchor> {
         if self.epochs_since_anchor == 0 {
@@ -809,6 +824,22 @@ mod tests {
     /// The deposit index comes from the chain, so a helper needs to read it.
     fn deposit(node: &Chain, n: u8) -> Intent {
         Intent::next_deposit(node.state(), acct(n), XZEC, Fixed::whole(100), [0u8; 32])
+    }
+
+    /// A quiet chain still moves epochs on the clock when asked to — and only
+    /// once the epoch's time is up, so a caller polling it does not seal twice.
+    #[test]
+    fn a_clock_seal_waits_for_the_epoch_to_run_out() {
+        let mut s = SwapState::new(1, Params::v1());
+        s.tokens.get_mut(&XZEC).unwrap().vault.as_mut().unwrap().observed = Fixed::whole(1);
+        let p = EpochPolicy { max_seconds_per_epoch: 60, ..policy() };
+        let mut n: Chain = Node::resume(s, p, Economics::flat(1_000), 100);
+        assert!(n.seal_if_due(1_000).is_none(), "an empty epoch never seals on policy");
+        assert!(n.seal_on_clock(159).is_none(), "not before its time");
+        let cp = n.seal_on_clock(160).expect("seals on the clock");
+        assert_eq!(cp.epoch, 0);
+        assert!(n.seal_on_clock(200).is_none(), "and the clock restarts");
+        assert!(n.seal_on_clock(220).is_some());
     }
 
     #[test]

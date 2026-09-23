@@ -156,7 +156,7 @@ fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
 /// Pools and sales, public by design. Amounts are raw WAD integers as
 /// strings: a wallet computes prices from them in `BigInt` and must never
 /// round a reserve through a double.
-fn market_json(vm: &ObjectVm) -> String {
+fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
     use objectvm::market::{lp_asset, LaunchState};
     let pools: Vec<String> = vm
         .market
@@ -206,8 +206,9 @@ fn market_json(vm: &ObjectVm) -> String {
         })
         .collect();
     format!(
-        "{{\"epoch\":{},\"pools\":[{}],\"launches\":[{}]}}",
+        "{{\"epoch\":{},\"epoch_seconds\":{},\"pools\":[{}],\"launches\":[{}]}}",
         vm.epoch,
+        epoch_seconds,
         pools.join(","),
         launches.join(",")
     )
@@ -533,7 +534,7 @@ fn handle(
             let n = node.lock().unwrap();
             format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}",
-                market_json(n.state())
+                market_json(n.state(), n.policy().max_seconds_per_epoch)
             )
         }
         // What the ledger owes, by claim id. Ids derive from a nonce only
@@ -1238,9 +1239,12 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<
             }
             if buf.len() >= pos + 4 + want {
                 let body = String::from_utf8_lossy(&buf[pos + 4..pos + 4 + want]).to_string();
-                let out = handle(
-                    &body, &node, &journal, anchoring, &pub_log, &dir, chain,
-                    da_dir.as_deref(), &sync, vault.as_ref(),
+                let out = with_request_id(
+                    &body,
+                    handle(
+                        &body, &node, &journal, anchoring, &pub_log, &dir, chain,
+                        da_dir.as_deref(), &sync, vault.as_ref(),
+                    ),
                 );
                 let _ = s.write_all(
                     format!(
@@ -1257,6 +1261,33 @@ fn serve(mut s: TcpStream, node: Arc<Mutex<Node<ObjectVm>>>, journal: Arc<Mutex<
             return; // a devnet console does not accept a megabyte
         }
     }
+}
+
+/// Answer with the id the request asked under.
+///
+/// JSON-RPC says a response carries its request's id, and the wallet checks
+/// it — an answer to some other question is refused, which is the point. This
+/// node answered every request as id 1, so the browser wallet refused every
+/// answer an object ledger gave it. Only a number or a plain token string is
+/// echoed; anything else keeps 1 rather than splicing caller bytes into JSON.
+fn with_request_id(body: &str, out: String) -> String {
+    let Some(id) = request_id(body) else {
+        return out;
+    };
+    out.replacen("\"id\":1,", &format!("\"id\":{id},"), 1)
+}
+
+fn request_id(body: &str) -> Option<String> {
+    let at = body.find("\"id\"")? + 4;
+    let rest = body[at..].trim_start().strip_prefix(':')?.trim_start();
+    if let Some(q) = rest.strip_prefix('"') {
+        let end = q.find('"')?;
+        let v = &q[..end];
+        let plain = !v.is_empty() && v.len() <= 64 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        return plain.then(|| format!("\"{v}\""));
+    }
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    (!digits.is_empty() && digits.len() <= 15).then_some(digits)
 }
 
 fn find(h: &[u8], needle: &[u8]) -> Option<usize> {
@@ -1721,7 +1752,17 @@ fn main() {
             // Only fires for an epoch that had traffic and then went quiet:
             // `seal_if_due` refuses an empty epoch, and a submission that was
             // already due sealed itself above.
-            if n.seal_if_due(now_secs()).is_some() {
+            // A sale closes at an epoch, so while one is open the clock has
+            // to move epochs even when nobody trades.
+            let sale_open = n
+                .state()
+                .market
+                .launches
+                .values()
+                .any(|l| l.state == objectvm::market::LaunchState::Open);
+            let sealed = n.seal_if_due(now_secs()).is_some()
+                || (sale_open && n.seal_on_clock(now_secs()).is_some());
+            if sealed {
                 // A sealed epoch is a root worth carrying. Proposing is free
                 // and idempotent — `propose_anchor` refuses while one is in
                 // flight — and the settler below is what turns a proposal
@@ -2357,6 +2398,17 @@ mod signed_door {
                 e.finish().to_vec()
             }
         }
+    }
+
+    #[test]
+    fn a_reply_carries_the_id_it_was_asked_under() {
+        let out = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string();
+        let uuid = r#"{"jsonrpc":"2.0","id":"0b5c9f3e-1d2a-4c55-9a51-7e1c2f0b9d11","method":"zyn_status"}"#;
+        assert!(with_request_id(uuid, out.clone()).contains(r#""id":"0b5c9f3e-1d2a-4c55-9a51-7e1c2f0b9d11""#));
+        assert!(with_request_id(r#"{"id": 42,"method":"x"}"#, out.clone()).contains(r#""id":42,"#));
+        // Caller bytes are not spliced into JSON.
+        assert!(with_request_id(r#"{"id":"a\",\"b","method":"x"}"#, out.clone()).contains(r#""id":1,"#));
+        assert_eq!(with_request_id(r#"{"method":"x"}"#, out.clone()), out);
     }
 
     #[test]

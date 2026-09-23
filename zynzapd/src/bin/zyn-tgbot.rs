@@ -41,6 +41,16 @@ struct Bot {
     zebras: Vec<(String, String)>,
 }
 
+/// An HTTP error names the URL it failed on, and a Telegram URL carries the
+/// bot's token. Written to journald as it was, every timed-out poll put the
+/// token in the system log for anyone who can read it.
+fn redact(message: &str, token: &str) -> String {
+    if token.is_empty() {
+        return message.to_string();
+    }
+    message.replace(token, "<token>")
+}
+
 impl Bot {
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
@@ -50,7 +60,7 @@ impl Bot {
         match self.agent.post(&self.api(method)).send_json(body) {
             Ok(r) => r.into_json::<serde_json::Value>().ok(),
             Err(e) => {
-                eprintln!("zyn-tgbot: {} failed: {}", method, e);
+                eprintln!("zyn-tgbot: {} failed: {}", method, redact(&e.to_string(), &self.token));
                 None
             }
         }
@@ -676,6 +686,14 @@ mod tests {
 
     fn live() -> serde_json::Value {
         serde_json::from_str(LIVE).unwrap()
+    }
+
+    #[test]
+    fn a_logged_error_never_carries_the_token() {
+        let e = "https://api.telegram.org/bot123:ABC-def/getUpdates: timed out";
+        let out = redact(e, "123:ABC-def");
+        assert!(!out.contains("ABC-def"), "{out}");
+        assert!(out.contains("getUpdates: timed out"));
     }
 
     /// The bug this whole change exists to fix: the bot reported chain 11
