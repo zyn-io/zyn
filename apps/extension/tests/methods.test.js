@@ -59,6 +59,22 @@ test('the deposit address is fetched, not posted', () => {
 
 test('the shipped build is the source', async () => {
     // dist/ is what Chrome loads. A fix that lands only in src/ is not a fix.
-    const dist = await readFile(new URL('../dist/background.js', import.meta.url), 'utf8');
-    assert.equal(dist, background, 'dist/background.js has drifted from src/background.js');
+    // The build puts the browser wallet's ZIP-321 parser in front of the
+    // background, as a classic script; both halves must be current.
+    const zip321 = (await readFile(new URL('../../nap-web/src/zip321.js', import.meta.url), 'utf8')).replace(/^export /gm, '');
+    for (const dir of ['dist', 'dist-firefox']) {
+        const dist = await readFile(new URL(`../${dir}/background.js`, import.meta.url), 'utf8');
+        assert.ok(dist.endsWith(background), `${dir}/background.js has drifted from src/background.js`);
+        assert.ok(dist.includes(zip321), `${dir}/background.js carries a stale ZIP-321 parser`);
+    }
+});
+
+test('a site learns nothing about the holder until it is connected', () => {
+    // Every read of the holder's own data is marked, and the gate asks to
+    // connect before any marked read or any write runs.
+    for (const name of ['zyn_account', 'zyn_balances', 'zyn_depositAddress', 'zyn_nftItems', 'zyn_owed', 'zec_getAddress']) {
+        assert.match(background, new RegExp(`${name}:\\s*\\{[^}]*mine: true`), `${name} must need a connected site`);
+    }
+    assert.match(background, /\(m\.session \|\| m\.mine \|\| !m\.read\) && !isConnected/);
+    assert.match(background, /nap:announceProvider|nap_connect/);
 });

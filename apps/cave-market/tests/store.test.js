@@ -129,10 +129,14 @@ test('standalone build emits only the dedicated Jade product', () => {
 test('trading goes through Nap and nowhere else', async () => {
   const { readFileSync } = await import('node:fs');
   const trade = readFileSync(new URL('../trade.js', import.meta.url), 'utf8');
-  // The page asks nothing of the network itself: every read and write is a
-  // provider request, and every write is one Nap asks the holder to approve.
-  assert.doesNotMatch(trade, /fetch\(|XMLHttpRequest|WebSocket/);
-  for (const m of ['zyn_nftOffers', 'zyn_nftItems', 'zyn_owed', 'zyn_nftList', 'zyn_nftBuy', 'zyn_nftCancel', 'zyn_nftRedeem', 'zyn_collect']) {
+  // The page itself reads one thing: the chain's public order book, which
+  // names no holder. Everything about the holder, and every write, is a
+  // request to their Nap, and every write is one Nap asks them to approve.
+  assert.equal((trade.match(/fetch\(/g) || []).length, 1, 'one fetch, for the public order book');
+  assert.match(trade, /method: 'zyn_offers'/);
+  assert.match(trade, /credentials: 'omit'/);
+  assert.doesNotMatch(trade, /XMLHttpRequest|WebSocket|window\.zyn/);
+  for (const m of ['zyn_nftItems', 'zyn_owed', 'zyn_nftList', 'zyn_nftBuy', 'zyn_nftCancel', 'zyn_nftRedeem', 'zyn_collect']) {
     assert.match(trade, new RegExp(m));
   }
   // What the provider says is shape-checked and escaped before it is shown.
@@ -141,3 +145,15 @@ test('trading goes through Nap and nowhere else', async () => {
   assert.match(html, /trade\.js/);
 });
 
+
+test('the store connects through Nap Connect, the same file Nap ships', async () => {
+  const { readFileSync } = await import('node:fs');
+  const here = readFileSync(new URL('../nap-connect.js', import.meta.url), 'utf8');
+  const canonical = readFileSync(new URL('../../nap-connect/nap-connect.js', import.meta.url), 'utf8');
+  assert.equal(here, canonical, 'apps/cave-market/nap-connect.js must be a verbatim copy of apps/nap-connect/nap-connect.js');
+  const wallet = readFileSync(new URL('../wallet.js', import.meta.url), 'utf8');
+  assert.match(wallet, /from '\.\/nap-connect\.js'/);
+  assert.match(html, /data-wallet-dialog[^>]*>\s*<span><\/span> Connect wallet/);
+  // Nothing the wallet reports is put on the page unescaped.
+  assert.doesNotMatch(wallet, /\$\{(?!esc\()[^}]*(session|info)\.[a-z]+/);
+});

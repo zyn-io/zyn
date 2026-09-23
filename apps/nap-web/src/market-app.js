@@ -10,7 +10,9 @@
 // must — the intents — and the public learns pool reserves and sale totals.
 
 import { checkedEpoch, deriveIdentity, forgetIdentity, openSealedWallet, parseAmount } from './core.js';
-import { hex, nullifierOf, scan, signedFrame, submitSigned, unhex } from './object.js';
+import { hex, nullifierOf, scan, unhex } from './object.js';
+import * as ledger from './ledger.js';
+import { isHex, isInt, isSmall, validOffer, PER_CLAIM } from './ledger.js';
 import * as mk from './market.js';
 import './styles.css';
 import './market.css';
@@ -18,15 +20,6 @@ import './market.css';
 const root = document.querySelector('#app');
 const KEPT_KEY = 'nap.kept.v1';
 const NETWORK_KEY = 'nap.network';
-/// Epochs a signature stays valid. Long enough to survive a slow submit,
-/// short enough that a frame found later is useless.
-const VALIDITY = 100n;
-/// How far past the last nonce this device used to look for claims — the
-/// other device, or a restore, may have used some.
-const LOOKAHEAD = 24;
-/// Claims per redemption: the VM's I/O limit.
-const PER_CLAIM = 16;
-
 let config;
 let identity = null;
 let view = 'swap';
@@ -144,67 +137,13 @@ function requireWallet() {
 // Talking to the chain.
 // ---------------------------------------------------------------------------
 
-async function call(method, fields = {}) {
-  const id = crypto.randomUUID();
-  const response = await fetch(config.rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
-    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) throw new Error(`The chain answered HTTP ${response.status}`);
-  const body = await response.json();
-  if (body.id !== id) throw new Error('The chain answered a different question');
-  if (body.error) throw new Error(body.error.message || 'The chain refused');
-  return body.result;
-}
+const call = (method, fields = {}) => ledger.call(config, method, fields);
+const nextNonce = () => ledger.nextNonce(config, identity);
+const loadOwed = () => ledger.loadOwed(config, identity);
 
-// Nonces are receipts, so they are counted per chain and account and never
-// handed out twice by this device.
-const counterKey = () => `nap.market.n.${config.chain}.${identity.accountHex}`;
-const counter = () => Number(read(counterKey()) || 0);
-function nextNonce() {
-  const n = counter();
-  write(counterKey(), String(n + 1));
-  return mk.marketNonce(identity.secretKey, n);
-}
-
-/// Every claim this wallet could be owed, from every nonce it may have used.
-function claimSources(limit) {
-  const out = [];
-  const me = identity.account;
-  for (let n = 0; n < limit; n++) {
-    const nonce = mk.marketNonce(identity.secretKey, n);
-    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce)]) {
-      out.push(...mk.claimIds(source).map(hex));
-    }
-  }
-  return out;
-}
-
-async function loadOwed() {
-  const ids = claimSources(counter() + LOOKAHEAD);
-  const rows = [];
-  for (let i = 0; i < ids.length; i += 240) {
-    const part = await call('zyn_claims', { ids: ids.slice(i, i + 240).join(',') });
-    if (Array.isArray(part)) rows.push(...part);
-  }
-  return rows.filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount));
-}
-
-// What the node says goes into markup, ids and arithmetic, so its shape is
-// checked first: a row that is not exactly hex ids and integer strings is
-// dropped rather than rendered.
-const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
-const isInt = (v) => typeof v === 'string' && /^\d{1,40}$/.test(v);
-const isSmall = (v) => Number.isSafeInteger(v) && v >= 0;
 const validPool = (p) => ['id', 'a', 'b', 'lp'].every((k) => isHex(p[k]))
   && ['reserve_a', 'reserve_b', 'shares', 'locked'].every((k) => isInt(p[k]))
   && BigInt(p.reserve_a) > 0n && BigInt(p.reserve_b) > 0n && BigInt(p.shares) > 0n && isSmall(p.fee_bps);
-const validOffer = (o) => ['item', 'asset', 'price_asset'].every((k) => isHex(o[k]))
-  && ['price_raw', 'fee_raw', 'pay_raw'].every((k) => isInt(o[k])) && isSmall(o.expires_at_epoch)
-  && (o.collection === '' || isHex(o.collection)) && (o.nullifier === '' || isHex(o.nullifier)) && Number.isSafeInteger(o.serial);
 const validLaunch = (l) => ['token', 'quote', 'meta'].every((k) => isHex(l[k]))
   && ['total_supply', 'sale_supply', 'pool_supply', 'soft_cap', 'hard_cap', 'raised'].every((k) => isInt(l[k]))
   && ['open', 'graduated', 'failed'].includes(l.state) && isSmall(l.closes_at_epoch) && isSmall(l.pool_bps) && isSmall(l.fee_bps);
@@ -262,12 +201,7 @@ async function submit(intent, what) {
   busy = true;
   setBusy(true);
   try {
-    const status = await call('zyn_status');
-    const epoch = checkedEpoch(status, config.chain);
-    const frame = await signedFrame(identity.secretKey, config.chain, epoch + VALIDITY, intent);
-    const result = await submitSigned(config.rpcUrl, frame);
-    const refused = /Refused\("([^"]*)"\)/.exec(String(result?.receipts || ''));
-    if (refused) throw new Error(`The chain refused: ${refused[1]}`);
+    await ledger.submitIntent(config, identity, intent);
     notice(what);
     await refresh(true);
     return true;

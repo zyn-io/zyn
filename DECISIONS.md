@@ -6314,3 +6314,24 @@ balance, receive, send.
 | 139.7 | **Proving runs in a Web Worker,** about 21 s for a two-action payment including building the key (measured on testnet, Node, one thread). The page stays live; the send says to keep the tab open | ✅ |
 | 139.8 | **Where a scan starts.** A phrase created in the browser starts at the tip. A restored one starts at the network's `zecBirthday` (config: mainnet 3,440,000, testnet 4,320,000); "Scan from an earlier block" reseeds from any height | ✅ |
 
+## §140 — Nap connects to sites: Nap Connect (23 Sep 2026)
+
+Sites on Zyn and Zcash can find Nap and ask it for things. Surveyed first:
+Ethereum wallets announce themselves with EIP-6963 events and gate accounts
+behind `eth_requestAccounts`; web-only wallets (Coinbase Smart Wallet's
+keys.coinbase.com and the like) open their own origin in a popup and talk by
+`postMessage`; Zcash has no connection standard — MetaMask's Zcash snap
+serves only its own site (`getViewingKey`, `signPczt`), and a
+WalletConnect-for-Zcash grant was declined in May 2026 — but Zcash wallets do
+share ZIP-321 payment requests.
+
+| # | Decision | |
+|---|---|---|
+| 140.1 | **One provider interface for every Nap:** `request({method, params})`, EIP-1193 error codes, one method set (`apps/nap-connect/README.md`). A site written against the extension works against the browser wallet unchanged | 🔒 |
+| 140.2 | **Discovery is EIP-6963's shape under our own names:** the extension answers `nap:requestProvider` with `nap:announceProvider {info, provider}`; `window.zyn` stays for older pages | ✅ |
+| 140.3 | **Nap in the browser connects through its own window** (`/connect.html`, popup + `postMessage`). Nap answers only its opener, at the origin of the opener's first message; the site listens only to Nap's window at Nap's origin; the page refuses to run framed, and `_headers` forbids framing everywhere | 🔒 |
+| 140.4 | **Connect before anything about the holder.** `nap_connect` is approved once per site and shows the Zyn account and a Zcash address — never balances, notes or keys. Any read of the holder's data, or any write, from an unconnected site prompts the connection first (as `eth_requestAccounts` does). Public order-book reads need nothing. This closes the extension's old gap, where any page could read `zyn_account` | 🔒 |
+| 140.5 | **Writes are prepared from the chain, not the site.** An approval shows the listed price, the item, the ZIP-321 amount and memo as Nap reads them; a site's `pay` that disagrees with the listing is refused | 🔒 |
+| 140.6 | **ZEC requests are ZIP-321** (`zec_pay {uri}`), single-recipient; a multi-payment or unknown `req-` request is refused whole. One parser (`nap-web/src/zip321.js`) serves the browser wallet, its Send field and the extension build | ✅ |
+| 140.7 | **The Cave store connects through Nap Connect:** a header button and picker (extension, Nap in the browser). It reads only the public order book itself (`zyn_offers`, no credentials) so anyone can browse; everything about the holder goes through their Nap. A localhost-only `?nap=` override exists for development and is not read on the real domain | ✅ |
+

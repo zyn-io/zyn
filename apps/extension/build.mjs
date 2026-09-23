@@ -34,6 +34,11 @@ function stage(dir) {
     'html, body { width: 420px; min-height: 560px; } main { padding: 14px; grid-template-columns: 1fr; gap: 12px; }\n</style>'
   );
   writeFileSync(`${dir}/popup.html`, html);
+  // The ZIP-321 parser the browser wallet uses, as a classic script in front
+  // of the background: service workers and Firefox event pages both load it
+  // without module support, and there is one parser to get right.
+  const zip321 = readFileSync('../nap-web/src/zip321.js', 'utf8').replace(/^export /gm, '');
+  writeFileSync(`${dir}/background.js`, `// --- zip321.js (from apps/nap-web) ---\n${zip321}\n// --- background.js ---\n${readFileSync('src/background.js', 'utf8')}`);
   writeFileSync(`${dir}/popup.js`, js);
 }
 

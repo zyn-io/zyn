@@ -1,10 +1,12 @@
 // Trading in the Cave store: the market's listings and the owner's gallery.
 //
-// Everything goes through `window.zyn`, the provider Nap Wallet's extension
-// injects. The page makes no requests of its own: reads are answered by the
-// holder's own Nap, and every write — list, buy, cancel, redeem, collect —
-// waits for the holder to approve it in Nap's window, which this page cannot
-// touch. Without Nap the market stays sealed rather than inventing anything.
+// The listings are the chain's public order book, read straight from its RPC,
+// so anyone can browse. Everything else goes through the Nap the visitor
+// connected (`wallet.js`): their items and what they are owed are read by
+// their own wallet, and every write — list, buy, cancel, redeem, collect —
+// waits for them to approve it in Nap's window, which this page cannot touch.
+
+import { ask, canAskQuietly, onWallet, openPicker, RPC, wallet } from './wallet.js';
 
 const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e';
 const WAD = 10n ** 18n;
@@ -29,8 +31,20 @@ function itemName(collection, serial) {
   return `Zyn ${species} #${String(serial - start + 1).padStart(4, '0')}`;
 }
 
-const provider = () => (typeof window.zyn?.request === 'function' ? window.zyn : null);
-const ask = (method, params) => provider().request({ method, params });
+/// The public order book, from the chain itself.
+async function publicOffers() {
+  const id = crypto.randomUUID();
+  const r = await fetch(RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'zyn_offers', params: [] }),
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  });
+  const body = await r.json();
+  if (body.id !== id || body.error) throw new Error(body.error?.message || 'The chain did not answer');
+  return body.result;
+}
 
 function say(el, text, bad = false) {
   if (!el) return;
@@ -45,13 +59,10 @@ function say(el, text, bad = false) {
 
 async function loadMarket() {
   const catalog = $('#market .market-catalog');
-  const wallet = $('#market .market-wallet');
-  if (!catalog || !provider()) return;
-  wallet.disabled = false;
-  wallet.innerHTML = '<span></span> Nap connected';
+  if (!catalog) return;
   let book;
   try {
-    book = await ask('zyn_nftOffers');
+    book = await publicOffers();
   } catch (e) {
     return say($('#trade-note-market'), e.message, true);
   }
@@ -73,13 +84,16 @@ async function loadMarket() {
       <div class="trade-art" aria-hidden="true"><img src="./assets/cave-mark.svg" alt="" /></div>
       <h3>${esc(itemName(o.collection, o.serial))}</h3>
       <dl><dt>Price</dt><dd>${zec(o.price_raw)} ZEC.zy</dd><dt>You pay</dt><dd>${zec(o.pay_raw)} ZEC.zy</dd></dl>
-      <button type="button" class="trade-action" data-buy="${i}">Buy with Nap</button>
+      <button type="button" class="trade-action" data-buy="${i}">${wallet() ? 'Buy with Nap' : 'Connect to buy'}</button>
     </article>`).join('');
   grid.querySelectorAll('[data-buy]').forEach((b) => {
     b.onclick = async () => {
       const o = offers[Number(b.dataset.buy)];
+      if (!wallet()) { openPicker(); return; }
       b.disabled = true;
       try {
+        // Asked before anything is awaited: Nap in the browser may need to
+        // open its window, and only this click may open it.
         await ask('zyn_nftBuy', { item: o.item, pay: zec(o.pay_raw) });
         say($('#trade-note-market'), `Bought ${itemName(o.collection, o.serial)}. It is in your Nap wallet.`);
         loadMarket();
@@ -97,7 +111,12 @@ async function loadMarket() {
 
 async function loadPortfolio() {
   const gallery = $('#portfolio .portfolio-gallery');
-  if (!gallery || !provider()) return;
+  if (!gallery) return;
+  if (!wallet()) return;
+  if (!canAskQuietly()) {
+    say($('#trade-note-portfolio'), "Nap's window is closed. Press the wallet button to open it again, then come back here.");
+    return;
+  }
   let mine, owed;
   try {
     [mine, owed] = await Promise.all([ask('zyn_nftItems'), ask('zyn_owed')]);
@@ -110,7 +129,6 @@ async function loadPortfolio() {
   stats.querySelectorAll('dd')[0].textContent = String(items.length);
   stats.querySelectorAll('dd')[1].textContent = String(new Set(items.map((i) => i.collection)).size);
   stats.querySelectorAll('dd')[2].textContent = String(items.filter((i) => i.listed).length);
-  $('#portfolio .portfolio-connect').innerHTML = '<span></span> Nap connected';
   const empty = $('.gallery-empty', gallery);
   const placeholder = $('.gallery-grid', gallery);
   if (items.length) {
@@ -165,19 +183,8 @@ function route() {
   if (location.hash === '#portfolio') loadPortfolio();
 }
 
-// With Nap present, "Connect wallet" loads the gallery instead of explaining
-// that no wallet is available.
-function wire() {
-  if (!provider()) return;
-  document.querySelectorAll('#portfolio [data-wallet-dialog]').forEach((b) => {
-    b.removeAttribute('data-wallet-dialog');
-    b.addEventListener('click', () => loadPortfolio());
-  });
-  route();
-}
-
 window.addEventListener('hashchange', route);
-// The extension injects its provider as the page starts; allow it a moment.
-if (provider()) wire();
-else window.addEventListener('zyn#initialized', wire, { once: true });
-setTimeout(() => { if (provider()) wire(); }, 800);
+// Connecting or disconnecting changes what the market can offer and what the
+// portfolio can show.
+onWallet(() => route());
+route();

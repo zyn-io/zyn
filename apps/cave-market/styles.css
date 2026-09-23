@@ -688,3 +688,26 @@ body[data-view="launch"] footer span:last-child { color: var(--zec); }
 .trade-owed { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px dashed rgba(232,196,106,.6); border-radius: 12px; }
 .trade-note { margin: 10px 0; padding: 10px 12px; border-left: 3px solid #6ad4a0; background: rgba(106,212,160,.08); }
 .trade-note[data-tone="bad"] { border-color: #e56b5b; background: rgba(229,107,91,.08); }
+
+/* Wallet: the header button, and the picker inside #wallet-dialog. */
+.header-wallet { min-height: 40px; padding: 10px 14px; border: 1px solid var(--zec); color: #10140d; background: var(--zec); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.header-wallet:hover { background: #ffd267; }
+.header-wallet span, .market-wallet span { display: inline-block; width: 6px; height: 6px; margin-right: 8px; background: #283119; }
+.header-wallet.is-connected { background: transparent; color: var(--ink); border-color: var(--line); }
+.header-wallet.is-connected span, .market-wallet.is-connected span, .portfolio-connect.is-connected span { background: var(--acid); }
+.market-wallet:not(:disabled) { color: var(--ink); border-color: var(--zec); cursor: pointer; }
+.wallet-body { display: grid; gap: 10px; margin-top: 18px; }
+.wallet-option { display: grid; grid-template-columns: 36px 1fr auto; gap: 14px; align-items: center; width: 100%; padding: 14px; border: 1px solid #58717a; background: #0d1d24; color: var(--ink); text-align: left; cursor: pointer; }
+.wallet-option:hover, .wallet-option:focus-visible { border-color: var(--zec); outline: none; }
+.wallet-option img { width: 36px; height: 36px; object-fit: contain; }
+.wallet-option b { display: block; font-size: 15px; }
+.wallet-option small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.wallet-option i { font-style: normal; color: var(--zec); }
+.wallet-status { min-height: 18px; margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.wallet-status[data-tone="bad"] { color: #ff9a8c; }
+.wallet-status[data-tone="ok"] { color: var(--acid); }
+.wallet-facts { display: grid; gap: 1px; margin: 0; border-top: 1px solid var(--line); }
+.wallet-facts div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.wallet-facts dt { color: var(--muted); font-size: 12px; }
+.wallet-facts dd { margin: 0; }
+@media (max-width: 760px) { .header-wallet { padding: 9px 10px; } }

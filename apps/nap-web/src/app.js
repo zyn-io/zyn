@@ -4,6 +4,7 @@ import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerInt
 import { fund as fundFrom } from './market.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
+import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import './styles.css';
 
@@ -522,6 +523,19 @@ function bindZec() {
   const go = root.querySelector('#zec-go');
   const disarm = () => { delete go.dataset.armed; go.innerHTML = 'Review <span>→</span>'; };
   form.querySelectorAll('input').forEach((el) => { el.oninput = disarm; });
+  // A ZIP-321 request (a shop's QR, a "zcash:" link) pasted as the recipient
+  // fills in the whole payment, which the holder still reviews.
+  root.querySelector('#zec-to').addEventListener('input', (e) => {
+    const v = e.target.value.trim();
+    if (!/^zcash:/i.test(v)) return;
+    try {
+      const r = parsePaymentRequest(v);
+      e.target.value = r.address;
+      if (r.zatoshi != null) root.querySelector('#zec-amount').value = zecText(r.zatoshi);
+      root.querySelector('#zec-memo').value = r.memo;
+      note(r.message ? `Payment request: “${r.message}”. Check it, then review.` : 'Payment request filled in. Check it, then review.');
+    } catch (err) { note(err.message, true); }
+  });
   form.onsubmit = async (e) => {
     e.preventDefault();
     try {

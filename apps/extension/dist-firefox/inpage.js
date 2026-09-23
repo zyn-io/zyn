@@ -17,6 +17,14 @@
     pending.set(id, { resolve, reject });
     window.postMessage({ target: 'zyn-content', id, method, params: params || {} }, '*');
   });
-  Object.defineProperty(window, 'zyn', { value: Object.freeze({ isZynZap: true, request }), writable: false, configurable: false });
+  const provider = Object.freeze({ isZynZap: true, isNap: true, request });
+  Object.defineProperty(window, 'zyn', { value: provider, writable: false, configurable: false });
   window.dispatchEvent(new Event('zyn#initialized'));
+  // Announced the way EIP-6963 has wallets do it, so a page lists every Nap
+  // it can reach (this one, Nap in the browser) instead of taking whichever
+  // wrote a global first. See apps/nap-connect.
+  const info = Object.freeze({ uuid: crypto.randomUUID(), name: 'Nap Wallet', detail: 'Extension, with desktop Nap', rdns: 'win.cavebro.nap.desktop', icon: '' });
+  const announce = () => window.dispatchEvent(new CustomEvent('nap:announceProvider', { detail: Object.freeze({ info, provider }) }));
+  window.addEventListener('nap:requestProvider', announce);
+  announce();
 })();
