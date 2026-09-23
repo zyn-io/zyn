@@ -163,9 +163,151 @@ pub fn scan(
     Ok(Scanner::new(viewing, nullifier_key).scan(owner, &outputs, 0, &spent))
 }
 
+// ---------------------------------------------------------------------------
+// Acting on the ledger: the same doors the browser wallet uses.
+// ---------------------------------------------------------------------------
+
+use ed25519_dalek::{Signer, SigningKey};
+use objectvm::{ObjectVm, Op, Output};
+use zyn_vm::object::{nullifier, Note};
+use zyn_vm::spec::MicrochainVm;
+use zyn_vm::Fixed;
+
+/// A decimal amount as WAD, exactly: at most 18 decimals, above zero.
+pub fn parse_amount(text: &str) -> Result<Fixed, String> {
+    let t = text.trim();
+    let (whole, frac) = t.split_once('.').unwrap_or((t, ""));
+    if t.ends_with('.') || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) || frac.len() > 18 || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("use a positive decimal with at most 18 decimal places".into());
+    }
+    let w: i128 = whole.parse().map_err(|_| "amount too large")?;
+    let f: i128 = if frac.is_empty() { 0 } else { format!("{frac:0<18}").parse().map_err(|_| "bad decimals")? };
+    let v = w.checked_mul(zyn_vm::fixed::WAD).and_then(|x| x.checked_add(f)).ok_or("amount too large")?;
+    if v <= 0 {
+        return Err("amount must be above zero".into());
+    }
+    Ok(Fixed(v))
+}
+
+/// One JSON-RPC call with named fields, as the object node reads them.
+pub fn call(host: &str, method: &str, fields: serde_json::Value) -> Result<serde_json::Value, String> {
+    let mut body = serde_json::json!({ "jsonrpc": "2.0", "id": "nap", "method": method, "params": [] });
+    if let (Some(b), Some(f)) = (body.as_object_mut(), fields.as_object()) {
+        for (k, v) in f {
+            b.insert(k.clone(), v.clone());
+        }
+    }
+    let text = rpc(host, &body.to_string()).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| "the object ledger's reply is not JSON".to_string())?;
+    if let Some(e) = v.get("error") {
+        return Err(e.get("message").and_then(|m| m.as_str()).unwrap_or("the chain refused").to_string());
+    }
+    Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+fn hexs(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
+}
+
+/// Sign `intent` with `key` and hand it to the holders' door. A refusal
+/// inside the receipts is an error: the frame was taken, the intent was not.
+pub fn submit(host: &str, chain: u32, key: &SigningKey, intent: Op) -> Result<String, String> {
+    let status = call(host, "zyn_status", serde_json::json!({}))?;
+    if status.get("chain").and_then(|c| c.as_u64()) != Some(chain as u64) {
+        return Err(format!("the ledger at {host} is not chain {chain}"));
+    }
+    let epoch = status.get("epoch").and_then(|e| e.as_u64()).ok_or("the ledger gave no epoch")?;
+    let auth = zyn_vm::auth::Authorization {
+        chain_id: chain,
+        vm_id: zyn_vm::zvm::vm_id::<ObjectVm>(),
+        valid_until_epoch: epoch + 100,
+    };
+    let signature = key.sign(&zyn_vm::auth::signing_payload::<ObjectVm>(&auth, &intent));
+    let cred = zyn_vm::verify::Credential::Ed25519 {
+        key: key.verifying_key().to_bytes(),
+        signature: signature.to_bytes(),
+    };
+    let genesis = <ObjectVm as MicrochainVm>::genesis(chain, objectvm::Limits { max_io: 16 });
+    let authorized = zyn_vm::verify::authorize_intent::<ObjectVm>(&[cred], &auth, intent, &genesis)
+        .map_err(|e| format!("cannot sign that: {e:?}"))?;
+    let frame = zyn_vm::verify::encode_authorized::<ObjectVm>(&authorized);
+    let r = call(host, "zyn_submitSigned", serde_json::json!({ "frame": hexs(&frame) }))?;
+    let receipts = r.get("receipts").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if let Some(at) = receipts.find("Refused(\"") {
+        let rest = &receipts[at + 9..];
+        return Err(format!("the chain refused: {}", &rest[..rest.find('"').unwrap_or(rest.len())]));
+    }
+    Ok(receipts)
+}
+
+fn random32() -> [u8; 32] {
+    use rand::RngCore;
+    let mut b = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut b);
+    b
+}
+
+/// A note for `owner`, sealed to the viewing key they registered.
+pub fn sealed_output(owner: AccountId, to_viewing: &[u8; 32], asset: [u8; 32], amount: Fixed) -> Result<Output, String> {
+    let note = Note { asset, amount, owner, nonce: random32() };
+    let mut plain = Vec::with_capacity(80);
+    plain.extend_from_slice(&note.asset);
+    plain.extend_from_slice(&note.amount.0.to_be_bytes());
+    plain.extend_from_slice(&note.nonce);
+    let enc = zyn_vm::note_enc::seal(to_viewing, StaticSecret::from(random32()), &plain)
+        .map_err(|e| format!("cannot seal the note: {e:?}"))?;
+    Ok(Output { note, enc })
+}
+
+/// Notes of `asset` covering `amount`, largest first, and change back to
+/// `owner` sealed to `own_viewing`.
+pub fn fund(
+    wallet: &Wallet,
+    nullifier_key: &[u8; 32],
+    owner: AccountId,
+    own_viewing: &[u8; 32],
+    asset: [u8; 32],
+    amount: Fixed,
+) -> Result<(Vec<([u8; 32], [u8; 32])>, Vec<Output>), String> {
+    let mut mine: Vec<_> = wallet.live.iter().filter(|o| o.note.asset == asset).collect();
+    mine.sort_by(|a, b| b.note.amount.cmp(&a.note.amount));
+    let mut sum: i128 = 0;
+    let mut inputs = Vec::new();
+    for o in mine {
+        if sum >= amount.0 {
+            break;
+        }
+        inputs.push((o.commitment, nullifier(nullifier_key, &o.commitment)));
+        sum += o.note.amount.0;
+    }
+    if sum < amount.0 {
+        return Err("not enough of that asset".into());
+    }
+    if inputs.len() > 16 {
+        return Err("that needs too many notes at once".into());
+    }
+    let change = if sum > amount.0 {
+        vec![sealed_output(owner, own_viewing, asset, Fixed(sum - amount.0))?]
+    } else {
+        Vec::new()
+    };
+    Ok((inputs, change))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Amounts are exact: a wallet that rounds what someone sends is lying.
+    #[test]
+    fn amounts_parse_exactly_and_refuse_the_rest() {
+        assert_eq!(parse_amount("1").unwrap(), Fixed::whole(1));
+        assert_eq!(parse_amount("0.000000000000000001").unwrap(), Fixed(1));
+        assert_eq!(parse_amount("12.5").unwrap(), Fixed(12_500_000_000_000_000_000));
+        for bad in ["", "0", "-1", "1.", ".5", "1e3", "0.0000000000000000001", "1,5"] {
+            assert!(parse_amount(bad).is_err(), "{bad} must be refused");
+        }
+    }
     use zyn_vm::note_enc::{seal, viewing_public};
     use zyn_vm::object::{commitment, nullifier, Note};
     use zyn_vm::Fixed;

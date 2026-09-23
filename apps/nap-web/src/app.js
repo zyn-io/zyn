@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
-import { scan as scanObjects, objectCall, registerIntent, signedFrame as objectFrame, submitSigned, withdrawIntent } from './object.js';
+import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
 import { fund as fundFrom } from './market.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
@@ -573,7 +573,8 @@ function renderCoins() {
   const count = root.querySelector('#coin-count');
   if (!holder) return;
   count.textContent = String(coins.length);
-  holder.innerHTML = coins.map((c) => `<div class="coin"><div><p class="kicker">${escapeHtml(c.meta.symbol)}</p><b>${escapeHtml(readableAmount(c.amount))}</b></div>${c.meta.symbol === 'ZEC.zy' ? '<span class="muted">deposited ZEC</span>' : ''}</div>`).join('');
+  holder.innerHTML = coins.map((c, i) => `<div class="coin"><div><p class="kicker">${escapeHtml(c.meta.symbol)}</p><b>${escapeHtml(readableAmount(c.amount))}</b></div>${config.kind === 'object' && decimalRaw(c.amount) > 0n ? `<button class="quiet coin-send" data-coin="${i}">Send →</button>` : (c.meta.symbol === 'ZEC.zy' ? '<span class="muted">deposited ZEC</span>' : '')}</div>`).join('');
+  holder.querySelectorAll('[data-coin]').forEach((b) => { b.onclick = () => openObjectSend(coins[Number(b.dataset.coin)]); });
 }
 
 function renderItems() {
@@ -739,6 +740,56 @@ function openSend(item) {
   };
   dialog.showModal();
 }
+
+/// Send a coin to another Zyn account on the object ledger: retire notes this
+/// wallet holds and create one for the recipient, sealed to the viewing key
+/// they registered, plus change sealed to this wallet. Nothing on chain names
+/// either account in the clear.
+function openObjectSend(coin) {
+  const current = generation;
+  let reviewed = null;
+  const dialog = root.querySelector('#send-dialog');
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>To another Zyn account.</h2><p class="muted">The chain records that notes were spent and created — not who sent, who received, or how much. Transfers cannot be undone.</p><form><label>Recipient Zyn account<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="64 hex characters"></label><label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label><div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
+  dialog.querySelector('.x').onclick = () => dialog.close();
+  dialog.querySelector('form').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = dialog.querySelector('.primary');
+    const error = dialog.querySelector('.error');
+    button.disabled = true;
+    try {
+      const to = unhex(dialog.querySelector('#send-to').value.trim(), 32);
+      const amount = parseAmount(dialog.querySelector('#send-amount').value.trim());
+      if (to.every((b) => b === 0) || hex(to) === identity.accountHex) throw new Error('Choose a different, nonzero recipient account');
+      if (!reviewed) {
+        reviewed = `${hex(to)}:${amount}`;
+        dialog.querySelector('#send-to').value = hex(to);
+        dialog.querySelectorAll('input').forEach((el) => { el.readOnly = true; });
+        button.textContent = `Confirm: send ${readableAmount(dialog.querySelector('#send-amount').value.trim())} ${coin.meta.symbol}`;
+        button.disabled = false;
+        error.textContent = 'Check all 64 recipient characters above. Close to edit.';
+        return;
+      }
+      if (`${hex(to)}:${amount}` !== reviewed) throw new Error('Details changed; close and review again');
+      const { viewing } = await objectCall(config.rpcUrl, 'zyn_viewingKey', { account: hex(to) });
+      if (generation !== current) return;
+      const asset = unhex(coin.asset, 32);
+      const { inputs, change } = fundFrom(identity, objectHeld, asset, amount);
+      const note = { asset, amount, owner: to, nonce: crypto.getRandomValues(new Uint8Array(32)) };
+      const enc = sealNote(unhex(viewing, 32), crypto.getRandomValues(new Uint8Array(32)), note);
+      await submitObject(spendIntent(identity.account, OBJECT_PROGRAM.privateTransfer, inputs, [{ note, enc }, ...change]));
+      if (generation !== current) return;
+      dialog.close();
+      note_(`Sent ${readableAmount(dialog.querySelector('#send-amount')?.value || '')} ${coin.meta.symbol}.`);
+      refresh(false);
+    } catch (e) {
+      if (generation !== current) return;
+      error.textContent = e.message;
+      button.disabled = false;
+    }
+  };
+  dialog.showModal();
+}
+const note_ = (text) => note(text);
 
 async function claimGift() {
   const owner = identity, current = generation;

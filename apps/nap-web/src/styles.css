@@ -40,3 +40,4 @@
 .withdraw-input { display: block; width: 100%; margin: 10px 0 0; padding: 12px 13px; border: 1px solid #ffffff2d; border-radius: 8px; background: #121618; color: #fff; font: 14px Mono; }
 .withdraw-input:focus { outline: none; border-color: #e8a916; }
 #withdraw-form .primary { margin-top: 0; }
+.coin-send { padding: 4px 0; font: 700 13px Plex; color: #1f2428; }

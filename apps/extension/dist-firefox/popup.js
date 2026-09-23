@@ -428,6 +428,7 @@ async function paintArt(el, item) {
   el.dataset.verified = '1';
 }
 
+const ZEC_ZY = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 // The object ledger, if one is configured. Failing to reach it must not read
 // as "you hold nothing": those look identical and mean opposite things, so an
 // unreachable ledger hides the panel and says why rather than showing zero.
@@ -463,6 +464,16 @@ async function loadObjects() {
     ? `${o.live} note(s) held, ${o.spent} spent.`
     : 'Nothing here yet. Objects arrive when a deposit is credited or someone sends you one.';
   panel.hidden = false;
+  $('zyn-obj-act').hidden = false;
+  const sel = $('os-asset'), keep = sel.value;
+  sel.replaceChildren();
+  for (const h of o.held) {
+    const opt = document.createElement('option');
+    opt.value = h.asset;
+    opt.textContent = h.asset === ZEC_ZY ? 'ZEC.zy' : (h.asset || '').slice(0, 10) + '…';
+    sel.append(opt);
+  }
+  if (keep) sel.value = keep;
 }
 
 function renderItems(z) {
@@ -619,9 +630,10 @@ function render(s) {
     $('job-bar').hidden = !(job.kind === 'sync' && p);
     if (p) $('job-bar').firstElementChild.style.width = Math.min(100, Math.round(100 * (p.at - s.birthday) / Math.max(1, p.to - s.birthday))) + '%';
   }
-  for (const b of ['sync', 'send', 'deposit', 'withdraw', 'bind', 'zt-send', 'import', 'reset', 'save-settings', 't-shield']) $(b).disabled = !!job || ((b === 'withdraw' || b === 't-shield') && $(b).disabled);
+  for (const b of ['sync', 'send', 'deposit', 'withdraw', 'bind', 'zt-send', 'import', 'reset', 'save-settings', 't-shield', 'sw-go', 'sw-shield']) $(b).disabled = !!job || ((b === 'withdraw' || b === 't-shield') && $(b).disabled);
   setAddr('address', s.address);
   $('t-recv').hidden = !s.transparent_address;
+  $('switch-sec').hidden = !s.transparent_address;
   if (s.transparent_address) setAddr('t-address', s.transparent_address);
   $('qr').innerHTML = s.qr_svg || '';
   $('faucet-hint').textContent = main ? 'Shielded (Orchard + Ironwood) unified address. Private from the moment it lands.' : 'Testnet. No TAZ yet? Paste the address into a testnet faucet.';
@@ -938,6 +950,74 @@ async function loadTransparent() {
   $('t-shield').dataset.net = dead ? '' : fmt(t.net) + ' ' + unit;
 }
 $('t-recv').addEventListener('toggle', loadTransparent);
+// The switch: shielded ⇄ transparent, both ways, in one place. "Make public"
+// pays the wallet's own t-address from the shielded balance; "make private"
+// sweeps whatever is on the t-address back in.
+function setSwitch(pub) {
+  $('sw-pub').classList.toggle('on', pub); $('sw-priv').classList.toggle('on', !pub);
+  $('sw-pub').setAttribute('aria-selected', String(pub)); $('sw-priv').setAttribute('aria-selected', String(!pub));
+  $('sw-pub-pane').hidden = !pub; $('sw-priv-pane').hidden = pub;
+  if (!pub) loadSwitchTransparent();
+}
+async function loadSwitchTransparent() {
+  $('sw-shield').disabled = true;
+  let t;
+  try { t = await api('/api/transparent'); } catch (e) { $('sw-t-state').textContent = e.message; return; }
+  const unit = $('unit').textContent || 'ZEC';
+  if (!t.total) { $('sw-t-state').textContent = 'Nothing on your transparent address.'; return; }
+  const dead = !t.net;
+  $('sw-t-state').textContent = dead
+    ? `${fmt(t.total)} ${unit} is there, but the network fee would take all of it.`
+    : `${fmt(t.total)} ${unit} is public on your transparent address. ${fmt(t.net)} ${unit} arrives shielded after the ${fmt(t.fee)} ${unit} fee.`;
+  $('sw-shield').disabled = dead;
+  $('sw-shield').dataset.net = dead ? '' : `${fmt(t.net)} ${unit}`;
+}
+$('od-get').onclick = () => run($('od-get'), 'Asking…', async () => {
+  const r = await api('/api/object/deposit');
+  if (!r.address || !String(r.address).startsWith(state.network === 'mainnet' ? 'u1' : 'utest1')) throw new Error('The node answered with an address for the wrong network — do not send anything.');
+  $('od-addr').textContent = r.address; $('od-addr').dataset.full = r.address;
+  $('od-get').textContent = 'Copy'; $('od-get').onclick = () => navigator.clipboard.writeText(r.address).then(() => toast('copied'));
+});
+$('os-send').onclick = () => run($('os-send'), 'Sending…', async () => {
+  const to = $('os-to').value.trim(), asset = $('os-asset').value, amount = $('os-amount').value.trim();
+  if (!/^[0-9a-f]{64}$/i.test(to) || !amount) throw new Error('recipient (64 hex) and amount are required');
+  const ok = await confirmDialog('Send on Zyn', [['To', to], ['Asset', asset === ZEC_ZY ? 'ZEC.zy' : asset], ['Amount', amount]]);
+  if (!ok) return;
+  await api('/api/object/send', { to: to.toLowerCase(), asset, amount });
+  $('os-amount').value = ''; await loadObjects();
+});
+$('ow-go').onclick = () => run($('ow-go'), 'Withdrawing…', async () => {
+  const to = $('ow-to').value.trim() || ($('address').dataset.full || '');
+  const amount = $('ow-amount').value.trim();
+  if (!to || !amount) throw new Error('an address and an amount are required');
+  const ok = await confirmDialog('Take ZEC out', [['Amount', `${amount} ZEC.zy`], ['To', to], ['Fee', 'the Zcash fee comes out of it']]);
+  if (!ok) return;
+  await api('/api/object/withdraw', { address: to, amount });
+  $('ow-amount').value = ''; await loadObjects();
+});
+$('sw-pub').onclick = () => setSwitch(true);
+$('sw-priv').onclick = () => setSwitch(false);
+$('sw-max').onclick = () => { if (state) $('sw-amount').value = fmt(Math.max(0, state.balance.total - state.fee_estimate)); };
+$('sw-go').onclick = () => run($('sw-go'), 'Moving out…', async () => {
+  const amount = $('sw-amount').value.trim();
+  if (!amount) throw new Error('amount is required');
+  const ok = await confirmDialog('Make public', [
+    ['Amount', `${amount} ${state.unit}`],
+    ['To', `your transparent address ${state.transparent_address || ''}`],
+    ['Fee', `about ${fmt(state.fee_estimate)} ${state.unit}`],
+    ['Visible', 'to anyone, once it lands'],
+  ]);
+  if (!ok) return;
+  await api('/api/unshield', { amount });
+  $('sw-amount').value = '';
+});
+$('sw-shield').onclick = async () => {
+  const ok = await confirmDialog('Make it private', [['You receive', $('sw-shield').dataset.net || '—'], ['To', $('address').dataset.full || '']]);
+  if (!ok) return;
+  await run($('sw-shield'), 'Moving in…', async () => { await api('/api/shield', {}); });
+  await loadSwitchTransparent();
+};
+
 $('t-shield').onclick = async () => {
   const ok = await confirmDialog('Make it private', [
     ['Moving', $('t-total').textContent.replace(' waiting', '')],

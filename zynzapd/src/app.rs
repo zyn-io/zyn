@@ -1374,24 +1374,96 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // the wallet downloads what everyone is served and opens what it can
         // with its own viewing key (§133.5). The node is never told which
         // outputs mattered, because it is never asked about any of them.
-        ("GET", "/api/object") => {
-            // The ledger of the network the wallet is on. One default for
-            // both meant a mainnet wallet read the testnet's notes — and found
-            // none, which reads as an empty wallet rather than the wrong one.
-            let mainnet = app
-                .wallet
-                .lock()
-                .map(|w| w.network() == Network::MainNetwork)
-                .unwrap_or(false);
-            let (default_node, chain) = if mainnet {
-                (DEFAULT_OBJECT_NODE_MAINNET, OBJECT_CHAIN_MAINNET)
-            } else {
-                (DEFAULT_OBJECT_NODE, OBJECT_CHAIN)
+        ("GET", "/api/object/deposit") => {
+            let (host, chain) = object_target(app);
+            let account = account(&app.key());
+            let ask = || crate::object_client::call(&host, "zyn_depositAddress", json!({ "account": hex(&account) }));
+            let mut r = ask()?;
+            // An address credits an account that has published where to be
+            // paid. Registering is one signed intent that moves nothing.
+            if r.get("registered").and_then(Value::as_bool) == Some(false) {
+                let viewing = {
+                    let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                    zyn_vm::note_enc::viewing_public(&w.object_keys(0)?.0)
+                };
+                crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Register {
+                    account,
+                    program: zyn_vm::program::register_viewing_key(),
+                    viewing,
+                })?;
+                r = ask()?;
+            }
+            Ok(r)
+        }
+        ("POST", "/api/object/send") => {
+            let (host, chain) = object_target(app);
+            let to: [u8; 32] = unhex32(str_of(input, "to")?.trim()).ok().ok_or("the recipient is not a 64-hex account")?;
+            let asset: [u8; 32] = unhex32(str_of(input, "asset")?.trim()).ok().ok_or("the asset is not a 64-hex id")?;
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            let me = account(&app.key());
+            if to == me || to == [0u8; 32] {
+                return Err("choose a different, nonzero recipient".into());
+            }
+            let viewing = crate::object_client::call(&host, "zyn_viewingKey", json!({ "account": hex(&to) }))?;
+            let their = unhex32(viewing.get("viewing").and_then(Value::as_str).unwrap_or("")).ok().ok_or("the ledger gave no viewing key")?;
+            let (vk, nk) = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.object_keys(0)?
             };
-            let host = std::env::var("ZYN_OBJECT_NODE")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| default_node.to_string());
+            let wallet = crate::object_client::scan(&host, &me, vk.clone(), nk).map_err(|e| e.to_string())?;
+            let mine = zyn_vm::note_enc::viewing_public(&vk);
+            let (inputs, change) = crate::object_client::fund(&wallet, &nk, me, &mine, asset, amount)?;
+            let mut outputs = vec![crate::object_client::sealed_output(to, &their, asset, amount)?];
+            outputs.extend(change);
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Spend {
+                spender: me,
+                program: zyn_vm::program::private_transfer(),
+                inputs,
+                outputs,
+            })?;
+            Ok(json!({ "sent": true }))
+        }
+        ("POST", "/api/object/withdraw") => {
+            let (host, chain) = object_target(app);
+            let address = str_of(input, "address")?.trim().to_string();
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            if amount.0 % 10_000_000_000 != 0 {
+                return Err("ZEC has eight decimal places".into());
+            }
+            if amount.0 < 100_000 * 10_000_000_000 {
+                return Err("withdraw at least 0.001 ZEC — the Zcash fee comes out of it".into());
+            }
+            let salt = {
+                use rand::RngCore;
+                let mut b = [0u8; 32];
+                rand::rngs::OsRng.fill_bytes(&mut b);
+                b
+            };
+            let c = crate::object_client::call(&host, "zyn_exitCommitment", json!({ "address": address, "salt": hex(&salt) }))?;
+            let destination = unhex32(c.get("destination").and_then(Value::as_str).unwrap_or("")).ok().ok_or("the ledger gave no commitment")?;
+            let me = account(&app.key());
+            let (vk, nk) = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.object_keys(0)?
+            };
+            let wallet = crate::object_client::scan(&host, &me, vk.clone(), nk).map_err(|e| e.to_string())?;
+            let mine = zyn_vm::note_enc::viewing_public(&vk);
+            let zec = swapvm::types::XZEC;
+            let (inputs, outputs) = crate::object_client::fund(&wallet, &nk, me, &mine, zec, amount)?;
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Withdraw {
+                holder: me,
+                program: zyn_vm::program::withdraw(),
+                inputs,
+                asset: zec,
+                amount,
+                destination,
+                outputs,
+            })?;
+            crate::object_client::call(&host, "zyn_exitReveal", json!({ "address": address, "salt": hex(&salt) }))?;
+            Ok(json!({ "withdrawing": true }))
+        }
+        ("GET", "/api/object") => {
+            let (host, chain) = object_target(app);
             let (viewing, nullifier_key) = {
                 let w = app.wallet.lock().map_err(|_| "wallet busy")?;
                 w.object_keys(0)?
@@ -1510,6 +1582,23 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 "net": s.as_ref().map(|x| zec(x.net)),
                 "outputs": s.as_ref().map(|x| x.count),
             }))
+        }
+        // Shielded to this wallet's own transparent address: the switch's
+        // "make public" side. The sweep back is `/api/shield`.
+        ("POST", "/api/unshield") => {
+            let zat = zatoshi_of(input, "amount")?;
+            let to = {
+                let w = app.wallet.try_lock().map_err(|_| "wallet busy")?;
+                let to = w.transparent_address().ok_or("this wallet has no transparent address")?;
+                if zat + zyn_custody::payout::zip317_fee(2, 0) > w.balance().0 + w.balance().1 {
+                    return Err("not enough for that amount plus the fee".into());
+                }
+                to
+            };
+            App::start_job(app, "unshield", move |a| {
+                let txid = send(a, &to, zat, None, "made public")?;
+                Ok(format!("moved {:.8} to your transparent address: {}", zec(zat), txid))
+            })
         }
         ("POST", "/api/send") => {
             let to = str_of(input, "to")?.trim().to_string();
@@ -2369,6 +2458,28 @@ fn sync(app: &App) -> Result<Vec<String>, String> {
     }
     Ok(lines)
 }
+
+/// The object ledger of the network the wallet is on. One default for both
+/// meant a mainnet wallet read the testnet's notes — and found none, which
+/// reads as an empty wallet rather than the wrong one.
+fn object_target(app: &App) -> (String, u32) {
+    let mainnet = app
+        .wallet
+        .lock()
+        .map(|w| w.network() == Network::MainNetwork)
+        .unwrap_or(false);
+    let (default_node, chain) = if mainnet {
+        (DEFAULT_OBJECT_NODE_MAINNET, OBJECT_CHAIN_MAINNET)
+    } else {
+        (DEFAULT_OBJECT_NODE, OBJECT_CHAIN)
+    };
+    let host = std::env::var("ZYN_OBJECT_NODE")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default_node.to_string());
+    (host, chain)
+}
+
 
 fn send(app: &App, to: &str, zat: u64, memo: Option<&str>, kind: &str) -> Result<String, String> {
     let mut w = app.wallet.lock().map_err(|_| "wallet busy")?;

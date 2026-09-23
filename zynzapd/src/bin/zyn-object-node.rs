@@ -613,6 +613,25 @@ fn handle(
                 market_json(n.state(), n.policy().max_seconds_per_epoch)
             )
         }
+        // Where to pay an account: its registered viewing key. Public by
+        // design — it is in the state root already, and a payer who cannot
+        // read it cannot address a note to anyone.
+        "zyn_viewingKey" => {
+            let Some(account) = field(body, "account")
+                .and_then(|h| unhex(&h))
+                .and_then(|b| <[u8; 32]>::try_from(b).ok())
+            else {
+                return err("account is not 32 hex bytes");
+            };
+            let n = node.lock().unwrap();
+            match n.state().viewing.get(&account) {
+                Some(v) => format!(
+                    "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"viewing\":\"{}\"}}}}",
+                    hex(v)
+                ),
+                None => err("that account has not registered where to be paid, so nothing can be sent to it yet"),
+            }
+        }
         // What the ledger owes, by claim id. Ids derive from a nonce only
         // the owner holds, so this answers the owner and nobody else — there
         // is deliberately no "claims for this account" to ask.
@@ -858,7 +877,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_viewingKey, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 
@@ -2824,6 +2843,16 @@ mod market_door {
         assert!(v["result"]["receipts"].as_str().unwrap().contains("Claimed"), "{v}");
         let v = r.call(&format!("{{\"method\":\"zyn_claims\",\"ids\":\"{}\"}}", hex(&proceeds)));
         assert_eq!(v["result"].as_array().unwrap().len(), 0, "redeemed once");
+    }
+
+    #[test]
+    fn a_payer_can_look_up_where_to_pay_a_registered_account() {
+        let r = rig("viewing");
+        let v = r.call(&format!("{{\"method\":\"zyn_viewingKey\",\"account\":\"{}\"}}", hex(&[0x77; 32])));
+        assert!(v["error"]["message"].as_str().unwrap().contains("not registered"), "{v}");
+        r.operator(Op::Register { account: [0x77; 32], program: zyn_vm::program::register_viewing_key(), viewing: [0x42; 32] });
+        let v = r.call(&format!("{{\"method\":\"zyn_viewingKey\",\"account\":\"{}\"}}", hex(&[0x77; 32])));
+        assert_eq!(v["result"]["viewing"], hex(&[0x42; 32]));
     }
 
     /// Only the account an intent names can sign it — including a claim,

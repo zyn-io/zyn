@@ -1044,6 +1044,20 @@ impl Wallet {
         Ok(zyn_custody::transparent::plan(&utxos))
     }
 
+    /// The other direction: pay `zatoshi` from the shielded balance to this
+    /// wallet's own transparent address.
+    ///
+    /// For the places that can only read a transparent address — an exchange
+    /// deposit, a service that checks a t-address balance. What lands there is
+    /// public, which is the whole point of doing it and worth saying where the
+    /// holder chooses it. Shielding it again is `shield_transparent`.
+    pub fn unshield(&mut self, zatoshi: u64, on: impl FnMut(Event)) -> Result<String, String> {
+        let to = self
+            .transparent_address()
+            .ok_or("this build cannot derive a transparent address")?;
+        self.send(&to, zatoshi, None, on)
+    }
+
     /// Sweep the doormat into one shielded note this wallet owns.
     ///
     /// The only thing that can be done with transparent funds here, on
