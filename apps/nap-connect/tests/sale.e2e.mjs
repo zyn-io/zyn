@@ -100,9 +100,13 @@ if (PHASE === 'mint') {
 }
 
 // What the wallet now holds, on its shelf.
+// Followed by the store's own link, which keeps the Nap connection (a fresh
+// page load would start a new, unconnected session).
 if (PHASE !== 'buy') {
-  await page.goto(`${SITE}/items/?network=testnet`);
-  await page.waitForSelector('#s-shelf:not([hidden]) .item, #s-ready:not([hidden]), #s-connect:not([hidden])', { timeout: 60000 }).catch(() => {});
+  await page.click('.nav a[href="/items"]');
+  await page.waitForSelector('#s-shelf:not([hidden]) .item', { timeout: 90000 });
+  const shelf = await page.locator('#shelf .item .sym').allTextContents();
+  ok(shelf.length >= 1, `the shelf holds ${shelf.join(', ')}`);
   await page.screenshot({ path: `${S}/sale-shelf-${PHASE}.png`, fullPage: true });
 }
 

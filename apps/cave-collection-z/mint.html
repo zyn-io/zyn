@@ -298,7 +298,8 @@
       .won-art { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
       .won-art figure { margin: 0; display: grid; gap: 6px; }
       .won-art img { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--line); background: #0d0f0c; image-rendering: pixelated; }
-      .won-art figcaption { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+      .won-art figcaption { display: grid; gap: 5px; justify-items: start; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+      .won-art figcaption .tag { font-size: 7.5px; padding: 3px 6px; }
       .burn { display: grid; gap: 14px; margin-top: 10px; padding-top: 22px; border-top: 1px dashed var(--line); }
       .burn[hidden] { display: none; }
       .say.small { font-size: 10px; color: #5c6058; }
