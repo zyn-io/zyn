@@ -84,6 +84,83 @@ export async function waitSpent(config, identity, commitments, timeoutMs = 90_00
   throw new Error('The chain has not taken the last step in yet; try the rest again shortly');
 }
 
+// ---------------------------------------------------------------------------
+// Deposits from other chains (§146): SOL, ETH. A deposit there carries a
+// commitment to this account and one of its nonces — never the account — and
+// waits on the ledger until this wallet claims it.
+
+/// The assets bridged here beside ZEC, as the chain describes them.
+export async function loadBridged(config) {
+  const rows = await call(config, 'zyn_bridged').catch(() => []);
+  return (Array.isArray(rows) ? rows : []).filter((r) => isHex(r.asset) && typeof r.network === 'string' && isSmall(r.decimals));
+}
+
+const bridgeKey = (config, identity) => `nap.bridge.${config.chain}.${identity.accountHex}`;
+const bridgeUsedKey = (config, identity) => `nap.bridge.used.${config.chain}.${identity.accountHex}`;
+const usedNonces = (config, identity) => new Set(JSON.parse(read(bridgeUsedKey(config, identity)) || '[]'));
+
+/// Deposits waiting for this wallet, from every nonce it may have used.
+export async function loadWaiting(config, identity, bridged) {
+  const assets = (bridged || (await loadBridged(config))).map((b) => b.asset);
+  if (!assets.length) return [];
+  const me = identity.account;
+  const want = new Map();
+  const limit = nonceCount(config, identity) + LOOKAHEAD;
+  for (let n = 0; n < limit; n++) {
+    const secret = mk.marketNonce(identity.secretKey, n);
+    const commitment = mk.depositCommitment(me, secret);
+    for (const a of assets) want.set(hex(mk.depositKey(commitment, unhex(a))), { n, secret, asset: a });
+  }
+  const ids = [...want.keys()];
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = await call(config, 'zyn_waiting', { ids: ids.slice(i, i + 500).join(',') });
+    if (Array.isArray(part)) rows.push(...part);
+  }
+  return rows
+    .filter((r) => want.has(r.key) && isInt(r.amount) && want.get(r.key).asset === r.asset)
+    .map((r) => ({ ...want.get(r.key), amount: BigInt(r.amount) }));
+}
+
+/// The code a deposit on another chain carries: `zyn:<commitment>`. The same
+/// code comes back until a deposit with it lands, then a fresh one — so two
+/// deposits are not linked to each other by their memo.
+export async function bridgeMemo(config, identity) {
+  const saved = read(bridgeKey(config, identity));
+  if (saved != null && !usedNonces(config, identity).has(Number(saved))) {
+    const n = Number(saved);
+    const waiting = await loadWaiting(config, identity).catch(() => []);
+    if (!waiting.some((w) => w.n === n)) {
+      const commitment = mk.depositCommitment(identity.account, mk.marketNonce(identity.secretKey, n));
+      return { memo: `zyn:${hex(commitment)}`, commitment: hex(commitment) };
+    }
+    markUsed(config, identity, n);
+  }
+  const n = nonceCount(config, identity);
+  nextNonce(config, identity);
+  write(bridgeKey(config, identity), String(n));
+  const commitment = mk.depositCommitment(identity.account, mk.marketNonce(identity.secretKey, n));
+  return { memo: `zyn:${hex(commitment)}`, commitment: hex(commitment) };
+}
+
+function markUsed(config, identity, n) {
+  const used = usedNonces(config, identity);
+  used.add(n);
+  write(bridgeUsedKey(config, identity), JSON.stringify([...used]));
+}
+
+/// Claim every waiting deposit into this wallet, one note each.
+export async function claimWaiting(config, identity) {
+  const waiting = await loadWaiting(config, identity);
+  for (const w of waiting) {
+    await submitIntent(config, identity, mk.claimDepositIntent({
+      owner: identity.account, secret: w.secret, asset: unhex(w.asset), output: mk.selfNote(identity, unhex(w.asset), w.amount),
+    }));
+    markUsed(config, identity, w.n);
+  }
+  return waiting.length;
+}
+
 /// Tickets this wallet bought in a sale (§144). A ticket id derives from a
 /// nonce only this wallet holds, so it asks by id: the first ticket of every
 /// nonce it may have used, then the rest of each buy it finds.

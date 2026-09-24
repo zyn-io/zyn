@@ -61,6 +61,7 @@ const KIND_CLASS = {
   'Tickets bought': 'trade', 'Items claimed': 'claim', 'Open mint': 'trade',
   'Sale opened': 'op', 'Sale closed': 'op', 'Draw posted': 'op', 'Open mint posted': 'op',
   'Burn posted': 'bridge', 'Burn tickets capped': 'op',
+  'Bridge deposit': 'bridge', 'Bridge deposit claimed': 'claim', 'Bridged asset registered': 'op',
 };
 const kindChip = (t) => `<span class="chip ${KIND_CLASS[t.kind] || 'plain'}">${esc(t.kind)}</span>`;
 const status = (t) => (t.ok ? '<span class="ok">accepted</span>' : `<span class="bad" title="${esc(t.refusal)}">refused</span>`);
@@ -93,6 +94,8 @@ function detail(t) {
   if (d.root) parts.push(`root ${hash(d.root)}`);
   if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
   if (d.burn) parts.push(`burn ${hash(d.burn)}`);
+  if (d.asset && !d.serial && d.serial !== 0) parts.push(`asset ${hash(d.asset)}`);
+  if (d.network) parts.push(`${esc(d.network)}${d.origin ? ` · ${hash(d.origin)}` : ''} · ${esc(d.decimals)} decimals`);
   return parts.join(' · ');
 }
 

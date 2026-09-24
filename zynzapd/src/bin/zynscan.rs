@@ -159,6 +159,14 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // belongs to is not shown (the commitment hides it).
         Op::PostVoucher { collection, burn, count, .. } => ("Burn posted", true, json!({ "collection": hex(collection), "burn": hex(burn), "tickets": count })),
         Op::ClaimVoucherItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
+        Op::RegisterBridged { network, origin, decimals, .. } => (
+            "Bridged asset registered",
+            true,
+            json!({ "network": String::from_utf8_lossy(network), "origin": hex(origin), "decimals": decimals }),
+        ),
+        // Like a ZEC deposit: which asset arrived, not how much or for whom.
+        Op::DepositCommitted { asset, .. } => ("Bridge deposit", true, json!({ "asset": hex(asset) })),
+        Op::ClaimDeposit { asset, .. } => ("Bridge deposit claimed", false, json!({ "asset": hex(asset) })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }

@@ -339,6 +339,10 @@ pub struct Market {
     /// Burns already turned into tickets (§145), by the burn's id, so none is
     /// posted twice.
     pub burns: BTreeMap<Hash, Address>,
+    /// Assets bridged from other chains beside ZEC, by address (§146).
+    pub bridged: BTreeMap<Address, crate::bridge::Origin>,
+    /// Committed deposits waiting for their depositor, by `deposit_key`.
+    pub waiting: BTreeMap<Hash, crate::bridge::Waiting>,
 }
 
 impl Market {
@@ -359,6 +363,8 @@ impl Market {
             && self.sales.is_empty()
             && self.tickets.is_empty()
             && self.burns.is_empty()
+            && self.bridged.is_empty()
+            && self.waiting.is_empty()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -407,6 +413,12 @@ impl Market {
         for c in self.claims.values() {
             if &c.asset == asset {
                 t = t.checked_add(c.amount.0)?;
+            }
+        }
+        // Committed deposits nobody has claimed yet are issued and owed (§146).
+        for w in self.waiting.values() {
+            if &w.asset == asset {
+                t = t.checked_add(w.amount.0)?;
             }
         }
         for l in self.launches.values() {
@@ -561,11 +573,21 @@ impl Market {
         if !self.sales.is_empty() || !self.tickets.is_empty() || !self.burns.is_empty() {
             crate::sale::section(&mut e, &self.sales, &self.tickets, &self.burns);
         }
+        // And bridged assets beside ZEC (§146): joined once one is registered.
+        if !self.bridged.is_empty() || !self.waiting.is_empty() {
+            let b: Vec<Hash> = self.bridged.iter().map(|(a, o)| crate::bridge::origin_leaf(a, o)).collect();
+            let w: Vec<Hash> = self.waiting.iter().map(|(k, w)| crate::bridge::waiting_leaf(k, w)).collect();
+            e.bytes(b"objectvm.bridged.v1")
+                .u32(b.len() as u32)
+                .bytes(&zyn_vm::commit::merkle_root(&b))
+                .u32(w.len() as u32)
+                .bytes(&zyn_vm::commit::merkle_root(&w));
+        }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET06").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET07").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -637,6 +659,7 @@ impl Market {
         }
         crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
         crate::sale::encode(e, &self.sales, &self.tickets, &self.burns);
+        crate::bridge::encode(e, &self.bridged, &self.waiting);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -646,12 +669,14 @@ impl Market {
         // v3 predates curves and reads as a market with none.
         // v4 predates sales and reads as a market with none.
         // v5 predates burn tickets (§145): its sales have no cap and no burns.
-        let (v3, v4, v5, v6) = match d.take_bytes(8).ok()? {
-            b"MARKET06" => (true, true, true, true),
-            b"MARKET05" => (true, true, true, false),
-            b"MARKET04" => (true, true, false, false),
-            b"MARKET03" => (true, false, false, false),
-            b"MARKET02" => (false, false, false, false),
+        // v6 predates bridged assets beside ZEC (§146) and reads as none.
+        let (v3, v4, v5, v6, v7) = match d.take_bytes(8).ok()? {
+            b"MARKET07" => (true, true, true, true, true),
+            b"MARKET06" => (true, true, true, true, false),
+            b"MARKET05" => (true, true, true, false, false),
+            b"MARKET04" => (true, true, false, false, false),
+            b"MARKET03" => (true, false, false, false, false),
+            b"MARKET02" => (false, false, false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -773,6 +798,11 @@ impl Market {
             m.sales = sales;
             m.tickets = tickets;
             m.burns = burns;
+        }
+        if v7 {
+            let (bridged, waiting) = crate::bridge::decode(d)?;
+            m.bridged = bridged;
+            m.waiting = waiting;
         }
         Some(m)
     }

@@ -182,3 +182,16 @@ test('primary sales: ids, leaves, the draw proof and the three holder intents ma
   assert.equal(hex(m.voucherTicketId(commitment, 2)), v.voucher_ticket_id);
   assert.equal(hex(m.claimVoucherItemsIntent({ buyer: OWNER, collection: TOKEN, secret: NONCE, k: 2, serials: [7, 1], proof, items: [item(7), item(1)], inputs, change })), v.claim_voucher_items);
 });
+
+test('bridged assets beside ZEC: ids, the deposit commitment, the claim and the exit commitment match the ledger (§146)', () => {
+  assert.equal(hex(m.bridgedAsset('solana-devnet')), v.bridged_sol_devnet);
+  assert.equal(hex(m.bridgedAsset('eip155:11155111')), v.bridged_eth_sepolia);
+  const commitment = m.depositCommitment(OWNER, NONCE);
+  assert.equal(hex(commitment), v.deposit_commitment);
+  const sol = m.bridgedAsset('solana-devnet');
+  assert.equal(hex(m.depositKey(commitment, sol)), v.deposit_key);
+  assert.equal(hex(m.exitCommitment(new Uint8Array(20).fill(0x11), NONCE)), v.exit_commitment_evm);
+  const output = { note: { ...change[0].note, asset: sol }, enc: change[0].enc };
+  assert.equal(hex(m.claimDepositIntent({ owner: OWNER, secret: NONCE, asset: sol, output })), v.claim_deposit);
+});
+

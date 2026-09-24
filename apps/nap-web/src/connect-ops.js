@@ -587,7 +587,9 @@ export const METHODS = {
       for (let i = 0; i < owed.length; i += ledger.PER_CLAIM) {
         await ledger.submitIntent(ctx.config, ctx.identity, mk.claimIntent(mk.redeem(ctx.identity, owed.slice(i, i + ledger.PER_CLAIM))));
       }
-      return { collected: owed.length };
+      // Deposits from other chains waiting for this wallet (§146).
+      const arrived = await ledger.claimWaiting(ctx.config, ctx.identity).catch(() => 0);
+      return { collected: owed.length + arrived };
     },
   },
 

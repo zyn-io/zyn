@@ -257,6 +257,7 @@ pub fn vectors() -> Vec<(&'static str, String)> {
     ]
     .into_iter()
     .chain(sale_vectors(&input))
+    .chain(bridge_vectors())
     .collect()
 }
 
@@ -346,3 +347,25 @@ fn sale_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
         ),
     ]
 }
+
+/// Bridged assets beside ZEC (§146): ids from public facts, the deposit
+/// commitment and its key, the claim, and an exit's destination commitment.
+fn bridge_vectors() -> Vec<(&'static str, String)> {
+    use objectvm::bridge::{asset_of, deposit_commitment, deposit_key};
+    let sol = asset_of(b"solana-devnet", b"");
+    let com = deposit_commitment(&OWNER, &NONCE);
+    let mut out = change();
+    out.note.asset = sol;
+    vec![
+        ("bridged_sol_devnet", hex(&sol)),
+        ("bridged_eth_sepolia", hex(&asset_of(b"eip155:11155111", b""))),
+        ("deposit_commitment", hex(&com)),
+        ("deposit_key", hex(&deposit_key(&com, &sol))),
+        ("exit_commitment_evm", hex(&zyn_vm::eip712::keccak(&[&[0x11; 20][..], &NONCE[..]]))),
+        (
+            "claim_deposit",
+            hex(&ObjectVm::encode_intent(&Op::ClaimDeposit { owner: OWNER, program: program::claim(), secret: NONCE, asset: sol, output: out })),
+        ),
+    ]
+}
+

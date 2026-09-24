@@ -928,6 +928,128 @@ fn handle(
                 Err(_) => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":null}}"),
             }
         }
+        // Assets bridged from other chains beside ZEC (§146): what each is,
+        // from public facts, so a wallet names and scales it without a list.
+        // Committed deposits waiting to be claimed (§146), asked by key. A key
+        // derives from a commitment only its depositor can make, so this
+        // answers them and nobody else — there is no "deposits for this
+        // account" to ask.
+        "zyn_waiting" => {
+            let Some(list) = field(body, "ids") else {
+                return err("no ids");
+            };
+            let n = node.lock().unwrap();
+            let mut rows = Vec::new();
+            for id in list.split(',').filter(|s| !s.is_empty()).take(512) {
+                let Some(key) = unhex(id).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                    return err("an id is not 32 hex bytes");
+                };
+                if let Some(w) = n.state().market.waiting.get(&key) {
+                    rows.push(serde_json::json!({ "key": hex(&key), "asset": hex(&w.asset), "amount": w.amount.0.to_string() }));
+                }
+            }
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
+        "zyn_bridged" => {
+            let n = node.lock().unwrap();
+            let rows: Vec<serde_json::Value> = n
+                .state()
+                .market
+                .bridged
+                .iter()
+                .map(|(a, o)| {
+                    serde_json::json!({
+                        "asset": hex(a),
+                        "network": String::from_utf8_lossy(&o.network),
+                        "origin": hex(&o.asset),
+                        "decimals": o.decimals,
+                        "issued": n.state().issued.get(a).map_or(0, |f| f.0).to_string(),
+                    })
+                })
+                .collect();
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
+        // A holder saying where their exit of a bridged asset goes (§146):
+        // `keccak(address ‖ salt)` must be what their withdrawal committed
+        // to, for an unpaid exit of that asset, or nothing is written. The
+        // bridge for that chain reads these through `zyn_bridgeExits`.
+        "zyn_bridgeReveal" => {
+            let (Some(asset), Some(address), Some(salt)) = (
+                field(body, "asset").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),
+                field(body, "address").and_then(|h| unhex(h.trim_start_matches("0x"))),
+                field(body, "salt").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),
+            ) else {
+                return err("give the asset, the address (hex) and the salt");
+            };
+            let commitment = zyn_vm::eip712::keccak(&[&address[..], &salt[..]]);
+            let known = {
+                let n = node.lock().unwrap();
+                let st = n.state();
+                let Some(o) = st.market.bridged.get(&asset) else {
+                    return err("that asset is not bridged here");
+                };
+                let width = if o.network.starts_with(b"eip155:") { 20 } else { 32 };
+                if address.len() != width {
+                    return err("that address is the wrong length for its chain");
+                }
+                st.exits.iter().any(|e| e.paid_by.is_none() && e.asset == asset && e.destination == commitment)
+            };
+            if !known {
+                return err("no unpaid exit names that address and salt");
+            }
+            let path = std::path::Path::new(dir).join(format!("chain-{chain}.bridge-reveals"));
+            let line = format!("{} {} {}", hex(&asset), hex(&address), hex(&salt));
+            let have = std::fs::read_to_string(&path).unwrap_or_default();
+            if !have.lines().any(|l| l == line) {
+                use std::io::Write as _;
+                let mut f = match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                    Ok(f) => f,
+                    Err(_) => return err("the node could not record that reveal"),
+                };
+                if writeln!(f, "{line}").is_err() {
+                    return err("the node could not record that reveal");
+                }
+            }
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"revealed\":true}}".to_string()
+        }
+        // The unpaid exits of one bridged asset, with where each goes when
+        // its holder has said (§146). Operator only: a revealed address is
+        // for the bridge that pays it, not for the public.
+        "zyn_bridgeExits" => {
+            match submit_token() {
+                Some(want) if token_matches(&field(body, "token").unwrap_or_default(), want) => {}
+                _ => return err("zyn_bridgeExits is the bridge's, and needs the operator's token"),
+            }
+            let Some(asset) = field(body, "asset").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("give the asset");
+            };
+            let path = std::path::Path::new(dir).join(format!("chain-{chain}.bridge-reveals"));
+            let reveals: Vec<(Vec<u8>, [u8; 32])> = std::fs::read_to_string(&path)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| {
+                    let mut f = l.split_whitespace();
+                    let a = unhex(f.next()?)?;
+                    if a != asset {
+                        return None;
+                    }
+                    Some((unhex(f.next()?)?, <[u8; 32]>::try_from(unhex(f.next()?)?).ok()?))
+                })
+                .collect();
+            let n = node.lock().unwrap();
+            let rows: Vec<serde_json::Value> = n
+                .state()
+                .exits
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.paid_by.is_none() && e.asset == asset)
+                .map(|(i, e)| {
+                    let to = reveals.iter().find(|(a, s)| zyn_vm::eip712::keccak(&[&a[..], &s[..]]) == e.destination).map(|(a, _)| hex(a));
+                    serde_json::json!({ "index": i, "amount": e.amount.0.to_string(), "to": to, "since_epoch": e.since_epoch })
+                })
+                .collect();
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
         "zyn_claims" => {
             let Some(list) = field(body, "ids") else {
                 return err("no ids");
@@ -1195,7 +1317,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 

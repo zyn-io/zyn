@@ -13,6 +13,7 @@
 // wallet can walk the counter and find everything it is owed again.
 
 import { sha256 } from '@noble/hashes/sha2.js';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import { x25519 } from '@noble/curves/ed25519.js';
 import {
   commitment,
@@ -50,7 +51,7 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['saleMint', 'sale-mint'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -356,6 +357,17 @@ function deriveAddress(program, namespace, seeds) {
   for (const s of seeds) parts.push(u32be(s.length), s);
   return sha256(concatBytes(...parts));
 }
+
+// Bridged assets beside ZEC (§146): an address from public facts about the
+// origin, deposits that carry a commitment instead of an account, and exits
+// that commit to `keccak(address ‖ salt)` on the destination chain.
+export const bridgedAsset = (network, origin = new Uint8Array(0)) => deriveAddress(ADDRESS_SCOPE_V1, te.encode('bridged'), [te.encode(network), origin]);
+export const depositCommitment = (account, secret) => id('objectvm.deposit.v1', account, secret);
+export const depositKey = (commitment, asset) => id('objectvm.deposit-claim.v1', commitment, asset);
+export const exitCommitment = (address, salt) => keccak_256(concatBytes(address, salt));
+export const claimDepositIntent = (o) => concatBytes(
+  new Uint8Array([TAG.claimDeposit]), o.owner, prog('claim'), o.secret, o.asset, outputs([o.output]),
+);
 
 export const itemAsset = (collection, serial) => deriveAddress(ADDRESS_SCOPE_V1, te.encode('item'), [collection, u32be(serial)]);
 export const listingSource = (seller, nonce) => id('objectvm.listing.v1', seller, nonce);

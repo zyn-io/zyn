@@ -46,6 +46,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
+pub mod bridge;
 pub mod curve;
 pub mod sale;
 pub mod market;
@@ -447,6 +448,30 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         change: Vec<Output>,
     },
+    /// Register an asset bridged from another chain (§146). Operator only.
+    RegisterBridged {
+        program: ProgramId,
+        network: Vec<u8>,
+        origin: Vec<u8>,
+        decimals: u8,
+    },
+    /// One deposit on another chain, recorded once by `external_ref`, waiting
+    /// for whoever holds the secret behind `commitment` (§146). Operator only.
+    DepositCommitted {
+        program: ProgramId,
+        asset: Address,
+        gross: Fixed,
+        external_ref: Hash,
+        commitment: Hash,
+    },
+    /// Take what waits for this account's commitment as one note (§146).
+    ClaimDeposit {
+        owner: AccountId,
+        program: ProgramId,
+        secret: Hash,
+        asset: Address,
+        output: Output,
+    },
     Seal,
 }
 
@@ -481,6 +506,8 @@ pub enum Receipt {
     OpenMintPosted { collection: Address, count: u32 },
     VoucherCapSet { collection: Address, cap: u32 },
     VoucherPosted { first: Hash, count: u32 },
+    BridgedRegistered { asset: Address },
+    DepositWaiting { key: Hash, amount: Fixed },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -536,6 +563,7 @@ impl Op {
             | Op::Commit { change, .. } => change.iter().collect(),
             Op::ClaimItems { change, items, .. } | Op::ClaimVoucherItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
             Op::MintOpen { change, item, .. } => change.iter().chain(std::iter::once(item)).collect(),
+            Op::ClaimDeposit { output, .. } => vec![output],
             _ => Vec::new(),
         }
     }
@@ -1937,6 +1965,21 @@ impl MicrochainVm for ObjectVm {
                     self.apply_mint_open(buyer, collection, *serial, proof, item, inputs, change, nonce)
                 })
             }
+            Op::RegisterBridged { program, network, origin, decimals } => one(if *program != program::bridge_register() {
+                Err("wrong program for a bridged asset")
+            } else {
+                self.apply_register_bridged(network, origin, *decimals)
+            }),
+            Op::DepositCommitted { program, asset, gross, external_ref, commitment } => one(if *program != program::deposit() {
+                Err("wrong program for a deposit")
+            } else {
+                self.apply_deposit_committed(asset, *gross, external_ref, commitment)
+            }),
+            Op::ClaimDeposit { owner, program, secret, asset, output } => one(if *program != program::claim() {
+                Err("wrong program for a claim")
+            } else {
+                self.apply_claim_deposit(owner, secret, asset, output)
+            }),
             Op::SetVoucherCap { program, collection, cap } => one(if *program != program::sale_vouchers() {
                 Err("wrong program for burn tickets")
             } else {
@@ -2057,6 +2100,7 @@ impl MicrochainVm for ObjectVm {
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
             Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
+            Op::ClaimDeposit { owner, .. } => vec![*owner],
             _ => Vec::new(),
         }
     }
@@ -2468,6 +2512,16 @@ impl MicrochainVm for ObjectVm {
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
             }
+            Op::RegisterBridged { program, network, origin, decimals } => {
+                e.u8(36).bytes(&program.0).u32(network.len() as u32).bytes(network).u32(origin.len() as u32).bytes(origin).u8(*decimals);
+            }
+            Op::DepositCommitted { program, asset, gross, external_ref, commitment } => {
+                e.u8(37).bytes(&program.0).bytes(asset).fixed(*gross).bytes(external_ref).bytes(commitment);
+            }
+            Op::ClaimDeposit { owner, program, secret, asset, output } => {
+                e.u8(38).bytes(owner).bytes(&program.0).bytes(secret).bytes(asset);
+                wire::outputs(&mut e, std::slice::from_ref(output));
+            }
             Op::SetVoucherCap { program, collection, cap } => {
                 e.u8(33).bytes(&program.0).bytes(collection).u32(*cap);
             }
@@ -2865,6 +2919,38 @@ impl MicrochainVm for ObjectVm {
                 let proof = wire::read_proof(d)?;
                 let items = wire::read_outputs(d)?;
                 Some(Op::ClaimItems { buyer, program, collection, nonce, k, serials, proof, items, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
+            }
+            36 => {
+                let program = ProgramId(d.hash().ok()?);
+                let n = d.u32().ok()? as usize;
+                if n > 64 {
+                    return None;
+                }
+                let network = d.take_bytes(n).ok()?.to_vec();
+                let m = d.u32().ok()? as usize;
+                if m > 32 {
+                    return None;
+                }
+                let origin = d.take_bytes(m).ok()?.to_vec();
+                Some(Op::RegisterBridged { program, network, origin, decimals: d.u8().ok()? })
+            }
+            37 => Some(Op::DepositCommitted {
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                gross: d.fixed().ok()?,
+                external_ref: d.hash().ok()?,
+                commitment: d.hash().ok()?,
+            }),
+            38 => {
+                let owner = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let secret = d.hash().ok()?;
+                let asset = d.hash().ok()?;
+                let mut one = wire::read_outputs(d)?;
+                if one.len() != 1 {
+                    return None;
+                }
+                Some(Op::ClaimDeposit { owner, program, secret, asset, output: one.remove(0) })
             }
             33 => Some(Op::SetVoucherCap { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, cap: d.u32().ok()? }),
             34 => Some(Op::PostVoucher {

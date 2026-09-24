@@ -202,6 +202,12 @@ pub fn sale_vouchers() -> ProgramId {
     named(b"sale-vouchers")
 }
 
+/// Register an asset bridged from another chain beside ZEC. Operator only
+/// (DECISIONS §146).
+pub fn bridge_register() -> ProgramId {
+    named(b"bridge-register")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")
@@ -265,6 +271,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         sale_open_mint(),
         sale_mint(),
         sale_vouchers(),
+        bridge_register(),
     ]
     .contains(id)
 }
@@ -307,6 +314,7 @@ mod tests {
             sale_open_mint(),
             sale_mint(),
             sale_vouchers(),
+            bridge_register(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {
