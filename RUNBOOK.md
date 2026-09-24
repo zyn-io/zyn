@@ -2637,6 +2637,15 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
 - **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
+## 5f-quindecies. ZynScan (24 Sep 2026)
+
+- **Mainnet** `zynscan-mainnet.service` on Contabo: `ZYN_CHAIN_ID=26460`, `ZYN_SCAN_DATA=/var/lib/zyn/object-mainnet`, node `127.0.0.1:8599`, listens `127.0.0.1:8093`.
+- **Testnet** `zynscan.service` on Hetzner: chain 212, data `/var/lib/zyn-object`, node `127.0.0.1:8499`, listens `127.0.0.1:8093`; `zyn-object-tunnel` also forwards it as Contabo `127.0.0.1:8593` (unit backup `/root/zyn-object-tunnel.service.bak-20260924`).
+- **Gateway** `zyn-rpc.cavebro.win/scan/` and `/scan-testnet/` (nginx `sites-enabled/zyn-rpc`, backup `/root/nginx-zyn-rpc.bak-20260924`): GET/HEAD/OPTIONS only; zynscan's own CORS headers are hidden so the server-wide ones are the only ones.
+- **Site** `apps/zynscan` → Pages project `zynscan`: `node scripts/build.mjs && npx wrangler@4.40.0 pages deploy dist --project-name zynscan --branch main`.
+- Both units run as root under `ProtectSystem=strict` (read-only filesystem; the mainnet data dir is root-only). zynscan replays from genesis on start and whenever the journal stops matching what it read; `/api/summary` `agrees` must be `true` — `false` means the journal no longer reproduces the node's root, which is a finding, not a restart.
+- Deploy a new build like the node: zigbuild (`aarch64` Hetzner, `x86_64` Contabo), `install -m755` to `/usr/local/bin/zynscan`, restart the unit.
+
 ## 5f-terdecies. The block servers' HTTP door, for browser Nap (23 Sep 2026)
 
 `zyn-lightd` answers HTTP as well as its TCP frames when `ZYN_LIGHTD_HTTP` is

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1411" />
+    <meta name="description" content="ZynScan — every Zyn epoch and transaction, replayed from the sequencer's own journal and checked against its state root. Private at tier 2: no accounts, no amounts." />
+    <title>ZynScan</title>
+    <link rel="stylesheet" href="/styles.css?v=1" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/" data-link>
+        <span class="mark" aria-hidden="true"></span>
+        <span><strong>ZynScan</strong><small>the Zyn ledger, replayed</small></span>
+      </a>
+      <form class="search" id="search" role="search">
+        <label class="sr-only" for="q">Search</label>
+        <input id="q" type="search" autocomplete="off" placeholder="Epoch, tx #, coin, collection or pool" />
+      </form>
+      <div class="net" role="group" aria-label="Network">
+        <button type="button" data-net="mainnet">Mainnet</button>
+        <button type="button" data-net="testnet">Testnet</button>
+      </div>
+    </header>
+
+    <main id="main" aria-live="polite">
+      <p class="loading">Reading the ledger…</p>
+    </main>
+
+    <footer>
+      <p>
+        <strong>What ZynScan shows, and what it doesn't.</strong> Every epoch and every transaction the sequencer
+        accepted, replayed from its journal through the ledger's own rules — the root on this page is recomputed, not
+        copied. Zyn is private from the public at tier 2: for a holder's transaction you see that it happened, its
+        kind and the public object it touched, never an account, an amount or an owner.
+      </p>
+      <nav><a href="/assets" data-link>Assets</a><a href="https://cavebro.win">Cave</a><a href="https://nap.cavebro.win">Nap Wallet</a></nav>
+    </footer>
+    <script type="module" src="/app.js?v=1"></script>
+  </body>
+</html>
