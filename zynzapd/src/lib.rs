@@ -35,6 +35,7 @@ pub mod rpc;
 pub mod sale;
 pub mod burn_watch;
 pub mod sale_draw;
+pub mod eth_bridge;
 pub mod sol_bridge;
 pub mod tickets;
 pub mod settle;
