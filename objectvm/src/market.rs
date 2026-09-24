@@ -336,6 +336,9 @@ pub struct Market {
     pub sales: BTreeMap<Address, crate::sale::Sale>,
     /// Their tickets, by an id only each ticket's buyer can derive.
     pub tickets: BTreeMap<Hash, crate::sale::Ticket>,
+    /// Burns already turned into tickets (§145), by the burn's id, so none is
+    /// posted twice.
+    pub burns: BTreeMap<Hash, Address>,
 }
 
 impl Market {
@@ -355,6 +358,7 @@ impl Market {
             && self.curve_terms.is_none()
             && self.sales.is_empty()
             && self.tickets.is_empty()
+            && self.burns.is_empty()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -554,14 +558,14 @@ impl Market {
             crate::curve::section(&mut e, self.curve_terms, &self.curves, &self.curve_orders);
         }
         // And sales: joined once one exists, so every root sealed before keeps.
-        if !self.sales.is_empty() || !self.tickets.is_empty() {
-            crate::sale::section(&mut e, &self.sales, &self.tickets);
+        if !self.sales.is_empty() || !self.tickets.is_empty() || !self.burns.is_empty() {
+            crate::sale::section(&mut e, &self.sales, &self.tickets, &self.burns);
         }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET05").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET06").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -632,7 +636,7 @@ impl Market {
             e.bytes(c).bytes(&l.source).bytes(&l.nullifier);
         }
         crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
-        crate::sale::encode(e, &self.sales, &self.tickets);
+        crate::sale::encode(e, &self.sales, &self.tickets, &self.burns);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -641,11 +645,13 @@ impl Market {
         // and listings, and reads as a market that had none of them.
         // v3 predates curves and reads as a market with none.
         // v4 predates sales and reads as a market with none.
-        let (v3, v4, v5) = match d.take_bytes(8).ok()? {
-            b"MARKET05" => (true, true, true),
-            b"MARKET04" => (true, true, false),
-            b"MARKET03" => (true, false, false),
-            b"MARKET02" => (false, false, false),
+        // v5 predates burn tickets (§145): its sales have no cap and no burns.
+        let (v3, v4, v5, v6) = match d.take_bytes(8).ok()? {
+            b"MARKET06" => (true, true, true, true),
+            b"MARKET05" => (true, true, true, false),
+            b"MARKET04" => (true, true, false, false),
+            b"MARKET03" => (true, false, false, false),
+            b"MARKET02" => (false, false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -763,9 +769,10 @@ impl Market {
             m.curve_orders = orders;
         }
         if v5 {
-            let (sales, tickets) = crate::sale::decode(d)?;
+            let (sales, tickets, burns) = crate::sale::decode(d, v6)?;
             m.sales = sales;
             m.tickets = tickets;
+            m.burns = burns;
         }
         Some(m)
     }

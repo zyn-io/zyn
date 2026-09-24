@@ -176,4 +176,9 @@ test('primary sales: ids, leaves, the draw proof and the three holder intents ma
   assert.equal(hex(m.buyTicketsIntent({ buyer: OWNER, collection: TOKEN, count: 3, nonce: NONCE, inputs, change })), v.buy_tickets);
   assert.equal(hex(m.claimItemsIntent({ buyer: OWNER, collection: TOKEN, nonce: NONCE, k: 1, serials: [7, 1], proof, items: [item(7), item(1)], inputs, change })), v.claim_items);
   assert.equal(hex(m.mintOpenIntent({ buyer: OWNER, collection: TOKEN, serial: 11, proof, item: item(11), nonce: NONCE, inputs, change })), v.mint_open);
+  // Burn tickets (§145).
+  const commitment = m.voucherCommitment(OWNER, NONCE);
+  assert.equal(hex(commitment), v.voucher_commitment);
+  assert.equal(hex(m.voucherTicketId(commitment, 2)), v.voucher_ticket_id);
+  assert.equal(hex(m.claimVoucherItemsIntent({ buyer: OWNER, collection: TOKEN, secret: NONCE, k: 2, serials: [7, 1], proof, items: [item(7), item(1)], inputs, change })), v.claim_voucher_items);
 });

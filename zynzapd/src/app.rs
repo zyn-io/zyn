@@ -1728,10 +1728,30 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     let won = draw.and_then(|d| d.won.iter().find(|w| w.0 == t.id)).map(|w| w.1.clone()).unwrap_or_default();
                     let result = if draw.is_none() { "waiting" } else if t.claimed { "claimed" } else if won.is_empty() { "no win" } else { "won" };
                     let names: Vec<String> = won.iter().map(|x| item_name(&c, *x)).collect();
-                    json!({ "ticket": hex(&t.id), "index": t.index, "claimed": t.claimed, "result": result, "serials": won, "names": names })
+                    json!({ "ticket": hex(&t.id), "index": t.index, "claimed": t.claimed, "burned": t.voucher, "result": result, "serials": won, "names": names })
                 })
                 .collect();
             Ok(json!({ "tickets": tickets }))
+        }
+        ("POST", "/api/object/sale/burn-memo") => {
+            let (host, chain) = object_target(app);
+            let key = app.key();
+            let me = account(&key);
+            // The same memo until a burn with it lands (ledger.js burnMemo).
+            let path = app.cfg.dir.join(format!("burn-nonce-{chain}-{}", hex(&me)));
+            let memo = |n: u64| objectvm::sale::voucher_commitment(&me, &market_nonce(&key, n));
+            if let Some(n) = std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse::<u64>().ok()) {
+                let c = memo(n);
+                let landed = crate::object_client::call(&host, "zyn_tickets", json!({ "ids": hex(&objectvm::sale::voucher_ticket_id(&c, 0)) }))?;
+                if landed.as_array().is_none_or(|a| a.is_empty()) {
+                    return Ok(json!({ "memo": format!("zyn:{}", hex(&c)), "commitment": hex(&c) }));
+                }
+            }
+            let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+            next_market_nonce(app, chain)?;
+            std::fs::write(&path, used.to_string()).map_err(|e| e.to_string())?;
+            let c = memo(used);
+            Ok(json!({ "memo": format!("zyn:{}", hex(&c)), "commitment": hex(&c) }))
         }
         ("POST", "/api/object/sale/buy") => {
             let (host, chain) = object_target(app);
@@ -1783,18 +1803,16 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     .map(|x| crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, *x), objectvm::market::ITEM_UNIT))
                     .collect::<Result<Vec<_>, _>>()?;
                 let used: Vec<[u8; 32]> = inputs.iter().map(|x| x.0).collect();
-                crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::ClaimItems {
-                    buyer: w.me,
-                    program: zyn_vm::program::sale_claim(),
-                    collection: c,
-                    nonce: t.nonce,
-                    k: t.k,
-                    serials: serials.clone(),
-                    proof: zyn_vm::commit::merkle_proof(&draw.leaves, i),
-                    items,
-                    inputs,
-                    change,
-                })?;
+                let proof = zyn_vm::commit::merkle_proof(&draw.leaves, i);
+                let buyer = w.me;
+                let program = zyn_vm::program::sale_claim();
+                // A burn ticket is claimed by revealing the secret its memo committed to.
+                let op = if t.voucher {
+                    objectvm::Op::ClaimVoucherItems { buyer, program, collection: c, secret: t.nonce, k: t.k, serials: serials.clone(), proof, items, inputs, change }
+                } else {
+                    objectvm::Op::ClaimItems { buyer, program, collection: c, nonce: t.nonce, k: t.k, serials: serials.clone(), proof, items, inputs, change }
+                };
+                crate::object_client::submit(&host, chain, &app.key(), op)?;
                 spent = used;
                 claimed.extend(serials);
             }
@@ -3180,6 +3198,8 @@ struct MyTicket {
     id: [u8; 32],
     nonce: [u8; 32],
     k: u32,
+    /// A burn ticket (§145): claimed by revealing `nonce` as the secret.
+    voucher: bool,
     index: u64,
     claimed: bool,
 }
@@ -3192,7 +3212,7 @@ fn my_tickets(app: &App, host: &str, chain: u32, collection: &[u8; 32]) -> Resul
     let me = account(&key);
     let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
     let c = hex(collection);
-    let ask = |want: Vec<([u8; 32], [u8; 32], u32)>| -> Result<Vec<MyTicket>, String> {
+    let ask = |want: Vec<([u8; 32], [u8; 32], u32, bool)>| -> Result<Vec<MyTicket>, String> {
         let mut out = Vec::new();
         for part in want.chunks(500) {
             let ids: Vec<String> = part.iter().map(|w| hex(&w.0)).collect();
@@ -3202,13 +3222,27 @@ fn my_tickets(app: &App, host: &str, chain: u32, collection: &[u8; 32]) -> Resul
                     continue;
                 }
                 let Some(w) = part.iter().find(|w| Some(hex(&w.0).as_str()) == r["ticket"].as_str()) else { continue };
-                out.push(MyTicket { id: w.0, nonce: w.1, k: w.2, index: r["index"].as_u64().unwrap_or(0), claimed: r["claimed"].as_bool().unwrap_or(false) });
+                out.push(MyTicket { id: w.0, nonce: w.1, k: w.2, voucher: w.3, index: r["index"].as_u64().unwrap_or(0), claimed: r["claimed"].as_bool().unwrap_or(false) });
             }
         }
         Ok(out)
     };
-    let firsts = ask((0..used + 24).map(|n| market_nonce(&key, n)).map(|nonce| (objectvm::sale::ticket_id(&me, &nonce, 0), nonce, 0)).collect())?;
-    let rest = ask(firsts.iter().flat_map(|t| (1..20).map(move |k| (objectvm::sale::ticket_id(&me, &t.nonce, k), t.nonce, k))).collect())?;
+    // Bought tickets from (me, nonce, k); burn tickets from the commitment
+    // (me, nonce) a burn's memo carried (ledger.js loadTickets).
+    let tid = move |nonce: &[u8; 32], k: u32, voucher: bool| {
+        if voucher {
+            objectvm::sale::voucher_ticket_id(&objectvm::sale::voucher_commitment(&me, nonce), k)
+        } else {
+            objectvm::sale::ticket_id(&me, nonce, k)
+        }
+    };
+    let firsts = ask(
+        (0..used + 24)
+            .map(|n| market_nonce(&key, n))
+            .flat_map(|nonce| [false, true].map(|v| (tid(&nonce, 0, v), nonce, 0, v)))
+            .collect(),
+    )?;
+    let rest = ask(firsts.iter().flat_map(|t| (1..20).map(move |k| (tid(&t.nonce, k, t.voucher), t.nonce, k, t.voucher))).collect())?;
     let mut all: Vec<MyTicket> = firsts.into_iter().chain(rest).collect();
     all.sort_by_key(|t| t.index);
     Ok(all)

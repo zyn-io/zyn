@@ -154,6 +154,11 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         Op::ClaimItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
         Op::PostOpenMint { collection, root, count, .. } => ("Open mint posted", true, json!({ "collection": hex(collection), "root": hex(root), "items": count })),
         Op::MintOpen { collection, serial, .. } => ("Open mint", false, json!({ "collection": hex(collection), "serial": serial })),
+        Op::SetVoucherCap { collection, cap, .. } => ("Burn tickets capped", true, json!({ "collection": hex(collection), "cap": cap })),
+        // A burn is public on its own chain already; which Zyn account it
+        // belongs to is not shown (the commitment hides it).
+        Op::PostVoucher { collection, burn, count, .. } => ("Burn posted", true, json!({ "collection": hex(collection), "burn": hex(burn), "tickets": count })),
+        Op::ClaimVoucherItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }

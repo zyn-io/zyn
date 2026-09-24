@@ -24,6 +24,14 @@
 //!   commits the order the rest are sold in; anyone then mints the next one
 //!   at the open price, proved against that root.
 //!
+//! * **Burn tickets** (`SetVoucherCap`, `PostVoucher`, `ClaimVoucherItems`,
+//!   DECISIONS §145): the operator records a burn of a promotional token on
+//!   another chain, once, and it becomes tickets in the same list, under ids
+//!   derived from a commitment the burner put in the burn's memo (their Zyn
+//!   account and a secret). They pay nothing in, so a sale caps how many there
+//!   may be; their winners claim by revealing the secret from that account and
+//!   pay the claim price like anyone.
+//!
 //! The sale holds no value of its own: every payment is in the floor or a
 //! claim the moment it is made, so conservation needs nothing new.
 
@@ -60,6 +68,19 @@ fn id(domain: &[u8], parts: &[&[u8]]) -> Hash {
 /// tickets says nothing about who holds them.
 pub fn ticket_id(buyer: &AccountId, nonce: &Hash, k: u32) -> Hash {
     id(b"objectvm.ticket.v1", &[buyer, nonce, &k.to_be_bytes()])
+}
+
+/// What a burner puts in the burn's memo: a commitment to their Zyn account
+/// and a secret only their wallet holds. A claim reveals the secret and is
+/// checked against the claimant's own account, so a revealed secret lets
+/// nobody else claim the burn's other tickets.
+pub fn voucher_commitment(account: &AccountId, secret: &Hash) -> Hash {
+    id(b"objectvm.voucher.v1", &[account, secret])
+}
+
+/// A burn ticket's id: from the burner's commitment and its place in the burn.
+pub fn voucher_ticket_id(commitment: &Hash, k: u32) -> Hash {
+    id(b"objectvm.voucher-ticket.v1", &[commitment, &k.to_be_bytes()])
 }
 
 /// Where the treasury's share of one payment is claimable: from the sale and
@@ -134,6 +155,10 @@ pub struct Sale {
     pub open_root: Hash,
     pub open_count: u32,
     pub open_next: u32,
+    /// The most burn tickets this sale takes (§145); none until it is set.
+    pub voucher_cap: u32,
+    /// Burn tickets posted so far.
+    pub voucher_tickets: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -160,7 +185,9 @@ fn sale_leaf(s: &Sale) -> Hash {
         .bytes(&s.draw_root)
         .bytes(&s.open_root)
         .u32(s.open_count)
-        .u32(s.open_next);
+        .u32(s.open_next)
+        .u32(s.voucher_cap)
+        .u32(s.voucher_tickets);
     e.leaf()
 }
 
@@ -181,16 +208,25 @@ pub(crate) fn section(
     e: &mut Encoder,
     sales: &std::collections::BTreeMap<Address, Sale>,
     tickets: &std::collections::BTreeMap<Hash, Ticket>,
+    burns: &std::collections::BTreeMap<Hash, Address>,
 ) {
     let s: Vec<Hash> = sales.values().map(sale_leaf).collect();
     let t: Vec<Hash> = tickets.iter().map(|(i, t)| ticket_leaf(i, t)).collect();
-    e.bytes(b"objectvm.sales.v1").u32(sales.len() as u32).bytes(&merkle_root(&s)).u32(tickets.len() as u32).bytes(&merkle_root(&t));
+    let b: Vec<Hash> = burns.iter().map(|(burn, c)| id(b"objectvm.burn-leaf.v1", &[burn, c])).collect();
+    e.bytes(b"objectvm.sales.v1")
+        .u32(sales.len() as u32)
+        .bytes(&merkle_root(&s))
+        .u32(tickets.len() as u32)
+        .bytes(&merkle_root(&t))
+        .u32(burns.len() as u32)
+        .bytes(&merkle_root(&b));
 }
 
 pub(crate) fn encode(
     e: &mut Encoder,
     sales: &std::collections::BTreeMap<Address, Sale>,
     tickets: &std::collections::BTreeMap<Hash, Ticket>,
+    burns: &std::collections::BTreeMap<Hash, Address>,
 ) {
     e.u32(sales.len() as u32);
     for s in sales.values() {
@@ -206,18 +242,30 @@ pub(crate) fn encode(
             .bytes(&s.draw_root)
             .bytes(&s.open_root)
             .u32(s.open_count)
-            .u32(s.open_next);
+            .u32(s.open_next)
+            .u32(s.voucher_cap)
+            .u32(s.voucher_tickets);
     }
     e.u32(tickets.len() as u32);
     for (i, t) in tickets {
         e.bytes(i).bytes(&t.collection).u32(t.index).u64(t.epoch).bool(t.claimed);
     }
+    e.u32(burns.len() as u32);
+    for (burn, c) in burns {
+        e.bytes(burn).bytes(c);
+    }
 }
 
-#[allow(clippy::type_complexity)]
-pub(crate) fn decode(
-    d: &mut Decoder,
-) -> Option<(std::collections::BTreeMap<Address, Sale>, std::collections::BTreeMap<Hash, Ticket>)> {
+/// Sales, tickets and the burns already posted, as a snapshot holds them.
+pub(crate) type SaleState = (
+    std::collections::BTreeMap<Address, Sale>,
+    std::collections::BTreeMap<Hash, Ticket>,
+    std::collections::BTreeMap<Hash, Address>,
+);
+
+/// `v6` snapshots carry burn tickets (§145); a `v5` one reads as a sale
+/// with no cap and no burns.
+pub(crate) fn decode(d: &mut Decoder, v6: bool) -> Option<SaleState> {
     let mut sales = std::collections::BTreeMap::new();
     for _ in 0..d.u32().ok()? {
         let collection = d.hash().ok()?;
@@ -237,6 +285,8 @@ pub(crate) fn decode(
                 open_root: d.hash().ok()?,
                 open_count: d.u32().ok()?,
                 open_next: d.u32().ok()?,
+                voucher_cap: if v6 { d.u32().ok()? } else { 0 },
+                voucher_tickets: if v6 { d.u32().ok()? } else { 0 },
             },
         );
     }
@@ -253,7 +303,13 @@ pub(crate) fn decode(
             },
         );
     }
-    Some((sales, tickets))
+    let mut burns = std::collections::BTreeMap::new();
+    if v6 {
+        for _ in 0..d.u32().ok()? {
+            burns.insert(d.hash().ok()?, d.hash().ok()?);
+        }
+    }
+    Some((sales, tickets, burns))
 }
 
 impl ObjectVm {
@@ -339,10 +395,12 @@ impl ObjectVm {
         if treasury_bps > MAX_TREASURY_BPS {
             return Err("the treasury's share is above the ceiling");
         }
+        let mut voucher_cap = 0;
         if let Some(s) = self.market.sales.get(collection) {
             if s.tickets > 0 || s.phase != Phase::Open {
                 return Err("the sale has started; its prices are fixed");
             }
+            voucher_cap = s.voucher_cap;
         }
         self.market.sales.insert(
             *collection,
@@ -360,6 +418,8 @@ impl ObjectVm {
                 open_root: [0; 32],
                 open_count: 0,
                 open_next: 0,
+                voucher_cap,
+                voucher_tickets: 0,
             },
         );
         Ok(Receipt::SaleOpened { collection: *collection })
@@ -396,6 +456,56 @@ impl ObjectVm {
         }
         self.market.sales.get_mut(collection).expect("checked above").tickets = s.tickets + count;
         Ok(Receipt::TicketsBought { first, count })
+    }
+
+    /// How many burn tickets the sale takes (§145). Set while it is open, and
+    /// never below what has already been posted.
+    pub(crate) fn apply_set_voucher_cap(&mut self, collection: &Address, cap: u32) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase != Phase::Open {
+            return Err("the sale is closed");
+        }
+        if cap < s.voucher_tickets {
+            return Err("more burn tickets than that are already posted");
+        }
+        self.market.sales.get_mut(collection).expect("checked above").voucher_cap = cap;
+        Ok(Receipt::VoucherCapSet { collection: *collection, cap })
+    }
+
+    /// One burn, recorded once, becomes `count` tickets in the sale's order
+    /// under ids from the burner's commitment (§145).
+    pub(crate) fn apply_post_voucher(&mut self, collection: &Address, burn: &Hash, commitment: &Hash, count: u32) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase != Phase::Open {
+            return Err("the sale is closed");
+        }
+        if count == 0 || count > MAX_TICKETS_PER_BUY {
+            return Err("a burn is worth between 1 and 20 tickets");
+        }
+        if burn == &[0; 32] || commitment == &[0; 32] {
+            return Err("a burn names itself and a commitment");
+        }
+        if self.market.burns.contains_key(burn) {
+            return Err("that burn is already posted");
+        }
+        if s.voucher_tickets.checked_add(count).is_none_or(|n| n > s.voucher_cap) {
+            return Err("the sale's burn tickets are all taken");
+        }
+        let first = voucher_ticket_id(commitment, 0);
+        if self.market.tickets.contains_key(&first) {
+            return Err("that commitment was already used; burn with a fresh one");
+        }
+        let epoch = self.epoch;
+        for k in 0..count {
+            self.market
+                .tickets
+                .insert(voucher_ticket_id(commitment, k), Ticket { collection: *collection, index: s.tickets + k, epoch, claimed: false });
+        }
+        self.market.burns.insert(*burn, *collection);
+        let sale = self.market.sales.get_mut(collection).expect("checked above");
+        sale.tickets = s.tickets + count;
+        sale.voucher_tickets = s.voucher_tickets + count;
+        Ok(Receipt::VoucherPosted { first, count })
     }
 
     pub(crate) fn apply_close_sale(&mut self, collection: &Address, zcash_height: u32, zcash_hash: &Hash) -> Result<Receipt, &'static str> {
@@ -440,11 +550,44 @@ impl ObjectVm {
         inputs: &[(Hash, Hash)],
         change: &[Output],
     ) -> Result<Receipt, &'static str> {
+        self.claim_ticket(buyer, collection, ticket_id(buyer, nonce, k), serials, proof, items, inputs, change)
+    }
+
+    /// Claim what burn ticket `(secret, k)` drew (§145): revealing the secret
+    /// behind the burn's commitment is what shows the tickets are the
+    /// claimant's; the rest is an ordinary claim.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_claim_voucher_items(
+        &mut self,
+        buyer: &AccountId,
+        collection: &Address,
+        secret: &Hash,
+        k: u32,
+        serials: &[u32],
+        proof: &[ProofStep],
+        items: &[Output],
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        self.claim_ticket(buyer, collection, voucher_ticket_id(&voucher_commitment(buyer, secret), k), serials, proof, items, inputs, change)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn claim_ticket(
+        &mut self,
+        buyer: &AccountId,
+        collection: &Address,
+        tid: Hash,
+        serials: &[u32],
+        proof: &[ProofStep],
+        items: &[Output],
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
         let (s, t) = self.sale(collection)?;
         if s.phase != Phase::Drawn {
             return Err("claims are open between the draw and the open mint");
         }
-        let tid = ticket_id(buyer, nonce, k);
         let ticket = *self.market.tickets.get(&tid).ok_or("no such ticket is yours")?;
         if &ticket.collection != collection {
             return Err("that ticket is for another sale");

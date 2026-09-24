@@ -196,6 +196,12 @@ pub fn sale_mint() -> ProgramId {
     named(b"sale-mint")
 }
 
+/// Burn tickets: set a sale's cap on them, and post one burn's tickets.
+/// Operator only (DECISIONS §145).
+pub fn sale_vouchers() -> ProgramId {
+    named(b"sale-vouchers")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")
@@ -258,6 +264,7 @@ pub fn is_named(id: &ProgramId) -> bool {
         sale_claim(),
         sale_open_mint(),
         sale_mint(),
+        sale_vouchers(),
     ]
     .contains(id)
 }
@@ -299,6 +306,7 @@ mod tests {
             sale_claim(),
             sale_open_mint(),
             sale_mint(),
+            sale_vouchers(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

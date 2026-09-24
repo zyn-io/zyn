@@ -50,7 +50,7 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['saleMint', 'sale-mint'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -398,6 +398,10 @@ export const redeemIntent = (o) => concatBytes(new Uint8Array([20]), o.holder, u
 
 /// One ticket's id — only its buyer can derive it.
 export const ticketId = (buyer, nonce, k) => id('objectvm.ticket.v1', buyer, nonce, u32be(k));
+/// Burn tickets (§145): the memo commitment binds this account and a secret,
+/// so a claim that reveals the secret helps nobody else.
+export const voucherCommitment = (account, secret) => id('objectvm.voucher.v1', account, secret);
+export const voucherTicketId = (commitment, k) => id('objectvm.voucher-ticket.v1', commitment, u32be(k));
 /// Where the treasury's share of one sale payment is claimable.
 export const treasurySource = (collection, payment) => id('objectvm.sale-treasury.v1', collection, payment);
 /// One leaf of a posted draw: a ticket and the serials it won.
@@ -457,6 +461,12 @@ export const buyTicketsIntent = (o) => concatBytes(
 
 export const claimItemsIntent = (o) => concatBytes(
   new Uint8Array([TAG.claimItems]), o.buyer, prog('saleClaim'), o.collection, o.nonce, u32bytes(o.k),
+  u32be(o.serials.length), ...o.serials.map((x) => u32be(x)), proofBytes(o.proof),
+  outputs(o.items), inputs(o.inputs), outputs(o.change),
+);
+
+export const claimVoucherItemsIntent = (o) => concatBytes(
+  new Uint8Array([TAG.claimVoucherItems]), o.buyer, prog('saleClaim'), o.collection, o.secret, u32bytes(o.k),
   u32be(o.serials.length), ...o.serials.map((x) => u32be(x)), proofBytes(o.proof),
   outputs(o.items), inputs(o.inputs), outputs(o.change),
 );

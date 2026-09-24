@@ -8,6 +8,7 @@
 // holds a key and never learns more than Nap chooses to tell it.
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
+import * as sol from './solana-burn.js';
 
 const initial = new URLSearchParams(location.search);
 const NETWORK = initial.get('network') === 'testnet' ? 'testnet' : 'mainnet';
@@ -339,6 +340,58 @@ async function chainSale() {
   return s;
 }
 
+// Burn tickets (§145): the token, per network, and the two Solana reads the
+// burn needs, through this site's relay.
+let burnConfig = null;
+async function burnToken() {
+  burnConfig ??= fetch(NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json', { credentials: 'omit' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((c) => (c && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.mint) && /^\d+$/.test(c.per_ticket) && Number.isInteger(c.decimals) ? c : null))
+    .catch(() => null);
+  return burnConfig;
+}
+
+async function solanaRead(cluster, method, params) {
+  const r = await fetch(`/api/solana?cluster=${cluster === 'devnet' ? 'devnet' : 'mainnet'}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, params }), credentials: 'omit',
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j.result;
+}
+
+const units = (raw, decimals) => {
+  const v = BigInt(raw); const d = 10n ** BigInt(decimals);
+  const f = (v % d).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return `${(v / d).toLocaleString('en-US')}${f ? `.${f}` : ''}`;
+};
+
+/// Burn for `tickets`: Nap's memo, the holder's Solana wallet, one signed
+/// transaction. Returns the Solana signature.
+async function burnForTickets(cfg, tickets, report) {
+  const { memo } = await ask('zyn_burnMemo', {});
+  if (!/^zyn:[0-9a-f]{64}$/.test(memo || '')) throw new Error('Nap did not give a burn code.');
+  const wallets = sol.solanaWallets();
+  await new Promise((r) => setTimeout(r, 300));
+  if (!wallets.length) throw new Error('No Solana wallet found in this browser. Install one (Phantom, Solflare, Backpack) and reload.');
+  const wallet = wallets[0];
+  report(`Connecting ${wallet.name}…`);
+  const { accounts } = await wallet.features['standard:connect'].connect();
+  const account = accounts?.[0];
+  if (!account) throw new Error(`${wallet.name} shared no account.`);
+  const amount = sol.burnAmount(tickets, cfg.per_ticket);
+  const held = await solanaRead(cfg.cluster, 'getTokenAccountsByOwner', [account.address, { mint: cfg.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+  const ta = (held?.value || []).find((a) => BigInt(a.account?.data?.parsed?.info?.tokenAmount?.amount || '0') >= amount);
+  if (!ta) throw new Error(`That wallet holds less than ${units(amount, cfg.decimals)} ${cfg.symbol}.`);
+  const { value } = await solanaRead(cfg.cluster, 'getLatestBlockhash', [{ commitment: 'finalized' }]);
+  const message = sol.burnMessage({
+    owner: account.address, tokenAccount: ta.pubkey, mint: cfg.mint, tokenProgram: ta.account.owner,
+    amount, decimals: cfg.decimals, memo, blockhash: value.blockhash,
+  });
+  report(`Approve the burn of ${units(amount, cfg.decimals)} ${cfg.symbol} in ${wallet.name}.`);
+  return sol.signAndSend(wallet, account, sol.unsigned(message), cfg.cluster === 'devnet' ? 'solana:devnet' : 'solana:mainnet');
+}
+
 const PHASE_LABEL = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' };
 
 async function mintPage() {
@@ -355,7 +408,7 @@ async function mintPage() {
     const r = await ask('zyn_saleTickets', {});
     const tickets = (r?.tickets || []).filter((t) => isHex(t.ticket) && Number.isSafeInteger(t.index) && Array.isArray(t.serials));
     box.hidden = !tickets.length;
-    el('mine').innerHTML = tickets.map((t) => `<li class="${t.result === 'won' ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}</span>
+    el('mine').innerHTML = tickets.map((t) => `<li class="${t.result === 'won' ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}${t.burned ? ' · burned' : ''}</span>
       <b>${t.result === 'won' ? esc((t.names || []).join(', ')) : t.result === 'claimed' ? 'claimed' : t.result === 'no win' ? 'no item this time' : 'waiting for the draw'}</b></li>`).join('');
     return tickets;
   };
@@ -370,6 +423,16 @@ async function mintPage() {
       el('claim-price').textContent = `${zec(sale.claim_price)} ZEC.zy`;
       el('open-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
       setTotal();
+      const cfg = await burnToken();
+      const left = Math.max(0, Number(sale.voucher_cap || 0) - Number(sale.voucher_tickets || 0));
+      el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0);
+      if (cfg) {
+        document.querySelectorAll('[data-burn-symbol]').forEach((x) => { x.textContent = cfg.symbol; });
+        el('burn-rate').textContent = `${units(cfg.per_ticket, cfg.decimals)} ${cfg.symbol}`;
+        el('burn-left').textContent = String(left);
+        const n = Math.max(1, Math.min(20, left, Number(el('burn-in').value) || 1));
+        el('burn-total').textContent = `${units(sol.burnAmount(n, cfg.per_ticket), cfg.decimals)} ${cfg.symbol}`;
+      }
       if (sale.phase === 'openmint') {
         const left = sale.open_count - sale.open_next;
         el('left').textContent = String(left);
@@ -408,6 +471,24 @@ async function mintPage() {
     } finally { el(button).disabled = false; }
   };
   el('count-in').oninput = setTotal;
+  el('burn-in').oninput = read;
+  el('burn-go').onclick = async () => {
+    if (!current) return pick();
+    const cfg = await burnToken();
+    if (!cfg || !sale || sale.phase !== 'open') return;
+    const n = Math.max(1, Math.min(20, Number(el('burn-in').value) || 1));
+    const out = el('out-burn');
+    el('burn-go').disabled = true;
+    out.classList.remove('bad');
+    try {
+      const sig = await burnForTickets(cfg, n, (t) => { out.textContent = t; });
+      out.textContent = `Burned. Your ${n} ticket${n > 1 ? 's' : ''} appear below once Solana finalizes it and the burn is posted — usually within a minute or two. Solana: ${sig.slice(0, 12)}…`;
+      for (const wait of [30000, 60000, 120000]) setTimeout(read, wait);
+    } catch (e) {
+      out.textContent = e.code === 4001 || /reject|declin|cancel/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message;
+      out.classList.add('bad');
+    } finally { el('burn-go').disabled = false; }
+  };
   el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {
     const count = Math.max(1, Math.min(20, Number(el('count-in').value) || 1));
     return { count, pay: zec(BigInt(sale.ticket_price) * BigInt(count)) };

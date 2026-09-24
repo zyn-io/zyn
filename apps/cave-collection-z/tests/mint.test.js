@@ -16,7 +16,7 @@ const WALLET = napOps && background
 
 // The sale runs on the object ledger (§144): tickets bought in ZEC.zy through
 // Nap, a draw posted as a root, claims proved against it, then an open mint.
-const SALE = ['zyn_saleTickets', 'zyn_buyTickets', 'zyn_claimItems', 'zyn_mintOpen'];
+const SALE = ['zyn_saleTickets', 'zyn_buyTickets', 'zyn_claimItems', 'zyn_mintOpen', 'zyn_burnMemo'];
 
 test('the checkout is the store\'s mint page, on Nap', () => {
   assert.match(page, /<body data-page="mint">/);

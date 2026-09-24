@@ -249,3 +249,83 @@ fn a_sale_joins_the_state_only_once_it_exists() {
     let greedy = Op::SetSale { program: program::sale_open(), collection: [0xCB; 32], ticket_price: TICKET, claim_price: CLAIM, open_price: OPEN, treasury_bps: 2_001 };
     assert_eq!(c.refused(greedy), "register the collection first");
 }
+
+/// Burn tickets (§145): a burn recorded once becomes tickets in the same
+/// order, capped, paying nothing in; its winner claims by revealing the
+/// secret from their own account, and nobody else can use that secret.
+#[test]
+fn burn_tickets_join_the_draw_and_only_their_burner_claims_them() {
+    use objectvm::sale::{voucher_commitment, voucher_ticket_id};
+    let mut c = Chain::new();
+    for who in [ALICE, BOB] {
+        c.mint(who, 1);
+    }
+    c.ok(Op::RegisterCollection { program: program::register_collection(), asset: CAVE, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 12 });
+    c.ok(Op::SetSale { program: program::sale_open(), collection: CAVE, ticket_price: TICKET, claim_price: CLAIM, open_price: OPEN, treasury_bps: 1_000 });
+    let secret = [0x5e; 32];
+    let commitment = voucher_commitment(&ALICE, &secret);
+    let post = |burn: u8, commitment: Hash, count: u32| Op::PostVoucher { program: program::sale_vouchers(), collection: CAVE, burn: [burn; 32], commitment, count };
+    assert_eq!(ObjectVm::intent_authorities(&post(1, commitment, 1)), Vec::<AccountId>::new(), "only the operator posts a burn");
+
+    // No cap, no burn tickets.
+    assert!(c.refused(post(1, commitment, 2)).contains("all taken"));
+    c.ok(Op::SetVoucherCap { program: program::sale_vouchers(), collection: CAVE, cap: 3 });
+
+    // A paid ticket first, then the burn: both in one order.
+    let (b_nonce, op) = c.buy(BOB, 1);
+    c.ok(op);
+    let floor = c.floor();
+    assert_eq!(c.ok(post(1, commitment, 2)), Receipt::VoucherPosted { first: voucher_ticket_id(&commitment, 0), count: 2 });
+    assert_eq!(c.floor(), floor, "a burn ticket pays nothing in");
+    assert_eq!(c.vm.market.tickets[&voucher_ticket_id(&commitment, 1)].index, 2);
+    assert!(c.refused(post(1, voucher_commitment(&ALICE, &[9; 32]), 1)).contains("already posted"), "a burn counts once");
+    assert!(c.refused(post(2, commitment, 1)).contains("already used"), "a commitment counts once");
+    assert!(c.refused(post(3, voucher_commitment(&BOB, &[8; 32]), 2)).contains("all taken"), "the cap holds");
+    c.ok(Op::SetVoucherCap { program: program::sale_vouchers(), collection: CAVE, cap: 2 });
+    assert!(c.refused(Op::SetVoucherCap { program: program::sale_vouchers(), collection: CAVE, cap: 1 }).contains("already posted"));
+
+    // Close and draw: Bob's ticket wins [0], Alice's burn tickets [1] and [2, 3].
+    c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 10, zcash_hash: [7; 32] });
+    assert!(c.refused(post(4, voucher_commitment(&BOB, &[6; 32]), 1)).contains("closed"));
+    let wins: Vec<(Hash, Vec<u32>)> = vec![
+        (ticket_id(&BOB, &b_nonce, 0), vec![0]),
+        (voucher_ticket_id(&commitment, 0), vec![1]),
+        (voucher_ticket_id(&commitment, 1), vec![2, 3]),
+    ];
+    let leaves: Vec<Hash> = wins.iter().map(|(t, s)| draw_leaf(t, s)).collect();
+    c.ok(Op::PostDraw { program: program::sale_draw(), collection: CAVE, root: merkle_root(&leaves) });
+
+    let voucher_claim = |c: &mut Chain, buyer: AccountId, k: u32, serials: &[u32], i: usize| {
+        let items = c.items(buyer, serials);
+        let (inputs, change) = c.fund(buyer, Fixed(CLAIM.0 * serials.len() as i128));
+        Op::ClaimVoucherItems {
+            buyer,
+            program: program::sale_claim(),
+            collection: CAVE,
+            secret,
+            k,
+            serials: serials.to_vec(),
+            proof: merkle_proof(&leaves, i),
+            items,
+            inputs,
+            change,
+        }
+    };
+    // Bob saw the secret nowhere yet — but even holding it, it is Alice's.
+    let stolen = voucher_claim(&mut c, BOB, 0, &[1], 1);
+    assert!(c.refused(stolen).contains("no such ticket"));
+    let op = voucher_claim(&mut c, ALICE, 0, &[1], 1);
+    assert!(matches!(c.ok(op), Receipt::ItemsClaimed { .. }));
+    // The secret is public now; the burn's other ticket is still only Alice's.
+    let stolen = voucher_claim(&mut c, BOB, 1, &[2, 3], 2);
+    assert!(c.refused(stolen).contains("no such ticket"));
+    let op = voucher_claim(&mut c, ALICE, 1, &[2, 3], 2);
+    c.ok(op);
+    assert_eq!(c.balance(ALICE, item_asset(&CAVE, 3)), ITEM_UNIT);
+    let again = voucher_claim(&mut c, ALICE, 1, &[2, 3], 2);
+    assert!(c.refused(again).contains("already claimed"));
+    // Paid tickets claim as before, beside them.
+    let op = c.claim_op(BOB, b_nonce, 0, &[0], merkle_proof(&leaves, 0));
+    c.ok(op);
+    assert_eq!(c.vm.market.sales[&CAVE].phase, Phase::Drawn);
+}

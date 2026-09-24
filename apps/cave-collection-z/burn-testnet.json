@@ -1,0 +1,8 @@
+{
+  "cluster": "devnet",
+  "symbol": "TESTZ",
+  "mint": "FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9",
+  "decimals": 6,
+  "per_ticket": "1000000",
+  "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+}

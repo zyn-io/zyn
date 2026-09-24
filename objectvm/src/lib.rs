@@ -418,6 +418,35 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         change: Vec<Output>,
     },
+    /// How many burn tickets a sale takes (§145). Operator only.
+    SetVoucherCap {
+        program: ProgramId,
+        collection: Address,
+        cap: u32,
+    },
+    /// One burn on another chain, recorded once, as `count` tickets under
+    /// ids from the burner's `commitment` (§145). Operator only.
+    PostVoucher {
+        program: ProgramId,
+        collection: Address,
+        burn: Hash,
+        commitment: Hash,
+        count: u32,
+    },
+    /// Claim what burn ticket `k` drew, revealing the secret behind the
+    /// burn's commitment to this account (§145).
+    ClaimVoucherItems {
+        buyer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        secret: Hash,
+        k: u32,
+        serials: Vec<u32>,
+        proof: Vec<zyn_vm::commit::ProofStep>,
+        items: Vec<Output>,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
     Seal,
 }
 
@@ -450,6 +479,8 @@ pub enum Receipt {
     DrawPosted { collection: Address },
     ItemsClaimed { created: Vec<Hash> },
     OpenMintPosted { collection: Address, count: u32 },
+    VoucherCapSet { collection: Address, cap: u32 },
+    VoucherPosted { first: Hash, count: u32 },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -469,6 +500,7 @@ impl Op {
             | Op::CurveTrade { inputs, .. }
             | Op::BuyTickets { inputs, .. }
             | Op::ClaimItems { inputs, .. }
+            | Op::ClaimVoucherItems { inputs, .. }
             | Op::MintOpen { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
@@ -502,7 +534,7 @@ impl Op {
             | Op::CurveTrade { change, .. }
             | Op::BuyTickets { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
-            Op::ClaimItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
+            Op::ClaimItems { change, items, .. } | Op::ClaimVoucherItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
             Op::MintOpen { change, item, .. } => change.iter().chain(std::iter::once(item)).collect(),
             _ => Vec::new(),
         }
@@ -1905,6 +1937,23 @@ impl MicrochainVm for ObjectVm {
                     self.apply_mint_open(buyer, collection, *serial, proof, item, inputs, change, nonce)
                 })
             }
+            Op::SetVoucherCap { program, collection, cap } => one(if *program != program::sale_vouchers() {
+                Err("wrong program for burn tickets")
+            } else {
+                self.apply_set_voucher_cap(collection, *cap)
+            }),
+            Op::PostVoucher { program, collection, burn, commitment, count } => one(if *program != program::sale_vouchers() {
+                Err("wrong program for burn tickets")
+            } else {
+                self.apply_post_voucher(collection, burn, commitment, *count)
+            }),
+            Op::ClaimVoucherItems { buyer, program, collection, secret, k, serials, proof, items, inputs, change } => {
+                one(if *program != program::sale_claim() {
+                    Err("wrong program for a claim")
+                } else {
+                    self.apply_claim_voucher_items(buyer, collection, secret, *k, serials, proof, items, inputs, change)
+                })
+            }
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -2007,7 +2056,7 @@ impl MicrochainVm for ObjectVm {
             Op::Redeem { holder, .. } => vec![*holder],
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
-            Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
+            Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
             _ => Vec::new(),
         }
     }
@@ -2419,6 +2468,22 @@ impl MicrochainVm for ObjectVm {
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
             }
+            Op::SetVoucherCap { program, collection, cap } => {
+                e.u8(33).bytes(&program.0).bytes(collection).u32(*cap);
+            }
+            Op::PostVoucher { program, collection, burn, commitment, count } => {
+                e.u8(34).bytes(&program.0).bytes(collection).bytes(burn).bytes(commitment).u32(*count);
+            }
+            Op::ClaimVoucherItems { buyer, program, collection, secret, k, serials, proof, items, inputs, change } => {
+                e.u8(35).bytes(buyer).bytes(&program.0).bytes(collection).bytes(secret).u32(*k).u32(serials.len() as u32);
+                for s in serials {
+                    e.u32(*s);
+                }
+                wire::proof(&mut e, proof);
+                wire::outputs(&mut e, items);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -2800,6 +2865,32 @@ impl MicrochainVm for ObjectVm {
                 let proof = wire::read_proof(d)?;
                 let items = wire::read_outputs(d)?;
                 Some(Op::ClaimItems { buyer, program, collection, nonce, k, serials, proof, items, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
+            }
+            33 => Some(Op::SetVoucherCap { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, cap: d.u32().ok()? }),
+            34 => Some(Op::PostVoucher {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                burn: d.hash().ok()?,
+                commitment: d.hash().ok()?,
+                count: d.u32().ok()?,
+            }),
+            35 => {
+                let buyer = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let collection = d.hash().ok()?;
+                let secret = d.hash().ok()?;
+                let k = d.u32().ok()?;
+                let n = d.u32().ok()? as usize;
+                if n > sale::MAX_ITEMS_PER_TICKET {
+                    return None;
+                }
+                let mut serials = Vec::with_capacity(n);
+                for _ in 0..n {
+                    serials.push(d.u32().ok()?);
+                }
+                let proof = wire::read_proof(d)?;
+                let items = wire::read_outputs(d)?;
+                Some(Op::ClaimVoucherItems { buyer, program, collection, secret, k, serials, proof, items, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
             }
             31 => Some(Op::PostOpenMint {
                 program: ProgramId(d.hash().ok()?),

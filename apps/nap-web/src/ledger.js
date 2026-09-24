@@ -102,9 +102,34 @@ export async function loadTickets(config, identity, collection) {
       .filter((r) => isHex(r.ticket) && r.collection === collection && isSmall(r.index) && typeof r.claimed === 'boolean' && byId.has(r.ticket))
       .map((r) => ({ ...byId.get(r.ticket), index: r.index, claimed: r.claimed }));
   };
-  const firsts = await ask(nonces.map((nonce) => ({ id: hex(mk.ticketId(me, nonce, 0)), nonce, k: 0 })));
-  const rest = await ask(firsts.flatMap((t) => Array.from({ length: 19 }, (_, j) => ({ id: hex(mk.ticketId(me, t.nonce, j + 1)), nonce: t.nonce, k: j + 1 }))));
-  return [...firsts, ...rest].map((t) => ({ ticket: t.id, nonce: t.nonce, k: t.k, index: t.index, claimed: t.claimed })).sort((a, b) => a.index - b.index);
+  // Bought tickets derive from (me, nonce, k); burn tickets (§145) from the
+  // commitment a burn's memo carried, made from (me, nonce) — so one scan of
+  // this wallet's nonces finds both.
+  const id = (nonce, k, voucher) => hex(voucher ? mk.voucherTicketId(mk.voucherCommitment(me, nonce), k) : mk.ticketId(me, nonce, k));
+  const firsts = await ask(nonces.flatMap((nonce) => [false, true].map((voucher) => ({ id: id(nonce, 0, voucher), nonce, k: 0, voucher }))));
+  const rest = await ask(firsts.flatMap((t) => Array.from({ length: 19 }, (_, j) => ({ id: id(t.nonce, j + 1, t.voucher), nonce: t.nonce, k: j + 1, voucher: t.voucher }))));
+  return [...firsts, ...rest]
+    .map((t) => ({ ticket: t.id, nonce: t.nonce, k: t.k, voucher: t.voucher, index: t.index, claimed: t.claimed }))
+    .sort((a, b) => a.index - b.index);
+}
+
+/// The memo a burn on Solana carries to become this wallet's tickets (§145):
+/// `zyn:<commitment>`, from this account and a nonce only it derives. The
+/// same memo comes back until a burn with it lands, so a site asking again
+/// does not use up nonces.
+export async function burnMemo(config, identity) {
+  const key = `nap.burn.${config.chain}.${identity.accountHex}`;
+  const saved = read(key);
+  if (saved != null) {
+    const commitment = mk.voucherCommitment(identity.account, mk.marketNonce(identity.secretKey, Number(saved)));
+    const landed = await call(config, 'zyn_tickets', { ids: hex(mk.voucherTicketId(commitment, 0)) });
+    if (!(Array.isArray(landed) && landed.length)) return { memo: `zyn:${hex(commitment)}`, commitment: hex(commitment) };
+  }
+  const n = nonceCount(config, identity);
+  nextNonce(config, identity);
+  write(key, String(n));
+  const commitment = mk.voucherCommitment(identity.account, mk.marketNonce(identity.secretKey, n));
+  return { memo: `zyn:${hex(commitment)}`, commitment: hex(commitment) };
 }
 
 /// A sale as the chain holds it, and the posted draw and open-mint order —

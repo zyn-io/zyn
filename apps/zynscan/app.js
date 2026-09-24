@@ -60,6 +60,7 @@ const KIND_CLASS = {
   Deposit: 'bridge', 'Withdraw to Zcash': 'bridge', Claim: 'claim',
   'Tickets bought': 'trade', 'Items claimed': 'claim', 'Open mint': 'trade',
   'Sale opened': 'op', 'Sale closed': 'op', 'Draw posted': 'op', 'Open mint posted': 'op',
+  'Burn posted': 'bridge', 'Burn tickets capped': 'op',
 };
 const kindChip = (t) => `<span class="chip ${KIND_CLASS[t.kind] || 'plain'}">${esc(t.kind)}</span>`;
 const status = (t) => (t.ok ? '<span class="ok">accepted</span>' : `<span class="bad" title="${esc(t.refusal)}">refused</span>`);
@@ -91,6 +92,7 @@ function detail(t) {
   if (d.zcash_height !== undefined) parts.push(`closed at Zcash ${num(d.zcash_height)}`);
   if (d.root) parts.push(`root ${hash(d.root)}`);
   if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
+  if (d.burn) parts.push(`burn ${hash(d.burn)}`);
   return parts.join(' · ');
 }
 

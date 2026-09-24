@@ -280,6 +280,8 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
                 "open_root": hex(&s.open_root),
                 "open_count": s.open_count,
                 "open_next": s.open_next,
+                "voucher_cap": s.voucher_cap,
+                "voucher_tickets": s.voucher_tickets,
             })
             .to_string()
         })

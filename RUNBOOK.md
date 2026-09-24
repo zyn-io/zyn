@@ -2657,6 +2657,17 @@ zyn-sale-draw status
 4. **Draw** — `zyn-sale-draw draw` once the reveal block (close + 100) and the reveal drand round both exist. It checks the manifest rebuilds the committed root, runs the engine over every ticket in order, writes `sale-<collection>-draw.json` into the node's data dir (served by `zyn_saleDraw`) and posts the root. Publish the same file anywhere you like — its root is what counts.
 5. **Open mint** — `zyn-sale-draw open-mint` after the claim window (16,128 blocks from the reveal block). It writes `sale-<collection>-open.json` and posts the order's root.
 
+**Burn tickets (DECISIONS §145).** Once the token exists, add `apps/cave-collection-z/burn.json` (`{"cluster":"mainnet","symbol","mint","decimals","per_ticket","token_program"}`), redeploy the store, and on Contabo:
+
+```sh
+export ZYN_BURN_MINT=<mint> ZYN_BURN_PER_TICKET=<base units per ticket> \
+       ZYN_BURN_NODE=http://127.0.0.1:8599 ZYN_BURN_CURSOR=/var/lib/zyn/burn-cursor   # + ZYN_SUBMIT_TOKEN from the env file
+zyn-burn-watch cap <n>      # after `open`: how many burn tickets the sale takes
+zyn-burn-watch run          # as a service; `status` shows tickets left
+```
+
+Run `zyn-burn-watch once` immediately before `zyn-sale-draw close`, so burns that finalized in time are posted before the door shuts. A paid RPC (`ZYN_BURN_RPC`, and `SOLANA_RPC` on the Pages project) is worth it on launch day — the public one rate-limits.
+
 Rehearsal: `ZYN_SALE_POLICY=rehearsal` (2-block notice, 2-block reveal, 60 drand rounds; `ZYN_SALE_CLAIM_WINDOW`, default 2). Its digest differs from the published policy, so it is for devnets and testnet only. The 24 Sep rehearsal ran against a local devnet (`scratchpad/devsale/sale.mjs` drove three wallets through Nap Connect's own methods) with testnet Zcash blocks from the Hetzner Zebra.
 
 ## 5f-quindecies. ZynScan (24 Sep 2026)

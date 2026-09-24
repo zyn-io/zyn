@@ -26,7 +26,9 @@
 //   zyn_nftList {asset, price}, zyn_nftCancel {asset}, zyn_nftRedeem {asset},
 //   zyn_collect
 //   zyn_saleInfo {collection?}, zyn_saleTickets {collection?},
-//   zyn_buyTickets {count, pay?}, zyn_claimItems, zyn_mintOpen {count}
+//   zyn_buyTickets {count, pay?}, zyn_claimItems, zyn_mintOpen {count},
+//   zyn_burnMemo → {memo, commitment}  (a burn on Solana with this memo
+//     becomes this wallet's tickets, §145)
 //     (the sale, §144; collection defaults to Collection Z)
 //
 // Call `request` from a click. Opening Nap's window is a popup, and browsers

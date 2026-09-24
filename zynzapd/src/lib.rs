@@ -33,6 +33,7 @@ pub mod reveal;
 mod restore;
 pub mod rpc;
 pub mod sale;
+pub mod burn_watch;
 pub mod sale_draw;
 pub mod tickets;
 pub mod settle;

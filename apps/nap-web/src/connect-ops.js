@@ -441,13 +441,21 @@ export const METHODS = {
       const drawn = !!s?.draw;
       return {
         tickets: mine.map((t) => ({
-          ticket: t.ticket, index: t.index, claimed: t.claimed,
+          ticket: t.ticket, index: t.index, claimed: t.claimed, burned: !!t.voucher,
           result: !drawn ? 'waiting' : t.claimed ? 'claimed' : wins.has(t.ticket) ? 'won' : 'no win',
           serials: wins.get(t.ticket) || [],
           names: (wins.get(t.ticket) || []).map((x) => itemName(collection, x)),
         })),
       };
     },
+  },
+
+  // The memo that makes a burn of the sale's promotional token on Solana
+  // into this wallet's tickets (§145). It names no account: the commitment
+  // binds this one without saying which. Nothing moves, so no approval.
+  zyn_burnMemo: {
+    kind: 'read',
+    run: async (ctx) => ledger.burnMemo(ctx.config, ctx.identity),
   },
 
   zyn_buyTickets: {
@@ -503,11 +511,15 @@ export const METHODS = {
             const won = s.draw.won[i].serials;
             const h = await holdings(ctx);
             const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(s.quote), BigInt(s.sale.claim_price) * BigInt(won.length));
-            await ledger.submitIntent(ctx.config, ctx.identity, mk.claimItemsIntent({
-              buyer: ctx.identity.account, collection: unhex(collection), nonce: t.nonce, k: t.k, serials: won,
+            const claim = {
+              buyer: ctx.identity.account, collection: unhex(collection), k: t.k, serials: won,
               proof: mk.merkleProof(s.draw.leaves, i),
               items: won.map((x) => mk.selfNote(ctx.identity, mk.itemAsset(unhex(collection), x), mk.ITEM_UNIT)), inputs, change,
-            }));
+            };
+            // A burn ticket is claimed by revealing the secret its memo committed to.
+            await ledger.submitIntent(ctx.config, ctx.identity, t.voucher
+              ? mk.claimVoucherItemsIntent({ ...claim, secret: t.nonce })
+              : mk.claimItemsIntent({ ...claim, nonce: t.nonce }));
             spent = inputs.map((x) => hex(x.commitment));
             claimed.push(...won);
           }

@@ -192,6 +192,7 @@ const METHODS = {
   // Collection Z's sale (§144).
   zyn_saleInfo:    { read: true,  run: (p) => app('/api/object/sale/info', p) },
   zyn_saleTickets: { read: true, mine: true,  run: (p) => app('/api/object/sale/tickets', p) },
+  zyn_burnMemo:    { read: true, mine: true,  run: (p) => app('/api/object/sale/burn-memo', p) },
   zyn_buyTickets:  { read: false, run: (p) => app('/api/object/sale/buy', p),   describe: (p) => `Buy ${p.count || 1} ticket${(p.count || 1) > 1 ? 's' : ''} in the Collection Z sale${p.pay ? ` for ${p.pay} ZEC.zy` : ''}. Tickets are drawn after the sale closes; the ticket price is not refunded.` },
   zyn_claimItems:  { read: false, run: (p) => app('/api/object/sale/claim', p), describe: () => 'Claim every item your winning tickets drew, at the claim price each. They are minted into your wallet.' },
   zyn_mintOpen:    { read: false, run: (p) => app('/api/object/sale/mint', p),  describe: (p) => `Mint ${p.count || 1} from the open mint, at the open price each — the next ones in the posted order.` },

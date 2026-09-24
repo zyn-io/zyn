@@ -263,7 +263,7 @@ pub fn vectors() -> Vec<(&'static str, String)> {
 /// Collection Z's lottery (DECISIONS §144): ids, leaves, a proof and the
 /// three intents a holder signs.
 fn sale_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
-    use objectvm::sale::{draw_leaf, open_leaf, ticket_id, treasury_source};
+    use objectvm::sale::{draw_leaf, open_leaf, ticket_id, treasury_source, voucher_commitment, voucher_ticket_id};
     use zyn_vm::commit::{merkle_proof, merkle_root};
     let enc = |op: &Op| hex(&ObjectVm::encode_intent(op));
     let ticket = ticket_id(&OWNER, &NONCE, 1);
@@ -306,6 +306,23 @@ fn sale_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
                 collection: TOKEN,
                 nonce: NONCE,
                 k: 1,
+                serials: vec![7, 1],
+                proof: proof.clone(),
+                items: vec![item(7), item(1)],
+                inputs: input.to_vec(),
+                change: vec![change()],
+            }),
+        ),
+        ("voucher_commitment", hex(&voucher_commitment(&OWNER, &NONCE))),
+        ("voucher_ticket_id", hex(&voucher_ticket_id(&voucher_commitment(&OWNER, &NONCE), 2))),
+        (
+            "claim_voucher_items",
+            enc(&Op::ClaimVoucherItems {
+                buyer: OWNER,
+                program: program::sale_claim(),
+                collection: TOKEN,
+                secret: NONCE,
+                k: 2,
                 serials: vec![7, 1],
                 proof: proof.clone(),
                 items: vec![item(7), item(1)],

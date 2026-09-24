@@ -299,6 +299,9 @@
       .won-art figure { margin: 0; display: grid; gap: 6px; }
       .won-art img { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--line); background: #0d0f0c; image-rendering: pixelated; }
       .won-art figcaption { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+      .burn { display: grid; gap: 14px; margin-top: 10px; padding-top: 22px; border-top: 1px dashed var(--line); }
+      .burn[hidden] { display: none; }
+      .say.small { font-size: 10px; color: #5c6058; }
       .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
       .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
       .nav a:hover { color: var(--ink); }
@@ -364,6 +367,30 @@
               <a class="act ghost" href="/deposit">Bring ZEC in</a>
             </div>
             <p class="out" id="out" role="status" aria-live="polite"></p>
+
+            <div class="burn" id="burn" hidden>
+              <p class="say">
+                <strong>Or burn <span data-burn-symbol>the token</span> for tickets.</strong>
+                <span id="burn-rate">—</span> on Solana is one ticket, into the same draw at the same odds.
+                The burn carries a code from your Nap, so the tickets are yours and nobody's else — without
+                your Solana wallet ever naming your Zyn account. <span id="burn-left">—</span> burn tickets left.
+              </p>
+              <label class="field">
+                <span>Tickets to burn for</span>
+                <input id="burn-in" type="number" min="1" max="20" step="1" value="1" />
+              </label>
+              <div class="total">
+                <span>To burn</span>
+                <b id="burn-total">—</b>
+              </div>
+              <button class="act ghost" id="burn-go" type="button">Burn with a Solana wallet</button>
+              <p class="say small">
+                A burn cannot be undone. A burn ticket costs nothing into the pool; if it wins, its items are
+                claimed at the claim price like any other. Burns that arrive after the sale closes, or after the
+                burn tickets run out, earn no tickets.
+              </p>
+              <p class="out" id="out-burn" role="status" aria-live="polite"></p>
+            </div>
           </section>
 
           <section class="state" id="s-closed" hidden>
@@ -441,6 +468,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=2"></script>
+    <script type="module" src="/zstore.js?v=3"></script>
   </body>
 </html>

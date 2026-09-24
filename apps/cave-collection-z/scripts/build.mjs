@@ -59,6 +59,12 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 // The shelf, item and market pages speak to Nap through Nap Connect — the same
 // file Nap ships — and share one module for it.
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
+await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
+// The burn button's token (§145): one file per network. Mainnet's exists only
+// once the token does; without it the page offers no burn.
+for (const f of ['burn.json', 'burn-testnet.json']) {
+  await cp(new URL(f, root), new URL(f, output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
+}
 await cp(new URL('../nap-connect/nap-connect.js', root), new URL('nap-connect.js', output));
 
 // Collection Z's public index: for every serial, its name, the hash of its
