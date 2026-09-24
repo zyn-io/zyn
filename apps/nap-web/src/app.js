@@ -300,7 +300,7 @@ function wallet(message = '') {
   shell(`<main class="wallet">
     <aside class="rail">
       <div><p class="kicker">YOUR ZYN ACCOUNT</p><button class="account-copy" id="copy-account"><b>${short(account)}</b><span>Copy full ID</span></button></div>
-      <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="recovery-link">Recovery</button></nav>
+      <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="bridge-link">Bridge</button><button id="recovery-link">Recovery</button></nav>
       <button class="quiet" id="forget">${keptWallet() ? 'Lock' : 'Lock &amp; forget key'}</button>
     </aside>
     <section class="content">
@@ -334,6 +334,7 @@ function wallet(message = '') {
   root.querySelector('#receive-link').onclick = () => root.querySelector('.account-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Same origin, same kept key: the market opens it with the same password.
   root.querySelector('#market-link').onclick = () => { location.href = '/market.html'; };
+  root.querySelector('#bridge-link').onclick = () => { location.href = '/bridge.html'; };
   root.querySelector('#recovery-link').onclick = () => root.querySelector('#recovery-dialog').showModal();
   root.querySelector('#recovery-dialog .x').onclick = () => root.querySelector('#recovery-dialog').close();
   // Locking returns to whatever this device can actually offer: a password if

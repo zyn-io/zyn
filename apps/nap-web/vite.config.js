@@ -13,7 +13,7 @@ const devProxy = () => {
 export default defineConfig({
   build: {
     rollupOptions: {
-      input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html' },
+      input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html', bridge: 'bridge.html' },
     },
   },
   // Local development only: `NAP_DEV_RPC=http://127.0.0.1:8399 npm run dev`

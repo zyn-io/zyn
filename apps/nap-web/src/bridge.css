@@ -1,0 +1,12 @@
+/* Nap Bridge: the market's paper and ink, laid out for two chains. */
+.br-lede { max-width: 62ch; margin: -6px 0 26px; font-size: 14px; line-height: 1.7; color: var(--ink-soft); }
+.br-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 22px; align-items: start; }
+.br-card { display: grid; gap: 16px; }
+.br-card h3 { font: 700 22px Bricolage; margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.br-card h3 span { font: 400 13px Mono; color: var(--muted); }
+.br-card .primary { width: 100%; }
+.br-say { font-size: 13px; line-height: 1.6; color: var(--ink-soft); margin: 0; min-height: 1.2em; }
+.br-say.error { color: #b3261e; }
+.br-card code, .mk-fine code { font: 11px Mono; background: var(--paper); padding: 1px 5px; border-radius: 4px; word-break: break-all; }
+.br-out { display: grid; gap: 16px; max-width: 560px; }
+@media (max-width: 720px) { .br-cards { grid-template-columns: 1fr; } }

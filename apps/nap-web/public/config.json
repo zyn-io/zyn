@@ -42,7 +42,16 @@
       "collections": [],
       "lightdUrl": "/zec/testnet",
       "zecBirthday": 4320000,
-      "launchpadUrl": "https://cave-jade.pages.dev/?network=testnet"
+      "launchpadUrl": "https://cave-jade.pages.dev/?network=testnet",
+      "bridges": {
+        "sol": {
+          "network": "solana-devnet",
+          "cluster": "devnet",
+          "vault": "7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA",
+          "rpc": "https://api.devnet.solana.com",
+          "explorer": "https://explorer.solana.com/tx/{tx}?cluster=devnet"
+        }
+      }
     }
   ],
   "collections": [
