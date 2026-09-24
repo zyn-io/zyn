@@ -137,6 +137,23 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         ),
         Op::CurveTrade { token, .. } => ("Curve trade", false, json!({ "token": hex(token) })),
         Op::SetCurveTerms { fee_bps, bond, .. } => ("Curve terms set", true, json!({ "fee_bps": fee_bps, "bond": bond.0.to_string() })),
+        Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
+            "Sale opened",
+            true,
+            json!({ "collection": hex(collection), "ticket_price": ticket_price.0.to_string(), "claim_price": claim_price.0.to_string(), "open_price": open_price.0.to_string(), "treasury_bps": treasury_bps }),
+        ),
+        // A ticket's id is its buyer's to derive; the count and the sale are public.
+        Op::BuyTickets { collection, count, .. } => ("Tickets bought", false, json!({ "collection": hex(collection), "tickets": count })),
+        Op::CloseSale { collection, zcash_height, zcash_hash, .. } => (
+            "Sale closed",
+            true,
+            json!({ "collection": hex(collection), "zcash_height": zcash_height, "zcash_block": hex(zcash_hash) }),
+        ),
+        Op::PostDraw { collection, root, .. } => ("Draw posted", true, json!({ "collection": hex(collection), "root": hex(root) })),
+        // Minted items are public (collection and serial); who claimed them is not.
+        Op::ClaimItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
+        Op::PostOpenMint { collection, root, count, .. } => ("Open mint posted", true, json!({ "collection": hex(collection), "root": hex(root), "items": count })),
+        Op::MintOpen { collection, serial, .. } => ("Open mint", false, json!({ "collection": hex(collection), "serial": serial })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }

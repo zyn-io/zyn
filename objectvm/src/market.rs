@@ -332,6 +332,10 @@ pub struct Market {
     pub curve_orders: Vec<crate::curve::CurveOrder>,
     /// What curves charge; absent until the operator sets it.
     pub curve_terms: Option<crate::curve::CurveTerms>,
+    /// Primary sales, by collection (`crate::sale`).
+    pub sales: BTreeMap<Address, crate::sale::Sale>,
+    /// Their tickets, by an id only each ticket's buyer can derive.
+    pub tickets: BTreeMap<Hash, crate::sale::Ticket>,
 }
 
 impl Market {
@@ -349,6 +353,8 @@ impl Market {
             && self.curves.is_empty()
             && self.curve_orders.is_empty()
             && self.curve_terms.is_none()
+            && self.sales.is_empty()
+            && self.tickets.is_empty()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -547,11 +553,15 @@ impl Market {
         if !self.curves.is_empty() || !self.curve_orders.is_empty() || self.curve_terms.is_some() {
             crate::curve::section(&mut e, self.curve_terms, &self.curves, &self.curve_orders);
         }
+        // And sales: joined once one exists, so every root sealed before keeps.
+        if !self.sales.is_empty() || !self.tickets.is_empty() {
+            crate::sale::section(&mut e, &self.sales, &self.tickets);
+        }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET04").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET05").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -622,6 +632,7 @@ impl Market {
             e.bytes(c).bytes(&l.source).bytes(&l.nullifier);
         }
         crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
+        crate::sale::encode(e, &self.sales, &self.tickets);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -629,10 +640,12 @@ impl Market {
         // existed (testnet 212, 23 Sep); it lacks the supply counters, items
         // and listings, and reads as a market that had none of them.
         // v3 predates curves and reads as a market with none.
-        let (v3, v4) = match d.take_bytes(8).ok()? {
-            b"MARKET04" => (true, true),
-            b"MARKET03" => (true, false),
-            b"MARKET02" => (false, false),
+        // v4 predates sales and reads as a market with none.
+        let (v3, v4, v5) = match d.take_bytes(8).ok()? {
+            b"MARKET05" => (true, true, true),
+            b"MARKET04" => (true, true, false),
+            b"MARKET03" => (true, false, false),
+            b"MARKET02" => (false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -748,6 +761,11 @@ impl Market {
             m.curve_terms = terms;
             m.curves = curves;
             m.curve_orders = orders;
+        }
+        if v5 {
+            let (sales, tickets) = crate::sale::decode(d)?;
+            m.sales = sales;
+            m.tickets = tickets;
         }
         Some(m)
     }

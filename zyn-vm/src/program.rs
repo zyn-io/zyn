@@ -160,6 +160,42 @@ pub fn redeem_item() -> ProgramId {
     named(b"redeem-item")
 }
 
+/// Open a collection's primary sale: its ticket, claim and open-mint prices
+/// (DECISIONS §144). Operator only.
+pub fn sale_open() -> ProgramId {
+    named(b"sale-open")
+}
+
+/// Buy lottery tickets in a collection's primary sale.
+pub fn sale_tickets() -> ProgramId {
+    named(b"sale-tickets")
+}
+
+/// Close a sale at the announced Zcash height. Operator only.
+pub fn sale_close() -> ProgramId {
+    named(b"sale-close")
+}
+
+/// Post the draw's result root. Operator only.
+pub fn sale_draw() -> ProgramId {
+    named(b"sale-draw")
+}
+
+/// Claim a ticket's drawn items against the posted root.
+pub fn sale_claim() -> ProgramId {
+    named(b"sale-claim")
+}
+
+/// End claims and post the open-mint order. Operator only.
+pub fn sale_open_mint() -> ProgramId {
+    named(b"sale-open-mint")
+}
+
+/// Mint the next item of the open-mint order.
+pub fn sale_mint() -> ProgramId {
+    named(b"sale-mint")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")
@@ -215,6 +251,13 @@ pub fn is_named(id: &ProgramId) -> bool {
         curve_create(),
         curve_trade(),
         configure_curves(),
+        sale_open(),
+        sale_tickets(),
+        sale_close(),
+        sale_draw(),
+        sale_claim(),
+        sale_open_mint(),
+        sale_mint(),
     ]
     .contains(id)
 }
@@ -249,6 +292,13 @@ mod tests {
             curve_create(),
             curve_trade(),
             configure_curves(),
+            sale_open(),
+            sale_tickets(),
+            sale_close(),
+            sale_draw(),
+            sale_claim(),
+            sale_open_mint(),
+            sale_mint(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

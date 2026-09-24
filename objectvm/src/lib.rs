@@ -47,6 +47,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
 pub mod curve;
+pub mod sale;
 pub mod market;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
@@ -352,6 +353,71 @@ pub enum Op {
         fee_bps: u32,
         bond: Fixed,
     },
+    /// Open a collection's primary sale at these prices (§144). Operator only.
+    SetSale {
+        program: ProgramId,
+        collection: Address,
+        ticket_price: Fixed,
+        claim_price: Fixed,
+        open_price: Fixed,
+        treasury_bps: u32,
+    },
+    /// Buy `count` lottery tickets in an open sale.
+    BuyTickets {
+        buyer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        count: u32,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Close a sale at the Zcash block it closed at. Operator only.
+    CloseSale {
+        program: ProgramId,
+        collection: Address,
+        zcash_height: u32,
+        zcash_hash: Hash,
+    },
+    /// Post the draw's result root. Operator only.
+    PostDraw {
+        program: ProgramId,
+        collection: Address,
+        root: Hash,
+    },
+    /// Claim what ticket `(nonce, k)` drew: proved against the posted root,
+    /// paid at the claim price, minted to the claimant.
+    ClaimItems {
+        buyer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        nonce: Hash,
+        k: u32,
+        serials: Vec<u32>,
+        proof: Vec<zyn_vm::commit::ProofStep>,
+        items: Vec<Output>,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// End claims and post the order the rest sell in. Operator only.
+    PostOpenMint {
+        program: ProgramId,
+        collection: Address,
+        root: Hash,
+        count: u32,
+    },
+    /// Mint the next item of the open-mint order at the open price.
+    MintOpen {
+        buyer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        serial: u32,
+        proof: Vec<zyn_vm::commit::ProofStep>,
+        item: Output,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
     Seal,
 }
 
@@ -378,6 +444,12 @@ pub enum Receipt {
     Redeemed { paid: Fixed, source: Hash },
     CurveCreated { token: Address },
     CurveTermsSet { fee_bps: u32, bond: Fixed },
+    SaleOpened { collection: Address },
+    TicketsBought { first: Hash, count: u32 },
+    SaleClosed { collection: Address, tickets: u32 },
+    DrawPosted { collection: Address },
+    ItemsClaimed { created: Vec<Hash> },
+    OpenMintPosted { collection: Address, count: u32 },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -395,6 +467,9 @@ impl Op {
             | Op::Commit { inputs, .. }
             | Op::CreateCurve { inputs, .. }
             | Op::CurveTrade { inputs, .. }
+            | Op::BuyTickets { inputs, .. }
+            | Op::ClaimItems { inputs, .. }
+            | Op::MintOpen { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
                 item_nullifier,
@@ -425,7 +500,10 @@ impl Op {
             | Op::Swap { change, .. }
             | Op::CreateCurve { change, .. }
             | Op::CurveTrade { change, .. }
+            | Op::BuyTickets { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
+            Op::ClaimItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
+            Op::MintOpen { change, item, .. } => change.iter().chain(std::iter::once(item)).collect(),
             _ => Vec::new(),
         }
     }
@@ -464,6 +542,32 @@ mod wire {
         let mut v = Vec::with_capacity(n.min(1024));
         for _ in 0..n {
             v.push((d.hash().ok()?, d.hash().ok()?));
+        }
+        Some(v)
+    }
+
+    /// A Merkle inclusion path: each step's sibling and which side the node is on.
+    pub fn proof(e: &mut Encoder, steps: &[zyn_vm::commit::ProofStep]) {
+        e.u32(steps.len() as u32);
+        for s in steps {
+            e.bytes(&s.sibling).bool(s.node_is_right);
+        }
+    }
+
+    pub fn read_proof(d: &mut Decoder) -> Option<Vec<zyn_vm::commit::ProofStep>> {
+        let n = d.u32().ok()? as usize;
+        if n > crate::sale::MAX_PROOF {
+            return None;
+        }
+        let mut v = Vec::with_capacity(n);
+        for _ in 0..n {
+            let sibling = d.hash().ok()?;
+            let node_is_right = match d.u8().ok()? {
+                0 => false,
+                1 => true,
+                _ => return None,
+            };
+            v.push(zyn_vm::commit::ProofStep { sibling, node_is_right });
         }
         Some(v)
     }
@@ -1762,6 +1866,45 @@ impl MicrochainVm for ObjectVm {
                 self.market.curve_terms = Some(curve::CurveTerms { fee_bps: *fee_bps, bond: *bond });
                 vec![Receipt::CurveTermsSet { fee_bps: *fee_bps, bond: *bond }]
             }
+            Op::SetSale { program, collection, ticket_price, claim_price, open_price, treasury_bps } => one(if *program != program::sale_open() {
+                Err("wrong program for a sale")
+            } else {
+                self.apply_set_sale(collection, *ticket_price, *claim_price, *open_price, *treasury_bps)
+            }),
+            Op::BuyTickets { buyer, program, collection, count, nonce, inputs, change } => one(if *program != program::sale_tickets() {
+                Err("wrong program for tickets")
+            } else {
+                self.apply_buy_tickets(buyer, collection, *count, nonce, inputs, change)
+            }),
+            Op::CloseSale { program, collection, zcash_height, zcash_hash } => one(if *program != program::sale_close() {
+                Err("wrong program for a close")
+            } else {
+                self.apply_close_sale(collection, *zcash_height, zcash_hash)
+            }),
+            Op::PostDraw { program, collection, root } => one(if *program != program::sale_draw() {
+                Err("wrong program for a draw")
+            } else {
+                self.apply_post_draw(collection, root)
+            }),
+            Op::ClaimItems { buyer, program, collection, nonce, k, serials, proof, items, inputs, change } => {
+                one(if *program != program::sale_claim() {
+                    Err("wrong program for a claim")
+                } else {
+                    self.apply_claim_items(buyer, collection, nonce, *k, serials, proof, items, inputs, change)
+                })
+            }
+            Op::PostOpenMint { program, collection, root, count } => one(if *program != program::sale_open_mint() {
+                Err("wrong program for an open mint")
+            } else {
+                self.apply_post_open_mint(collection, root, *count)
+            }),
+            Op::MintOpen { buyer, program, collection, serial, proof, item, nonce, inputs, change } => {
+                one(if *program != program::sale_mint() {
+                    Err("wrong program for a mint")
+                } else {
+                    self.apply_mint_open(buyer, collection, *serial, proof, item, inputs, change, nonce)
+                })
+            }
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -1864,6 +2007,7 @@ impl MicrochainVm for ObjectVm {
             Op::Redeem { holder, .. } => vec![*holder],
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
+            Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
             _ => Vec::new(),
         }
     }
@@ -2240,6 +2384,41 @@ impl MicrochainVm for ObjectVm {
             Op::SetCurveTerms { program, fee_bps, bond } => {
                 e.u8(25).bytes(&program.0).u32(*fee_bps).fixed(*bond);
             }
+            Op::SetSale { program, collection, ticket_price, claim_price, open_price, treasury_bps } => {
+                e.u8(26).bytes(&program.0).bytes(collection).fixed(*ticket_price).fixed(*claim_price).fixed(*open_price).u32(*treasury_bps);
+            }
+            Op::BuyTickets { buyer, program, collection, count, nonce, inputs, change } => {
+                e.u8(27).bytes(buyer).bytes(&program.0).bytes(collection).u32(*count).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::CloseSale { program, collection, zcash_height, zcash_hash } => {
+                e.u8(28).bytes(&program.0).bytes(collection).u32(*zcash_height).bytes(zcash_hash);
+            }
+            Op::PostDraw { program, collection, root } => {
+                e.u8(29).bytes(&program.0).bytes(collection).bytes(root);
+            }
+            Op::ClaimItems { buyer, program, collection, nonce, k, serials, proof, items, inputs, change } => {
+                e.u8(30).bytes(buyer).bytes(&program.0).bytes(collection).bytes(nonce).u32(*k).u32(serials.len() as u32);
+                for s in serials {
+                    e.u32(*s);
+                }
+                wire::proof(&mut e, proof);
+                wire::outputs(&mut e, items);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PostOpenMint { program, collection, root, count } => {
+                e.u8(31).bytes(&program.0).bytes(collection).bytes(root).u32(*count);
+            }
+            Op::MintOpen { buyer, program, collection, serial, proof, item, nonce, inputs, change } => {
+                e.u8(32).bytes(buyer).bytes(&program.0).bytes(collection).u32(*serial);
+                wire::proof(&mut e, proof);
+                wire::outputs(&mut e, std::slice::from_ref(item));
+                e.bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
             Op::Seal => {
                 e.u8(0);
             }
@@ -2580,6 +2759,67 @@ impl MicrochainVm for ObjectVm {
                 fee_bps: d.u32().ok()?,
                 bond: d.fixed().ok()?,
             }),
+            26 => Some(Op::SetSale {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                ticket_price: d.fixed().ok()?,
+                claim_price: d.fixed().ok()?,
+                open_price: d.fixed().ok()?,
+                treasury_bps: d.u32().ok()?,
+            }),
+            27 => Some(Op::BuyTickets {
+                buyer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                count: d.u32().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            28 => Some(Op::CloseSale {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                zcash_height: d.u32().ok()?,
+                zcash_hash: d.hash().ok()?,
+            }),
+            29 => Some(Op::PostDraw { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, root: d.hash().ok()? }),
+            30 => {
+                let buyer = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let collection = d.hash().ok()?;
+                let nonce = d.hash().ok()?;
+                let k = d.u32().ok()?;
+                let n = d.u32().ok()? as usize;
+                if n > sale::MAX_ITEMS_PER_TICKET {
+                    return None;
+                }
+                let mut serials = Vec::with_capacity(n);
+                for _ in 0..n {
+                    serials.push(d.u32().ok()?);
+                }
+                let proof = wire::read_proof(d)?;
+                let items = wire::read_outputs(d)?;
+                Some(Op::ClaimItems { buyer, program, collection, nonce, k, serials, proof, items, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
+            }
+            31 => Some(Op::PostOpenMint {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                root: d.hash().ok()?,
+                count: d.u32().ok()?,
+            }),
+            32 => {
+                let buyer = d.account().ok()?;
+                let program = ProgramId(d.hash().ok()?);
+                let collection = d.hash().ok()?;
+                let serial = d.u32().ok()?;
+                let proof = wire::read_proof(d)?;
+                let mut one_item = wire::read_outputs(d)?;
+                if one_item.len() != 1 {
+                    return None;
+                }
+                let item = one_item.remove(0);
+                Some(Op::MintOpen { buyer, program, collection, serial, proof, item, nonce: d.hash().ok()?, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
+            }
             _ => None,
         }
     }
