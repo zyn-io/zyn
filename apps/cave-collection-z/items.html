@@ -16,7 +16,7 @@
     <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <title>Cave — what you hold</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
-    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <link rel="stylesheet" href="/styles.css?v=20260924-nap1" />
     <style>
       /* The shelf. Deeper in the cave than the tunnel mouth, so it is lit by
          what is on it rather than by a torch at the entrance. */
@@ -63,7 +63,7 @@
       .nav a:hover { color: var(--ink); }
     </style>
   </head>
-  <body>
+  <body data-page="shelf">
     <main class="register">
       <h1><span>What you</span><span>hold</span></h1>
 
@@ -76,7 +76,7 @@
       <div class="ledger">
         <div class="ledger-index">
           <span>The shelf</span>
-          <span>Held · <b id="count">—</b></span>
+          <span>Held · <b id="count">—</b> <button class="act ghost small" type="button" data-wallet-button>Connect Nap</button></span>
         </div>
         <div class="ledger-body">
 
@@ -84,17 +84,17 @@
             <p class="say">Looking for a wallet…</p>
           </section>
 
-          <section class="state" id="s-nowallet" hidden>
+          <section class="state" id="s-connect" hidden>
             <p class="say">
               <strong>Only a key can say what it holds.</strong> There is no address to type in
               and no account to look up: what you own is derived from a key you hold, so this
-              page has nothing to show until a wallet is here to answer.
+              page shows nothing until your Nap answers for it.
             </p>
-            <a class="act" href="/#wallet">Get Nap Wallet</a>
+            <button class="act" id="connect" type="button">Connect Nap</button>
           </section>
 
           <section class="state" id="s-ready" hidden>
-            <p class="say">Ask your wallet what it is holding.</p>
+            <p class="say">Nap's window is closed. Open it to read your shelf.</p>
             <button class="act" id="ask" type="button">Read my shelf</button>
           </section>
 
@@ -107,6 +107,7 @@
           </section>
 
           <section class="state" id="s-shelf" hidden>
+            <div class="owed" id="owed" hidden><span></span><button class="act" id="collect" type="button">Collect with Nap</button></div>
             <div class="shelf" id="shelf"></div>
             <p class="out" id="out"></p>
             <button class="act ghost" id="again" type="button">Read again</button>
@@ -129,93 +130,6 @@
       </nav>
     </main>
 
-    <script type="module">
-      // The provider is injected by the Nap Wallet extension. It may arrive
-      // after this script runs, so the page waits for the event as well as
-      // checking — a wallet that loads a beat late must not read as absent.
-      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
-
-      const states = ['looking', 'nowallet', 'ready', 'empty', 'shelf', 'broke'];
-      const el = (id) => document.getElementById(id);
-      const show = (name) => {
-        for (const s of states) el('s-' + s).hidden = s !== name;
-      };
-
-      function look() {
-        if (provider()) show('ready');
-        else show('nowallet');
-      }
-
-      // An item is an asset the chain marks as one. Everything else a key
-      // holds — ZEC.zy, a curve token, a pool share — is money, and money on
-      // a shelf of things would be a category error the holder has to undo
-      // by reading ids.
-      const itemsOf = (assets) => (assets || []).filter((a) => a && a.item);
-
-      function render(items, listedIds) {
-        el('count').textContent = String(items.length);
-        if (!items.length) return show('empty');
-        const shelf = el('shelf');
-        shelf.replaceChildren();
-        for (const it of items) {
-          const id = String(it.id || '');
-          const card = document.createElement('a');
-          card.className = 'item';
-          card.href = `/item?id=${encodeURIComponent(id)}`;
-          const sym = document.createElement('div');
-          sym.className = 'sym';
-          sym.textContent = it.symbol || 'unnamed';
-          const tag = document.createElement('span');
-          const listed = listedIds.has(id);
-          tag.className = listed ? 'tag listed' : 'tag';
-          tag.textContent = listed ? 'Listed' : 'Held';
-          const idn = document.createElement('div');
-          idn.className = 'id';
-          // The whole id, not a prefix. A truncated id that looks complete is
-          // how somebody lists the wrong item.
-          idn.textContent = id;
-          card.append(sym, tag, idn);
-          shelf.append(card);
-        }
-        show('shelf');
-      }
-
-      async function ask() {
-        const p = provider();
-        if (!p) return look();
-        for (const b of ['ask', 'again']) el(b).disabled = true;
-        try {
-          const assets = await p.request({ method: 'zyn_assets', params: {} });
-          // Which of them are already resting on the market. Asked for
-          // separately because a listing lives on the order book, not on the
-          // item — the item does not know it is for sale.
-          let listedIds = new Set();
-          try {
-            const r = await p.request({ method: 'zyn_offers', params: {} });
-            for (const o of (r && r.offers) || []) {
-              if (o && o.mine) listedIds.add(String(o.offer_asset || ''));
-            }
-          } catch {
-            // A failed order-book read is not a failed shelf. Show what is
-            // held and say the listing state is unknown rather than showing
-            // everything as unlisted, which would be a wrong answer.
-            el('out').textContent = 'Could not read the order book — listing state below may be out of date.';
-          }
-          render(itemsOf(assets), listedIds);
-        } catch (e) {
-          el('broke').textContent = e.message || String(e);
-          show('broke');
-        } finally {
-          for (const b of ['ask', 'again']) el(b).disabled = false;
-        }
-      }
-
-      el('ask').addEventListener('click', ask);
-      el('again').addEventListener('click', ask);
-      el('retry').addEventListener('click', () => { look(); });
-
-      look();
-      window.addEventListener('zyn#initialized', look, { once: true });
-    </script>
+    <script type="module" src="/zstore.js?v=1"></script>
   </body>
 </html>

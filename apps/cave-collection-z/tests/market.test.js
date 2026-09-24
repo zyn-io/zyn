@@ -13,119 +13,91 @@ const items = await read('items.html');
 const item = await read('item.html');
 const market = await read('market.html');
 const exit = await read('exit.html');
-const background = await readFile(
-  new URL('../../extension/src/background.js', import.meta.url),
-  'utf8',
-).catch(() => null);
+const deposit = await read('deposit.html');
+const zstore = await read('zstore.js');
+const napOps = await readFile(new URL('../../nap-web/src/connect-ops.js', import.meta.url), 'utf8').catch(() => null);
+const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8').catch(() => null);
 
-// The wallet provider lives in a different repository. When the store is
-// checked out on its own, these cross-repo assertions cannot run — so they
-// skip with a reason rather than passing quietly. A silent pass here would
-// mean the store could call a method the wallet does not have and nothing
-// would say so, which is the exact failure this file exists to catch.
-const WALLET = background
+// The wallets live beside the store in the monorepo. Checked out on its own,
+// these cross-app assertions skip with a reason rather than passing quietly.
+const WALLET = napOps && background
   ? false
-  : 'apps/extension is not checked out — run in the monorepo to check the store against the wallet provider';
+  : 'apps/nap-web or apps/extension is not checked out — run in the monorepo to check the store against both Naps';
 
 const build = await read('scripts/build.mjs');
+const walletCalls = [...new Set([...zstore.matchAll(/ask\('(zyn_[a-zA-Z]+)'/g)].map((m) => m[1]))];
 
-const pages = { items, item, market, exit };
-
-test('every method these pages call exists on the provider', { skip: WALLET }, () => {
-  // The failure this catches is silent in a browser: a typo'd method is a
-  // rejected promise the page reports as "the wallet could not answer",
-  // which reads as the user's problem rather than ours.
-  for (const [name, page] of Object.entries(pages)) {
-    // Every zyn_* string literal on the page, not just the ones written
-    // inline as `method:`. Two of these pages route their writes through a
-    // shared helper that takes the method as an argument, and a test that
-    // only saw the inline form would pass while the write path was dead.
-    const called = [...new Set([...page.matchAll(/'(zyn_[a-zA-Z]+)'/g)].map((m) => m[1]))];
-    assert.ok(called.length, `${name} calls at least one provider method`);
-    for (const m of called) {
-      assert.match(background, new RegExp(`\\b${m}\\s*:`), `provider exposes ${m} (called by ${name})`);
-    }
+test('every method the store asks Nap for exists in both Naps', { skip: WALLET }, () => {
+  // A typo'd method is a rejected promise the page reports as "Nap could
+  // not answer", which reads as the holder's problem rather than ours.
+  assert.ok(walletCalls.length >= 6, `the store asks for ${walletCalls.join(', ')}`);
+  for (const m of walletCalls) {
+    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap in the browser serves ${m}`);
+    assert.match(background, new RegExp(`\\b${m}\\s*:`), `the extension serves ${m}`);
   }
 });
 
 test('the whole journey is reachable', () => {
-  // Each capability, and the page that carries it. A capability with no page
-  // is exactly the gap these were built to close (A118).
-  const carries = [
-    [items, 'zyn_assets'],       // what you hold
-    [item, 'zyn_placeOffer'],    // price it
-    [item, 'zyn_cancelOffer'],   // take it back
-    [item, 'zyn_takeOffer'],     // buy this one
-    [market, 'zyn_offers'],      // browse the book
-    [market, 'zyn_takeOffer'],   // buy from the book
-    [exit, 'zyn_withdraw'],      // leave
-    [exit, 'zyn_bind'],          // somewhere to leave to
-  ];
-  for (const [page, method] of carries) {
-    assert.match(page, new RegExp(`'${method}'`), `a page carries ${method}`);
+  // Each capability, and where it lives now: the store for holding and
+  // trading, Nap itself for bringing ZEC in and taking it out.
+  for (const m of ['zyn_nftItems', 'zyn_nftList', 'zyn_nftCancel', 'zyn_nftBuy', 'zyn_owed', 'zyn_collect']) {
+    assert.ok(walletCalls.includes(m), `the store carries ${m}`);
+  }
+  assert.match(zstore, /method: 'zyn_offers'/, 'the market reads the public book');
+  for (const page of [deposit, exit]) assert.match(page, /href="https:\/\/nap\.cavebro\.win"/, 'deposit and exit hand off to Nap');
+  for (const page of [items, item, market]) assert.match(page, /<script type="module" src="\/zstore\.js/);
+});
+
+test('nothing speaks the retired wallet API', () => {
+  for (const [name, page] of Object.entries({ items, item, market, exit, deposit, zstore })) {
+    assert.doesNotMatch(page, /isZynZap|zyn_assets|zyn_placeOffer|zyn_takeOffer|zyn_cancelOffer|zyn_withdraw|zyn_bind/, `${name} is on the object ledger`);
   }
 });
 
-test('the pages never reach a node or a service directly', () => {
-  // Everything goes through the wallet. A page that talked to a node would
-  // be telling that node which items a reader is interested in, which is the
-  // linkage the whole design exists to avoid.
-  for (const [name, page] of Object.entries(pages)) {
-    assert.doesNotMatch(page, /fetch\(/, `${name} makes no direct request`);
-    assert.doesNotMatch(page, /127\.0\.0\.1|localhost|:8096|:8099/, `${name} names no node`);
-  }
+test('the store reads only public things itself, and nothing with an account in it', () => {
+  // The public book and the collection index are the same for everyone, so
+  // fetching them says nothing about the reader. Anything about the holder is
+  // asked of their own Nap.
+  const fetches = [...zstore.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1].trim());
+  assert.deepEqual(fetches.sort(), ["'/collection-z.json'", 'RPC'].sort());
+  assert.match(zstore, /method: 'zyn_offers', params: \[\]/);
+  assert.doesNotMatch(zstore, /127\.0\.0\.1:\d|:8096|:8099/);
+  assert.match(zstore, /LOCAL && params\.get\('nap'\)/, 'the Nap override is for localhost only');
 });
 
-test('an item id out of the address bar is validated before use', () => {
-  // The id is attacker-supplied text. It is put into a URL and into a
-  // provider call, so it has to be exactly 32 bytes of hex or nothing.
-  assert.match(item, /\/\^\[0-9a-f\]\{64\}\$\/i/);
+test('an item named in the address bar is validated before use', () => {
+  assert.match(zstore, /Number\.isSafeInteger\(serial\) \|\| serial < 0/);
+  assert.match(zstore, /isHex\(params\.get\('collection'\)\)/);
 });
 
-test('prices and amounts are refused before they reach the wallet', () => {
-  // Not because the page is the authority — the chain is — but because a
-  // refusal that arrives after an approval prompt has already asked the user
-  // to sign is a worse experience than one that arrives instantly.
-  for (const page of [item, exit]) {
-    assert.match(page, /\/\^\\d\+\(\\\.\\d\+\)\?\$\//);
-    assert.match(page, /Number\([a-z]+\) <= 0/);
-  }
+test('prices are refused before they reach Nap', () => {
+  assert.match(zstore, /\/\^\\d\+\(\\\.\\d\{1,8\}\)\?\$\//);
+  assert.match(zstore, /Number\(price\) <= 0/);
 });
 
 test('the market never offers someone their own listing', () => {
-  // The chain refuses it, but a button that exists in order to fail is a
-  // button that lies about what it does.
-  assert.match(market, /o\.mine/);
-  assert.match(market, /Yours/);
+  assert.match(zstore, /yours\.has\(o\.asset\)/);
+  assert.match(zstore, />Yours</);
 });
 
 test('a write is followed by a re-read, never an optimistic update', () => {
-  // Whether an item sold is the chain's answer. A page that removed the row
-  // itself would show a sale that did not happen.
-  for (const page of [item, market, exit]) {
-    assert.match(page, /await read\(\)/);
-  }
+  const writes = (zstore.match(/await ask\('zyn_nft(List|Cancel|Buy)'/g) || []).length;
+  const rereads = (zstore.match(/setTimeout\(read, 12000\)/g) || []).length;
+  assert.ok(writes >= 4 && rereads >= writes, `${writes} writes, ${rereads} re-reads`);
 });
 
-test('an unreadable balance is not shown as zero', () => {
-  // "0" and "we could not ask" look identical and mean opposite things; one
-  // of them tells somebody their money is gone.
-  assert.match(exit, /record\.known === false/);
-});
-
-test('every new page is staged into the build', () => {
-  for (const page of ['items', 'item', 'market', 'exit']) {
-    assert.match(build, new RegExp(`'${page}'`), `${page} is built`);
-  }
+test('every page is staged into the build, with the module and the index', () => {
+  for (const page of ['items', 'item', 'market', 'exit']) assert.match(build, new RegExp(`'${page}'`));
+  assert.match(build, /'zstore\.js'/);
+  assert.match(build, /nap-connect\/nap-connect\.js/);
+  assert.match(build, /collection-z\.json/);
 });
 
 test('the pages link to each other, so no capability is an orphan', () => {
-  // A page nothing links to is a page nobody finds.
   assert.match(items, /href="\/market"/);
-  assert.match(items, /\/item\?id=\$\{/, 'the shelf links each card to its own page');
   assert.match(market, /href="\/items"/);
-  assert.match(market, /\/item\?id=\$\{/, 'each row links to the object it sells');
-  assert.match(exit, /href="\/deposit"/);
+  assert.match(zstore, /\/item\?collection=\$\{it\.collection\}&serial=\$\{it\.serial\}/, 'the shelf links each card to its own page');
+  assert.match(zstore, /\/item\?collection=\$\{o\.collection\}&serial=\$\{o\.serial\}/, 'each row links to the object it sells');
   assert.match(item, /href="\/items"/);
 });
 
@@ -169,13 +141,13 @@ test('the built site ships a policy, and it names every inline script', async ()
       checked += 1;
     }
   }
-  assert.ok(checked >= 8, `every page's script was checked (saw ${checked})`);
+  assert.ok(checked >= 3, `every page's inline script was checked (saw ${checked})`);
 });
 
 test('the pages load no script from anywhere else', () => {
   // The policy is only as good as this: with no external scripts, anything
   // the browser is asked to run that is not hashed above was injected.
-  for (const [name, page] of Object.entries(pages)) {
+  for (const [name, page] of Object.entries({ items, item, market, exit, deposit })) {
     assert.doesNotMatch(page, /<script[^>]+src=["']https?:/, `${name} loads no remote script`);
   }
 });

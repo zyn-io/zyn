@@ -56,6 +56,40 @@ for (const page of ['items', 'item', 'market', 'exit']) {
 // This site has no bundler, so "shared" means staged here as a plain module.
 await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 
+// The shelf, item and market pages speak to Nap through Nap Connect — the same
+// file Nap ships — and share one module for it.
+await cp(new URL('zstore.js', root), new URL('zstore.js', output));
+await cp(new URL('../nap-connect/nap-connect.js', root), new URL('nap-connect.js', output));
+
+// Collection Z's public index: for every serial, its name, the hash of its
+// image blob, its rarity and its traits — the frozen metadata, in one file the
+// item pages can read without a wallet. Built from the manifest's own
+// content.json (the image hashes the root commits to) and the metadata files.
+{
+  const base = new URL('../../examples/zyn-pfp-concepts/', root);
+  try {
+    const content = JSON.parse(await readFile(new URL('out/content.json', base), 'utf8'));
+    const species = [['mole-collection-2222', 2222], ['owl-collection-1333', 1333], ['moth-collection-889', 889]];
+    const skip = new Set(['Species', 'Canvas', 'Canvas Row', 'Canvas Column', 'Interactive Light ID', 'Component Tagging', 'Rarity', 'Rarity Rank', 'Visual Family']);
+    const items = [];
+    for (const [dir, supply] of species) {
+      for (let k = 1; k <= supply; k += 1) {
+        const meta = JSON.parse(await readFile(new URL(`${dir}/metadata/${String(k).padStart(4, '0')}.json`, base), 'utf8'));
+        const serial = items.length;
+        const media = content[String(serial)]?.media?.[0]?.sha256;
+        if (!media || content[String(serial)].name !== meta.name) throw new Error(`serial ${serial}: content.json and metadata disagree`);
+        const traits = { Species: meta.attributes.find((a) => a.trait_type === 'Species')?.value };
+        for (const a of meta.attributes) if (!skip.has(a.trait_type)) traits[a.trait_type] = String(a.value);
+        items.push({ n: meta.name, i: media, r: meta.rarity?.class, k: meta.rarity?.rank, t: traits });
+      }
+    }
+    await writeFile(new URL('collection-z.json', output), JSON.stringify({ collection: '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e', supply: items.length, items }));
+    console.log(`collection index: ${items.length} items`);
+  } catch (e) {
+    console.warn(`no collection index — ${e.message}`);
+  }
+}
+
 // Pages Functions ship from `functions/` beside the static output.
 await cp(new URL('functions', root), new URL('functions', output), { recursive: true });
 
@@ -102,7 +136,8 @@ for (const page of pages) {
 
 const csp = [
   "default-src 'none'",
-  `script-src 'self' ${[...scriptHashes].join(' ')}`,
+  // Extensions announce Nap Connect with a script of their own.
+  `script-src 'self' ${[...scriptHashes].join(' ')} chrome-extension: moz-extension: safari-web-extension:`,
   // Style attributes are used on a handful of elements. Inline *styles* cannot
   // exfiltrate or execute the way inline scripts can, so this is the one place
   // the policy relaxes.
@@ -112,7 +147,8 @@ const csp = [
   // The pages reach their own Functions and nothing else. The wallet is spoken
   // to through an injected object, not over the network, so no origin needs to
   // be named here for it.
-  "connect-src 'self'",
+  // Its own Functions, and the chain's public RPC for the order book.
+  "connect-src 'self' https://zyn-rpc.cavebro.win",
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
@@ -134,7 +170,8 @@ await writeFile(
     '  X-Content-Type-Options: nosniff',
     '  Referrer-Policy: no-referrer',
     '  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()',
-    '  Cross-Origin-Opener-Policy: same-origin',
+    // Nap in the browser answers from its own window; same-origin would cut it off.
+    '  Cross-Origin-Opener-Policy: same-origin-allow-popups',
     '',
   ].join('\n'),
 );

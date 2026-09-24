@@ -115,7 +115,9 @@ export async function submitFresh(config, identity, build, tries = 64) {
       await submitIntent(config, identity, build(nonce));
       return nonce;
     } catch (e) {
-      if (!/nonce was already used/.test(String(e.message))) throw e;
+      // A coin's address is a hash of creator and nonce, so "that token
+      // exists" from this creator means the same thing: the nonce is taken.
+      if (!/nonce was already used|that token exists/.test(String(e.message))) throw e;
     }
   }
   throw new Error('Every nonce tried was already used; this wallet has traded from somewhere else a lot. Try again.');

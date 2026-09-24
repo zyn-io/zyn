@@ -1505,7 +1505,8 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     expires_at_epoch: u32::MAX as u64,
                     nonce,
                 }) {
-                    Err(e) if e.contains("nonce was already used") => continue,
+                    // "that token exists" from this creator is the same fact: a coin id is a hash of creator and nonce.
+            Err(e) if e.contains("nonce was already used") || e.contains("that token exists") => continue,
                     other => {
                         other?;
                         return Ok(json!({ "listed": true }));
@@ -2844,7 +2845,8 @@ fn submit_fresh(app: &App, host: &str, chain: u32, build: impl Fn([u8; 32]) -> o
     for _ in 0..64 {
         let nonce = next_market_nonce(app, chain)?;
         match crate::object_client::submit(host, chain, &app.key(), build(nonce)) {
-            Err(e) if e.contains("nonce was already used") => continue,
+            // "that token exists" from this creator is the same fact: a coin id is a hash of creator and nonce.
+            Err(e) if e.contains("nonce was already used") || e.contains("that token exists") => continue,
             other => {
                 other?;
                 return Ok(nonce);
