@@ -1704,6 +1704,161 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             })?;
             Ok(json!({ "redeemed": true }))
         }
+        // Collection Z's sale (§144) — the same four steps Nap in the browser
+        // serves (connect-ops.js zyn_saleInfo … zyn_mintOpen).
+        ("POST", "/api/object/sale/info") => {
+            let (host, _) = object_target(app);
+            let c = sale_collection(input)?;
+            match load_sale(&host, &c)? {
+                None => Ok(json!({ "sale": null })),
+                Some(s) => {
+                    let remaining = s.open.as_ref().map(|_| s.sale["open_count"].as_u64().unwrap_or(0).saturating_sub(s.sale["open_next"].as_u64().unwrap_or(0)));
+                    Ok(json!({ "sale": s.sale, "drawPosted": s.draw.is_some(), "openPosted": s.open.is_some(), "remaining": remaining }))
+                }
+            }
+        }
+        ("POST", "/api/object/sale/tickets") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let sale = load_sale(&host, &c)?;
+            let draw = sale.as_ref().and_then(|s| s.draw.as_ref());
+            let tickets: Vec<Value> = my_tickets(app, &host, chain, &c)?
+                .iter()
+                .map(|t| {
+                    let won = draw.and_then(|d| d.won.iter().find(|w| w.0 == t.id)).map(|w| w.1.clone()).unwrap_or_default();
+                    let result = if draw.is_none() { "waiting" } else if t.claimed { "claimed" } else if won.is_empty() { "no win" } else { "won" };
+                    let names: Vec<String> = won.iter().map(|x| item_name(&c, *x)).collect();
+                    json!({ "ticket": hex(&t.id), "index": t.index, "claimed": t.claimed, "result": result, "serials": won, "names": names })
+                })
+                .collect();
+            Ok(json!({ "tickets": tickets }))
+        }
+        ("POST", "/api/object/sale/buy") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let count = input.get("count").and_then(Value::as_u64).unwrap_or(1);
+            if !(1..=20).contains(&count) {
+                return Err("buy between 1 and 20 tickets at a time".into());
+            }
+            let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+            if s.sale["phase"].as_str() != Some("open") {
+                return Err("the sale is closed".into());
+            }
+            let total = s.price("ticket_price")? * count as i128;
+            let w = object_session(app, &host)?;
+            let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(total))?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::BuyTickets {
+                buyer: w.me,
+                program: zyn_vm::program::sale_tickets(),
+                collection: c,
+                count: count as u32,
+                nonce,
+                inputs: inputs.clone(),
+                change: change.clone(),
+            })?;
+            let tickets: Vec<String> = (0..count as u32).map(|k| hex(&objectvm::sale::ticket_id(&w.me, &nonce, k))).collect();
+            Ok(json!({ "tickets": tickets }))
+        }
+        ("POST", "/api/object/sale/claim") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+            if s.sale["phase"].as_str() != Some("drawn") {
+                return Err("claims open after the draw is posted and close when the open mint starts".into());
+            }
+            let draw = s.draw.as_ref().ok_or("the posted draw does not match the chain; nothing can be claimed until it does")?;
+            let price = s.price("claim_price")?;
+            let mut claimed = Vec::new();
+            let mut spent: Vec<[u8; 32]> = Vec::new();
+            for t in my_tickets(app, &host, chain, &c)?.iter().filter(|t| !t.claimed) {
+                let Some(i) = draw.won.iter().position(|w| w.0 == t.id) else { continue };
+                if !spent.is_empty() {
+                    wait_spent(app, &host, &spent)?;
+                }
+                let serials = draw.won[i].1.clone();
+                let w = object_session(app, &host)?;
+                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(price * serials.len() as i128))?;
+                let items = serials
+                    .iter()
+                    .map(|x| crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, *x), objectvm::market::ITEM_UNIT))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let used: Vec<[u8; 32]> = inputs.iter().map(|x| x.0).collect();
+                crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::ClaimItems {
+                    buyer: w.me,
+                    program: zyn_vm::program::sale_claim(),
+                    collection: c,
+                    nonce: t.nonce,
+                    k: t.k,
+                    serials: serials.clone(),
+                    proof: zyn_vm::commit::merkle_proof(&draw.leaves, i),
+                    items,
+                    inputs,
+                    change,
+                })?;
+                spent = used;
+                claimed.extend(serials);
+            }
+            if claimed.is_empty() {
+                return Err("this wallet has no unclaimed winning tickets".into());
+            }
+            Ok(json!({ "claimed": claimed }))
+        }
+        ("POST", "/api/object/sale/mint") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let count = input.get("count").and_then(Value::as_u64).unwrap_or(1);
+            if !(1..=10).contains(&count) {
+                return Err("mint between 1 and 10 at a time".into());
+            }
+            let mut minted = Vec::new();
+            let mut spent: Vec<[u8; 32]> = Vec::new();
+            for _ in 0..count + 8 {
+                if minted.len() as u64 == count {
+                    break;
+                }
+                if !spent.is_empty() {
+                    wait_spent(app, &host, &spent)?;
+                }
+                let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+                if s.sale["phase"].as_str() != Some("openmint") {
+                    return Err("the open mint has not started".into());
+                }
+                let open = s.open.as_ref().ok_or("the posted order does not match the chain; nothing can be minted until it does")?;
+                let pos = s.sale["open_next"].as_u64().unwrap_or(0) as usize;
+                if pos >= open.order.len() {
+                    break;
+                }
+                let serial = open.order[pos];
+                let w = object_session(app, &host)?;
+                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(s.price("open_price")?))?;
+                let item = crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, serial), objectvm::market::ITEM_UNIT)?;
+                let proof = zyn_vm::commit::merkle_proof(&open.leaves, pos);
+                match submit_fresh(app, &host, chain, |nonce| objectvm::Op::MintOpen {
+                    buyer: w.me,
+                    program: zyn_vm::program::sale_mint(),
+                    collection: c,
+                    serial,
+                    proof: proof.clone(),
+                    item: item.clone(),
+                    nonce,
+                    inputs: inputs.clone(),
+                    change: change.clone(),
+                }) {
+                    // Someone else minted that place first; take the next one.
+                    Err(e) if e.contains("not the next item") || e.contains("already minted") => continue,
+                    other => {
+                        other?;
+                    }
+                }
+                spent = inputs.iter().map(|x| x.0).collect();
+                minted.push(serial);
+            }
+            if minted.is_empty() {
+                return Err("the open mint sold out first".into());
+            }
+            let names: Vec<String> = minted.iter().map(|x| item_name(&c, *x)).collect();
+            Ok(json!({ "minted": minted, "names": names }))
+        }
         ("GET", "/api/object/owed") => {
             let (host, chain) = object_target(app);
             let rows = owed_claims(app, &host, chain)?;
@@ -2929,6 +3084,147 @@ fn owed_claims(app: &App, host: &str, chain: u32) -> Result<Vec<Value>, String> 
         }
     }
     Ok(rows)
+}
+
+/// An item's name as the store shows it: Collection Z's species share one
+/// index space (§86.1) — connect-ops.js itemName, word for word.
+fn item_name(collection: &[u8; 32], serial: u32) -> String {
+    if collection != &crate::cave_z::collection_id() {
+        return format!("{}… #{serial}", &hex(collection)[..6]);
+    }
+    let (species, start) = if serial < 2222 { ("Mole", 0) } else if serial < 3555 { ("Owl", 2222) } else { ("Moth", 3555) };
+    format!("Zyn {species} #{:04}", serial - start + 1)
+}
+
+/// The sale a request names: Collection Z unless it names another.
+fn sale_collection(input: &Value) -> Result<[u8; 32], String> {
+    match input.get("collection").and_then(Value::as_str) {
+        None => Ok(crate::cave_z::collection_id()),
+        Some(c) => unhex32(c.trim()).map_err(|_| "collection must be 64 hex characters".into()),
+    }
+}
+
+struct SaleDraw {
+    won: Vec<([u8; 32], Vec<u32>)>,
+    leaves: Vec<[u8; 32]>,
+}
+
+struct SaleOpen {
+    order: Vec<u32>,
+    leaves: Vec<[u8; 32]>,
+}
+
+struct SaleView {
+    sale: Value,
+    quote: [u8; 32],
+    draw: Option<SaleDraw>,
+    open: Option<SaleOpen>,
+}
+
+impl SaleView {
+    fn price(&self, k: &str) -> Result<i128, String> {
+        self.sale.get(k).and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or_else(|| format!("the sale has no {k}"))
+    }
+}
+
+/// A sale as the chain holds it, with the posted draw and open-mint order —
+/// each kept only if it rebuilds the root the chain holds, so the node
+/// serving them cannot change who won or what sells next (ledger.js loadSale).
+fn load_sale(host: &str, collection: &[u8; 32]) -> Result<Option<SaleView>, String> {
+    let c = hex(collection);
+    let market = crate::object_client::call(host, "zyn_market", json!({}))?;
+    let Some(sale) = market.get("sales").and_then(Value::as_array).and_then(|a| a.iter().find(|s| s["collection"].as_str() == Some(&c)).cloned()) else {
+        return Ok(None);
+    };
+    let quote = market
+        .get("collections")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().find(|x| x["asset"].as_str() == Some(&c)))
+        .and_then(|x| x["quote"].as_str())
+        .and_then(|q| unhex32(q).ok())
+        .unwrap_or(swapvm::types::XZEC);
+    let phase = sale["phase"].as_str().unwrap_or("").to_string();
+    let mut view = SaleView { sale, quote, draw: None, open: None };
+    if phase == "drawn" || phase == "openmint" {
+        let d = crate::object_client::call(host, "zyn_saleDraw", json!({ "collection": c, "kind": "draw" }))?;
+        let won: Option<Vec<([u8; 32], Vec<u32>)>> = d.get("won").and_then(Value::as_array).and_then(|a| {
+            a.iter()
+                .map(|w| {
+                    let t = unhex32(w["ticket"].as_str()?).ok()?;
+                    let serials: Option<Vec<u32>> = w["serials"].as_array()?.iter().map(|x| x.as_u64().map(|x| x as u32)).collect();
+                    Some((t, serials?))
+                })
+                .collect()
+        });
+        if let Some(won) = won {
+            let leaves: Vec<[u8; 32]> = won.iter().map(|(t, s)| objectvm::sale::draw_leaf(t, s)).collect();
+            if Some(hex(&zyn_vm::commit::merkle_root(&leaves)).as_str()) == view.sale["draw_root"].as_str() {
+                view.draw = Some(SaleDraw { won, leaves });
+            }
+        }
+    }
+    if phase == "openmint" {
+        let o = crate::object_client::call(host, "zyn_saleDraw", json!({ "collection": c, "kind": "open" }))?;
+        let order: Option<Vec<u32>> = o.get("order").and_then(Value::as_array).and_then(|a| a.iter().map(|x| x.as_u64().map(|x| x as u32)).collect());
+        if let Some(order) = order {
+            let leaves: Vec<[u8; 32]> = order.iter().enumerate().map(|(i, s)| objectvm::sale::open_leaf(i as u32, *s)).collect();
+            if Some(hex(&zyn_vm::commit::merkle_root(&leaves)).as_str()) == view.sale["open_root"].as_str() {
+                view.open = Some(SaleOpen { order, leaves });
+            }
+        }
+    }
+    Ok(Some(view))
+}
+
+struct MyTicket {
+    id: [u8; 32],
+    nonce: [u8; 32],
+    k: u32,
+    index: u64,
+    claimed: bool,
+}
+
+/// This wallet's tickets in a sale, asked for by id: the first ticket of
+/// every nonce it may have used, then the rest of each buy it finds
+/// (ledger.js loadTickets).
+fn my_tickets(app: &App, host: &str, chain: u32, collection: &[u8; 32]) -> Result<Vec<MyTicket>, String> {
+    let key = app.key();
+    let me = account(&key);
+    let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let c = hex(collection);
+    let ask = |want: Vec<([u8; 32], [u8; 32], u32)>| -> Result<Vec<MyTicket>, String> {
+        let mut out = Vec::new();
+        for part in want.chunks(500) {
+            let ids: Vec<String> = part.iter().map(|w| hex(&w.0)).collect();
+            let rows = crate::object_client::call(host, "zyn_tickets", json!({ "ids": ids.join(",") }))?;
+            for r in rows.as_array().into_iter().flatten() {
+                if r["collection"].as_str() != Some(&c) {
+                    continue;
+                }
+                let Some(w) = part.iter().find(|w| Some(hex(&w.0).as_str()) == r["ticket"].as_str()) else { continue };
+                out.push(MyTicket { id: w.0, nonce: w.1, k: w.2, index: r["index"].as_u64().unwrap_or(0), claimed: r["claimed"].as_bool().unwrap_or(false) });
+            }
+        }
+        Ok(out)
+    };
+    let firsts = ask((0..used + 24).map(|n| market_nonce(&key, n)).map(|nonce| (objectvm::sale::ticket_id(&me, &nonce, 0), nonce, 0)).collect())?;
+    let rest = ask(firsts.iter().flat_map(|t| (1..20).map(move |k| (objectvm::sale::ticket_id(&me, &t.nonce, k), t.nonce, k))).collect())?;
+    let mut all: Vec<MyTicket> = firsts.into_iter().chain(rest).collect();
+    all.sort_by_key(|t| t.index);
+    Ok(all)
+}
+
+/// Wait until notes a write spent are gone from this wallet's view, so the
+/// next write funds from what the chain now publishes (ledger.js waitSpent).
+fn wait_spent(app: &App, host: &str, spent: &[[u8; 32]]) -> Result<(), String> {
+    for _ in 0..60 {
+        let w = object_session(app, host)?;
+        if !w.wallet.live.iter().any(|o| spent.contains(&o.commitment)) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+    Err("the chain has not taken the last step in yet; try the rest again shortly".into())
 }
 
 /// The object ledger of the network the wallet is on. One default for both

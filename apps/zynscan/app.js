@@ -58,6 +58,8 @@ const KIND_CLASS = {
   'Curve trade': 'trade', Swap: 'trade', 'Offer taken': 'trade', 'Coin created': 'create', 'Pool created': 'create',
   'Collection registered': 'op', 'Fees set': 'op', 'Curve terms set': 'op', 'Item minted': 'op', 'Exit paid': 'op',
   Deposit: 'bridge', 'Withdraw to Zcash': 'bridge', Claim: 'claim',
+  'Tickets bought': 'trade', 'Items claimed': 'claim', 'Open mint': 'trade',
+  'Sale opened': 'op', 'Sale closed': 'op', 'Draw posted': 'op', 'Open mint posted': 'op',
 };
 const kindChip = (t) => `<span class="chip ${KIND_CLASS[t.kind] || 'plain'}">${esc(t.kind)}</span>`;
 const status = (t) => (t.ok ? '<span class="ok">accepted</span>' : `<span class="bad" title="${esc(t.refusal)}">refused</span>`);
@@ -83,6 +85,12 @@ function detail(t) {
   if (d.bond !== undefined) parts.push(`bond ${wad(d.bond)} ZEC.zy`);
   if (d.cap !== undefined) parts.push(`cap ${num(d.cap)}`);
   if (d.zcash_txid) parts.push(`Zcash tx ${hash(d.zcash_txid)}`);
+  if (d.tickets !== undefined) parts.push(`${num(d.tickets)} ticket${d.tickets === 1 ? '' : 's'}`);
+  if (Array.isArray(d.serials)) parts.push(d.serials.map((x) => `#${esc(x)}`).join(', '));
+  if (d.ticket_price !== undefined) parts.push(`ticket ${wad(d.ticket_price)} · claim ${wad(d.claim_price)} · open ${wad(d.open_price)} ZEC.zy`);
+  if (d.zcash_height !== undefined) parts.push(`closed at Zcash ${num(d.zcash_height)}`);
+  if (d.root) parts.push(`root ${hash(d.root)}`);
+  if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
   return parts.join(' · ');
 }
 

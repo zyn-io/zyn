@@ -97,6 +97,12 @@ const METHODS = {
   zyn_nftItems:  { read: true, mine: true,  run: () => app('/api/object/items') },
   zyn_nftOffers: { read: true,  run: () => app('/api/object/offers') },
   zyn_owed:      { read: true, mine: true,  run: () => app('/api/object/owed') },
+  // Collection Z's sale (§144).
+  zyn_saleInfo:    { read: true,  run: (p) => app('/api/object/sale/info', p) },
+  zyn_saleTickets: { read: true, mine: true,  run: (p) => app('/api/object/sale/tickets', p) },
+  zyn_buyTickets:  { read: false, run: (p) => app('/api/object/sale/buy', p),   describe: (p) => `Buy ${p.count || 1} ticket${(p.count || 1) > 1 ? 's' : ''} in the Collection Z sale${p.pay ? ` for ${p.pay} ZEC.zy` : ''}. Tickets are drawn after the sale closes; the ticket price is not refunded.` },
+  zyn_claimItems:  { read: false, run: (p) => app('/api/object/sale/claim', p), describe: () => 'Claim every item your winning tickets drew, at the claim price each. They are minted into your wallet.' },
+  zyn_mintOpen:    { read: false, run: (p) => app('/api/object/sale/mint', p),  describe: (p) => `Mint ${p.count || 1} from the open mint, at the open price each — the next ones in the posted order.` },
   zyn_nftList:   { read: false, run: (p) => app('/api/object/list', p),   describe: (p) => `List this item for ${p.price} ZEC.zy. Buyers pay the price plus the collection fee; your proceeds wait for you to collect.` },
   zyn_nftBuy:    { read: false, run: (p) => app('/api/object/buy', p),    describe: (p) => `Buy this item for ${p.pay || 'the listed price plus fee'} ZEC.zy. It arrives in your wallet.` },
   zyn_nftCancel: { read: false, run: (p) => app('/api/object/cancel', p), describe: () => 'Cancel your listing. The item is yours to move again.' },

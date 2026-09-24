@@ -60,9 +60,10 @@ test('the store reads only public things itself, and nothing with an account in 
   // asked of their own Nap.
   const fetches = [...zstore.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1].trim());
   // The index, the chain's book, and this site's own next page (in-place navigation).
-  assert.deepEqual(fetches.sort(), ["'/collection-z.json'", 'RPC', 'url.pathname'].sort());
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/collection-z.json'", 'RPC', 'url.pathname'].sort());
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   assert.match(zstore, /method: 'zyn_offers', params: \[\]/);
+  assert.match(zstore, /method: 'zyn_market', params: \[\]/, 'the sale is read from the public market');
   assert.doesNotMatch(zstore, /127\.0\.0\.1:\d|:8096|:8099/);
   assert.match(zstore, /LOCAL && initial\.get\('nap'\)/, 'the Nap override is for localhost only');
 });
@@ -143,7 +144,7 @@ test('the built site ships a policy, and it names every inline script', async ()
       checked += 1;
     }
   }
-  assert.ok(checked >= 3, `every page's inline script was checked (saw ${checked})`);
+  assert.ok(checked >= 2, `every page's inline script was checked (saw ${checked})`);
 });
 
 test('the pages load no script from anywhere else', () => {

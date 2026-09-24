@@ -2637,6 +2637,28 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
 - **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
+## 5f-sedecies. Running Collection Z's sale (24 Sep 2026, DECISIONS §144)
+
+The operator's half is one binary, `zyn-sale-draw`, run on the box that holds the node — it reads the submit token from the node's env file and writes the draw beside the node's data so the node can serve it.
+
+```sh
+# on Contabo (mainnet); the token never appears on screen
+set -a; . /etc/zyn/zyn-object-mainnet.env; set +a     # ZYN_SUBMIT_TOKEN, ZYN_ZEBRA_*
+export ZYN_SALE_NETWORK=mainnet ZYN_SALE_NODE=http://127.0.0.1:8599 \
+       ZYN_SALE_DATA=/var/lib/zyn/object-mainnet \
+       ZYN_SALE_ANNOUNCEMENT=/root/cave-z-close.json \
+       ZYN_SALE_MANIFEST=/root/content.json               # examples/zyn-pfp-concepts/out/content.json
+zyn-sale-draw status
+```
+
+1. **Open** — `zyn-sale-draw open` posts `SetSale` at the terms' prices (0.01 / 0.005 / 0.0133, 10% treasury). CAVEZ must already be registered (it is on 26460).
+2. **Announce the close** — publish `{announced_at_zcash_height, announced_at_drand_round, deposit_close_zcash_height}`. The close must be ≥ 1,152 blocks after the announcement, and **the drand round must be late enough that round + 2,400 falls after the close** (drand quicknet: round = (unix − 1692803367)/3 + 1). `close` refuses otherwise.
+3. **Close** — `zyn-sale-draw close` once Zcash reaches the close height; it posts `CloseSale` with that block's hash.
+4. **Draw** — `zyn-sale-draw draw` once the reveal block (close + 100) and the reveal drand round both exist. It checks the manifest rebuilds the committed root, runs the engine over every ticket in order, writes `sale-<collection>-draw.json` into the node's data dir (served by `zyn_saleDraw`) and posts the root. Publish the same file anywhere you like — its root is what counts.
+5. **Open mint** — `zyn-sale-draw open-mint` after the claim window (16,128 blocks from the reveal block). It writes `sale-<collection>-open.json` and posts the order's root.
+
+Rehearsal: `ZYN_SALE_POLICY=rehearsal` (2-block notice, 2-block reveal, 60 drand rounds; `ZYN_SALE_CLAIM_WINDOW`, default 2). Its digest differs from the published policy, so it is for devnets and testnet only. The 24 Sep rehearsal ran against a local devnet (`scratchpad/devsale/sale.mjs` drove three wallets through Nap Connect's own methods) with testnet Zcash blocks from the Hetzner Zebra.
+
 ## 5f-quindecies. ZynScan (24 Sep 2026)
 
 - **Mainnet** `zynscan-mainnet.service` on Contabo: `ZYN_CHAIN_ID=26460`, `ZYN_SCAN_DATA=/var/lib/zyn/object-mainnet`, node `127.0.0.1:8599`, listens `127.0.0.1:8093`.

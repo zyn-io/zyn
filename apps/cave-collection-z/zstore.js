@@ -319,12 +319,114 @@ async function marketPage() {
 }
 
 // ---------------------------------------------------------------------------
+// The sale (§144): tickets, the draw, claims and the open mint. The sale's
+// state is public and read from the chain; which tickets are whose only Nap
+// can say, because only the wallet that bought one can derive its id.
+
+async function chainSale() {
+  const id = crypto.randomUUID();
+  const r = await fetch(RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'zyn_market', params: [] }),
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  });
+  const body = await r.json();
+  if (body.error) throw new Error(body.error.message || 'The chain did not answer');
+  const s = (body.result?.sales || []).find((x) => x.collection === CAVE_Z);
+  if (!s || !['ticket_price', 'claim_price', 'open_price'].every((k) => isInt(s[k]))) return null;
+  return s;
+}
+
+const PHASE_LABEL = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' };
+
+async function mintPage() {
+  const gen = generation;
+  let sale = null;
+  const setTotal = () => {
+    if (!sale) return;
+    const n = Math.max(1, Math.min(20, Number(el('count-in').value) || 1));
+    el('total').textContent = `${zec(BigInt(sale.ticket_price) * BigInt(n))} ZEC.zy`;
+  };
+  const mine = async () => {
+    const box = el('mine-box');
+    if (!current || !canAskQuietly()) { box.hidden = true; return null; }
+    const r = await ask('zyn_saleTickets', {});
+    const tickets = (r?.tickets || []).filter((t) => isHex(t.ticket) && Number.isSafeInteger(t.index) && Array.isArray(t.serials));
+    box.hidden = !tickets.length;
+    el('mine').innerHTML = tickets.map((t) => `<li class="${t.result === 'won' ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}</span>
+      <b>${t.result === 'won' ? esc((t.names || []).join(', ')) : t.result === 'claimed' ? 'claimed' : t.result === 'no win' ? 'no item this time' : 'waiting for the draw'}</b></li>`).join('');
+    return tickets;
+  };
+  const read = async () => {
+    if (gen !== generation) return;
+    try {
+      sale = await chainSale();
+      if (gen !== generation) return;
+      el('phase').textContent = sale ? PHASE_LABEL[sale.phase] || sale.phase : 'not open';
+      if (!sale) return show('none');
+      el('lede-price').textContent = `${zec(sale.ticket_price)} ZEC.zy`;
+      el('claim-price').textContent = `${zec(sale.claim_price)} ZEC.zy`;
+      el('open-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
+      setTotal();
+      if (sale.phase === 'openmint') {
+        const left = sale.open_count - sale.open_next;
+        el('left').textContent = String(left);
+        show(left > 0 ? 'openmint' : 'soldout');
+      } else show(sale.phase === 'open' ? 'open' : sale.phase === 'closed' ? 'closed' : 'drawn');
+      const tickets = await mine().catch(() => null);
+      if (gen !== generation || sale.phase !== 'drawn') return;
+      const wins = (tickets || []).filter((t) => t.result === 'won');
+      const serials = wins.flatMap((t) => t.serials);
+      el('claim').disabled = !serials.length;
+      el('claim-total-row').hidden = !serials.length;
+      el('claim-total').textContent = `${zec(BigInt(sale.claim_price) * BigInt(serials.length))} ZEC.zy`;
+      const cards = await Promise.all(serials.map(async (x) => { const d = await describe(CAVE_Z, x); return `<figure>${art(d)}<figcaption>${esc(d.name)} ${rarityTag(d)}</figcaption></figure>`; }));
+      el('won-art').innerHTML = cards.join('');
+      if (!current) el('out-claim').textContent = 'Connect Nap to see what your tickets drew.';
+      else if (!tickets) el('out-claim').textContent = "Nap's window is closed — connect again to see your tickets.";
+      else if (!serials.length) el('out-claim').textContent = (tickets || []).some((t) => t.result === 'claimed') ? 'Everything this wallet drew is claimed.' : 'None of this wallet’s tickets drew an item.';
+      else el('out-claim').textContent = '';
+    } catch (e) {
+      el('broke').textContent = e.message;
+      show('broke');
+    }
+  };
+  const act = (button, out, method, p, done) => async () => {
+    if (!current) return pick();
+    el(button).disabled = true;
+    el(out).classList.remove('bad');
+    el(out).textContent = "Approve it in Nap's window.";
+    try {
+      const r = await ask(method, p());
+      el(out).textContent = done(r);
+      setTimeout(read, 12000);
+    } catch (e) {
+      el(out).textContent = e.code === 4001 ? 'Not approved. Nothing was paid.' : e.message;
+      el(out).classList.add('bad');
+    } finally { el(button).disabled = false; }
+  };
+  el('count-in').oninput = setTotal;
+  el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {
+    const count = Math.max(1, Math.min(20, Number(el('count-in').value) || 1));
+    return { count, pay: zec(BigInt(sale.ticket_price) * BigInt(count)) };
+  }, (r) => `${r?.tickets?.length || 0} ticket${r?.tickets?.length === 1 ? '' : 's'} bought. They are drawn once the door shuts.`);
+  el('claim').onclick = act('claim', 'out-claim', 'zyn_claimItems', () => ({}), (r) => `Claimed ${r?.claimed?.length || 0}. They are in your Nap wallet once the epoch seals.`);
+  el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => ({ count: Math.max(1, Math.min(10, Number(el('mint-in').value) || 1)) }),
+    (r) => `Minted ${(r?.names || []).join(', ') || 'nothing'}.`);
+  el('retry').onclick = read;
+  walletListeners.add(read);
+  await read();
+}
+
+// ---------------------------------------------------------------------------
 // Moving between the shelf, an item and the market without reloading, so the
 // connection to Nap — which for Nap in the browser is a window this page
 // opened — carries across. Any other link loads normally.
 
-const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage };
-const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market' };
+const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage };
+const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint' };
 let params = new URLSearchParams(location.search);
 
 function start(page) {

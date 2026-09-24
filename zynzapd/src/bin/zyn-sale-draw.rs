@@ -26,6 +26,8 @@
 //!   ZYN_SALE_ANNOUNCEMENT  the close announcement, JSON  (required for close/draw)
 //!   ZYN_SALE_MANIFEST      the collection's content.json (required for draw)
 //!   ZYN_ZEBRA_HOST / _PORT / _USER / _PASS               (a Zcash node)
+//!   ZYN_SALE_CLAIM_WINDOW  rehearsal only: claim window in blocks (2);
+//!                          the published sale uses the terms' 16,128
 //! ```
 
 use std::collections::BTreeSet;
@@ -58,15 +60,20 @@ fn unhex32(s: &str) -> Option<[u8; 32]> {
 }
 
 const ZAT: i128 = 10_000_000_000;
+/// drand quicknet: genesis time and seconds per round.
+const QUICKNET_GENESIS: u64 = 1_692_803_367;
+const QUICKNET_PERIOD: u64 = 3;
 
 struct Ctx {
     policy: cave_randomness::AllocationPolicy,
     terms: cave_randomness::SaleTerms,
     network: zyn_custody::zebra::Network,
     node: String,
+    rehearsal: bool,
 }
 
 fn ctx() -> Result<Ctx, String> {
+    let rehearsal = env("ZYN_SALE_POLICY", "published") == "rehearsal";
     let policy = match env("ZYN_SALE_POLICY", "published").as_str() {
         "published" => zynzapd::cave_z::policy(),
         "rehearsal" => zynzapd::cave_z::rehearsal_policy(),
@@ -78,7 +85,7 @@ fn ctx() -> Result<Ctx, String> {
         "testnet" => zyn_custody::zebra::Network::Testnet,
         other => return Err(format!("ZYN_SALE_NETWORK is mainnet or testnet, not {other}")),
     };
-    Ok(Ctx { policy, terms, network, node: env("ZYN_SALE_NODE", "http://127.0.0.1:8599") })
+    Ok(Ctx { policy, terms, network, node: env("ZYN_SALE_NODE", "http://127.0.0.1:8599"), rehearsal })
 }
 
 impl Ctx {
@@ -191,6 +198,20 @@ fn close(c: &Ctx) -> Result<(), String> {
     if tip < at {
         return Err(format!("Zcash is at {tip}; the sale closes at {at} — {} blocks to go", at - tip));
     }
+    // The reveal's drand round is fixed by the announcement, not by the
+    // close. If it is already public when the sale closes, the draw's drand
+    // half was knowable while tickets were still on sale, and only the Zcash
+    // block would stand between a buyer and the result. Refuse that close.
+    let now_round = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs())
+        .saturating_sub(QUICKNET_GENESIS)
+        / QUICKNET_PERIOD
+        + 1;
+    if resolved.reveal_drand_round <= now_round {
+        return Err(format!(
+            "the reveal's drand round {} is already public (now {now_round}); announce a later round before closing",
+            resolved.reveal_drand_round
+        ));
+    }
     let hash = zebra.block_hash(at).map_err(|e| e.to_string())?;
     c.submit("close", &Op::CloseSale { program: program::sale_close(), collection: c.collection(), zcash_height: at as u32, zcash_hash: hash })
 }
@@ -261,6 +282,19 @@ fn open_mint(c: &Ctx) -> Result<(), String> {
     let sale = c.sale()?.ok_or("there is no sale")?;
     if sale["phase"].as_str() != Some("drawn") {
         return Err(format!("the open mint follows the draw; the sale is {}", sale["phase"]));
+    }
+    // Winners have the claim window the terms promise, counted from the
+    // reveal block; the rest go on sale only after it.
+    let (_, resolved) = c.announcement()?;
+    let window = if c.rehearsal {
+        env("ZYN_SALE_CLAIM_WINDOW", "2").parse::<u64>().map_err(|_| "ZYN_SALE_CLAIM_WINDOW must be a block count".to_string())?
+    } else {
+        c.terms.claim_window_blocks as u64
+    };
+    let ends = resolved.reveal_zcash_height as u64 + window;
+    let tip = c.zebra()?.block_count().map_err(|e| e.to_string())?;
+    if tip < ends {
+        return Err(format!("claims stay open until Zcash {ends}; it is at {tip} — {} blocks to go", ends - tip));
     }
     let file = c.data_file("draw")?;
     let d: Value = serde_json::from_str(&std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?).map_err(|e| e.to_string())?;

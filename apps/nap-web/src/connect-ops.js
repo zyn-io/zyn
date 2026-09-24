@@ -38,6 +38,13 @@ export function itemName(collection, serial) {
   return `Zyn ${species} #${String(serial - start + 1).padStart(4, '0')}`;
 }
 
+/// The sale a site asks about: Collection Z unless it names another.
+function saleCollection(p) {
+  const c = p?.collection ?? CAVE_Z;
+  if (!isHex(c)) throw bad('collection must be 64 hex characters');
+  return c;
+}
+
 /// What the site learns on connecting: the account, and a Zcash address. Not
 /// a balance, not a note, not a viewing key.
 export async function session(ctx) {
@@ -409,6 +416,150 @@ export const METHODS = {
             holder: ctx.identity.account, collection: unhex(item.collection), inputs: [{ commitment: c, nullifier: nullifierOf(ctx.identity.nullifier, c) }],
           }));
           return { redeemed: note.asset };
+        },
+      };
+    },
+  },
+
+  // Collection Z's sale (§144): tickets in ZEC.zy, a lottery drawn after the
+  // close, winners claim with a proof against the posted root, and whatever
+  // is left sells in the posted order.
+  zyn_saleInfo: {
+    kind: 'public',
+    run: async (ctx, p) => {
+      const s = await ledger.loadSale(ctx.config, saleCollection(p));
+      if (!s) return { sale: null };
+      return { sale: s.sale, drawPosted: !!s.draw, openPosted: !!s.open, remaining: s.open ? s.sale.open_count - s.sale.open_next : null };
+    },
+  },
+  zyn_saleTickets: {
+    kind: 'read',
+    run: async (ctx, p) => {
+      const collection = saleCollection(p);
+      const [s, mine] = await Promise.all([ledger.loadSale(ctx.config, collection), ledger.loadTickets(ctx.config, ctx.identity, collection)]);
+      const wins = new Map((s?.draw?.won || []).map((w) => [w.ticket, w.serials]));
+      const drawn = !!s?.draw;
+      return {
+        tickets: mine.map((t) => ({
+          ticket: t.ticket, index: t.index, claimed: t.claimed,
+          result: !drawn ? 'waiting' : t.claimed ? 'claimed' : wins.has(t.ticket) ? 'won' : 'no win',
+          serials: wins.get(t.ticket) || [],
+          names: (wins.get(t.ticket) || []).map((x) => itemName(collection, x)),
+        })),
+      };
+    },
+  },
+
+  zyn_buyTickets: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const count = Number(p.count ?? 1);
+      if (!Number.isInteger(count) || count < 1 || count > 20) throw bad('Buy between 1 and 20 tickets at a time');
+      const s = await ledger.loadSale(ctx.config, collection);
+      if (!s) throw bad('There is no sale for that collection');
+      if (s.sale.phase !== 'open') throw bad('The sale is closed');
+      const total = BigInt(s.sale.ticket_price) * BigInt(count);
+      if (p.pay != null && parseAmount(String(p.pay)) !== total) throw bad('The price changed since the page loaded; reload and try again');
+      return {
+        title: `Buy ${count} ticket${count > 1 ? 's' : ''} in the ${collection === CAVE_Z ? 'Collection Z' : `${collection.slice(0, 6)}…`} sale`,
+        rows: [['Per ticket', `${wadText(s.sale.ticket_price)} ZEC.zy`], ['Tickets', String(count)], ['You pay', `${wadText(total)} ZEC.zy`]],
+        note: 'Each ticket is drawn after the sale closes. A winning ticket claims its items at the claim price; the ticket price is not refunded.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(s.quote), total);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.buyTicketsIntent({
+            buyer: ctx.identity.account, collection: unhex(collection), count, nonce: n, inputs, change,
+          }));
+          return { tickets: Array.from({ length: count }, (_, k) => hex(mk.ticketId(ctx.identity.account, nonce, k))) };
+        },
+      };
+    },
+  },
+
+  zyn_claimItems: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const s = await ledger.loadSale(ctx.config, collection);
+      if (!s || s.sale.phase !== 'drawn') throw bad('Claims open after the draw is posted and close when the open mint starts');
+      if (!s.draw) throw bad('The posted draw does not match the chain; nothing can be claimed until it does');
+      const index = new Map(s.draw.won.map((w, i) => [w.ticket, i]));
+      const mine = (await ledger.loadTickets(ctx.config, ctx.identity, collection)).filter((t) => !t.claimed && index.has(t.ticket));
+      if (!mine.length) throw bad('This wallet has no unclaimed winning tickets');
+      const serials = mine.flatMap((t) => s.draw.won[index.get(t.ticket)].serials);
+      const total = BigInt(s.sale.claim_price) * BigInt(serials.length);
+      return {
+        title: `Claim ${serials.length} item${serials.length > 1 ? 's' : ''}`,
+        rows: [...serials.slice(0, 6).map((x) => ['Item', itemName(collection, x)]), ...(serials.length > 6 ? [['…', `and ${serials.length - 6} more`]] : []),
+          ['Per item', `${wadText(s.sale.claim_price)} ZEC.zy`], ['You pay', `${wadText(total)} ZEC.zy`]],
+        note: 'Each item is minted straight into this wallet. Unclaimed wins go to the open mint when claims close.',
+        run: async () => {
+          const claimed = [];
+          let spent = [];
+          for (const t of mine) {
+            if (spent.length) await ledger.waitSpent(ctx.config, ctx.identity, spent);
+            const i = index.get(t.ticket);
+            const won = s.draw.won[i].serials;
+            const h = await holdings(ctx);
+            const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(s.quote), BigInt(s.sale.claim_price) * BigInt(won.length));
+            await ledger.submitIntent(ctx.config, ctx.identity, mk.claimItemsIntent({
+              buyer: ctx.identity.account, collection: unhex(collection), nonce: t.nonce, k: t.k, serials: won,
+              proof: mk.merkleProof(s.draw.leaves, i),
+              items: won.map((x) => mk.selfNote(ctx.identity, mk.itemAsset(unhex(collection), x), mk.ITEM_UNIT)), inputs, change,
+            }));
+            spent = inputs.map((x) => hex(x.commitment));
+            claimed.push(...won);
+          }
+          return { claimed };
+        },
+      };
+    },
+  },
+
+  zyn_mintOpen: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const count = Number(p.count ?? 1);
+      if (!Number.isInteger(count) || count < 1 || count > 10) throw bad('Mint between 1 and 10 at a time');
+      const s = await ledger.loadSale(ctx.config, collection);
+      if (!s || s.sale.phase !== 'openmint') throw bad('The open mint has not started');
+      if (!s.open) throw bad('The posted order does not match the chain; nothing can be minted until it does');
+      const left = s.sale.open_count - s.sale.open_next;
+      if (left < count) throw bad(left ? `Only ${left} left` : 'The open mint is sold out');
+      const total = BigInt(s.sale.open_price) * BigInt(count);
+      return {
+        title: `Mint ${count} from the open mint`,
+        rows: [['Per item', `${wadText(s.sale.open_price)} ZEC.zy`], ['Items', String(count)], ['You pay', `${wadText(total)} ZEC.zy`], ['Left', String(left)]],
+        note: 'Items come in the order posted after the draw — the next ones in line, whichever they are.',
+        run: async () => {
+          const minted = [];
+          let spent = [];
+          for (let got = 0, tries = 0; got < count && tries < count + 8; tries++) {
+            if (spent.length) await ledger.waitSpent(ctx.config, ctx.identity, spent);
+            const now = await ledger.loadSale(ctx.config, collection);
+            const pos = now.sale.open_next;
+            if (pos >= now.sale.open_count) break;
+            const serial = s.open.order[pos];
+            const h = await holdings(ctx);
+            const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(s.quote), BigInt(s.sale.open_price));
+            const item = mk.selfNote(ctx.identity, mk.itemAsset(unhex(collection), serial), mk.ITEM_UNIT);
+            try {
+              await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.mintOpenIntent({
+                buyer: ctx.identity.account, collection: unhex(collection), serial, proof: mk.merkleProof(s.open.leaves, pos), item, nonce: n, inputs, change,
+              }));
+            } catch (e) {
+              // Someone else minted that place first; take the next one.
+              if (/not the next item|already minted/.test(String(e.message))) continue;
+              throw e;
+            }
+            spent = inputs.map((x) => hex(x.commitment));
+            minted.push(serial);
+            got++;
+          }
+          if (!minted.length) throw new Error('The open mint sold out first');
+          return { minted, names: minted.map((x) => itemName(collection, x)) };
         },
       };
     },

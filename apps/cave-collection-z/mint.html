@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070807" />
-    <meta name="description" content="Take a place in Cave Collection Z. One entry, paid in ZEC, drawn when the door closes." />
+    <meta name="description" content="Take a place in Cave Collection Z. Tickets in ZEC.zy through Nap, drawn when the door closes." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/mint" />
     <meta property="og:title" content="Cave Collection Z — take a place" />
-    <meta property="og:description" content="Pay in ZEC. The cave decides what you get, after the door shuts." />
+    <meta property="og:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
     <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Cave Collection Z — take a place" />
-    <meta name="twitter:description" content="Pay in ZEC. The cave decides what you get, after the door shuts." />
+    <meta name="twitter:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
     <title>Cave Collection Z — take a place</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
-    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <link rel="stylesheet" href="/styles.css?v=20260924-nap1" />
     <style>    
       /* Same cave, same torch. This is the mouth of the tunnel where money
          comes in, so it is lit a little warmer than the register. */
@@ -288,64 +288,61 @@
         letter-spacing: 0.08em;
         font-variant-numeric: tabular-nums;
       }
+
+      .act.small { padding: 9px 14px; font-size: 9.5px; }
+      .field input[type="number"] { max-width: 9ch; }
+      .mine { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+      .mine li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .mine li b { color: var(--ink); font-weight: 400; }
+      .mine li.won b { color: var(--acid); }
+      .won-art { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+      .won-art figure { margin: 0; display: grid; gap: 6px; }
+      .won-art img { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--line); background: #0d0f0c; image-rendering: pixelated; }
+      .won-art figcaption { font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav a:hover { color: var(--ink); }
     </style>
   </head>
-  <body>
+  <body data-page="mint">
     <main class="register">
       <h1><span>Take a place</span><span>in the cave</span></h1>
 
       <p class="lede">
-        One entry costs <strong>0.01 ZEC</strong> and buys a place in the draw — not a
+        A ticket costs <strong id="lede-price">0.01 ZEC.zy</strong> and buys a place in the draw — not a
         chosen creature. <strong>What you get is decided after the door shuts</strong>, by a
         number nobody can see yet. That is the whole design: there is no early look and
-        no better entry.
+        no better ticket.
       </p>
 
       <div class="ledger">
         <div class="ledger-index">
-          <span>Collection Z</span>
-          <span>4,444 · <b id="phase">checking</b></span>
+          <span>Collection Z · 4,444</span>
+          <span><b id="phase">checking</b> <button class="act ghost small" type="button" data-wallet-button>Connect Nap</button></span>
         </div>
         <div class="ledger-body">
 
           <section class="state" id="s-looking">
-            <p class="say">Looking for a wallet…</p>
+            <p class="say">Reading the sale from the chain…</p>
           </section>
 
-          <section class="state" id="s-nowallet" hidden>
+          <section class="state" id="s-none" hidden>
             <p class="say">
-              <strong>An entry has to belong to someone.</strong> The place you buy is held by a
-              key only you hold — which is what lets the cave hand you an item without ever
-              being told who you are. Nap Wallet holds that key.
+              <strong>The door is not open yet.</strong> Tickets are sold in one window, announced
+              before it starts and closed at a Zcash height fixed in advance. Nothing is sold outside
+              it, and nobody is let in early — including us.
             </p>
-            <a class="act" href="/#wallet">Get Nap Wallet</a>
-            <p class="say">
-              Already have it? Unlock it and <a href="" id="retry" style="color: var(--zec)">look again</a>.
-            </p>
+            <a class="act ghost" href="/whitelist">Hear when it opens</a>
           </section>
 
-          <section class="state" id="s-closed" hidden>
+          <section class="state" id="s-open" hidden>
             <p class="say">
-              <strong>The door is not open.</strong> Entries are taken in one window, announced
-              before it starts and closed at a height fixed in advance. Nothing is sold outside it,
-              and nobody is let in early — including us.
-            </p>
-            <a class="act ghost" href="/whitelist">Ask for a place on the list</a>
-            <p class="out" id="closed-why" role="status" aria-live="polite"></p>
-          </section>
-
-          <section class="state" id="s-reserve" hidden>
-            <p class="say">
-              Your invitation code reserves entries. Paying for them is the next step, and
-              the two are separate on purpose — a reservation you never pay for costs you nothing.
+              Tickets are paid in <strong>ZEC.zy</strong> — ZEC you have brought into Nap. No address to
+              send to and no confirmations to wait for: the ticket is yours as soon as Nap signs it.
             </p>
             <label class="field">
-              <span>Invitation code</span>
-              <input id="code" type="text" autocomplete="off" spellcheck="false" placeholder="the code from your invitation" />
-            </label>
-            <label class="field">
-              <span>Entries</span>
-              <input id="entries" type="number" min="1" max="10" step="1" value="1" />
+              <span>Tickets</span>
+              <input id="count-in" type="number" min="1" max="20" step="1" value="1" />
             </label>
 
             <div class="odds">
@@ -353,262 +350,97 @@
               <div><b>19%</b><span>two items</span></div>
               <div><b>1%</b><span>three items</span></div>
             </div>
-            <p class="say" style="margin-top:14px">
-              Per entry, by weights published before the sale opened. The draw reads them from
-              the same terms your payment references, so they cannot be changed afterwards.
+            <p class="say">
+              Per ticket, by weights published before the sale opened. A winning ticket then
+              claims its items at <strong id="claim-price">—</strong> each.
             </p>
 
-            <button class="act" id="reserve" type="button">Reserve</button>
+            <div class="total">
+              <span>To pay now</span>
+              <b id="total">—</b>
+            </div>
+            <div class="addr-row">
+              <button class="act" id="buy" type="button">Buy tickets</button>
+              <a class="act ghost" href="/deposit">Bring ZEC in</a>
+            </div>
             <p class="out" id="out" role="status" aria-live="polite"></p>
           </section>
 
-          <section class="state" id="s-pay" hidden>
+          <section class="state" id="s-closed" hidden>
+            <p class="say">
+              <strong>The door is shut.</strong> Every ticket is in. The draw waits for a Zcash block
+              and a drand round that did not exist when the sale closed; once both are public it runs
+              once, and anyone can run it again from the same inputs.
+            </p>
+          </section>
+
+          <section class="state" id="s-drawn" hidden>
+            <p class="say">
+              <strong>The draw has run.</strong> Your wallet proves which tickets are its own — the
+              cave cannot look them up, and nobody else can claim them. Each item is minted straight
+              into Nap.
+            </p>
+            <div class="won-art" id="won-art"></div>
+            <div class="total" id="claim-total-row">
+              <span>To claim</span>
+              <b id="claim-total">—</b>
+            </div>
+            <button class="act" id="claim" type="button">Claim what I drew</button>
+            <p class="out" id="out-claim" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="state" id="s-openmint" hidden>
+            <p class="say">
+              <strong>Claims are closed; the rest are on sale.</strong> What the draw handed nobody, and
+              what winners left, sell in an order posted after the draw — the next ones in line,
+              whichever they are.
+            </p>
+            <label class="field">
+              <span>Items</span>
+              <input id="mint-in" type="number" min="1" max="10" step="1" value="1" />
+            </label>
             <div class="total">
-              <span>To pay</span>
-              <b id="total">—</b>
+              <span><span id="left">—</span> left · each</span>
+              <b id="open-price">—</b>
             </div>
-            <p class="say">
-              Send exactly this to the address below. It is <strong>your own address</strong>,
-              derived from your key — no memo, nothing to attach, and nothing shared with another
-              buyer. Send the wrong amount and it is refused rather than half-accepted.
-            </p>
-            <div class="addr-and-qr">
-              <div class="addr" id="address"></div>
-              <figure class="qr" id="qr-wrap" hidden>
-                <canvas id="qr" width="180" height="180"></canvas>
-                <figcaption>Scan from a phone wallet</figcaption>
-              </figure>
-            </div>
-            <div class="addr-row">
-              <button class="act" id="copy" type="button">Copy address</button>
-              <button class="act ghost" id="claim-now" type="button">I have paid</button>
-            </div>
-
-            <ul class="facts">
-              <li><b>01</b><span>Zcash confirms it — <strong>a few minutes</strong>, not instant.</span></li>
-              <li><b>02</b><span>Six confirmations make it an <strong>entry</strong>. Fewer can still be reorged away.</span></li>
-              <li><b>03</b><span>Nothing is assigned yet. <strong>The draw runs once</strong>, after the door shuts.</span></li>
-              <li><b>04</b><span>Come back after the reveal with this same wallet to take what it gave you.</span></li>
-              <li><b>05</b><span><strong>90% of what you pay funds the pool</strong> a redeemed item is paid out of. 10% is the treasury's.</span></li>
-            </ul>
-            <p class="out" id="out2" role="status" aria-live="polite"></p>
+            <button class="act" id="mint" type="button">Mint</button>
+            <p class="out" id="out-mint" role="status" aria-live="polite"></p>
           </section>
 
-          <section class="state" id="s-claim" hidden>
-            <p class="say">
-              <strong>The draw has run.</strong> Your wallet proves the payment itself — the cave
-              cannot look up what you hold, so it asks you to show it. That proof discloses this
-              collection account and nothing else.
-            </p>
-            <button class="act" id="claim" type="button">Take what I drew</button>
-            <p class="out" id="out3" role="status" aria-live="polite"></p>
+          <section class="state" id="s-soldout" hidden>
+            <p class="say"><strong>All 4,444 are out.</strong> From here they change hands on the market.</p>
+            <a class="act" href="/market">The market</a>
           </section>
 
-          <section class="state" id="s-done" hidden>
-            <p class="say"><strong>Yours.</strong> Minted to the account that paid, so nothing has to be moved.</p>
-            <div class="serials" id="serials"></div>
-            <a class="act ghost" href="/" style="margin-top:22px">Back to the cave</a>
+          <section class="state" id="mine-box" hidden>
+            <p class="say"><strong>Your tickets</strong></p>
+            <ul class="mine" id="mine"></ul>
           </section>
 
           <section class="state" id="s-broke" hidden>
-            <p class="say" id="broke"></p>
-            <button class="act ghost" id="retry2" type="button">Try again</button>
+            <p class="say">The chain did not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
           </section>
 
         </div>
       </div>
 
       <p class="smallprint">
-        Entries are settled in <strong>ZEC</strong> and held by the Zyn vault, a threshold account
-        whose shares sit on separate machines. The allocation is drawn once, from a drand beacon
-        and a Zcash block chosen before either existed, over every entry that arrived before the
-        close — so the result is reproducible by anyone who kept the same public inputs, and it is
-        the same result whatever order the payments were seen in.
+        Tickets are paid in ZEC.zy on the Zyn object ledger; 90% funds the pool a redeemed item is
+        paid out of and 10% is the treasury's. The allocation is drawn once, from a drand beacon and
+        a Zcash block chosen before either existed, over every ticket bought before the close. The
+        chain holds the result as a Merkle root and accepts a claim only with a proof against it.
       </p>
 
-      <a class="back" href="/">← back to the cave</a>
+      <nav class="nav">
+        <a href="/items">My shelf</a>
+        <a href="/market">The market</a>
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/terms">The terms</a>
+      </nav>
     </main>
 
-    <script type="module">
-      import { toCanvas } from '/qr.js';
-
-      // Same provider contract as the deposit door: injected by the extension,
-      // possibly a beat after this script runs.
-      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
-
-      // Fixed before the sale opened and repeated here only to be shown. The
-      // service quotes the real price; this is never used to compute one.
-      const COLLECTION = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e';
-
-      const states = ['looking', 'nowallet', 'closed', 'reserve', 'pay', 'claim', 'done', 'broke'];
-      const el = (id) => document.getElementById(id);
-      const show = (name) => {
-        for (const s of states) el('s-' + s).hidden = s !== name;
-      };
-      const say = (node, message, ok) => {
-        node.textContent = message;
-        node.className = 'out ' + (ok ? 'ok' : 'bad');
-      };
-
-      // The order survives a reload: a buyer who pays and closes the tab must be
-      // able to come back and claim. Only the code and address are kept — both
-      // are already theirs, and neither is a secret the page invented.
-      const KEPT = 'cave-z-order';
-      const remember = (o) => { try { localStorage.setItem(KEPT, JSON.stringify(o)); } catch {} };
-      const recall = () => { try { return JSON.parse(localStorage.getItem(KEPT) || 'null'); } catch { return null; } };
-
-      async function sale(path, options) {
-        const r = await fetch('/api/sale' + path, options);
-        const j = await r.json().catch(() => ({ error: 'the sale service gave an unreadable reply' }));
-        if (!r.ok) throw new Error(j.error || r.statusText);
-        return j;
-      }
-
-      async function look() {
-        if (!provider()) return show('nowallet');
-        // Is there a sale at all? A closed door is the common case for most of
-        // this page's life, and it should read as deliberate rather than broken.
-        try {
-          const kept = recall();
-          await sale('/order?code=' + encodeURIComponent(kept ? kept.code : 'probe'));
-          el('phase').textContent = 'open';
-        } catch (e) {
-          if (/not open yet|not answering/i.test(e.message)) {
-            el('phase').textContent = 'sealed';
-            say(el('closed-why'), e.message, false);
-            return show('closed');
-          }
-          // Any other refusal means the service answered — the door is open and
-          // it simply does not know that code.
-          el('phase').textContent = 'open';
-        }
-        const kept = recall();
-        if (kept && kept.address) return resume(kept);
-        show('reserve');
-      }
-
-      function resume(order) {
-        el('total').textContent = order.total + ' ZEC';
-        el('address').textContent = order.address;
-        drawQr(order.address, order.total);
-        show('pay');
-      }
-
-      async function reserve() {
-        const code = el('code').value.trim();
-        const entries = Math.max(1, Math.min(10, Number(el('entries').value) || 1));
-        if (!code) return say(el('out'), 'The invitation code is the part we cannot guess.', false);
-        const button = el('reserve');
-        button.disabled = true;
-        say(el('out'), 'Reserving…', true);
-        try {
-          // The account quoted against is this collection's receiving account,
-          // not the wallet's identity (§97.5): the money and the item land in an
-          // account with no other history, so nothing has to be moved afterwards
-          // — and a move is exactly what would write the link back in.
-          const who = await provider().request({
-            method: 'zyn_receivingAccount',
-            params: { collection: COLLECTION },
-          });
-          if (!who || !who.account) throw new Error('the wallet gave no account for this collection');
-          const q = await sale('/quote', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ code, account: who.account, quantity: entries }),
-          });
-          const order = { code, address: q.payTo, total: q.total, quantity: q.quantity, treasury: q.treasury, unitPrice: q.unitPrice };
-          remember(order);
-          resume(order);
-        } catch (e) {
-          say(el('out'), e.message || String(e), false);
-        } finally {
-          button.disabled = false;
-        }
-      }
-
-      async function claim() {
-        const kept = recall();
-        if (!kept) return show('reserve');
-        const button = el('claim');
-        button.disabled = true;
-        say(el('out3'), 'Asking your wallet to prove the payment…', true);
-        try {
-          const proof = await provider().request({
-            method: 'zyn_receivingRead',
-            params: { collection: COLLECTION },
-          });
-          if (!proof || !proof.read) throw new Error('the wallet produced no proof');
-
-          // The entry payment, signed here and sent by the sale. 90% of it
-          // funds the collection's pool — which is what a redeemed item is
-          // paid out of — and 10% stays with the treasury. Signing without
-          // sending is deliberate: a payment that leaves the wallet but never
-          // reaches the sale is a buyer who paid for nothing.
-          if (!kept.treasury) throw new Error('this order predates the payment step — reserve again');
-          const signed = await provider().request({
-            method: 'zyn_receivingPay',
-            params: { collection: COLLECTION, to: kept.treasury, amount: kept.total },
-          });
-          if (!signed || !signed.frame) throw new Error('the wallet did not sign the payment');
-
-          const done = await sale('/settle', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ code: kept.code, read: proof.read, payment: signed.frame }),
-          });
-          const serials = done.serials || [];
-          el('serials').innerHTML = '';
-          for (const s of serials) {
-            const b = document.createElement('b');
-            b.textContent = '#' + s;
-            el('serials').appendChild(b);
-          }
-          show('done');
-        } catch (e) {
-          // "The draw has not run yet" is the expected answer for most of the
-          // sale's life, and it is not a failure — say so in those words rather
-          // than showing a buyer an error for having paid on time.
-          const waiting = /draw has not run/i.test(e.message || '');
-          say(el('out3'), waiting
-            ? 'Paid and counted. The draw runs once, after the door shuts — come back then and this button will hand you your items.'
-            : (e.message || String(e)), waiting);
-        } finally {
-          button.disabled = false;
-        }
-      }
-
-      function drawQr(address, total) {
-        const wrap = el('qr-wrap');
-        try {
-          // ZIP-321 with the amount, so the paying wallet fills in the exact
-          // figure. An entry that is a zatoshi short is refused, and a hand-typed
-          // amount is the likeliest way that happens.
-          const uri = 'zcash:' + address
-            + '?amount=' + encodeURIComponent(total)
-            + '&message=' + encodeURIComponent('Cave Collection Z entry');
-          toCanvas(el('qr'), uri, { level: 'M', width: 180, dark: '#0a0c0a', light: '#f0eee6' });
-          wrap.hidden = false;
-        } catch {
-          wrap.hidden = true;
-        }
-      }
-
-      el('reserve').addEventListener('click', reserve);
-      el('claim').addEventListener('click', claim);
-      el('claim-now').addEventListener('click', () => show('claim'));
-      el('retry').addEventListener('click', (e) => { e.preventDefault(); look(); });
-      el('retry2').addEventListener('click', () => look());
-      el('copy').addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(el('address').textContent);
-          say(el('out2'), 'Copied. Send the exact amount shown above.', true);
-        } catch {
-          say(el('out2'), 'Could not reach the clipboard — select the address and copy it.', false);
-        }
-      });
-
-      window.addEventListener('zyn#initialized', look, { once: true });
-      look();
-    </script>
+    <script type="module" src="/zstore.js?v=2"></script>
   </body>
 </html>

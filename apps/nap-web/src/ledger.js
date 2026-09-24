@@ -6,7 +6,7 @@
 // wallet can no longer find — so there is one.
 
 import { checkedEpoch } from './core.js';
-import { hex, scan, signedFrame, submitSigned } from './object.js';
+import { hex, scan, signedFrame, submitSigned, unhex } from './object.js';
 import * as mk from './market.js';
 
 /// Epochs a signature stays valid. Long enough to survive a slow submit,
@@ -68,6 +68,70 @@ export async function loadOwed(config, identity) {
     if (Array.isArray(part)) rows.push(...part);
   }
   return rows.filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount));
+}
+
+/// Wait until notes a write spent are gone from this holder's view, so the
+/// next write funds from what the chain now publishes (its change) rather
+/// than from notes already spent. The node may seal the write before this
+/// is even called, so this watches the notes, not the epoch.
+export async function waitSpent(config, identity, commitments, timeoutMs = 90_000) {
+  const gone = new Set(commitments);
+  for (const until = Date.now() + timeoutMs; Date.now() < until;) {
+    const { held } = await loadHoldings(config, identity, []);
+    if (!held.some((h) => gone.has(h.commitment))) return;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error('The chain has not taken the last step in yet; try the rest again shortly');
+}
+
+/// Tickets this wallet bought in a sale (§144). A ticket id derives from a
+/// nonce only this wallet holds, so it asks by id: the first ticket of every
+/// nonce it may have used, then the rest of each buy it finds.
+export async function loadTickets(config, identity, collection) {
+  const me = identity.account;
+  const limit = nonceCount(config, identity) + LOOKAHEAD;
+  const nonces = Array.from({ length: limit }, (_, n) => mk.marketNonce(identity.secretKey, n));
+  const ask = async (ids) => {
+    const rows = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = await call(config, 'zyn_tickets', { ids: ids.slice(i, i + 500).map((x) => x.id).join(',') });
+      if (Array.isArray(part)) rows.push(...part);
+    }
+    const byId = new Map(ids.map((x) => [x.id, x]));
+    return rows
+      .filter((r) => isHex(r.ticket) && r.collection === collection && isSmall(r.index) && typeof r.claimed === 'boolean' && byId.has(r.ticket))
+      .map((r) => ({ ...byId.get(r.ticket), index: r.index, claimed: r.claimed }));
+  };
+  const firsts = await ask(nonces.map((nonce) => ({ id: hex(mk.ticketId(me, nonce, 0)), nonce, k: 0 })));
+  const rest = await ask(firsts.flatMap((t) => Array.from({ length: 19 }, (_, j) => ({ id: hex(mk.ticketId(me, t.nonce, j + 1)), nonce: t.nonce, k: j + 1 }))));
+  return [...firsts, ...rest].map((t) => ({ ticket: t.id, nonce: t.nonce, k: t.k, index: t.index, claimed: t.claimed })).sort((a, b) => a.index - b.index);
+}
+
+/// A sale as the chain holds it, and the posted draw and open-mint order —
+/// each checked against the root the chain holds, so the node serving them
+/// cannot change who won or what sells next.
+export async function loadSale(config, collection) {
+  const market = await call(config, 'zyn_market');
+  const sale = (market.sales || []).find((s) => s.collection === collection);
+  if (!sale) return null;
+  const terms = (market.collections || []).find((c) => c.asset === collection);
+  const out = { sale, quote: terms && isHex(terms.quote) ? terms.quote : config.zecAsset, draw: null, open: null };
+  if (sale.phase === 'drawn' || sale.phase === 'openmint') {
+    const d = await call(config, 'zyn_saleDraw', { collection, kind: 'draw' });
+    if (d && Array.isArray(d.won)) {
+      const won = d.won.filter((w) => isHex(w.ticket) && Array.isArray(w.serials) && w.serials.length && w.serials.every(isSmall));
+      const leaves = won.map((w) => mk.drawLeaf(unhex(w.ticket), w.serials));
+      if (won.length === d.won.length && hex(mk.merkleRoot(leaves)) === sale.draw_root) out.draw = { won, leaves };
+    }
+  }
+  if (sale.phase === 'openmint') {
+    const o = await call(config, 'zyn_saleDraw', { collection, kind: 'open' });
+    if (o && Array.isArray(o.order) && o.order.every(isSmall) && o.order.length === sale.open_count) {
+      const leaves = o.order.map((s, i) => mk.openLeaf(i, s));
+      if (hex(mk.merkleRoot(leaves)) === sale.open_root) out.open = { order: o.order, leaves };
+    }
+  }
+  return out;
 }
 
 // What the node says goes into markup, ids and arithmetic, so its shape is

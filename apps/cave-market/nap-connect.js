@@ -25,6 +25,9 @@
 //   zyn_nftOffers, zyn_nftItems, zyn_owed, zyn_nftBuy {item, pay},
 //   zyn_nftList {asset, price}, zyn_nftCancel {asset}, zyn_nftRedeem {asset},
 //   zyn_collect
+//   zyn_saleInfo {collection?}, zyn_saleTickets {collection?},
+//   zyn_buyTickets {count, pay?}, zyn_claimItems, zyn_mintOpen {count}
+//     (the sale, §144; collection defaults to Collection Z)
 //
 // Call `request` from a click. Opening Nap's window is a popup, and browsers
 // only allow a popup that a click asked for.

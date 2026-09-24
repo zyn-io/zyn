@@ -3,73 +3,57 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const page = await readFile(new URL('../mint.html', import.meta.url), 'utf8');
-const relay = await readFile(new URL('../functions/api/sale/[[path]].js', import.meta.url), 'utf8');
+const zstore = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
+const napOps = await readFile(new URL('../../nap-web/src/connect-ops.js', import.meta.url), 'utf8').catch(() => null);
 const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8').catch(() => null);
 
-// The wallet provider lives in a different repository. When the store is
-// checked out on its own, these cross-repo assertions cannot run — so they
-// skip with a reason rather than passing quietly. A silent pass here would
-// mean the store could call a method the wallet does not have and nothing
-// would say so, which is the exact failure this file exists to catch.
-const WALLET = background
+// The wallet provider lives beside the store in the monorepo. When the store
+// is checked out on its own, these cross-repo assertions cannot run — so they
+// skip with a reason rather than passing quietly.
+const WALLET = napOps && background
   ? false
-  : 'apps/extension is not checked out — run in the monorepo to check the store against the wallet provider';
+  : 'apps/nap-web and apps/extension are not checked out — run in the monorepo to check the store against both Naps';
 
+// The sale runs on the object ledger (§144): tickets bought in ZEC.zy through
+// Nap, a draw posted as a root, claims proved against it, then an open mint.
+const SALE = ['zyn_saleTickets', 'zyn_buyTickets', 'zyn_claimItems', 'zyn_mintOpen'];
 
-test('the checkout quotes against the collection receiving account, not the identity', async () => {
-  // §97.5: the money and the item must land in an account with no other
-  // history. Quoting against zyn_account would put the buyer's identity in the
-  // journal and require a move afterwards — and the move is the leak.
-  assert.match(page, /method: 'zyn_receivingAccount'/);
-  assert.doesNotMatch(page, /method: 'zyn_account'/);
+test('the checkout is the store\'s mint page, on Nap', () => {
+  assert.match(page, /<body data-page="mint">/);
+  assert.match(page, /<script type="module" src="\/zstore\.js/);
+  assert.match(zstore, /mint: mintPage/);
+  assert.match(zstore, /'\/mint\/': 'mint'/);
 });
 
-test('the methods it calls exist on the provider', { skip: WALLET }, () => {
-  for (const method of ['zyn_receivingAccount', 'zyn_receivingRead']) {
-    assert.match(page, new RegExp(`method: '${method}'`), `page calls ${method}`);
-    assert.match(background, new RegExp(`${method}:`), `provider exposes ${method}`);
+test('every step of the sale is a Nap call, served by both Naps', { skip: WALLET }, () => {
+  for (const m of SALE) {
+    assert.match(zstore, new RegExp(`'${m}'`), `the page asks for ${m}`);
+    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap in the browser serves ${m}`);
+    assert.match(background, new RegExp(`\\b${m}\\s*:`), `the extension serves ${m}`);
   }
 });
 
-test('the page reaches the sale only through the relay, never a service address', () => {
-  assert.match(page, /fetch\('\/api\/sale'/);
-  assert.doesNotMatch(page, /https?:\/\/[^'"]*:8096|ZYN_SALE|127\.0\.0\.1/);
-});
-
-test('the relay names the calls it allows and no prefix', () => {
-  // A forwarded prefix would publish every route zyn-sale ever grows.
-  for (const call of ['POST /quote', 'POST /settle', 'GET /order']) {
-    assert.ok(relay.includes(`'${call}'`), `${call} is allowed`);
-  }
-  assert.match(relay, /env\.ZYN_SALE_URL/);
-  assert.doesNotMatch(relay, /https?:\/\/\d/, 'the upstream must not be a literal');
-});
-
-test('the relay never echoes the upstream', () => {
-  assert.match(relay, /the sale service is not answering/);
-  assert.doesNotMatch(relay, /error:\s*(String\(|e\.message|err)/);
+test('the retired checkout is gone: no payment address, no relay, no reservation', () => {
+  assert.doesNotMatch(page + zstore, /\/api\/sale|zyn_receiving|isZynZap|Invitation code/);
 });
 
 test('it states the odds where the money is asked for', () => {
   // The weights were published before the sale; a buyer should not have to
-  // find them in a document to know what an entry buys.
-  assert.match(page, /80%/);
-  assert.match(page, /19%/);
-  assert.match(page, /1%/);
-  assert.match(page, /one item/);
-  assert.match(page, /three items/);
+  // find them in a document to know what a ticket buys.
+  for (const s of ['80%', '19%', '1%', 'one item', 'three items']) assert.ok(page.includes(s), s);
 });
 
 test('it does not promise an item at payment time', () => {
   // The draw runs once, after the close (§104.1). A checkout that implied
   // otherwise would be lying about the one thing the design is built around.
-  assert.match(page, /Nothing is assigned yet/i);
-  assert.match(page, /draw runs once/i);
+  assert.match(page, /decided after the door shuts/i);
+  assert.match(page, /runs\s+once/i);
 });
 
-test('waiting for the draw reads as waiting, not as failure', () => {
-  assert.match(page, /draw has not run/i);
-  assert.match(page, /Paid and counted/);
+test('the price the holder approves is the price the page showed', () => {
+  // Nap refuses a buy whose `pay` differs from the chain's price, so a page
+  // that quietly showed a stale price cannot get it approved.
+  assert.match(zstore, /zyn_buyTickets', \(\) => \{[\s\S]*?pay: zec\(/);
 });
 
 test('the built site serves the checkout at /mint', async () => {
@@ -77,23 +61,8 @@ test('the built site serves the checkout at /mint', async () => {
   assert.equal(built, page, 'dist/mint/index.html is the page');
 });
 
-test('the entry is paid, not merely proven', { skip: WALLET }, async () => {
-  // The floor buyers are trusting is funded by the entries. A checkout that
-  // proved a balance and moved nothing left the pool funded by nobody (§113.8).
-  assert.match(page, /method: 'zyn_receivingPay'/);
-  assert.match(page, /payment: signed\.frame/);
-  assert.match(background, /zyn_receivingPay:/);
-});
-
-test('the payment is signed by the wallet and sent by the sale', { skip: WALLET }, () => {
-  // Signing without sending: a payment that leaves the wallet but never
-  // reaches the sale is a buyer who paid for nothing.
-  assert.match(background, /zyn_receivingPay: \{ read: false/, 'paying is approval-gated');
-  assert.doesNotMatch(page, /submit_raw|\/api\/submit/, 'the page never submits directly');
-});
-
 test('it names where the money goes', () => {
-  assert.match(page, /90% of what you pay funds the pool/i);
+  assert.match(page, /90% funds the pool/i);
   assert.match(page, /10% is the treasury/i);
 });
 
