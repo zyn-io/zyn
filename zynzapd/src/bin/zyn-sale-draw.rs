@@ -26,8 +26,8 @@
 //!   ZYN_SALE_ANNOUNCEMENT  the close announcement, JSON  (required for close/draw)
 //!   ZYN_SALE_MANIFEST      the collection's content.json (required for draw)
 //!   ZYN_ZEBRA_HOST / _PORT / _USER / _PASS               (a Zcash node)
-//!   ZYN_SALE_CLAIM_WINDOW  rehearsal only: claim window in blocks (2);
-//!                          the published sale uses the terms' 16,128
+//!   ZYN_SALE_CLAIM_WINDOW  rehearsal only: claim window in blocks after the
+//!                          close (2); the published sale uses the terms' 16,128
 //! ```
 
 use std::collections::BTreeSet;
@@ -178,7 +178,38 @@ fn status(c: &Ctx) -> Result<(), String> {
     Ok(())
 }
 
+/// Serials of the collection that already exist on this chain. A sale can
+/// never mint them: a winner drawn one could not claim it, and one in the
+/// open-mint order would stop every place after it.
+fn minted(c: &Ctx) -> Result<BTreeSet<u32>, String> {
+    let collection = c.collection();
+    let mut out = BTreeSet::new();
+    let serials: Vec<u32> = (0..c.policy.supply).collect();
+    for part in serials.chunks(400) {
+        let assets: Vec<String> = part.iter().map(|s| hex(&objectvm::market::item_asset(&collection, *s))).collect();
+        let rows = zynzapd::object_client::call(&c.node, "zyn_items", serde_json::json!({ "assets": assets.join(",") }))?;
+        for r in rows.as_array().into_iter().flatten() {
+            if r["collection"].as_str() == Some(&hex(&collection)) {
+                if let Some(s) = r["serial"].as_u64() {
+                    out.insert(s as u32);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn open(c: &Ctx) -> Result<(), String> {
+    // The published sale runs over an untouched collection. A rehearsal on a
+    // chain whose test items already exist is told which, and goes on.
+    let taken = minted(c)?;
+    if !taken.is_empty() {
+        let list: Vec<String> = taken.iter().take(12).map(u32::to_string).collect();
+        if !c.rehearsal {
+            return Err(format!("{} serial(s) of this collection already exist here ({}…) — the published sale runs over an untouched collection", taken.len(), list.join(", ")));
+        }
+        println!("rehearsal: {} serial(s) already exist ({}); a win of one cannot be claimed, and the open mint skips them", taken.len(), list.join(", "));
+    }
     let op = Op::SetSale {
         program: program::sale_open(),
         collection: c.collection(),
@@ -272,6 +303,14 @@ fn draw(c: &Ctx) -> Result<(), String> {
         return Err("the ticket list is not the whole sale".into());
     }
     let d = sale_draw::run(&c.policy, &manifest, &tickets, &resolved, &reveal, announcement.announced_at_drand_round)?;
+    let taken = minted(c)?;
+    let blocked: Vec<u32> = d.won.iter().flat_map(|(_, s)| s.iter().copied()).filter(|s| taken.contains(s)).collect();
+    if !blocked.is_empty() {
+        if !c.rehearsal {
+            return Err(format!("the draw hands out serial(s) that already exist ({blocked:?}) — nothing is posted; this chain's collection was not untouched"));
+        }
+        println!("rehearsal: the draw hands out serial(s) that already exist {blocked:?}; those wins cannot be claimed");
+    }
     let file = c.data_file("draw")?;
     std::fs::write(&file, serde_json::to_vec_pretty(&sale_draw::draw_json(&c.collection(), &resolved, &reveal, &d)).unwrap()).map_err(|e| format!("{}: {e}", file.display()))?;
     println!("draw: {} tickets, {} won, {} serials left for the open mint; written to {}", tickets.len(), d.won.len(), d.batch.unused_indices.len(), file.display());
@@ -283,15 +322,16 @@ fn open_mint(c: &Ctx) -> Result<(), String> {
     if sale["phase"].as_str() != Some("drawn") {
         return Err(format!("the open mint follows the draw; the sale is {}", sale["phase"]));
     }
-    // Winners have the claim window the terms promise, counted from the
-    // reveal block; the rest go on sale only after it.
+    // Winners have the claim window the published terms promise: 16,128
+    // blocks after the close (cavebro.win/terms). The rest go on sale only
+    // after it.
     let (_, resolved) = c.announcement()?;
     let window = if c.rehearsal {
         env("ZYN_SALE_CLAIM_WINDOW", "2").parse::<u64>().map_err(|_| "ZYN_SALE_CLAIM_WINDOW must be a block count".to_string())?
     } else {
         c.terms.claim_window_blocks as u64
     };
-    let ends = resolved.reveal_zcash_height as u64 + window;
+    let ends = resolved.deposit_close_zcash_height as u64 + window;
     let tip = c.zebra()?.block_count().map_err(|e| e.to_string())?;
     if tip < ends {
         return Err(format!("claims stay open until Zcash {ends}; it is at {tip} — {} blocks to go", ends - tip));
@@ -309,6 +349,15 @@ fn open_mint(c: &Ctx) -> Result<(), String> {
         if !claimed.contains(&t) {
             order.extend(w["serials"].as_array().into_iter().flatten().filter_map(|v| v.as_u64().map(|x| x as u32)));
         }
+    }
+    // What already exists cannot be sold again; left in, it would stop the
+    // open mint at its place. Skipping it is decided by public chain state,
+    // so the order is still anyone's to recompute.
+    let taken = minted(c)?;
+    let before = order.len();
+    order.retain(|s| !taken.contains(s));
+    if order.len() != before {
+        println!("open mint: {} serial(s) already exist and are left out", before - order.len());
     }
     let out = c.data_file("open")?;
     std::fs::write(&out, serde_json::to_vec_pretty(&sale_draw::open_json(&c.collection(), &order)).unwrap()).map_err(|e| format!("{}: {e}", out.display()))?;

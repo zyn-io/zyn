@@ -2675,7 +2675,7 @@ zyn-sale-draw status
 2. **Announce the close** — publish `{announced_at_zcash_height, announced_at_drand_round, deposit_close_zcash_height}`. The close must be ≥ 1,152 blocks after the announcement, and **the drand round must be late enough that round + 2,400 falls after the close** (drand quicknet: round = (unix − 1692803367)/3 + 1). `close` refuses otherwise.
 3. **Close** — `zyn-sale-draw close` once Zcash reaches the close height; it posts `CloseSale` with that block's hash.
 4. **Draw** — `zyn-sale-draw draw` once the reveal block (close + 100) and the reveal drand round both exist. It checks the manifest rebuilds the committed root, runs the engine over every ticket in order, writes `sale-<collection>-draw.json` into the node's data dir (served by `zyn_saleDraw`) and posts the root. Publish the same file anywhere you like — its root is what counts.
-5. **Open mint** — `zyn-sale-draw open-mint` after the claim window (16,128 blocks from the reveal block). It writes `sale-<collection>-open.json` and posts the order's root.
+5. **Open mint** — `zyn-sale-draw open-mint` after the claim window (16,128 blocks after the close, as the terms say). It writes `sale-<collection>-open.json` and posts the order's root.
 
 **Burn tickets (DECISIONS §145).** Once the token exists, add `apps/cave-collection-z/burn.json` (`{"cluster":"mainnet","symbol","mint","decimals","per_ticket","token_program","rpc"?}` — `rpc` optional, a paid endpoint that answers browsers; the build adds its origin to the policy), redeploy the store, and on Contabo:
 

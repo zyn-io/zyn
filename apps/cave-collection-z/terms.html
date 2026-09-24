@@ -174,6 +174,8 @@
       }
       .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
       .facts strong { color: var(--ink); font-weight: 400; }
+      .zyn-facts li { grid-template-columns: 96px 1fr; }
+      @media (max-width: 520px) { .zyn-facts li { grid-template-columns: 1fr; gap: 2px; } }
 
       .out { margin: 0; font-size: 11px; line-height: 1.7; min-height: 1.2em; }
       .out.bad { color: #ff8b6b; }
@@ -311,6 +313,23 @@
           </ul>
         </div>
       </div>
+
+      <section style="margin-top:52px">
+        <h2 style="font-family:var(--serif);font-size:26px;margin:0">How the sale runs on Zyn</h2>
+        <p class="smallprint" style="margin-top:12px;max-width:66ch">
+          <strong>Added 24 Sep 2026. The terms above are unchanged</strong> — the same bytes, the same digest,
+          the same collection, odds, prices, close and reveal. What changed is where an entry is paid:
+          on Zyn, from Nap, instead of by a Zcash deposit to the vault.
+        </p>
+        <ul class="facts zyn-facts" style="margin-top:14px;max-width:66ch">
+          <li><b>Entry</b><span>A ticket bought in Nap with <strong>ZEC.zy</strong> — ZEC you have brought into Nap — at the entry price, 0.01. It exists the moment Nap signs it. The six confirmations apply to bringing ZEC into Nap, not to the ticket.</span></li>
+          <li><b>Split</b><span>90% to the collection's pool, 10% to the treasury, recorded on the ledger as each ticket is bought.</span></li>
+          <li><b>Draw</b><span>Run once over every ticket bought before the announced close, from the announced drand round and the Zcash reveal block. Its result is posted on Zyn as a Merkle root; anyone holding the public inputs can run it again and get the same root.</span></li>
+          <li><b>Claim</b><span>A winner claims with a proof against that root, at the claim price per item, within 16,128 blocks after the close. Only the wallet that bought a ticket can claim it; nobody can be refused one the draw gave.</span></li>
+          <li><b>Open mint</b><span>After the window, what the draw handed nobody and what winners left sell at the open-mint price, in an order fixed by the draw.</span></li>
+          <li><b>Burn tickets</b><span>A promotional token on Solana may also be burned for tickets — capped, into the same draw at the same odds. They pay nothing into the pool; a winning burn ticket pays the claim price like any other.</span></li>
+        </ul>
+      </section>
 
       <section style="margin-top:52px">
         <h2 style="font-family:var(--serif);font-size:26px;margin:0">Check it yourself</h2>
