@@ -600,14 +600,27 @@ fn remember_issued(account: &zyn_vm::spec::AccountId) {
 
 /// The zatoshi the vault holds for others: issued ZEC.zy, exits owed, and
 /// deposits waiting for their account to register.
-fn backing_zat(vm: &ObjectVm, zec: &[u8; 32]) -> u64 {
+/// What the ledger owes in zatoshi: issued plus unpaid exits. Read under the
+/// node lock — and nothing else is, see [`backing_zat`].
+fn ledger_owed_zat(vm: &ObjectVm, zec: &[u8; 32]) -> u64 {
     let issued = vm.issued.get(zec).map(|f| (f.0.max(0) / 10_000_000_000) as u64).unwrap_or(0);
+    issued.saturating_add(zynzapd::object_exit::owed(vm, zec))
+}
+
+/// The floor the vault must keep: what the ledger owes, what is pending, and
+/// deposits the bridge has not judged yet.
+///
+/// Takes the ledger's figure, not the ledger: the unjudged part reads the
+/// vault's note stores, which the note scan holds for a whole step — minutes
+/// while the node catches up. Reading them under the node lock stalled every
+/// RPC for a step's length on 24 Sep (BACKLOG A162), so the caller reads the
+/// ledger under its lock, lets go, and only then comes here.
+fn backing_zat(ledger_owed: u64) -> u64 {
     let unjudged = VAULT_NOTES
         .get()
         .map(|n| unjudged_zat(n, BRIDGE_JUDGED.load(std::sync::atomic::Ordering::SeqCst)))
         .unwrap_or(0);
-    issued
-        .saturating_add(zynzapd::object_exit::owed(vm, zec))
+    ledger_owed
         .saturating_add(PENDING_ZAT.load(std::sync::atomic::Ordering::SeqCst))
         .saturating_add(unjudged)
 }
@@ -2648,8 +2661,13 @@ fn main() {
         let pub_log = Arc::clone(&pub_log);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
-            if let (Some(floor), Ok(n)) = (BACKING_FLOOR.get(), node.lock()) {
-                floor.store(backing_zat(n.state(), &zec_asset()), std::sync::atomic::Ordering::SeqCst);
+            if let Some(floor) = BACKING_FLOOR.get() {
+                // The ledger's part under the node lock; the note stores after
+                // it is released (A162).
+                let owed = node.lock().map(|n| ledger_owed_zat(n.state(), &zec_asset()));
+                if let Ok(owed) = owed {
+                    floor.store(backing_zat(owed), std::sync::atomic::Ordering::SeqCst);
+                }
             }
             match settler.poll_once(&node, now_secs()) {
                 Ok(Some(c)) => {
@@ -2713,10 +2731,13 @@ fn main() {
                     ex.add_reveal(r);
                 }
                 let ops = {
+                    // A copy of the exits under the lock; paying after it is
+                    // released, since paying waits on the note stores (A162).
                     let vm_ops = node
                         .lock()
+                        .map(|n| n.state().exits.clone())
                         .map_err(|_| "node lock poisoned".to_string())
-                        .and_then(|n| ex.poll_once(n.state()));
+                        .and_then(|exits| ex.poll_once(&exits));
                     match vm_ops {
                         Ok(ops) => ops,
                         Err(e) => {

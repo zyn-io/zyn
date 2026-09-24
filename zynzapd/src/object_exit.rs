@@ -69,6 +69,16 @@ pub fn payable(
     asset: &Hash,
     reveals: &[Reveal],
 ) -> (Vec<Payable>, Vec<Blocked>) {
+    payable_from(&vm.exits, asset, reveals)
+}
+
+/// [`payable`] over the ledger's exits alone, so a caller can copy them out
+/// under the node lock and decide — and pay — after letting go of it (A162).
+pub fn payable_from(
+    exits: &[objectvm::PendingExit],
+    asset: &Hash,
+    reveals: &[Reveal],
+) -> (Vec<Payable>, Vec<Blocked>) {
     // Keyed by the commitment the reveal *reproduces*, not by anything it
     // claims. A reveal that matches no exit simply never matches.
     let by_commitment: BTreeMap<Hash, Destination> = reveals
@@ -83,7 +93,7 @@ pub fn payable(
 
     let mut ready = Vec::new();
     let mut blocked = Vec::new();
-    for (i, exit) in vm.exits.iter().enumerate() {
+    for (i, exit) in exits.iter().enumerate() {
         if exit.paid_by.is_some() || exit.asset != *asset {
             continue;
         }
@@ -275,13 +285,16 @@ impl ExitSettler {
     }
 
     /// One pass. Returns the intents to apply.
-    pub fn poll_once(&mut self, vm: &ObjectVm) -> Result<Vec<objectvm::Op>, String> {
+    /// `exits` is a copy of the ledger's, taken under the node lock and
+    /// passed after it is released: paying reads the vault's note stores,
+    /// which the note scan can hold for minutes (A162).
+    pub fn poll_once(&mut self, exits: &[objectvm::PendingExit]) -> Result<Vec<objectvm::Op>, String> {
         let settled = self.follow_up()?;
         // One payment in flight at a time. The vault's notes are the input to
         // the next transaction, and building a second one against notes the
         // first already spent produces a transaction Zcash refuses.
         if self.inflight.is_empty() {
-            self.pay_next(vm)?;
+            self.pay_next(exits)?;
         }
         Ok(settled)
     }
@@ -320,8 +333,8 @@ impl ExitSettler {
     }
 
     /// Build, sign and broadcast one payment covering what can be paid.
-    fn pay_next(&mut self, vm: &ObjectVm) -> Result<(), String> {
-        let (ready, blocked) = payable(vm, &self.asset, &self.reveals);
+    fn pay_next(&mut self, exits: &[objectvm::PendingExit]) -> Result<(), String> {
+        let (ready, blocked) = payable_from(exits, &self.asset, &self.reveals);
         if !blocked.is_empty() && !self.warned {
             eprintln!(
                 "zyn-object-node: {} exit(s) cannot be paid yet: {:?}",
