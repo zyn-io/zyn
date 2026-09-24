@@ -8,7 +8,7 @@ const out = new URL('dist/', root);
 await rm(out, { recursive: true, force: true });
 await mkdir(new URL('assets/fonts/', out), { recursive: true });
 for (const f of ['index.html', 'app.js', 'styles.css']) await cp(new URL(f, root), new URL(f, out));
-await cp(new URL('assets/fonts/DM-Sans.ttf', root), new URL('assets/fonts/DM-Sans.ttf', out));
+await cp(new URL('assets/', root), new URL('assets/', out), { recursive: true });
 await writeFile(new URL('_redirects', out), '/* /index.html 200\n');
 await writeFile(new URL('_headers', out), [
   '/*',

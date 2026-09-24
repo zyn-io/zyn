@@ -36,11 +36,8 @@ a:hover { text-decoration: underline; }
 .brand:hover { text-decoration: none; }
 .brand strong { display: block; font-size: 18px; letter-spacing: -.02em; }
 .brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-/* A stack of three sealed blocks: the mark says "epochs". */
-.mark { width: 26px; height: 26px; display: block; background:
-  linear-gradient(var(--jade), var(--jade)) 0 0 / 26px 6px no-repeat,
-  linear-gradient(var(--jade-dim), var(--jade-dim)) 0 10px / 26px 6px no-repeat,
-  linear-gradient(#174636, #174636) 0 20px / 26px 6px no-repeat; }
+/* The Zyn mark: the jade Z, on its own obsidian tile. */
+.mark { width: 36px; height: 36px; display: block; border-radius: 9px; box-shadow: 0 0 0 1px var(--line); }
 .search input { width: 100%; max-width: 560px; height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
 .search input::placeholder { color: var(--muted); }
 .net { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }

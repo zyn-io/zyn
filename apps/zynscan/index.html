@@ -6,12 +6,15 @@
     <meta name="theme-color" content="#0b1411" />
     <meta name="description" content="ZynScan — every Zyn epoch and transaction, replayed from the sequencer's own journal and checked against its state root. Private at tier 2: no accounts, no amounts." />
     <title>ZynScan</title>
-    <link rel="stylesheet" href="/styles.css?v=1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+    <meta property="og:image" content="https://zynscan.pages.dev/assets/zyn-mark-256.png" />
+    <link rel="stylesheet" href="/styles.css?v=2" />
   </head>
   <body>
     <header class="top">
       <a class="brand" href="/" data-link>
-        <span class="mark" aria-hidden="true"></span>
+        <img class="mark" src="/assets/zyn-mark-64.png" srcset="/assets/zyn-mark-64.png 1x, /assets/zyn-mark-128.png 2x" width="36" height="36" alt="" />
         <span><strong>ZynScan</strong><small>the Zyn ledger, replayed</small></span>
       </a>
       <form class="search" id="search" role="search">
@@ -37,6 +40,6 @@
       </p>
       <nav><a href="/assets" data-link>Assets</a><a href="https://cavebro.win">Cave</a><a href="https://nap.cavebro.win">Nap Wallet</a></nav>
     </footer>
-    <script type="module" src="/app.js?v=1"></script>
+    <script type="module" src="/app.js?v=2"></script>
   </body>
 </html>
