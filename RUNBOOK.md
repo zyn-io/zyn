@@ -2637,6 +2637,26 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
 - **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
+## 5f-septendecies. SOL.zy and ETH.zy bridges, testnet (24 Sep 2026, DECISIONS §146)
+
+**SOL (Solana devnet ↔ testnet 212)** — `zyn-sol-bridge.service` on Hetzner, env `/etc/zyn/zyn-sol-bridge.env` plus the node's own env for the token. Vault `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` (FROST 2-of-3; public package `/var/zyn/solana-shares/public.bin`; custodians `127.0.0.1:8110/8111/8112`), durable nonce `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H`. State in `/var/lib/zyn/sol-bridge` (`deposit-cursor`, `inflight.json` — a damaged `inflight.json` stops the bridge on purpose: it is the record that prevents paying twice). `zyn-sol-bridge status` shows the vault balance against what Zyn has issued. Top up the vault's lamports for rent/fees with a plain transfer (no memo = credits nobody).
+
+**ETH (Sepolia ↔ testnet 212)** — deploy once the gas payer has test ETH:
+
+```sh
+# keys: scratchpad eth-sepolia/{owner1,owner2,owner3,payer}.key (0600)
+RPC=https://ethereum-sepolia-rpc.publicnode.com
+forge create src/ZynSigners.sol:ZynSigners --rpc-url $RPC --private-key $(cat payer.key) --broadcast \
+  --constructor-args "[$(cat owner1.addr),$(cat owner2.addr),$(cat owner3.addr)]" 2
+forge create src/ZynVault.sol:ZynVault --rpc-url $RPC --private-key $(cat payer.key) --broadcast \
+  --constructor-args <signers> $(cat payer.addr)
+cast send <vault> "registerAsset(uint32,address)" 1 0x0000000000000000000000000000000000000000 --rpc-url $RPC --private-key $(cat payer.key)
+```
+
+then `zyn-eth-bridge register` and a `zyn-eth-bridge run` unit (env `ZYN_ETH_RPC`, `ZYN_ETH_VAULT`, `ZYN_ETH_KEYS`, `ZYN_ETH_PAYER`, `ZYN_ETH_STATE=/var/lib/zyn/eth-bridge`), and the vault in `apps/nap-web/public/config.json` → testnet `bridges.eth` (`{"chainId":11155111,"vault":"0x…","assetId":1,"explorer":"https://sepolia.etherscan.io/tx/{tx}"}`).
+
+Both bridges refuse mainnet by design (§146.10).
+
 ## 5f-sedecies. Running Collection Z's sale (24 Sep 2026, DECISIONS §144)
 
 The operator's half is one binary, `zyn-sale-draw`, run on the box that holds the node — it reads the submit token from the node's env file and writes the draw beside the node's data so the node can serve it.
