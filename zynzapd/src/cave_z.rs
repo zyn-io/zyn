@@ -85,6 +85,20 @@ pub fn policy() -> AllocationPolicy {
     }
 }
 
+/// The published policy with a testnet clock (DECISIONS §144): the same odds,
+/// shuffle, manifest and prices, but minutes of notice and reveal instead of a
+/// day and two hours, so a rehearsal of the whole sale fits in an afternoon.
+/// A different digest from the published one — it is never sold under.
+pub fn rehearsal_policy() -> AllocationPolicy {
+    let mut p = policy();
+    p.randomness.announced_close = Some(AnnouncedClose {
+        reveal_offset_blocks: 2,
+        reveal_offset_rounds: 60, // three minutes of 3 s rounds
+        min_notice_blocks: 2,
+    });
+    p
+}
+
 pub fn terms(p: &AllocationPolicy) -> SaleTerms {
     SaleTerms {
         policy_digest: p.digest().expect("the policy must validate"),

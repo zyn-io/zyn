@@ -259,9 +259,34 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
             )
         })
         .collect();
+    // Primary sales (§144): prices, phase, tickets sold and the posted roots —
+    // all in the state root already. Which tickets are whose is not here.
+    let sales: Vec<String> = vm
+        .market
+        .sales
+        .values()
+        .map(|s| {
+            serde_json::json!({
+                "collection": hex(&s.collection),
+                "ticket_price": s.ticket_price.0.to_string(),
+                "claim_price": s.claim_price.0.to_string(),
+                "open_price": s.open_price.0.to_string(),
+                "treasury_bps": s.treasury_bps,
+                "phase": format!("{:?}", s.phase).to_lowercase(),
+                "tickets": s.tickets,
+                "close_zcash_height": s.close_zcash_height,
+                "close_zcash_hash": hex(&s.close_zcash_hash),
+                "draw_root": hex(&s.draw_root),
+                "open_root": hex(&s.open_root),
+                "open_count": s.open_count,
+                "open_next": s.open_next,
+            })
+            .to_string()
+        })
+        .collect();
     let terms = vm.market.curve_terms.unwrap_or_default();
     format!(
-        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"curve_terms\":{{\"set\":{},\"fee_bps\":{},\"bond\":\"{}\"}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}],\"curves\":[{}]}}",
+        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"curve_terms\":{{\"set\":{},\"fee_bps\":{},\"bond\":\"{}\"}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}],\"curves\":[{}],\"sales\":[{}]}}",
         vm.epoch,
         epoch_seconds,
         vm.market.bridge_bps(),
@@ -272,7 +297,8 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
         collections.join(","),
         pools.join(","),
         launches.join(","),
-        curves.join(",")
+        curves.join(","),
+        sales.join(",")
     )
 }
 
@@ -849,6 +875,57 @@ fn handle(
         // What the ledger owes, by claim id. Ids derive from a nonce only
         // the owner holds, so this answers the owner and nobody else — there
         // is deliberately no "claims for this account" to ask.
+        // A sale's tickets (§144). By `collection`: every ticket in the order
+        // the draw runs over — ids only, which nobody but each buyer can link
+        // to anyone. By `ids`: just those, for a wallet finding its own.
+        "zyn_tickets" => {
+            let n = node.lock().unwrap();
+            let tickets = &n.state().market.tickets;
+            let row = |id: &[u8; 32], t: &objectvm::sale::Ticket| {
+                serde_json::json!({ "ticket": hex(id), "collection": hex(&t.collection), "index": t.index, "epoch": t.epoch, "claimed": t.claimed })
+            };
+            let rows: Vec<serde_json::Value> = if let Some(list) = field(body, "ids") {
+                let mut out = Vec::new();
+                for id in list.split(',').filter(|s| !s.is_empty()).take(512) {
+                    let Some(key) = unhex(id).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                        return err("an id is not 32 hex bytes");
+                    };
+                    if let Some(t) = tickets.get(&key) {
+                        out.push(row(&key, t));
+                    }
+                }
+                out
+            } else if let Some(c) = field(body, "collection").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()) {
+                let mut all: Vec<(&[u8; 32], &objectvm::sale::Ticket)> = tickets.iter().filter(|(_, t)| t.collection == c).collect();
+                all.sort_by_key(|(_, t)| t.index);
+                all.into_iter().map(|(id, t)| row(id, t)).collect()
+            } else {
+                return err("zyn_tickets needs a collection or ids");
+            };
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
+        // The posted draw and open-mint order (§144), as `zyn-sale-draw`
+        // wrote them beside the chain. The chain holds only their roots; a
+        // wallet checks what it reads here against those roots before it
+        // claims, so this file is a convenience, never a trust.
+        "zyn_saleDraw" => {
+            let Some(c) = field(body, "collection").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("zyn_saleDraw needs a collection");
+            };
+            let kind = match field(body, "kind").as_deref() {
+                None | Some("draw") => "draw",
+                Some("open") => "open",
+                Some(_) => return err("kind is draw or open"),
+            };
+            let path = std::path::Path::new(dir).join(format!("sale-{}-{kind}.json", hex(&c)));
+            match std::fs::read_to_string(&path) {
+                Ok(doc) if serde_json::from_str::<serde_json::Value>(&doc).is_ok() => {
+                    format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{doc}}}")
+                }
+                Ok(_) => err("the posted file is damaged"),
+                Err(_) => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":null}}"),
+            }
+        }
         "zyn_claims" => {
             let Some(list) = field(body, "ids") else {
                 return err("no ids");
@@ -1116,7 +1193,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 

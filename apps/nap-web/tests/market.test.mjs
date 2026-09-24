@@ -156,3 +156,24 @@ test('the curve prices lots exactly as the ledger does', () => {
   // Nothing past graduation.
   assert.equal(m.previewCurveBuy(m.CURVE.graduateAt, m.WAD, 0).lots, 0);
 });
+
+test('primary sales: ids, leaves, the draw proof and the three holder intents match the ledger (§144)', () => {
+  assert.equal(m.MARKET_PROGRAM.saleTickets, v.program_sale_tickets);
+  assert.equal(m.MARKET_PROGRAM.saleClaim, v.program_sale_claim);
+  assert.equal(m.MARKET_PROGRAM.saleMint, v.program_sale_mint);
+  const ticket = m.ticketId(OWNER, NONCE, 1);
+  assert.equal(hex(ticket), v.ticket_id);
+  assert.equal(hex(m.treasurySource(TOKEN, ticket)), v.treasury_source);
+  assert.equal(hex(m.drawLeaf(ticket, [7, 1])), v.draw_leaf);
+  assert.equal(hex(m.openLeaf(3, 11)), v.open_leaf);
+  const leaves = [m.drawLeaf(new Uint8Array(32).fill(0x01), [4]), m.drawLeaf(ticket, [7, 1]), m.drawLeaf(new Uint8Array(32).fill(0x03), [0, 2, 9])];
+  assert.equal(hex(m.merkleRoot(leaves)), v.draw_root);
+  const proof = m.merkleProof(leaves, 1);
+  assert.equal(proof.map((p) => `${hex(p.sibling)}${p.nodeIsRight ? 1 : 0}`).join(','), v.draw_proof);
+  assert.ok(m.verifyProof(leaves[1], proof, m.merkleRoot(leaves)), 'a proof verifies against its root');
+  assert.ok(!m.verifyProof(m.drawLeaf(ticket, [7, 2]), proof, m.merkleRoot(leaves)), 'and not for serials it did not draw');
+  const item = (serial) => ({ note: { ...change[0].note, asset: m.itemAsset(TOKEN, serial), amount: m.ITEM_UNIT }, enc: change[0].enc });
+  assert.equal(hex(m.buyTicketsIntent({ buyer: OWNER, collection: TOKEN, count: 3, nonce: NONCE, inputs, change })), v.buy_tickets);
+  assert.equal(hex(m.claimItemsIntent({ buyer: OWNER, collection: TOKEN, nonce: NONCE, k: 1, serials: [7, 1], proof, items: [item(7), item(1)], inputs, change })), v.claim_items);
+  assert.equal(hex(m.mintOpenIntent({ buyer: OWNER, collection: TOKEN, serial: 11, proof, item: item(11), nonce: NONCE, inputs, change })), v.mint_open);
+});

@@ -45,9 +45,12 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['launchCommit', 'launch-commit'],
   ['curveCreate', 'curve-create'],
   ['curveTrade', 'curve-trade'],
+  ['saleTickets', 'sale-tickets'],
+  ['saleClaim', 'sale-claim'],
+  ['saleMint', 'sale-mint'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -387,3 +390,79 @@ export function takeOfferIntent(o) {
 }
 
 export const redeemIntent = (o) => concatBytes(new Uint8Array([20]), o.holder, unhex(REDEEM_ITEM), o.collection, inputs(o.inputs));
+
+// ---------------------------------------------------------------------------
+// Primary sales (objectvm::sale, DECISIONS §144): lottery tickets bought in
+// ZEC.zy, a draw posted as a Merkle root, and claims proved against it.
+// ---------------------------------------------------------------------------
+
+/// One ticket's id — only its buyer can derive it.
+export const ticketId = (buyer, nonce, k) => id('objectvm.ticket.v1', buyer, nonce, u32be(k));
+/// Where the treasury's share of one sale payment is claimable.
+export const treasurySource = (collection, payment) => id('objectvm.sale-treasury.v1', collection, payment);
+/// One leaf of a posted draw: a ticket and the serials it won.
+export const drawLeaf = (ticket, serials) => leaf(te.encode('objectvm.draw-leaf.v1'), ticket, u32be(serials.length), ...serials.map((x) => u32be(x)));
+/// One leaf of the open-mint order.
+export const openLeaf = (position, serial) => leaf(te.encode('objectvm.open-leaf.v1'), u32be(position), u32be(serial));
+
+/// `zyn_vm::commit::hash_node`: SHA-256 over a node prefix and both children.
+const hashNode = (l, r) => sha256(concatBytes(new Uint8Array([0x01]), l, r));
+
+/// The same tree as `zyn_vm::commit::merkle_root`: an odd node is promoted.
+export function merkleRoot(leaves) {
+  if (!leaves.length) return new Uint8Array(32);
+  let level = leaves.slice();
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0; i + 1 < level.length; i += 2) next.push(hashNode(level[i], level[i + 1]));
+    if (level.length % 2) next.push(level[level.length - 1]);
+    level = next;
+  }
+  return level[0];
+}
+
+/// `zyn_vm::commit::merkle_proof`: the siblings from a leaf to the root.
+export function merkleProof(leaves, index) {
+  const path = [];
+  let level = leaves.slice();
+  let idx = index;
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0; i + 1 < level.length; i += 2) {
+      if (idx === i) path.push({ sibling: level[i + 1], nodeIsRight: false });
+      else if (idx === i + 1) path.push({ sibling: level[i], nodeIsRight: true });
+      next.push(hashNode(level[i], level[i + 1]));
+    }
+    if (level.length % 2) next.push(level[level.length - 1]);
+    idx = Math.floor(idx / 2);
+    level = next;
+  }
+  return path;
+}
+
+export function verifyProof(leafHash, path, root) {
+  let node = leafHash;
+  for (const s of path) node = s.nodeIsRight ? hashNode(s.sibling, node) : hashNode(node, s.sibling);
+  return hex(node) === hex(root);
+}
+
+function proofBytes(path) {
+  return concatBytes(u32be(path.length), ...path.flatMap((s) => [s.sibling, bool(s.nodeIsRight)]));
+}
+
+export const buyTicketsIntent = (o) => concatBytes(
+  new Uint8Array([TAG.buyTickets]), o.buyer, prog('saleTickets'), o.collection, u32bytes(o.count), o.nonce,
+  inputs(o.inputs), outputs(o.change),
+);
+
+export const claimItemsIntent = (o) => concatBytes(
+  new Uint8Array([TAG.claimItems]), o.buyer, prog('saleClaim'), o.collection, o.nonce, u32bytes(o.k),
+  u32be(o.serials.length), ...o.serials.map((x) => u32be(x)), proofBytes(o.proof),
+  outputs(o.items), inputs(o.inputs), outputs(o.change),
+);
+
+export const mintOpenIntent = (o) => concatBytes(
+  new Uint8Array([TAG.mintOpen]), o.buyer, prog('saleMint'), o.collection, u32bytes(o.serial), proofBytes(o.proof),
+  outputs([o.item]), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+

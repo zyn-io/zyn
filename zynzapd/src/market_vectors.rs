@@ -249,9 +249,82 @@ pub fn vectors() -> Vec<(&'static str, String)> {
                 buy: true,
                 amount_in: Fixed::whole(1),
                 min_out: objectvm::curve::LOT,
-                inputs: input,
+                inputs: input.clone(),
                 change: vec![change()],
                 nonce: NONCE,
+            }),
+        ),
+    ]
+    .into_iter()
+    .chain(sale_vectors(&input))
+    .collect()
+}
+
+/// Collection Z's lottery (DECISIONS §144): ids, leaves, a proof and the
+/// three intents a holder signs.
+fn sale_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
+    use objectvm::sale::{draw_leaf, open_leaf, ticket_id, treasury_source};
+    use zyn_vm::commit::{merkle_proof, merkle_root};
+    let enc = |op: &Op| hex(&ObjectVm::encode_intent(op));
+    let ticket = ticket_id(&OWNER, &NONCE, 1);
+    let leaves = vec![draw_leaf(&[0x01; 32], &[4]), draw_leaf(&ticket, &[7, 1]), draw_leaf(&[0x03; 32], &[0, 2, 9])];
+    let proof = merkle_proof(&leaves, 1);
+    let proof_hex: Vec<String> = proof.iter().map(|p| format!("{}{}", hex(&p.sibling), if p.node_is_right { "1" } else { "0" })).collect();
+    let item = |serial: u32| {
+        let mut o = change();
+        o.note.asset = market::item_asset(&TOKEN, serial);
+        o.note.amount = market::ITEM_UNIT;
+        o
+    };
+    vec![
+        ("program_sale_tickets", hex(&program::sale_tickets().0)),
+        ("program_sale_claim", hex(&program::sale_claim().0)),
+        ("program_sale_mint", hex(&program::sale_mint().0)),
+        ("ticket_id", hex(&ticket)),
+        ("treasury_source", hex(&treasury_source(&TOKEN, &ticket))),
+        ("draw_leaf", hex(&draw_leaf(&ticket, &[7, 1]))),
+        ("open_leaf", hex(&open_leaf(3, 11))),
+        ("draw_root", hex(&merkle_root(&leaves))),
+        ("draw_proof", proof_hex.join(",")),
+        (
+            "buy_tickets",
+            enc(&Op::BuyTickets {
+                buyer: OWNER,
+                program: program::sale_tickets(),
+                collection: TOKEN,
+                count: 3,
+                nonce: NONCE,
+                inputs: input.to_vec(),
+                change: vec![change()],
+            }),
+        ),
+        (
+            "claim_items",
+            enc(&Op::ClaimItems {
+                buyer: OWNER,
+                program: program::sale_claim(),
+                collection: TOKEN,
+                nonce: NONCE,
+                k: 1,
+                serials: vec![7, 1],
+                proof: proof.clone(),
+                items: vec![item(7), item(1)],
+                inputs: input.to_vec(),
+                change: vec![change()],
+            }),
+        ),
+        (
+            "mint_open",
+            enc(&Op::MintOpen {
+                buyer: OWNER,
+                program: program::sale_mint(),
+                collection: TOKEN,
+                serial: 11,
+                proof,
+                item: item(11),
+                nonce: NONCE,
+                inputs: input.to_vec(),
+                change: vec![change()],
             }),
         ),
     ]
