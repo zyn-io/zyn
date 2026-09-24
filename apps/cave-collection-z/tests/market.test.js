@@ -59,10 +59,12 @@ test('the store reads only public things itself, and nothing with an account in 
   // fetching them says nothing about the reader. Anything about the holder is
   // asked of their own Nap.
   const fetches = [...zstore.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1].trim());
-  assert.deepEqual(fetches.sort(), ["'/collection-z.json'", 'RPC'].sort());
+  // The index, the chain's book, and this site's own next page (in-place navigation).
+  assert.deepEqual(fetches.sort(), ["'/collection-z.json'", 'RPC', 'url.pathname'].sort());
+  assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   assert.match(zstore, /method: 'zyn_offers', params: \[\]/);
   assert.doesNotMatch(zstore, /127\.0\.0\.1:\d|:8096|:8099/);
-  assert.match(zstore, /LOCAL && params\.get\('nap'\)/, 'the Nap override is for localhost only');
+  assert.match(zstore, /LOCAL && initial\.get\('nap'\)/, 'the Nap override is for localhost only');
 });
 
 test('an item named in the address bar is validated before use', () => {

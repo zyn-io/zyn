@@ -108,6 +108,11 @@ export async function loadHoldings(config, identity, offers) {
 /// this device, so a restored phrase, a second device or a cleared browser
 /// starts the count where another left off — and the chain, which refuses a
 /// reused source, is the only place that knows. Returns the nonce that took.
+/// Every way the chain says "this nonce is already taken" — by a claim or
+/// order, by a resting listing, or by a coin (whose address is a hash of its
+/// creator and nonce). tests/nonce.test.mjs checks these against the VM.
+export const NONCE_TAKEN = /that nonce was already used|that nonce is in use|that token exists/;
+
 export async function submitFresh(config, identity, build, tries = 64) {
   for (let i = 0; i < tries; i++) {
     const nonce = nextNonce(config, identity);
@@ -115,9 +120,7 @@ export async function submitFresh(config, identity, build, tries = 64) {
       await submitIntent(config, identity, build(nonce));
       return nonce;
     } catch (e) {
-      // A coin's address is a hash of creator and nonce, so "that token
-      // exists" from this creator means the same thing: the nonce is taken.
-      if (!/nonce was already used|that token exists/.test(String(e.message))) throw e;
+      if (!NONCE_TAKEN.test(String(e.message))) throw e;
     }
   }
   throw new Error('Every nonce tried was already used; this wallet has traded from somewhere else a lot. Try again.');

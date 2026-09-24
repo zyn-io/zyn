@@ -9,14 +9,15 @@
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 
-const params = new URLSearchParams(location.search);
-const NETWORK = params.get('network') === 'testnet' ? 'testnet' : 'mainnet';
+const initial = new URLSearchParams(location.search);
+const NETWORK = initial.get('network') === 'testnet' ? 'testnet' : 'mainnet';
 const RPC = NETWORK === 'testnet' ? 'https://zyn-rpc.cavebro.win/object' : 'https://zyn-rpc.cavebro.win/';
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
-const NAP = (LOCAL && params.get('nap')) || NAP_WEB;
+const NAP = (LOCAL && initial.get('nap')) || NAP_WEB;
 const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e';
 const WAD = 10n ** 18n;
 const PAGE = document.body.dataset.page;
+
 
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -85,6 +86,9 @@ async function publicOffers() {
 
 let current = null;
 const walletListeners = new Set();
+/// Bumped on every in-place page change: a read or timer from the page you
+/// left must not write into the page you are on.
+let generation = 0;
 
 function canAskQuietly() {
   return !!current && (!current.provider.isNapWeb || current.provider.isOpen());
@@ -152,7 +156,9 @@ function wireWallet() {
 // The shelf: what this holder's Nap holds, and what they are owed.
 
 async function shelfPage() {
+  const gen = generation;
   const read = async () => {
+    if (gen !== generation) return;
     if (!current) return show('connect');
     if (!canAskQuietly()) return show('ready');
     show('looking');
@@ -193,7 +199,7 @@ async function shelfPage() {
     } catch (e) { say(e.message, true); } finally { el('collect').disabled = false; }
   };
   walletListeners.add(read);
-  show('connect');
+  if (current) read(); else show('connect');
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +219,9 @@ async function itemPage() {
 
   let offer = null;
   let mine = null;
+  const gen = generation;
   const read = async () => {
+    if (gen !== generation) return;
     say('');
     try {
       offer = (await publicOffers()).find((o) => o.collection === collection && o.serial === serial) || null;
@@ -261,7 +269,9 @@ async function itemPage() {
 // The market: every resting listing, public; bought through Nap.
 
 async function marketPage() {
+  const gen = generation;
   const read = async () => {
+    if (gen !== generation) return;
     show('looking');
     let offers;
     try { offers = await publicOffers(); } catch (e) { el('broke').textContent = e.message; return show('broke'); }
@@ -308,5 +318,47 @@ async function marketPage() {
   await read();
 }
 
-wireWallet();
-({ shelf: shelfPage, item: itemPage, market: marketPage })[PAGE]?.();
+// ---------------------------------------------------------------------------
+// Moving between the shelf, an item and the market without reloading, so the
+// connection to Nap — which for Nap in the browser is a window this page
+// opened — carries across. Any other link loads normally.
+
+const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage };
+const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market' };
+let params = new URLSearchParams(location.search);
+
+function start(page) {
+  generation += 1;
+  walletListeners.clear();
+  wireWallet();
+  PAGES[page]?.();
+}
+
+async function go(url, push = true) {
+  const html = await (await fetch(url.pathname, { credentials: 'omit' })).text();
+  const next = new DOMParser().parseFromString(html, 'text/html');
+  const page = next.body.dataset.page;
+  if (!PAGES[page]) { location.href = url.href; return; }
+  document.querySelector('main').replaceWith(document.adoptNode(next.querySelector('main')));
+  document.body.dataset.page = page;
+  document.title = next.title;
+  if (push) history.pushState({}, '', url.href);
+  params = new URLSearchParams(url.search);
+  window.scrollTo(0, 0);
+  start(page);
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href]');
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey || a.target) return;
+  const url = new URL(a.getAttribute('href'), location.href);
+  const path = url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`;
+  if (url.origin !== location.origin || !ROUTES[path]) return;
+  e.preventDefault();
+  url.pathname = path;
+  if (NETWORK === 'testnet' && !url.searchParams.has('network')) url.searchParams.set('network', 'testnet');
+  go(url).catch(() => { location.href = url.href; });
+});
+window.addEventListener('popstate', () => go(new URL(location.href), false).catch(() => location.reload()));
+
+start(PAGE);

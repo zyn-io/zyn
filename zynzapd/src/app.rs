@@ -1505,8 +1505,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     expires_at_epoch: u32::MAX as u64,
                     nonce,
                 }) {
-                    // "that token exists" from this creator is the same fact: a coin id is a hash of creator and nonce.
-            Err(e) if e.contains("nonce was already used") || e.contains("that token exists") => continue,
+                    Err(e) if nonce_taken(&e) => continue,
                     other => {
                         other?;
                         return Ok(json!({ "listed": true }));
@@ -2845,8 +2844,7 @@ fn submit_fresh(app: &App, host: &str, chain: u32, build: impl Fn([u8; 32]) -> o
     for _ in 0..64 {
         let nonce = next_market_nonce(app, chain)?;
         match crate::object_client::submit(host, chain, &app.key(), build(nonce)) {
-            // "that token exists" from this creator is the same fact: a coin id is a hash of creator and nonce.
-            Err(e) if e.contains("nonce was already used") || e.contains("that token exists") => continue,
+            Err(e) if nonce_taken(&e) => continue,
             other => {
                 other?;
                 return Ok(nonce);
@@ -2874,6 +2872,13 @@ fn content_proof(key: &SigningKey, nonce: &[u8; 32], token: &[u8; 32], hash: &[u
         "nonce": hex(nonce),
         "signature": hex(&key.sign(&message).to_bytes()),
     })
+}
+
+/// Every way the chain says "this nonce is already taken": by a claim or
+/// order, by a resting listing, or by a coin, whose id is a hash of creator
+/// and nonce. Nap in the browser keeps the same list (ledger.js NONCE_TAKEN).
+fn nonce_taken(e: &str) -> bool {
+    ["that nonce was already used", "that nonce is in use", "that token exists"].iter().any(|m| e.contains(m))
 }
 
 /// A launchpad token's 32 bytes of meta: the ticker in the first 8 (1–8
