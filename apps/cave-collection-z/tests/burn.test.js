@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import * as sol from '../solana-burn.js';
-import { onRequestPost } from '../functions/api/solana.js';
 
 // Burn tickets (§145). The layout below was accepted and finalized by Solana
 // devnet on 24 Sep 2026 (burn pezJdGmt…6BXUxSD, 3 tickets of the test token),
@@ -43,17 +42,12 @@ test("it burns only with Nap's memo and a real token program", () => {
   assert.throws(() => sol.burnMessage({ ...INPUT, tokenProgram: sol.MEMO_PROGRAM }), /token program/);
 });
 
-test('the relay forwards two reads and nothing that sends', async () => {
-  const call = (body) => onRequestPost({ request: new Request('https://cavebro.win/api/solana', { method: 'POST', body: JSON.stringify(body) }), env: {} });
-  for (const bad of [
-    { method: 'sendTransaction', params: ['AA=='] },
-    { method: 'getBalance', params: [INPUT.owner] },
-    { method: 'getTokenAccountsByOwner', params: [INPUT.owner, { programId: sol.TOKEN_PROGRAMS[0] }, {}] },
-  ]) {
-    assert.equal((await call(bad)).status, 400, bad.method);
-  }
-  const src = await readFile(new URL('../functions/api/solana.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(src, /sendTransaction|requestAirdrop/, 'nothing that sends is named');
+test('the page may reach Solana only where a burn config says, and only to read', async () => {
+  const headers = await readFile(new URL('../dist/_headers', import.meta.url), 'utf8');
+  assert.match(headers, /connect-src 'self' https:\/\/zyn-rpc\.cavebro\.win https:\/\/api\.devnet\.solana\.com/);
+  const zstore = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
+  const asked = [...zstore.matchAll(/solanaRead\(cfg, '(\w+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(asked, ['getLatestBlockhash', 'getTokenAccountsByOwner'], 'the page reads; the wallet sends');
 });
 
 test('no burn is offered on mainnet until the token exists', async () => {

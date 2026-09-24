@@ -341,7 +341,8 @@ async function chainSale() {
 }
 
 // Burn tickets (§145): the token, per network, and the two Solana reads the
-// burn needs, through this site's relay.
+// burn needs — asked of Solana directly, since its public RPC refuses
+// Cloudflare's workers.
 let burnConfig = null;
 async function burnToken() {
   burnConfig ??= fetch(NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json', { credentials: 'omit' })
@@ -351,12 +352,14 @@ async function burnToken() {
   return burnConfig;
 }
 
-async function solanaRead(cluster, method, params) {
-  const r = await fetch(`/api/solana?cluster=${cluster === 'devnet' ? 'devnet' : 'mainnet'}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, params }), credentials: 'omit',
+const SOLANA_PUBLIC = { mainnet: 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com' };
+async function solanaRead(cfg, method, params) {
+  const r = await fetch(cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), credentials: 'omit', referrerPolicy: 'no-referrer',
   });
-  const j = await r.json();
-  if (j.error) throw new Error(j.error);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error || !('result' in j)) throw new Error('Solana did not answer; try again shortly.');
   return j.result;
 }
 
@@ -380,10 +383,10 @@ async function burnForTickets(cfg, tickets, report) {
   const account = accounts?.[0];
   if (!account) throw new Error(`${wallet.name} shared no account.`);
   const amount = sol.burnAmount(tickets, cfg.per_ticket);
-  const held = await solanaRead(cfg.cluster, 'getTokenAccountsByOwner', [account.address, { mint: cfg.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+  const held = await solanaRead(cfg, 'getTokenAccountsByOwner', [account.address, { mint: cfg.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
   const ta = (held?.value || []).find((a) => BigInt(a.account?.data?.parsed?.info?.tokenAmount?.amount || '0') >= amount);
   if (!ta) throw new Error(`That wallet holds less than ${units(amount, cfg.decimals)} ${cfg.symbol}.`);
-  const { value } = await solanaRead(cfg.cluster, 'getLatestBlockhash', [{ commitment: 'finalized' }]);
+  const { value } = await solanaRead(cfg, 'getLatestBlockhash', [{ commitment: 'finalized' }]);
   const message = sol.burnMessage({
     owner: account.address, tokenAccount: ta.pubkey, mint: cfg.mint, tokenProgram: ta.account.owner,
     amount, decimals: cfg.decimals, memo, blockhash: value.blockhash,

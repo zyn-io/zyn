@@ -60,9 +60,10 @@ test('the store reads only public things itself, and nothing with an account in 
   // asked of their own Nap.
   const fetches = [...zstore.matchAll(/fetch\(([^,)]+)/g)].map((m) => m[1].trim());
   // The index, the chain's book, this site's own next page (in-place
-  // navigation), the burn token's config, and the Solana relay — which carries
-  // a Solana address the holder is about to make public by burning (§145).
-  assert.deepEqual([...new Set(fetches)].sort(), ["'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", '`/api/solana?cluster=${cluster === \'devnet\' ? \'devnet\' : \'mainnet\'}`'].sort());
+  // navigation), the burn token's config, and Solana's RPC — asked for a
+  // blockhash and the token accounts of a Solana address the holder is about
+  // to make public by burning (§145).
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   assert.match(zstore, /method: 'zyn_offers', params: \[\]/);
   assert.match(zstore, /method: 'zyn_market', params: \[\]/, 'the sale is read from the public market');

@@ -140,6 +140,17 @@ for (const page of pages) {
   }
 }
 
+// The Solana endpoints a burn reads its blockhash and token accounts from
+// (§145): each burn config's own `rpc`, or the cluster's public endpoint.
+// Solana's public RPC refuses Cloudflare's workers, so the page asks it
+// directly — and the policy names exactly those origins.
+const SOLANA_PUBLIC = { mainnet: 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com' };
+const solanaOrigins = new Set();
+for (const f of ['burn.json', 'burn-testnet.json']) {
+  const c = await readFile(new URL(f, root), 'utf8').then(JSON.parse).catch(() => null);
+  if (c) solanaOrigins.add(new URL(c.rpc || SOLANA_PUBLIC[c.cluster] || SOLANA_PUBLIC.mainnet).origin);
+}
+
 const csp = [
   "default-src 'none'",
   // Extensions announce Nap Connect with a script of their own.
@@ -154,7 +165,7 @@ const csp = [
   // to through an injected object, not over the network, so no origin needs to
   // be named here for it.
   // Its own Functions, and the chain's public RPC for the order book.
-  "connect-src 'self' https://zyn-rpc.cavebro.win",
+  `connect-src 'self' https://zyn-rpc.cavebro.win${[...solanaOrigins].map((o) => ` ${o}`).join('')}`,
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",
