@@ -2641,7 +2641,7 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 
 **SOL (Solana devnet ↔ testnet 212)** — `zyn-sol-bridge.service` on Hetzner, env `/etc/zyn/zyn-sol-bridge.env` plus the node's own env for the token. Vault `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` (FROST 2-of-3; public package `/var/zyn/solana-shares/public.bin`; custodians `127.0.0.1:8110/8111/8112`), durable nonce `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H`. State in `/var/lib/zyn/sol-bridge` (`deposit-cursor`, `inflight.json` — a damaged `inflight.json` stops the bridge on purpose: it is the record that prevents paying twice). `zyn-sol-bridge status` shows the vault balance against what Zyn has issued. Top up the vault's lamports for rent/fees with a plain transfer (no memo = credits nobody).
 
-**ETH (Sepolia ↔ testnet 212)** — deploy once the gas payer has test ETH:
+**ETH (Sepolia ↔ testnet 212)** — deployed 24 Sep 2026: `ZynSigners` `0x95cb60b0e6FE122ea0AA21725E83e3ef00AEfa41` (2 of owners `0x395b…fbb2`, `0x096E…F6e3`, `0x4966…381e`), `ZynVault` `0xe17bb5943b34133f6a8a5D221BE4eD9493B3ef27` (asset 1 = native ETH, admin and gas payer `0xfFb1…4E89`). `zyn-eth-bridge.service` on Hetzner, keys in `/etc/zyn/eth-keys/` (0600). How it was deployed:
 
 ```sh
 # keys: scratchpad eth-sepolia/{owner1,owner2,owner3,payer}.key (0600)

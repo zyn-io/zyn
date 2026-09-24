@@ -50,6 +50,12 @@
           "vault": "7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA",
           "rpc": "https://api.devnet.solana.com",
           "explorer": "https://explorer.solana.com/tx/{tx}?cluster=devnet"
+        },
+        "eth": {
+          "chainId": 11155111,
+          "vault": "0xe17bb5943b34133f6a8a5D221BE4eD9493B3ef27",
+          "assetId": 1,
+          "explorer": "https://sepolia.etherscan.io/tx/{tx}"
         }
       }
     }
