@@ -329,3 +329,25 @@ fn burn_tickets_join_the_draw_and_only_their_burner_claims_them() {
     c.ok(op);
     assert_eq!(c.vm.market.sales[&CAVE].phase, Phase::Drawn);
 }
+
+/// A sale that closed with no tickets drew nothing and owes nobody, so it may
+/// be set again; once a ticket exists, it may not.
+#[test]
+fn an_empty_closed_sale_can_be_set_again_and_a_sold_one_cannot() {
+    let mut c = Chain::new();
+    c.mint(ALICE, 1);
+    c.ok(Op::RegisterCollection { program: program::register_collection(), asset: CAVE, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 12 });
+    let set = || Op::SetSale { program: program::sale_open(), collection: CAVE, ticket_price: TICKET, claim_price: CLAIM, open_price: OPEN, treasury_bps: 1_000 };
+    c.ok(set());
+    c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 10, zcash_hash: [7; 32] });
+    assert_eq!(c.vm.market.sales[&CAVE].phase, Phase::Closed);
+    c.ok(set());
+    assert_eq!(c.vm.market.sales[&CAVE].phase, Phase::Open, "set again");
+    assert_eq!(c.vm.market.sales[&CAVE].close_zcash_height, 0);
+    let (_, op) = c.buy(ALICE, 1);
+    c.ok(op);
+    assert!(c.refused(set()).contains("prices are fixed"));
+    c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 11, zcash_hash: [8; 32] });
+    assert!(c.refused(set()).contains("prices are fixed"), "not after a close with tickets in it");
+}
+

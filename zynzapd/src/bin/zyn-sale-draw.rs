@@ -302,6 +302,9 @@ fn draw(c: &Ctx) -> Result<(), String> {
     if tickets.len() as u64 != sale["tickets"].as_u64().unwrap_or(0) {
         return Err("the ticket list is not the whole sale".into());
     }
+    if tickets.is_empty() {
+        return Err("the sale closed with no tickets, so there is nothing to draw — `open` sets it again, or `open-mint` sells the collection in order".into());
+    }
     let d = sale_draw::run(&c.policy, &manifest, &tickets, &resolved, &reveal, announcement.announced_at_drand_round)?;
     let taken = minted(c)?;
     let blocked: Vec<u32> = d.won.iter().flat_map(|(_, s)| s.iter().copied()).filter(|s| taken.contains(s)).collect();

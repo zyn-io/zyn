@@ -397,7 +397,11 @@ impl ObjectVm {
         }
         let mut voucher_cap = 0;
         if let Some(s) = self.market.sales.get(collection) {
-            if s.tickets > 0 || s.phase != Phase::Open {
+            // Before its first ticket a sale may be re-priced. After a close
+            // with none, nothing can be drawn and nobody holds anything, so it
+            // may be set again rather than stay closed for good.
+            let untouched = s.tickets == 0 && (s.phase == Phase::Open || s.phase == Phase::Closed);
+            if !untouched {
                 return Err("the sale has started; its prices are fixed");
             }
             voucher_cap = s.voucher_cap;
