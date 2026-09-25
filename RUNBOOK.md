@@ -1359,8 +1359,15 @@ Three faces of the wallet, one core (`zynzapd::app`, DECISIONS §26). The page i
 file in all of them (`zynzapd/ui/index.html`); its `api()` picks the
 transport: in-process `invoke` under Tauri, loopback HTTP otherwise.
 
-**Desktop and mobile — `apps/nap`** (Tauri 2, one project for macOS,
-Windows, Linux, iOS, Android). Keys live in the platform app-data dir
+**Phones — `apps/nap-mobile`** (since 25 Sep 2026, DECISIONS §149). The
+iOS and Android app is the web wallet in a Tauri 2 shell, like the extension
+(`apps/nap-web` built with `--mode mobile`); the mobile plan below for
+`apps/nap` is superseded. Build, run, release and store listing:
+`apps/nap-mobile/README.md` and `apps/nap-mobile/store/LISTING.md`. Nap's
+server answers the app's origins through `apps/nap-web/functions/_middleware.js`.
+
+**Desktop — `apps/nap`** (Tauri 2, one project for macOS,
+Windows, Linux; its iOS/Android notes below are historical). Keys live in the platform app-data dir
 (`~/Library/Application Support/io.infinityteam.napwallet` on macOS); the same
 `ZYN_*` env overrides apply when launched from a shell.
 

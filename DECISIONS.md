@@ -6479,3 +6479,17 @@ itself."
 | 148.5 | **Desktop Nap is no longer behind the extension.** Its own UI stays; whether the extension should also reach it (when it runs) is open | ⏳ |
 | 148.6 | **Stores:** Chrome Web Store and Firefox Add-ons, from `apps/extension/release/`. Firefox gets the source package (rebuilds byte for byte) and declares `financialAndPaymentInfo` — the signed transactions that leave the device | ✅ |
 
+## §149 — Nap on phones is the web wallet in a native shell (25 Sep 2026)
+
+"Also prepare for the nap mobile app." The desktop project (`apps/nap`) wraps
+the Rust wallet core and had a phone plan that stopped at halo2 on Android;
+the web wallet already runs Zcash in WebAssembly and is laid out for phones.
+
+| # | Decision | |
+|---|---|---|
+| 149.1 | **One wallet codebase for web, extension and phones.** `apps/nap-mobile` is a Tauri 2 shell with no commands or plugins around `apps/nap-web` built with `--mode mobile`; keys are made and sealed on the phone | ✅ |
+| 149.2 | **Nap's server answers the app's origins only** (`tauri://localhost`, `http(s)://tauri.localhost`) via a Pages middleware; other cross-origin pages still get no readable reply | 🔒 |
+| 149.3 | **Identifier `io.infinityteam.napwallet`** on both stores (the one the desktop app already uses); iPhone-only and iOS 15+ for the first version; Android native code aligned for 16 KB pages | ✅ |
+| 149.4 | **Publishing needs the holder:** Apple Developer Program as an organization (3.1.5), Google Play account (12 testers × 14 days if personal), the upload key (`scripts/make-upload-key.sh`) | ⏳ |
+| 149.5 | **Next, before review:** biometric unlock through Keychain/Keystore (4.2), and a decision on whether iOS ships Nap Market (3.1.5(iii)) | ⏳ |
+

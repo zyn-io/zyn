@@ -10,14 +10,14 @@ const devProxy = () => {
   return Object.keys(proxy).length ? { proxy } : {};
 };
 
-// `vite build --mode extension` builds the same pages for the browser
-// extension (apps/extension): the endpoints stay on Nap's server
+// `vite build --mode extension` (or `--mode mobile`) builds the same pages
+// for the browser extension (apps/extension) or the phone app (apps/nap-mobile): the endpoints stay on Nap's server
 // (`VITE_NAP_API` in .env.extension), so each page's policy admits that
 // origin too, and the web app's install manifest does not apply.
 const extensionPages = (mode) => ({
   name: 'nap-extension-pages',
   transformIndexHtml(html) {
-    if (mode !== 'extension') return html;
+    if (mode !== 'extension' && mode !== 'mobile') return html;
     const api = new URL(process.env.VITE_NAP_API || 'https://nap.cavebro.win').origin;
     return html
       .replace(/connect-src 'self'/, `connect-src 'self' ${api}`)

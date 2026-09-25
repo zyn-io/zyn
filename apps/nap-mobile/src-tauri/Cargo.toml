@@ -1,0 +1,30 @@
+[package]
+name = "nap-mobile"
+version = "0.1.0"
+description = "Nap Wallet for iOS and Android — the wallet's own pages in a native shell"
+edition = "2021"
+
+[lib]
+name = "nap_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+# Its own workspace: the phone shell shares no Rust with the rest of the repo.
+[workspace]
+
+# The shell is Tauri and nothing else; its debug symbols made a 235 MB debug
+# APK that an emulator could not hold.
+[profile.dev]
+debug = false
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

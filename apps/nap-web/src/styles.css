@@ -129,3 +129,9 @@
    has no viewport to speak of: give it a phone's width, and the phone layout
    follows. */
 html.in-popup, html.in-popup body { width: 400px; min-height: 580px; }
+
+/* The phone app (apps/nap-mobile) runs edge to edge: keep content clear of the
+   notch, the status bar and the home indicator. */
+html.in-app body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+/* What scrolls up passes under a solid strip, not under the clock. */
+html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; height: env(safe-area-inset-top); background: #f8f2e4; z-index: 2147483000; pointer-events: none; }

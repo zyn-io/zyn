@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:extension": "vite build --mode extension --outDir dist-extension",
+    "build:mobile": "vite build --mode mobile --outDir dist-mobile",
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs"
   },

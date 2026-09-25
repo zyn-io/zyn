@@ -7,10 +7,17 @@
 // same rule applies against that origin instead. Keys never leave the page's
 // own origin either way; only chain reads and signed frames go out.
 
-/// Set only by the extension build (`vite build --mode extension`).
+// The phone app (apps/nap-mobile) is packaged the same way, from
+// `vite build --mode mobile`.
+
+/// Set only by the packaged builds (`.env.extension`, `.env.mobile`).
 const EXT_API = import.meta.env.VITE_NAP_API || '';
 
-export const IN_EXTENSION = !!EXT_API;
+/// Which package this build is for: '' on the web, 'extension' or 'mobile'.
+export const SHELL = import.meta.env.VITE_NAP_SHELL || '';
+export const PACKAGED = !!EXT_API;
+export const IN_EXTENSION = SHELL === 'extension';
+export const IN_APP = SHELL === 'mobile';
 export const API_ORIGIN = EXT_API ? new URL(EXT_API).origin : location.origin;
 
 /// A configured endpoint, checked to be a plain path on API_ORIGIN. On the web
@@ -21,7 +28,7 @@ export function endpoint(value, key) {
   if (!value || url.origin !== API_ORIGIN || url.username || url.password || url.search || url.hash) {
     throw new Error(`${key} must be a path on ${API_ORIGIN}`);
   }
-  return IN_EXTENSION ? url.origin + url.pathname : url.pathname;
+  return PACKAGED ? url.origin + url.pathname : url.pathname;
 }
 
 /// The extension's toolbar popup (opened as `index.html?popup=1`): narrow, and
@@ -33,3 +40,7 @@ export function openPage(path) {
   if (IN_POPUP) window.open(path, '_blank');
   else location.href = path;
 }
+
+// The phone app draws under the status bar and home indicator; the pages pad
+// themselves by the safe area there (styles.css, `html.in-app`).
+if (IN_APP) document.documentElement.classList.add('in-app');

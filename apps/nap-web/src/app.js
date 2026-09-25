@@ -7,7 +7,7 @@ import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveI
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
-import { endpoint, IN_POPUP, openPage } from './origin.js';
+import { endpoint, IN_APP, IN_EXTENSION, IN_POPUP, openPage } from './origin.js';
 import './styles.css';
 
 const root = document.querySelector('#app');
@@ -190,20 +190,25 @@ function bindKept() {
   };
 }
 
+// Where this Nap is: the words the welcome uses for it.
+const WHERE = IN_APP ? { eyebrow: 'NAP WALLET / ON YOUR PHONE', closing: 'Closing the app' }
+  : IN_EXTENSION ? { eyebrow: 'NAP WALLET / IN YOUR TOOLBAR', closing: 'Closing Nap' }
+  : { eyebrow: 'BROWSER WALLET / NO INSTALL', closing: 'Closing this tab' };
+
 function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'restore')) {
   if (mode !== 'create') generatedWords = '';
   shell(`<main class="onboard">
     <section class="intro">
-      <p class="eyebrow">BROWSER WALLET / NO INSTALL</p>
+      <p class="eyebrow">${WHERE.eyebrow}</p>
       <h1>Your pocket,<br><em>between blocks.</em></h1>
-      <p class="lede">Receive the Nap Mole in person, then carry the same account into desktop Nap with one recovery phrase.</p>
+      <p class="lede">Receive the Nap Mole in person, then open the same account wherever Nap runs with one recovery phrase.</p>
       <div class="promise"><span>01</span><p><b>No account server.</b><br>Your key is derived and used on this device.</p></div>
-      <div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>Closing this tab forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>
+      <div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>${WHERE.closing} forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>
     </section>
     <section class="entry panel">
       ${mode === 'kept' ? '' : `<div class="tabs"><button data-mode="restore" class="${mode === 'restore' ? 'active' : ''}">Restore</button><button data-mode="create" class="${mode === 'create' ? 'active' : ''}">Create new</button></div>`}
       ${mode === 'kept' ? unlockForm() : (mode === 'restore' ? restoreForm() : createForm())}
-      <div class="scope"><b>Holds</b><span>Shielded ZEC, and Zyn tokens and items. The same phrase opens desktop Nap.</span></div>
+      <div class="scope"><b>Holds</b><span>Shielded ZEC, and Zyn tokens and items. The same phrase opens Nap on the web, in the browser extension and on your phone.</span></div>
     </section>
   </main>`);
   root.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => onboarding(b.dataset.mode));
@@ -314,7 +319,7 @@ function wallet(message = '') {
       <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button> <button class="quiet" id="deposit-from-zec">Pay it from my ZEC →</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
       ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Take ZEC out</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">The chain records only a commitment to the address. The vault pays it once two custodians sign; the Zcash network fee comes out of the amount, and any bridge fee is added on top.</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
     </section>
-  </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><p class="kicker">RECOVERY</p><h2>The phrase is the wallet.</h2><p>Nap does not store it in this browser. Restore this same phrase, passphrase and account index in browser or desktop Nap to recover <code>${account}</code>.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
+  </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><p class="kicker">RECOVERY</p><h2>The phrase is the wallet.</h2><p>Nap does not store it in this browser. Restore this same phrase, passphrase and account index in any Nap to recover <code>${account}</code>.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
   QRCode.toCanvas(root.querySelector('#qr'), account, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
   void loadDepositAddress(identity);
   root.querySelector('#withdraw-form')?.addEventListener('submit', async (e) => {
