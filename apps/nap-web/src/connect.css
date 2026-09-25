@@ -27,3 +27,11 @@
 @keyframes cn-turn { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cn-spin { animation: none; } }
 .cn-picture { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; border: 1px solid #ffffff2d; }
+
+/* Reject and Not now are real buttons, as easy to hit as Approve. */
+.cn form .primary { margin-top: 16px; }
+.cn .primary { min-height: 52px; align-items: center; }
+.cn .quiet { border: 1px solid #ffffff33; border-radius: 9px; padding: 0 16px; min-height: 48px; text-align: center; color: #f8f2e4; }
+.cn .quiet:hover { border-color: #ffffff70; }
+.cn > .quiet { justify-self: start; }
+.cn .actions .quiet { width: 100%; min-height: 52px; }

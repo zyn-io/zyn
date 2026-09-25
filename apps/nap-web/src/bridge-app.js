@@ -16,6 +16,7 @@ import * as ledger from './ledger.js';
 import * as mk from './market.js';
 import * as sol from './solana.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
+import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import './styles.css';
 import './market.css';
 import './bridge.css';
@@ -26,8 +27,13 @@ const NETWORK_KEY = 'nap.network';
 let config;
 let identity = null;
 let view = 'in';
+/// Where to go back to once the wallet opens.
+let returnTo = 'in';
 let busy = false;
-let state = { epoch: 0n, bridged: [], balances: new Map(), held: [], bps: 0n, waiting: [] };
+const emptyState = () => ({ epoch: 0n, bridged: [], balances: new Map(), held: [], bps: 0n, waiting: [] });
+let state = emptyState();
+/// Bumped on a network switch, so an answer from the old chain is dropped.
+let generation = 0;
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = (sel) => root.querySelector(sel);
@@ -65,9 +71,36 @@ async function loadConfig() {
   const networks = Array.isArray(value.networks) && value.networks.length ? value.networks : [{ id: 'default', ...value }];
   const wanted = read(NETWORK_KEY);
   const chosen = networks.find((n) => n.id === wanted) || networks[0];
+  return checkedNetwork(chosen, networks);
+}
+
+function checkedNetwork(chosen, networks) {
   const url = new URL(chosen.rpcUrl, location.origin);
   if (url.origin !== location.origin) throw new Error('rpcUrl must be a same-origin path');
   return { ...chosen, rpcUrl: url.pathname, networks, bridges: bridgesOf(chosen) };
+}
+
+/// The first network that bridges anything, for the "not here" screen.
+const bridgingNetwork = () => (config.networks || []).find((n) => n.id !== config.id && bridgesOf(n).length);
+
+/// Move to another chain, the wallet's way: the key stays open — the same
+/// words are the same account on either chain — and every answer from the old
+/// chain goes, including any still in flight.
+function switchNetwork(id) {
+  const next = config.networks.find((n) => n.id === id);
+  if (!next || next.id === config.id) return true;
+  if (busy) { notice('One moment — a deposit or exit is still in progress. Switch networks once it settles.'); return false; }
+  let checked;
+  try { checked = checkedNetwork(next, config.networks); } catch (e) { notice(e.message, true); return false; }
+  rememberNetwork(checked.id);
+  config = checked;
+  generation++;
+  state = emptyState();
+  frame();
+  render();
+  notice(`On ${config.network} now. Reading the chain…`);
+  refresh();
+  return true;
 }
 
 const keptWallet = () => { try { return JSON.parse(read(KEPT_KEY) || 'null'); } catch { return null; } };
@@ -76,20 +109,22 @@ const call = (method, fields = {}) => ledger.call(config, method, fields);
 // ---------------------------------------------------------------------------
 // Exits waiting to be revealed: kept on this device until the node files them.
 
-const exitsKey = () => `nap.bridge.exits.${config.chain}`;
-const pendingExits = () => { try { return JSON.parse(read(exitsKey()) || '[]'); } catch { return []; } };
-const savePendingExits = (v) => write(exitsKey(), JSON.stringify(v));
+// Each takes the network it is about, so a switch in the middle of a reveal
+// cannot file one chain's exits under the other's.
+const exitsKey = (cfg = config) => `nap.bridge.exits.${cfg.chain}`;
+const pendingExits = (cfg = config) => { try { return JSON.parse(read(exitsKey(cfg)) || '[]'); } catch { return []; } };
+const savePendingExits = (v, cfg = config) => write(exitsKey(cfg), JSON.stringify(v));
 
-async function revealExits() {
+async function revealExits(cfg = config) {
   const left = [];
-  for (const x of pendingExits()) {
+  for (const x of pendingExits(cfg)) {
     try {
-      await call('zyn_bridgeReveal', { asset: x.asset, address: x.address, salt: x.salt });
+      await ledger.call(cfg, 'zyn_bridgeReveal', { asset: x.asset, address: x.address, salt: x.salt });
     } catch (e) {
       if (!/no unpaid exit/.test(e.message)) left.push(x);
     }
   }
-  savePendingExits(left);
+  savePendingExits(left, cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,25 +139,35 @@ function editing() {
 }
 
 async function refresh(quiet = false, timed = false) {
+  const gen = generation;
+  // A switch mid-flight leaves this read behind: nothing more is asked of,
+  // claimed on or shown from the old chain.
+  const stale = () => gen !== generation;
   try {
     const status = await call('zyn_status');
+    if (stale()) return;
     const epoch = checkedEpoch(status, config.chain);
     const [bridged, market] = await Promise.all([ledger.loadBridged(config), call('zyn_market').catch(() => ({}))]);
+    if (stale()) return;
     const live = new Set(bridged.map((b) => b.asset));
     const next = { ...state, epoch, bridged, bps: BigInt(Number(market?.fees?.bridge_bps) || 0) };
     for (const b of config.bridges) b.live = live.has(b.asset);
     if (identity) {
       const me = identity;
       let waiting = await ledger.loadWaiting(config, me, bridged).catch(() => []);
+      if (stale()) return;
       if (waiting.length && identity === me) {
         notice(`Claiming ${waiting.length} deposit${waiting.length > 1 ? 's' : ''} that arrived…`);
         await ledger.claimWaiting(config, me);
         waiting = [];
       }
+      if (stale()) return;
       const published = await call('zyn_published');
+      if (stale()) return;
       const { held, balances } = scan(published, { secret: me.viewing, nkey: me.nullifier, owner: me.account });
       Object.assign(next, { held, balances, waiting });
       await revealExits();
+      if (stale()) return;
     }
     state = next;
     if (timed && editing()) {
@@ -133,6 +178,7 @@ async function refresh(quiet = false, timed = false) {
     }
     if (!quiet) notice(`Up to date at epoch ${epoch}.`);
   } catch (e) {
+    if (stale()) return;
     notice(e.message === 'Failed to fetch' ? 'The chain is not answering. Nothing was sent.' : e.message, true);
   }
 }
@@ -222,11 +268,12 @@ function shell(content) {
   <header class="mk-header">
     <a class="brand" href="/" aria-label="Nap Wallet"><img src="/nap-mark.png" alt=""><span>Nap</span><em>Bridge</em></a>
     <div class="mk-head-right">
-      <span class="network"><i></i>${esc(config.network)} · chain ${config.chain}</span>
+      ${networkPill(config)}
       <a class="mk-link" href="/">Wallet →</a>
     </div>
   </header>${content}
   <footer><span>A deposit carries a code, not your account. An exit's address is shown only to the bridge that pays it.</span><span>Nap Bridge · Zyn</span></footer>`;
+  bindNetworkPick(root, config, switchNetwork);
 }
 
 function frame() {
@@ -242,7 +289,7 @@ function frame() {
     </section>
   </main>`);
   $('#lock')?.addEventListener('click', () => { forgetIdentity(identity); identity = null; frame(); render(); });
-  $('#open-wallet')?.addEventListener('click', () => { view = 'wallet'; render(); });
+  $('#open-wallet')?.addEventListener('click', () => { if (view !== 'wallet') returnTo = view; view = 'wallet'; render(); });
   root.querySelectorAll('#tabs [data-view]').forEach((b) => { b.onclick = () => { view = b.dataset.view; render(); }; });
 }
 
@@ -255,7 +302,7 @@ function notice(text, bad = false) {
 }
 
 function heading(eyebrow, title, lede) {
-  return `<div class="topline"><div><p class="eyebrow">${esc(eyebrow)}</p><h1 class="mk-h1">${esc(title)}</h1></div><button class="refresh" id="refresh">↻ Refresh</button></div>${lede ? `<p class="br-lede">${esc(lede)}</p>` : ''}`;
+  return `<div class="topline"><div><p class="eyebrow">${esc(eyebrow)}</p><h1 class="mk-h1">${esc(title)}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>${lede ? `<p class="br-lede">${esc(lede)}</p>` : ''}`;
 }
 
 function bindRefresh() {
@@ -266,24 +313,35 @@ function balanceOf(b) {
   return state.balances.get(b.asset) || 0n;
 }
 
+/// No bridge on this network: say where there is one, and go there in one tap.
+function renderNone() {
+  const there = bridgingNetwork();
+  $('#view').innerHTML = `${heading('BRIDGES', 'Not on this network yet.', there
+    ? `SOL and ETH bridge on ${there.network} today (Solana devnet, Ethereum Sepolia). Testnet coins are for trying it out; they are worth nothing.`
+    : 'No network on this deployment bridges SOL or ETH yet.')}
+    ${there ? `<div class="br-none"><button class="primary mk-act" id="switch-bridge" data-network="${esc(there.id)}">Switch to ${esc(there.network)} <span>→</span></button><p class="mk-fine">The wallet follows: it opens on ${esc(there.network)} too, and you can switch back from the header.</p></div>` : ''}`;
+  $('#switch-bridge')?.addEventListener('click', (e) => switchNetwork(e.currentTarget.dataset.network));
+}
+
 function renderIn() {
-  if (!config.bridges.length) {
-    $('#view').innerHTML = `${heading('BRIDGES', 'Not on this network yet.', 'SOL and ETH bridge on the testnet today (Solana devnet, Ethereum Sepolia). Switch networks in the wallet to try them.')}`;
-    return;
-  }
+  if (!config.bridges.length) { renderNone(); return; }
   $('#view').innerHTML = `${heading('BRING IN', 'SOL and ETH, private on Zyn.', 'Send from your own Solana or Ethereum wallet. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
     <div class="br-cards">${config.bridges.map((b) => `<section class="mk-card br-card" data-bridge="${b.key}">
       <p class="eyebrow">${esc(b.symbol)} · ${esc(b.network)}</p>
       <h3>${esc(b.zy)} <span>${identity ? `you hold ${fmt(balanceOf(b), b.decimals)}` : ''}</span></h3>
-      ${b.live ? '' : '<p class="br-say error">This network has not registered it yet.</p>'}
+      ${b.live === false ? '<p class="br-say error">This network has not registered it yet.</p>' : ''}
       <label class="mk-field"><span>Amount of ${esc(b.symbol)}</span><input class="amt" inputmode="decimal" autocomplete="off" placeholder="0.05"></label>
-      <button class="primary go" ${identity && b.live ? '' : 'disabled'}>Deposit from a${b.key === 'eth' ? 'n Ethereum' : ' Solana'} wallet <span>→</span></button>
+      ${identity
+    ? `<button class="primary go" ${b.live ? '' : 'disabled'}>Deposit from a${b.key === 'eth' ? 'n Ethereum' : ' Solana'} wallet <span>→</span></button>`
+    : '<button class="primary open-first" type="button">Open your wallet to deposit <span>→</span></button>'}
       <p class="br-say say" role="status"></p>
       <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>
     </section>`).join('')}</div>`;
   root.querySelectorAll('[data-bridge]').forEach((card) => {
     const b = config.bridges.find((x) => x.key === card.dataset.bridge);
     const say = (t, bad = false) => { const el = card.querySelector('.say'); el.textContent = t; el.classList.toggle('error', bad); };
+    card.querySelector('.open-first')?.addEventListener('click', () => { returnTo = 'in'; view = 'wallet'; render(); });
+    if (!card.querySelector('.go')) return;
     card.querySelector('.go').onclick = async () => {
       if (busy || !identity) return;
       busy = true;
@@ -302,8 +360,10 @@ function renderIn() {
 
 function renderOut() {
   const live = config.bridges.filter((b) => b.live);
+  if (!config.bridges.length) { renderNone(); return; }
   if (!identity) {
-    $('#view').innerHTML = `${heading('SEND OUT', 'Open your wallet to send out.', '')}`;
+    $('#view').innerHTML = `${heading('SEND OUT', 'Open your wallet to send out.', 'Sending SOL.zy or ETH.zy back spends notes only your key can open.')}<div class="br-none"><button class="primary mk-act" id="out-open" type="button">Open wallet <span>→</span></button></div>`;
+    $('#out-open').onclick = () => { returnTo = 'out'; view = 'wallet'; render(); };
     return;
   }
   $('#view').innerHTML = `${heading('SEND OUT', 'Back to Solana or Ethereum.', 'The chain records only a commitment to where it goes. The address is then shown to the bridge that pays it, and to nobody else.')}
@@ -355,7 +415,7 @@ function begin(id) {
     return;
   }
   identity = id;
-  view = 'in';
+  view = returnTo;
   frame();
   render();
   refresh();
@@ -363,9 +423,9 @@ function begin(id) {
 
 function render() {
   if (!$('#view')) return;
-  $('#epoch').textContent = `epoch ${state.epoch}`;
+  $('#epoch').textContent = state.epoch ? `epoch ${state.epoch}` : 'epoch —';
   root.querySelectorAll('#tabs [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  if (view === 'wallet' && identity) view = 'in';
+  if (view === 'wallet' && identity) view = returnTo;
   ({ in: renderIn, out: renderOut, wallet: renderWallet })[view]();
   bindRefresh();
 }

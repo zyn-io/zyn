@@ -265,6 +265,9 @@ h1 em { color: var(--zec); font-style: normal; text-shadow: 6px 6px 0 rgba(244,1
   width: min(39vw, 610px);
   aspect-ratio: 1;
   opacity: .68;
+  /* The rings turn inside this box; clip them here so a rotated ring never
+     widens the page. */
+  overflow: hidden;
 }
 
 .portal-ring, .portal-core { position: absolute; inset: 0; border-radius: 48% 52% 45% 55%; }
@@ -317,7 +320,8 @@ h1 em { color: var(--zec); font-style: normal; text-shadow: 6px 6px 0 rgba(244,1
 .tip-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
 .tip-heading span { color: var(--muted); font-family: var(--pixel); font-size: 7px; text-transform: uppercase; letter-spacing: .11em; }
 .tip-heading button { border: 0; padding: 0; color: var(--state); background: none; font-family: var(--pixel); font-size: 7px; text-transform: uppercase; cursor: pointer; }
-.tip-card code { display: block; overflow: hidden; margin-top: 12px; color: #d7d8d2; font: 500 clamp(10px, 1.05vw, 13px)/1.4 "DM Sans", sans-serif; letter-spacing: .055em; white-space: nowrap; text-overflow: ellipsis; }
+/* width 0 / min-width 100%: fills the card but never widens it; long hashes ellipsize. */
+.tip-card code { display: block; width: 0; min-width: 100%; overflow: hidden; margin-top: 12px; color: #d7d8d2; font: 500 clamp(10px, 1.05vw, 13px)/1.4 "DM Sans", sans-serif; letter-spacing: .055em; white-space: nowrap; text-overflow: ellipsis; }
 
 .refresh { margin-top: 23px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; }
 .refresh > div { height: 2px; overflow: hidden; background: rgba(240,238,229,.09); }
@@ -367,10 +371,14 @@ footer a { justify-self: end; color: var(--ink); }
   h1 { font-size: clamp(76px, 27vw, 118px); }
   .premise, .access-rule { margin-left: 0; }
   .node-chamber { min-height: 530px; }
+  /* Bleed the portal into the page gutter, never past the screen edge. */
+  .portal { right: max(-5%, -18px); }
   .telemetry { padding: 28px 20px; clip-path: polygon(0 0, calc(100% - 15px) 0, 100% 15px, 100% 100%, 15px 100%, 0 calc(100% - 15px)); }
-  .height { min-height: 78px; font-size: clamp(68px, 21vw, 103px); }
+  /* Sized to the card's inner width so a seven-digit height never pushes the
+     card past the screen edge (the digits run about 4x the font size). */
+  .height { min-height: 78px; font-size: clamp(48px, calc((100vw - 80px) / 4.2), 103px); }
   .metrics { grid-template-columns: repeat(2, 1fr); }
-  .metrics > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+  .metrics > div:nth-child(3) { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
   .metrics > div:nth-child(4) { border-top: 1px solid var(--line); }
   .tip-card code { font-size: 10px; }
   footer { grid-template-columns: 1fr; gap: 11px; }

@@ -16,26 +16,26 @@
     <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <title>Cave — what you hold</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
-    <link rel="stylesheet" href="/styles.css?v=20260924-nap1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
     <style>
       /* The shelf. Deeper in the cave than the tunnel mouth, so it is lit by
          what is on it rather than by a torch at the entrance. */
       .register { max-width: 940px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
-      .register::before { content: ""; position: absolute; inset: -20% -30% auto; height: 70%; background: radial-gradient(ellipse 46% 60% at 30% 0%, rgba(199, 240, 75, 0.05), transparent 68%); pointer-events: none; }
+      .register::before { content: ""; position: absolute; inset: -20% 0 auto; height: 70%; background: radial-gradient(ellipse 44% 60% at 30% 0%, rgba(199, 240, 75, 0.05), transparent 68%); pointer-events: none; }
       .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
       .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--acid); }
-      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
-      .lede strong { color: var(--ink); font-weight: 400; }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
 
       .ledger { margin: 52px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
-      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: #62665f; text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
       .ledger-index b { color: var(--acid); font-weight: 400; }
       .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
 
       .state { display: grid; gap: 18px; }
       .state[hidden] { display: none; }
-      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
-      .say strong { color: var(--ink); font-weight: 400; }
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
 
       .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--acid); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
       .act:hover { filter: brightness(1.08); }
@@ -51,19 +51,32 @@
       .item:hover { border-color: rgba(199, 240, 75, 0.45); }
       .item:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
       .item .sym { font-family: var(--mono); font-size: 13px; color: var(--ink); word-break: break-word; }
-      .item .id { font-family: var(--mono); font-size: 9px; color: #62665f; word-break: break-all; line-height: 1.6; }
+      .item .id { font-family: var(--mono); font-size: 9px; color: var(--muted); word-break: break-all; line-height: 1.6; }
       /* The listing state is the one fact on this card that changes what the
          holder can do next, so it is the only thing here that carries colour. */
       .tag { justify-self: start; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; padding: 4px 8px; border: 1px solid var(--line); color: var(--muted); }
       .tag.listed { color: var(--zec); border-color: rgba(244, 183, 40, 0.5); }
-      .out { font-family: var(--mono); font-size: 10px; line-height: 1.7; color: var(--muted); }
+      .out { font-family: var(--sans); font-size: 14px; line-height: 1.55; color: var(--read); }
       .out.bad { color: #e88; }
-      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
-      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .nav { display: flex; flex-wrap: wrap; gap: 0 22px; margin: 26px 0 0; }
+      .nav a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 6px; }
       .nav a:hover { color: var(--ink); }
     </style>
   </head>
   <body data-page="shelf">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items" aria-current="page"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </header>
     <main class="register">
       <h1><span>What you</span><span>hold</span></h1>
 
@@ -130,6 +143,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=3"></script>
+    <script type="module" src="/zstore.js?v=4"></script>
   </body>
 </html>

@@ -59,3 +59,68 @@
 #zec-send .primary, #zec-add .primary { margin-top: 0; }
 .zec-add textarea { resize: vertical; font: 13px/1.5 Mono; }
 @media (max-width: 800px) { .zec-notes li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ---------------------------------------------------------------------------
+   Shared layout fixes (wallet, market, bridge, connect).
+   ------------------------------------------------------------------------- */
+
+/* The header network control reads as a control, and says which chain. */
+.network { white-space: nowrap; }
+.network-pick { cursor: pointer; transition: border-color .15s; }
+.network-pick:hover { border-color: #1f242870; }
+.network-pick:focus-within { outline: 2px solid #e8a916; outline-offset: 2px; }
+.network-pick select:focus { outline: none; }
+/* The whole pill opens the list, not just the words in it. */
+.network-pick { padding-top: 0; padding-bottom: 0; }
+.network-pick select { min-height: 34px; }
+.net-chain { white-space: nowrap; }
+
+/* Refresh stays on one line, beside the heading it belongs to. */
+.topline { gap: 16px; }
+.refresh { flex: none; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; line-height: 1; }
+
+/* Section titles with a status beside them keep apart. */
+.section-title { gap: 16px; }
+.section-title span { text-align: right; }
+
+/* A coin card never outgrows its column, however long the amount. */
+.coin, .coin > div { min-width: 0; }
+.coin b { overflow-wrap: anywhere; font-size: clamp(22px, 2.3vw, 30px); line-height: 1.1; }
+.coin-send { flex: none; white-space: nowrap; }
+
+/* Quiet actions on the dark cards look like something to press. */
+.account-card .quiet { color: #e8a916; text-decoration: underline; text-underline-offset: 3px; }
+
+/* On a wide screen the rail stays in view: the nav and the lock are the
+   things reached for, and on a long pocket they drifted off screen. */
+@media (min-width: 801px) {
+  .wallet { background: linear-gradient(90deg, transparent 259px, #1f242826 259px, #1f242826 260px, transparent 260px); }
+  .wallet > .rail { position: sticky; top: 0; align-self: start; min-height: calc(100vh - 152px); border-right: 0; justify-content: flex-start; gap: 36px; }
+  .wallet > .rail > .quiet { margin-top: auto; }
+}
+
+/* Phones: every control a finger can hit, the network always visible, the
+   footer stacked rather than ragged. */
+@media (max-width: 800px) {
+  header { gap: 10px; }
+  .brand { flex: none; gap: 8px; font-size: 22px; }
+  .brand img { width: 36px; height: 36px; }
+  .network { font-size: 11px; min-width: 0; }
+  .net-chain { display: none; }
+  .brand { min-height: 40px; }
+  .network-pick { padding: 0 10px; min-height: 40px; }
+  .network-pick select { min-height: 40px; max-width: 100%; }
+  .network-pick { border-width: 0; box-shadow: inset 0 0 0 1px #1f242833; }
+  footer { flex-direction: column; gap: 6px; line-height: 1.7; }
+  .refresh { min-height: 40px; padding: 0 14px; }
+  .quiet, .coin-send, .rail nav button { min-height: 40px; }
+  .rail { gap: 12px 16px; }
+  .rail nav { display: flex; grid-column: 1 / -1; overflow-x: auto; gap: 14px; scrollbar-width: none; }
+  .rail nav button { white-space: nowrap; flex: none; }
+  .rail > .quiet { grid-column: 2; grid-row: 1; align-self: start; }
+}
+
+/* Review rows in the send dialog: a long exact amount wraps, it does not
+   push the dialog wider than the phone. */
+.review, .descriptor { grid-template-columns: auto minmax(0, 1fr); }
+.review b, .descriptor b { overflow-wrap: anywhere; text-align: right; }

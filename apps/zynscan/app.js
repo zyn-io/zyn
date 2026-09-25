@@ -100,26 +100,26 @@ function detail(t) {
 }
 
 const txRow = (t) => `<tr>
-  <td><a href="/tx/${t.seq}" data-link class="mono">#${num(t.seq)}</a></td>
-  <td>${kindChip(t)}</td>
-  <td><a href="/epoch/${t.epoch}" data-link class="mono">${num(t.epoch)}</a></td>
-  <td>${status(t)}</td>
-  <td class="mono dim">${t.created}↑ ${t.spent}↓</td>
+  <td class="tx"><a href="/tx/${t.seq}" data-link class="mono">#${num(t.seq)}</a></td>
+  <td class="kind">${kindChip(t)}</td>
+  <td class="epoch"><a href="/epoch/${t.epoch}" data-link class="mono">${num(t.epoch)}</a></td>
+  <td class="status">${status(t)}</td>
+  <td class="notes mono dim">${t.created}↑ ${t.spent}↓</td>
   <td class="detail">${detail(t)}</td>
 </tr>`;
 const txTable = (rows, empty) => rows.length
-  ? `<div class="scroll"><table><thead><tr><th>Tx</th><th>Kind</th><th>Epoch</th><th>Status</th><th title="notes created ↑ / spent ↓">Notes</th><th>Public detail</th></tr></thead><tbody>${rows.map(txRow).join('')}</tbody></table></div>`
+  ? `<div class="scroll"><table class="txs"><thead><tr><th>Tx</th><th>Kind</th><th>Epoch</th><th>Status</th><th title="notes created ↑ / spent ↓">Notes</th><th>Public detail</th></tr></thead><tbody>${rows.map(txRow).join('')}</tbody></table></div>`
   : `<p class="empty">${empty}</p>`;
 
 const epochRow = (e) => `<tr>
-  <td><a href="/epoch/${e.epoch}" data-link class="mono">${num(e.epoch)}</a></td>
-  <td>${e.sealed ? hash(e.root) : '<span class="dim">open</span>'}</td>
-  <td class="mono">${num(e.txs)}${e.refused ? ` <span class="bad">(${e.refused} refused)</span>` : ''}</td>
-  <td class="dim">${e.sealed ? ago(e.sealed_at) : 'now'}</td>
-  <td>${e.sealed ? anchorBadge(e.anchor, true) : ''}</td>
+  <td class="epoch"><a href="/epoch/${e.epoch}" data-link class="mono">${num(e.epoch)}</a></td>
+  <td class="root">${e.sealed ? hash(e.root) : '<span class="dim">open</span>'}</td>
+  <td class="txs mono">${num(e.txs)}${e.refused ? ` <span class="bad">(${e.refused} refused)</span>` : ''}</td>
+  <td class="sealed dim">${e.sealed ? ago(e.sealed_at) : 'now'}</td>
+  <td class="settled">${e.sealed ? anchorBadge(e.anchor, true) : ''}</td>
 </tr>`;
 const epochTable = (rows) => rows.length
-  ? `<div class="scroll"><table><thead><tr><th>Epoch</th><th>State root</th><th>Txs</th><th>Sealed</th><th>Settled</th></tr></thead><tbody>${rows.map(epochRow).join('')}</tbody></table></div>`
+  ? `<div class="scroll"><table class="epochs"><thead><tr><th>Epoch</th><th>State root</th><th>Txs</th><th>Sealed</th><th>Settled</th></tr></thead><tbody>${rows.map(epochRow).join('')}</tbody></table></div>`
   : '<p class="empty">No epochs yet.</p>';
 
 // ---------------------------------------------------------------------------
@@ -254,10 +254,20 @@ function route() {
   return home;
 }
 
+// On phones each table row stacks into a block, so every cell carries its
+// column's name for the small label it shows there.
+function labelCells(root) {
+  for (const table of root.querySelectorAll('table')) {
+    const names = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    for (const tr of table.querySelectorAll('tbody tr')) [...tr.cells].forEach((td, i) => { td.dataset.label = names[i] || ''; });
+  }
+}
+
 async function render() {
   document.querySelectorAll('[data-net]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.net === network)));
   try {
     main.innerHTML = await route()();
+    labelCells(main);
   } catch (e) {
     main.innerHTML = e.status === 404
       ? `<p class="empty">Not on the ${network} ledger (yet). <a href="/" data-link>Back to the latest</a>.</p>`

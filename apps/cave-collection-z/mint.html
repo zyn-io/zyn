@@ -15,7 +15,7 @@
     <meta name="twitter:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
     <title>Cave Collection Z — take a place</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
-    <link rel="stylesheet" href="/styles.css?v=20260924-nap1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
     <style>    
       /* Same cave, same torch. This is the mouth of the tunnel where money
          comes in, so it is lit a little warmer than the register. */
@@ -29,10 +29,10 @@
       .register::before {
         content: "";
         position: absolute;
-        inset: -20% -30% auto;
+        inset: -20% 0 auto;
         height: 70%;
         background: radial-gradient(
-          ellipse 46% 60% at 30% 0%,
+          ellipse 44% 60% at 30% 0%,
           rgba(244, 183, 40, 0.07),
           transparent 68%
         );
@@ -40,8 +40,8 @@
       }
       .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
       .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
-      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
-      .lede strong { color: var(--ink); font-weight: 400; }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
 
       .ledger {
         margin: 52px 0 0;
@@ -55,7 +55,7 @@
         gap: 14px;
         padding: 11px 16px;
         border-bottom: 1px solid var(--line);
-        color: #62665f;
+        color: var(--muted);
         text-transform: uppercase;
         font-size: 8px;
         letter-spacing: 0.19em;
@@ -66,8 +66,8 @@
       .state { display: grid; gap: 18px; }
       .state[hidden] { display: none; }
 
-      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
-      .say strong { color: var(--ink); font-weight: 400; }
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
 
       .act {
         justify-self: start;
@@ -168,28 +168,32 @@
         grid-template-columns: 22px 1fr;
         gap: 12px;
         align-items: baseline;
-        font-size: clamp(11px, 1vw, 13px);
-        line-height: 1.75;
-        color: var(--muted);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--read);
       }
       .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
-      .facts strong { color: var(--ink); font-weight: 400; }
+      .facts strong { color: var(--ink); font-weight: 600; }
 
-      .out { margin: 0; font-size: 11px; line-height: 1.7; min-height: 1.2em; }
+      .out { margin: 0; font-family: var(--sans); font-size: 14px; line-height: 1.55; min-height: 1.2em; }
       .out.bad { color: #ff8b6b; }
       .out.ok { color: var(--acid); }
 
       .smallprint {
         margin: 34px 0 0;
-        font-size: 10px;
-        line-height: 1.9;
-        color: #5c6058;
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--read-dim);
         max-width: 60ch;
       }
-      .smallprint strong { color: var(--muted); font-weight: 400; }
+      .smallprint strong { color: var(--read); font-weight: 600; }
       .back {
-        display: inline-block;
-        margin: 40px 0 0;
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin: 32px 0 0;
         font-family: var(--mono);
         font-size: 10px;
         letter-spacing: 0.14em;
@@ -209,7 +213,7 @@
         font-size: 9px;
         letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: #62665f;
+        color: var(--muted);
       }
       .field input {
         width: 100%;
@@ -249,7 +253,7 @@
         font-size: 9px;
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: #62665f;
+        color: var(--muted);
       }
 
       .total {
@@ -268,7 +272,7 @@
         font-size: 9px;
         letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: #62665f;
+        color: var(--muted);
       }
       .total b {
         font-family: var(--serif);
@@ -302,13 +306,26 @@
       .won-art figcaption .tag { font-size: 7.5px; padding: 3px 6px; }
       .burn { display: grid; gap: 14px; margin-top: 10px; padding-top: 22px; border-top: 1px dashed var(--line); }
       .burn[hidden] { display: none; }
-      .say.small { font-size: 10px; color: #5c6058; }
-      .nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
-      .nav a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+      .say.small { font-size: 13.5px; color: var(--read-dim); }
+      .nav { display: flex; flex-wrap: wrap; gap: 0 22px; margin: 26px 0 0; }
+      .nav a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 6px; }
       .nav a:hover { color: var(--ink); }
     </style>
   </head>
   <body data-page="mint">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint" aria-current="page"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </header>
     <main class="register">
       <h1><span>Take a place</span><span>in the cave</span></h1>
 
@@ -469,6 +486,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=3"></script>
+    <script type="module" src="/zstore.js?v=4"></script>
   </body>
 </html>

@@ -652,7 +652,11 @@ body[data-view="launch"] footer span:last-child { color: var(--zec); }
 @media (max-width: 600px) {
   .launch-studio { padding-block: 26px 48px; }
   .launch-mast h1 { font-size: 48px; }
-  .launch-rail li { padding: 10px 8px; grid-template-columns: 1fr; gap: 4px; }
+  /* Four step names don't fit one row at phone width: two by two. */
+  .launch-rail ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .launch-rail li { min-height: 44px; padding: 10px 12px; grid-template-columns: auto 1fr; gap: 8px; border-bottom: 1px solid var(--line); }
+  .launch-rail li:nth-child(2n) { border-right: 0; }
+  .launch-rail li:nth-child(n+3) { border-bottom: 0; }
   .launch-rail li strong { font-size: 14px; }
   .mode-picker { grid-template-columns: 1fr; }
   .mode-picker label > span { min-height: 67px; }

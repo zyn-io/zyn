@@ -10,3 +10,11 @@
 .br-card code, .mk-fine code { font: 11px Mono; background: var(--paper); padding: 1px 5px; border-radius: 4px; word-break: break-all; }
 .br-out { display: grid; gap: 16px; max-width: 560px; }
 @media (max-width: 720px) { .br-cards { grid-template-columns: 1fr; } }
+
+/* An empty status line takes no room; the deposit button sits with its field. */
+.br-say:empty { min-height: 0; }
+.br-card .mk-fine { margin-top: 0; }
+.br-card .primary { margin-top: 6px; text-align: left; }
+/* No bridge on this network: the way to one. */
+.br-none { display: grid; gap: 4px; max-width: 420px; }
+.br-none .primary { margin-top: 0; }

@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
 import { decodeMeta, fund as fundFrom } from './market.js';
+import { bridgedName, loadBridged } from './ledger.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
@@ -304,7 +305,7 @@ function wallet(message = '') {
       <button class="quiet" id="forget">${keptWallet() ? 'Lock' : 'Lock &amp; forget key'}</button>
     </aside>
     <section class="content">
-      <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh">↻ Refresh</button></div>
+      <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>
       <div class="notice ${message ? 'show' : ''}" id="notice">${escapeHtml(message)}</div>
       ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD DETECTED</p><h2>Your mole is waiting.</h2><p>The coordinator sees this public account ID—not your phrase or key.</p></div><button id="claim">Claim gift <span>→</span></button></section>` : ''}
       ${zecSection()}
@@ -809,9 +810,17 @@ async function refreshObject(epoch, announce, active) {
   const tickers = new Map();
   if (others.some((a) => !items.has(a))) {
     try {
-      for (const c of (await objectCall(config.rpcUrl, 'zyn_market')).curves || []) {
+      const market = await objectCall(config.rpcUrl, 'zyn_market');
+      for (const c of market.curves || []) {
         const m = /^[0-9a-f]{64}$/.test(c.token) && typeof c.meta === 'string' ? decodeMeta(c.meta) : null;
         if (m) tickers.set(c.token, m.symbol);
+      }
+      // Bridged coins name themselves by origin (SOL.zy, ETH.zy, a token's
+      // .zy), and pool shares by their pair, the way the market names them.
+      for (const b of await loadBridged(config)) tickers.set(b.asset, bridgedName(config, b));
+      const nameOf = (id) => (id === zec ? 'ZEC.zy' : tickers.get(id) || `${id.slice(0, 6)}…`);
+      for (const p of market.pools || []) {
+        if (/^[0-9a-f]{64}$/.test(p.lp) && typeof p.a === 'string' && typeof p.b === 'string') tickers.set(p.lp, `LP ${nameOf(p.a)}/${nameOf(p.b)}`);
       }
     } catch { /* names only */ }
     if (!active()) return;
@@ -834,10 +843,30 @@ async function refreshObject(epoch, announce, active) {
   if (announce) note(`Synced at epoch ${epoch}.`);
 }
 
+/// A WAD amount as a trimmed decimal with thousands marks, to `places`
+/// decimals (cut, never rounded up), for display only.
+function wadText(raw, places = 18) {
+  const v = BigInt(raw);
+  const whole = (v / WAD).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const frac = (v % WAD).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole;
+}
+
 function renderCoins() {
-  const coins = holdings
+  let coins = holdings
     .map((h) => ({ ...h, meta: assets.find((a) => a.id === h.asset) }))
     .filter((h) => h.meta && !h.meta.content && !h.meta.item && decimalRaw(h.amount) > 0n);
+  // On the object ledger a holding is one note, in WAD units: the pocket
+  // shows one card per coin, its notes summed, as a decimal. What is sent is
+  // funded from the notes themselves, not from this total.
+  if (config.kind === 'object') {
+    const byAsset = new Map();
+    for (const c of coins) {
+      const had = byAsset.get(c.asset);
+      byAsset.set(c.asset, had ? { ...had, amount: (BigInt(had.amount) + BigInt(c.amount)).toString() } : { ...c });
+    }
+    coins = [...byAsset.values()].map((c) => ({ ...c, shown: wadText(c.amount, 8), exact: wadText(c.amount) }));
+  }
 
   const deposit = assets.find((a) => a.symbol === 'ZEC.zy');
   if (deposit && !coins.some((c) => c.asset === deposit.id)) {
@@ -849,7 +878,7 @@ function renderCoins() {
   const count = root.querySelector('#coin-count');
   if (!holder) return;
   count.textContent = String(coins.length);
-  holder.innerHTML = coins.map((c, i) => `<div class="coin"><div><p class="kicker">${escapeHtml(c.meta.symbol)}</p><b>${escapeHtml(readableAmount(c.amount))}</b></div>${config.kind === 'object' && decimalRaw(c.amount) > 0n ? `<button class="quiet coin-send" data-coin="${i}">Send →</button>` : (c.meta.symbol === 'ZEC.zy' ? '<span class="muted">deposited ZEC</span>' : '')}</div>`).join('');
+  holder.innerHTML = coins.map((c, i) => `<div class="coin"><div><p class="kicker">${escapeHtml(c.meta.symbol)}</p><b${c.exact ? ` title="${escapeHtml(c.exact)}"` : ''}>${escapeHtml(c.shown ?? readableAmount(c.amount))}</b></div>${config.kind === 'object' && decimalRaw(c.amount) > 0n ? `<button class="quiet coin-send" data-coin="${i}">Send →</button>` : (c.meta.symbol === 'ZEC.zy' ? '<span class="muted">deposited ZEC</span>' : '')}</div>`).join('');
   holder.querySelectorAll('[data-coin]').forEach((b) => { b.onclick = () => openObjectSend(coins[Number(b.dataset.coin)]); });
 }
 
@@ -1038,7 +1067,7 @@ function openObjectSend(coin) {
   const dialog = root.querySelector('#send-dialog');
   const isItem = !!coin.meta.item;
   const isZec = coin.asset === config.zecAsset;
-  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>${isItem ? 'Send this item.' : 'Send.'}</h2><p class="muted">To a Zyn account id, or to a Zcash address. A Zcash address that belongs to a Zyn account is paid on Zyn, privately and at once${isZec ? '; any other Zcash address is paid on Zcash, as a withdrawal' : isItem ? '; an item cannot leave for any other Zcash address' : ''}. Transfers cannot be undone.</p><form><label>Recipient<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Zyn account (64 hex) or ${escapeHtml(config.zcashPrefix)}…"></label>${isItem ? '<input id="send-amount" type="hidden" value="1">' : '<label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>'}<div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>${isItem ? 'Send this item.' : 'Send.'}</h2><p class="muted">To a Zyn account id, or to a Zcash address. A Zcash address that belongs to a Zyn account is paid on Zyn, privately and at once${isZec ? '; any other Zcash address is paid on Zcash, as a withdrawal' : isItem ? '; an item cannot leave for any other Zcash address' : ''}. Transfers cannot be undone.</p><form><label>Recipient<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Zyn account (64 hex) or ${escapeHtml(config.zcashPrefix)}…"></label>${isItem ? '<input id="send-amount" type="hidden" value="1">' : '<label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>'}<div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(coin.exact ?? readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
   dialog.querySelector('.x').onclick = () => dialog.close();
   dialog.querySelector('form').onsubmit = async (event) => {
     event.preventDefault();

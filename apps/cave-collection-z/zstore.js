@@ -526,6 +526,12 @@ async function go(url, push = true) {
   const page = next.body.dataset.page;
   if (!PAGES[page]) { location.href = url.href; return; }
   document.querySelector('main').replaceWith(document.adoptNode(next.querySelector('main')));
+  // The top bar is outside <main> and stays; only its current-page mark moves.
+  const here = url.pathname.replace(/\/$/, '');
+  document.querySelectorAll('.topbar-nav a').forEach((a) => {
+    if (a.getAttribute('href') === here) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
   document.body.dataset.page = page;
   document.title = next.title;
   if (push) history.pushState({}, '', url.href);

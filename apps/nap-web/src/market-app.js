@@ -14,6 +14,7 @@ import { hex, nullifierOf, scan, unhex } from './object.js';
 import * as ledger from './ledger.js';
 import { isHex, isInt, isSmall, validOffer, PER_CLAIM } from './ledger.js';
 import * as mk from './market.js';
+import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import './styles.css';
 import './market.css';
 
@@ -25,7 +26,13 @@ let identity = null;
 let view = 'swap';
 /// Where to go back to after the wallet opens for an action that needed it.
 let returnTo = 'swap';
-let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], curves: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map(), bridged: [] };
+const emptyState = () => ({ epoch: 0n, epochSeconds: 0, pools: [], launches: [], curves: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map(), bridged: [] });
+let state = emptyState();
+/// Whether the chain has answered once on this network: until it has, an empty
+/// list means "not read yet", not "there are none".
+let loaded = false;
+/// Bumped on a network switch, so an answer from the old chain is dropped.
+let generation = 0;
 let busy = false;
 let timer = null;
 const ui = { pool: null, sellA: true, slippage: 100 };
@@ -56,6 +63,17 @@ function fmt(raw, places = 6) {
 function ratio(num, den, places = 6) {
   if (den === 0n) return '—';
   return fmt((num * mk.WAD) / den, places);
+}
+
+/// A price that stays readable when it is tiny: more places until something
+/// shows, rather than a "0" that reads as worthless.
+function price(num, den) {
+  if (den === 0n) return '—';
+  for (const places of [6, 10, 14, 18]) {
+    const t = ratio(num, den, places);
+    if (/[1-9]/.test(t) || num === 0n) return t;
+  }
+  return '< 0.000000000000000001';
 }
 
 function parse(value) {
@@ -109,11 +127,37 @@ async function loadConfig() {
   const networks = Array.isArray(value.networks) && value.networks.length ? value.networks : [{ id: 'default', ...value }];
   const wanted = read(NETWORK_KEY);
   const chosen = networks.find((n) => n.id === wanted) || networks.find((n) => n.chain === value.chain) || networks[0];
+  return checkedNetwork(chosen, networks);
+}
+
+function checkedNetwork(chosen, networks) {
   const url = new URL(chosen.rpcUrl, location.origin);
   if (url.origin !== location.origin) throw new Error('rpcUrl must be a same-origin path');
   if (chosen.kind !== 'object') throw new Error('The market runs on an object ledger, and this network is not one');
   if (!/^[0-9a-f]{64}$/.test(String(chosen.zecAsset))) throw new Error('This network names no ZEC asset');
   return { ...chosen, rpcUrl: url.pathname, networks };
+}
+
+/// Move to another chain, the wallet's way: the key stays open — the same
+/// words are the same account on either chain — and every answer from the old
+/// chain goes, including any still in flight.
+function switchNetwork(id) {
+  const next = config.networks.find((n) => n.id === id);
+  if (!next || next.id === config.id) return true;
+  if (busy) { notice('One moment — the last action is still settling. Switch networks once it has.'); return false; }
+  let checked;
+  try { checked = checkedNetwork(next, config.networks); } catch (e) { notice(e.message, true); return false; }
+  rememberNetwork(checked.id);
+  config = checked;
+  generation++;
+  state = emptyState();
+  loaded = false;
+  ui.pool = null;
+  frame();
+  render();
+  notice(`On ${config.network} now. Reading the chain…`);
+  refresh();
+  return true;
 }
 
 const keptWallet = () => { try { return JSON.parse(read(KEPT_KEY) || 'null'); } catch { return null; } };
@@ -165,17 +209,21 @@ function editing() {
 /// `timed`: a background refresh. It updates what the page knows, but leaves
 /// the view alone while the holder is editing; the next render shows it.
 async function refresh(quiet = false, timed = false) {
+  // Pinned for the whole read: a network switch mid-flight must not mix chains.
+  const cfg = config, gen = generation;
+  const call = (method, fields = {}) => ledger.call(cfg, method, fields);
   try {
     const status = await call('zyn_status');
-    const epoch = checkedEpoch(status, config.chain);
+    const epoch = checkedEpoch(status, cfg.chain);
     const me = identity;
     const [market, published, owed, offerBook, bridged] = await Promise.all([
       call('zyn_market'),
       me ? call('zyn_published') : null,
-      me ? loadOwed() : [],
+      me ? ledger.loadOwed(cfg, me) : [],
       call('zyn_offers').catch(() => ({ offers: [] })),
-      ledger.loadBridged(config),
+      ledger.loadBridged(cfg),
     ]);
+    if (gen !== generation) return;
     // The wallet may have been locked while this was in flight.
     const mine = me && identity === me;
     const { held, balances } = mine && published
@@ -203,10 +251,12 @@ async function refresh(quiet = false, timed = false) {
     const unknown = [...new Set(held.map((h) => h.asset))].filter((a) => a !== config.zecAsset && !state.items.has(a) && !bridged.some((b) => b.asset === a));
     if (unknown.length) {
       const found = await call('zyn_items', { assets: unknown.slice(0, 500).join(',') }).catch(() => []);
+      if (gen !== generation) return;
       for (const i of Array.isArray(found) ? found : []) {
         if (isHex(i.asset) && isHex(i.collection) && isSmall(i.serial)) state.items.set(i.asset, { collection: i.collection, serial: i.serial });
       }
     }
+    loaded = true;
     if (!ui.pool && state.pools.length) ui.pool = state.pools[0].id;
     if (timed && editing()) {
       const e = $('#epoch');
@@ -216,6 +266,7 @@ async function refresh(quiet = false, timed = false) {
     }
     if (!quiet) notice(`Up to date at epoch ${epoch}.`);
   } catch (e) {
+    if (gen !== generation) return;
     notice(e.message === 'Failed to fetch' ? 'The chain is not answering. Nothing was sent.' : e.message, true);
   }
 }
@@ -254,11 +305,12 @@ function shell(content) {
   <header class="mk-header">
     <a class="brand" href="/" aria-label="Nap Wallet"><img src="/nap-mark.png" alt=""><span>Nap</span><em>Market</em></a>
     <div class="mk-head-right">
-      <span class="network"><i></i>${esc(config.network)} · chain ${config.chain}</span>
+      ${networkPill(config)}
       <a class="mk-link" href="/">Wallet →</a>
     </div>
   </header>${content}
   <footer><span>Keys stay in this tab. Orders clear together, once an epoch.</span><span>Nap Market · Zyn</span></footer>`;
+  bindNetworkPick(root, config, switchNetwork);
 }
 
 /// Opening the wallet, as a view inside the market rather than a gate in
@@ -342,7 +394,7 @@ function setBusy(on) {
 
 function render() {
   if (!$('#view')) return;
-  $('#epoch').textContent = `epoch ${state.epoch}`;
+  $('#epoch').textContent = loaded ? `epoch ${state.epoch}` : 'epoch —';
   root.querySelectorAll('#tabs [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   const owedBadge = $('#badge-owed');
   owedBadge.textContent = state.owed.length ? String(state.owed.length) : '';
@@ -358,6 +410,10 @@ function render() {
 
 function renderSwap() {
   const pools = state.pools;
+  if (!pools.length && !loaded) {
+    $('#view').innerHTML = `${heading('SWAP', 'Reading<br><em>the market…</em>')}<div class="mk-empty"><p>Asking ${esc(config.network)} for its pools.</p></div>`;
+    return;
+  }
   if (!pools.length) {
     $('#view').innerHTML = `${heading('SWAP', 'No pools yet.')}<div class="mk-empty"><p>A pool opens when someone provides both sides of a pair. Launches open theirs when their sale closes.</p><button class="mk-act" id="go-pools">Open a pool →</button></div>`;
     $('#go-pools').onclick = () => { view = 'pools'; render(); };
@@ -424,7 +480,7 @@ function poolFacts(p) {
   const mine = balance(p.lp);
   const shares = BigInt(p.shares);
   return `<dl class="mk-facts">
-    <dt>Price</dt><dd>1 ${esc(name(p.a))} = ${ratio(y, x)} ${esc(name(p.b))}</dd>
+    <dt>Price</dt><dd>1 ${esc(name(p.a))} = ${price(y, x)} ${esc(name(p.b))}</dd>
     <dt>Reserves</dt><dd>${fmt(x, 4)} ${esc(name(p.a))}<br>${fmt(y, 4)} ${esc(name(p.b))}</dd>
     <dt>Fee</dt><dd>${(p.fee_bps / 100).toFixed(2)}% to liquidity</dd>
     <dt>This batch</dt><dd>${p.pending ? `${p.pending} order${p.pending === 1 ? '' : 's'} waiting` : 'empty so far'}</dd>
@@ -434,7 +490,7 @@ function poolFacts(p) {
 }
 
 function heading(eyebrow, title) {
-  return `<div class="topline"><div><p class="eyebrow">${eyebrow}</p><h1 class="mk-h1">${title}</h1></div><button class="refresh" id="refresh">↻ Refresh</button></div>`;
+  return `<div class="topline"><div><p class="eyebrow">${eyebrow}</p><h1 class="mk-h1">${title}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,8 +510,8 @@ function renderPools() {
         ${balance(p.lp) > 0n ? `<button class="mk-act" data-remove="${p.id}">Remove</button>` : ''}
       </div>
       <form class="mk-inline" id="add-${p.id}" hidden>
-        <label class="mk-field"><span>${esc(name(p.a))}</span><input name="a" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>
-        <label class="mk-field"><span>${esc(name(p.b))}</span><input name="b" inputmode="decimal" autocomplete="off" placeholder="matched to the ratio"></label>
+        <label class="mk-field"><span>${esc(name(p.a))}${identity ? ` · you hold ${fmt(balance(p.a), 4)}` : ''}</span><input name="a" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>
+        <label class="mk-field"><span>${esc(name(p.b))}${identity ? ` · you hold ${fmt(balance(p.b), 4)}` : ''}</span><input name="b" inputmode="decimal" autocomplete="off" placeholder="matched to the ratio"></label>
         <p class="mk-fine" data-preview></p>
         <button class="primary mk-act" type="submit">Add liquidity <span>→</span></button>
       </form>
@@ -463,7 +519,7 @@ function renderPools() {
         <label class="mk-field"><span>Shares (you hold ${fmt(balance(p.lp))})</span><input name="s" inputmode="decimal" autocomplete="off"></label>
         <button class="primary mk-act" type="submit">Remove <span>→</span></button>
       </form>
-    </article>`).join('') : '<div class="mk-empty"><p>No pools yet. Open the first one below.</p></div>'}</section>
+    </article>`).join('') : `<div class="mk-empty"><p>${loaded ? 'No pools yet. Open the first one below.' : 'Reading the pools…'}</p></div>`}</section>
   <form class="mk-card mk-create" id="create-pool">
     <h2>Open a pool</h2>
     <p class="mk-fine">You set the first price by what you put in. A sliver of the first shares is locked for good so the pool can never be emptied and restarted at a different price.</p>
@@ -556,7 +612,7 @@ function renderLaunchpad() {
   $('#view').innerHTML = `${heading('LAUNCHPAD', 'Everyone pays<br><em>the same price.</em>')}
   ${jade ? `<div class="mk-empty mk-jade"><p><b>Pump-style launches live on Cave Jade.</b> Anyone makes a token; it trades at once on one curve for every token, each epoch at one price, and graduates into a locked pool that trades here. ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
   <p class="mk-fine mk-lead">Below: fixed-price sales, where everyone who commits before the close pays the same price.</p>
-  <section class="mk-list">${launches.length ? launches.map(launchCard).join('') : '<div class="mk-empty"><p>No sales yet. Start the first one below.</p></div>'}</section>
+  <section class="mk-list">${launches.length ? launches.map(launchCard).join('') : `<div class="mk-empty"><p>${loaded ? 'No sales yet. Start the first one below.' : 'Reading the sales…'}</p></div>`}</section>
   ${createLaunchForm()}`;
   for (const l of launches) {
     const form = $(`#commit-${l.token}`);
@@ -676,7 +732,7 @@ function renderOwed() {
   <p class="mk-fine mk-lead">Swap proceeds, refunds, pool shares and sale allocations are held by the ledger until you collect them. Only this wallet can find them — they are listed by ids derived from your key, and nobody else can ask for them.</p>
   ${state.owed.length ? `<section class="coins">${[...byAsset].map(([a, v]) => `<div class="coin"><div><span>${esc(name(a))}</span><b>${fmt(v)}</b></div></div>`).join('')}</section>
   <button class="primary mk-act mk-collect" id="collect">Collect all ${state.owed.length} <span>→</span></button>`
-    : '<div class="mk-empty"><p>Nothing owed right now. Orders settle at the end of the epoch they were placed in.</p></div>'}`;
+    : `<div class="mk-empty"><p>${loaded ? 'Nothing owed right now. Orders settle at the end of the epoch they were placed in.' : 'Looking for what the market owes you…'}</p></div>`}`;
   $('#collect')?.addEventListener('click', async () => {
     if (!requireWallet()) return;
     const all = [...state.owed];

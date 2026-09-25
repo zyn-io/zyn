@@ -18,10 +18,23 @@
   font-display: swap;
 }
 
+/* The reading face, shared with cave-market. The pixel faces stay on
+   headings, labels, buttons and numbers; sentences are set in this. */
+@font-face {
+  font-family: "DM Sans";
+  src: url("./assets/fonts/DM-Sans.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
   --ink: #f0eee6;
   --muted: #82857d;
+  --sans: "DM Sans", "Helvetica Neue", Arial, sans-serif;
+  /* Running text on the dark ground: ~10:1, and ~7:1 for small print. */
+  --read: #b8bbb2;
+  --read-dim: #9a9d94;
   --black: #070807;
   --deep: #0a0c0a;
   --acid: #c7f04b;
@@ -548,7 +561,7 @@ dialog dl { border-top: 1px solid var(--line); margin: 30px 0; }
 dialog dl div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 12px 0; }
 dialog dt, dialog dd { margin: 0; text-transform: uppercase; font-size: 9px; letter-spacing: .16em; }
 dialog dd { color: var(--acid); }
-.fine-print { color: #5e625b; font-size: 8px; line-height: 1.6; text-transform: uppercase; letter-spacing: .12em; }
+.fine-print { color: var(--read-dim); font-family: var(--sans); font-size: 13px; line-height: 1.55; }
 .dialog-action { width: 100%; margin-top: 18px; padding: 14px; border: 1px solid var(--ink); background: var(--ink); color: var(--black); text-transform: uppercase; font-size: 9px; letter-spacing: .2em; cursor: pointer; }
 
 @media (max-width: 900px) {
@@ -568,7 +581,11 @@ dialog dd { color: var(--acid); }
 @media (max-width: 580px) {
   .site-header { height: 70px; padding-inline: 20px; }
   .wordmark > span:last-child { display: none; }
-  .header-actions { gap: 15px; }
+  .header-actions { gap: 4px; margin-right: -6px; }
+  /* "Enter the cave" opens the same manifest, so the header copy of that
+     button gives its room to the mint and market links on a phone. */
+  .header-actions > [data-dialog-open] { display: none; }
+  .header-actions .text-button { padding: 0 6px; letter-spacing: .12em; }
   .hero { min-height: auto; padding: 50px 20px 10px; }
   .eyebrow { margin-bottom: 28px; }
   h1 > span { font-size: clamp(68px, 24vw, 112px); }
@@ -590,6 +607,12 @@ dialog dd { color: var(--acid); }
   footer { padding-inline: 20px; }
   footer span:nth-child(2) { display: none; }
   dialog { padding: 42px 28px 30px; }
+}
+
+@media (max-width: 370px) {
+  .site-header { padding-inline: 14px; }
+  .header-actions .text-button { padding: 0 4px; letter-spacing: .05em; }
+  .x-button { min-width: 36px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -616,9 +639,84 @@ dialog dd { color: var(--acid); }
 dialog.zwallet { max-width: 420px; padding: 24px; border: 1px solid currentColor; }
 dialog.zwallet::backdrop { background: rgba(0, 0, 0, .6); }
 dialog.zwallet .zwallet-option { display: block; width: 100%; margin: 0 0 8px; }
-.say.small { font-size: 12px; opacity: .8; }
+.say.small { font-size: 13.5px; color: var(--read-dim); }
 @media (max-width: 720px) { .object { grid-template-columns: 1fr; } }
 .object dl.facts { display: grid; gap: 0; }
 .object dl.facts > div { display: flex; justify-content: space-between; gap: 16px; padding: 7px 10px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
 .object dl.facts dt { opacity: .7; }
 .object dl.facts dd { margin: 0; text-align: right; }
+
+/* ---- Inner pages: the top bar ------------------------------------------
+   One bar on every page past the landing: the Cave mark home, and the rooms.
+   It sits outside <main>, so in-place navigation (zstore.js) keeps it and
+   only moves the aria-current mark. On a phone the labels shorten so all
+   five stay in one row; below that the row scrolls inside itself rather
+   than widening the page. */
+.topbar {
+  height: 64px;
+  padding: 0 clamp(16px, 4vw, 68px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 10;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: .16em;
+}
+.topbar .wordmark { flex: none; min-height: 44px; }
+.topbar .sigil { width: 32px; height: 32px; }
+.topbar-nav {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: clamp(4px, 1.6vw, 22px);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar-nav::-webkit-scrollbar { display: none; }
+.topbar-nav a {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 6px;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 140ms ease;
+}
+.topbar-nav a:hover { color: var(--ink); }
+.topbar-nav a[aria-current="page"] { color: var(--acid); box-shadow: inset 0 -2px 0 var(--acid); }
+.topbar-nav a:focus-visible { outline-offset: -4px; }
+.topbar-nav .s { display: none; }
+
+@media (max-width: 720px) {
+  .topbar { height: 56px; gap: 8px; }
+  .topbar .wordmark > span:last-child { display: none; }
+  .topbar-nav { gap: 2px; letter-spacing: .1em; }
+  .topbar-nav .l { display: none; }
+  .topbar-nav .s { display: inline; }
+}
+
+/* ---- Inner pages: shared furniture --------------------------------------
+   The ledger header holds a label on the left and a status (and a Connect
+   button) on the right. On a phone the right half drops to its own line as
+   a unit instead of the label breaking mid-phrase. */
+.ledger-index { flex-wrap: wrap; align-items: center; row-gap: 6px; }
+.ledger-index > span { white-space: nowrap; }
+.ledger-index > span:last-child { margin-left: auto; }
+
+/* Touch widths: nothing tappable under 40px tall. */
+@media (max-width: 720px), (pointer: coarse) {
+  .act.small { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+  .text-button, .x-button, .wordmark { min-height: 44px; display: inline-flex; align-items: center; }
+  .x-button { min-width: 44px; justify-content: center; }
+}
+
+/* A link styled as a button is a button: no underline (deposit, mint and
+   exit style .act without resetting it). */
+a.act { text-decoration: none; }
