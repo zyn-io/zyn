@@ -86,7 +86,8 @@ async function handle(origin, method, params) {
       kicker: `${host} asks`,
       title: `Connect ${host} to Nap`,
       rows: [
-        ['It will see', `Your Zyn account ID${identity.zec ? ' and Zcash address' : ''}, and what you hold when it asks`],
+        ['It will see', `Your Zyn account ID${identity.zec ? ' and Zcash address' : ''}`],
+        ['When it asks', 'Your ZEC.zy and token balances, your items, what you are owed, your sale tickets and the coins you made'],
         ['It will not see', 'Your keys or your recovery phrase'],
         ['Network', `${config.network} · ${config.zcash}`],
       ],

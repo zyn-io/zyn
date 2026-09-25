@@ -238,12 +238,18 @@ export function readableAmount(value) {
   return trimmed === '' ? '0' : trimmed;
 }
 
+/// The largest amount the ledger can represent (signed 128-bit), exclusive.
+export const MAX_AMOUNT = 1n << 127n;
+
 export function parseAmount(value) {
   const s = String(value).trim();
   if (!/^(0|[1-9]\d*)(\.\d{1,18})?$/.test(s)) throw new Error('Use a positive decimal with at most 18 decimal places');
   const [whole, fraction = ''] = s.split('.');
   const raw = BigInt(whole) * WAD + BigInt(fraction.padEnd(18, '0') || '0');
   if (raw <= 0n) throw new Error('Amount must be greater than zero');
+  // The ledger's amounts are signed 128-bit; anything larger would be encoded
+  // as something else entirely (a price shown as huge, signed as dust).
+  if (raw >= MAX_AMOUNT) throw new Error('That amount is larger than any the ledger can hold');
   return raw;
 }
 /// ZEC.zy, the asset a Zyn price is quoted in.

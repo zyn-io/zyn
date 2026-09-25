@@ -6534,3 +6534,16 @@ nothing on iOS and loaded inside the wallet on Android.
 | 152.4 | **The wallet's own view never leaves the app's pages**; outside links and new windows open in the Nap browser | 🔒 |
 | 152.5 | **One Zcash account per wallet page:** sites use the wallet's own (its address once open; payments wait for its sync), never a second one in the same worker | ✅ |
 
+## §153 — The wallet audit's four highs, fixed (25 Sep 2026)
+
+The 25 Sep audit of every Nap build (keys, web surface, transactions, site
+connections, phone app) found no critical issue and four high ones. "do them":
+
+| # | Decision | |
+|---|---|---|
+| 153.1 | **Amounts that do not fit are refused, never wrapped.** `parseAmount` stops below 2^127; the one 128-bit encoder every intent uses throws outside the signed range. A site could have had a listing shown at 340 quintillion ZEC.zy and signed at 5 wei | 🔒 |
+| 153.2 | **The connect screens say what a connected site can read**: account and Zcash address, and — when it asks — balances, items, what is owed, sale tickets and coins made. The privacy policy says the same. (Jade's portfolio uses the coins-made list, so it stays; honesty, not removal) | ✅ |
+| 153.3 | **A restored wallet finds its count.** A device that never counted for a wallet walks its nonces in pages of 64 for anything the chain still holds under them (claims, tickets, waiting deposits, coins made), stopping after 256 empty in a row, and keeps the count. Once per device; ~1.6 s on testnet. A run of more than 256 fully collected trades is the one case it cannot see past | ✅ |
+| 153.4 | **iOS 16 is the phone app's minimum** (AbortSignal.timeout and wasm-unsafe-eval arrived in Safari 16); the web build targets safari16 / chrome103 / firefox114 so newer syntax fails the build, not the phone. Supersedes §149.3's iOS 15 | ✅ |
+| 153.5 | **Open from the audit:** the kept wallet's KDF and password rule (Argon2, 12+ characters, phone backups), one connect window with a rate limit, per-asset approval labels and token ids, exit salts that survive lost storage, /rpc allowlist, app privacy screen and auto-lock, Firefox 127 minimum, broken `href="/"` links in the extension | ⏳ |
+

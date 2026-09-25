@@ -255,7 +255,8 @@ const siteName = () => `<b class="site">${esc(site ? new URL(site).host : 'A sit
 function connectCard() {
   return `<p class="kicker">CONNECT</p><h2>${siteName()} wants to connect.</h2>
     <dl class="rows"><dt>It will see</dt><dd>Your Zyn account ID${identity.zec ? ' and your Zcash address' : ''}</dd>
-    <dt>It will not see</dt><dd>Your balances, your notes, your keys</dd>
+    <dt>When it asks</dt><dd>Your ZEC.zy and token balances, your items, what you are owed, your sale tickets and the coins you made</dd>
+    <dt>It will not see</dt><dd>Your keys or your recovery phrase</dd>
     <dt>Network</dt><dd>${esc(config.network)} · ${esc(config.zcash)}</dd></dl>
     <p class="muted">It can ask you to approve payments and trades. Nothing moves unless you approve it here.</p>
     <div class="actions"><button class="quiet" id="no">Reject</button><button class="primary" id="yes">Connect <span>→</span></button></div>`;

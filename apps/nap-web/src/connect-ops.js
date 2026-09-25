@@ -156,7 +156,7 @@ export const METHODS = {
       const h = await holdings(ctx);
       // The tokens this wallet made: its own nonces, turned into token ids.
       const mine = new Set();
-      const count = ledger.nonceCount(ctx.config, ctx.identity) + ledger.LOOKAHEAD;
+      const count = (await ledger.ensureNonces(ctx.config, ctx.identity)) + ledger.LOOKAHEAD;
       for (let n = 0; n < count; n++) mine.add(hex(mk.tokenOf(ctx.identity.account, mk.marketNonce(ctx.identity.secretKey, n))));
       return {
         zec: String(h.balances.get(ctx.config.zecAsset) || 0n),

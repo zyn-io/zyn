@@ -49,10 +49,10 @@ export function nextNonce(config, identity) {
 }
 
 /// Every claim this wallet could be owed, from every nonce it may have used.
-export function claimSources(identity, limit) {
+export function claimSources(identity, limit, from = 0) {
   const out = [];
   const me = identity.account;
-  for (let n = 0; n < limit; n++) {
+  for (let n = from; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
     for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce)]) {
       out.push(...mk.claimIds(source).map(hex));
@@ -61,7 +61,69 @@ export function claimSources(identity, limit) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Finding the count after a restore (the 25 Sep audit's H2).
+//
+// The count of nonces a wallet has used lives on the device that used them.
+// A restored wallet starts at zero and looks only LOOKAHEAD past it, so an
+// active holder's newest — uncollected — claims, tickets and deposits were out
+// of sight. A device that has never counted for this wallet now walks its
+// nonces in pages, asking the chain for anything still held under each one
+// (claims owed, sale tickets, deposits waiting, coins it created), until
+// RECOVERY_GAP nonces in a row show nothing; then it keeps the count. Settled
+// and collected trades leave nothing behind, so a longer run of those than
+// the gap is the one case this cannot see past — the Owed view can look
+// further by hand (`recoverNonces(…, { gap })`).
+export const RECOVERY_GAP = 256;
+const RECOVERY_PAGE = 64;
+const recovering = new Map();
+
+/// Once per device and wallet: recover the count if this device never kept one.
+export function ensureNonces(config, identity) {
+  if (read(counterKey(config, identity)) != null) return Promise.resolve(nonceCount(config, identity));
+  const key = counterKey(config, identity);
+  if (!recovering.has(key)) recovering.set(key, recoverNonces(config, identity).finally(() => recovering.delete(key)));
+  return recovering.get(key);
+}
+
+/// Walk this wallet's nonces for anything the chain still holds under them,
+/// and keep the count past the last one found. Returns the count.
+export async function recoverNonces(config, identity, { gap = RECOVERY_GAP } = {}) {
+  const me = identity.account;
+  const market = await call(config, 'zyn_market').catch(() => ({}));
+  const made = new Set((market.curves || []).map((c) => c.token));
+  const bridged = (await loadBridged(config)).map((b) => b.asset);
+  let last = -1;
+  for (let from = 0; from <= last + gap; from += RECOVERY_PAGE) {
+    const to = from + RECOVERY_PAGE;
+    const at = new Map(); // id -> nonce index
+    for (let n = from; n < to; n++) {
+      const nonce = mk.marketNonce(identity.secretKey, n);
+      if (made.has(hex(mk.tokenOf(me, nonce)))) last = Math.max(last, n);
+      for (const id of claimSources(identity, n + 1, n)) at.set(id, n);
+      at.set(hex(mk.ticketId(me, nonce, 0)), n);
+      at.set(hex(mk.voucherTicketId(mk.voucherCommitment(me, nonce), 0)), n);
+      const commitment = mk.depositCommitment(me, nonce);
+      for (const a of bridged) at.set(hex(mk.depositKey(commitment, unhex(a))), n);
+    }
+    const ids = [...at.keys()];
+    // One page's questions at once: a restore should take seconds, not a minute.
+    const asks = [];
+    for (const [method, field, size] of [['zyn_claims', 'id', 240], ['zyn_tickets', 'ticket', 500], ['zyn_waiting', 'key', 500]]) {
+      for (let i = 0; i < ids.length; i += size) {
+        asks.push(call(config, method, { ids: ids.slice(i, i + size).join(',') }).then((part) => (Array.isArray(part) ? part.map((row) => row[field]) : []), () => []));
+      }
+    }
+    const found = (await Promise.all(asks)).flat();
+    for (const id of found) if (at.has(id)) last = Math.max(last, at.get(id));
+  }
+  const count = Math.max(last + 1, nonceCount(config, identity));
+  write(counterKey(config, identity), String(count));
+  return count;
+}
+
 export async function loadOwed(config, identity) {
+  await ensureNonces(config, identity);
   const ids = claimSources(identity, nonceCount(config, identity) + LOOKAHEAD);
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
@@ -118,6 +180,7 @@ const usedNonces = (config, identity) => new Set(JSON.parse(read(bridgeUsedKey(c
 
 /// Deposits waiting for this wallet, from every nonce it may have used.
 export async function loadWaiting(config, identity, bridged) {
+  await ensureNonces(config, identity);
   const assets = (bridged || (await loadBridged(config))).map((b) => b.asset);
   if (!assets.length) return [];
   const me = identity.account;
@@ -182,6 +245,7 @@ export async function claimWaiting(config, identity) {
 /// nonce only this wallet holds, so it asks by id: the first ticket of every
 /// nonce it may have used, then the rest of each buy it finds.
 export async function loadTickets(config, identity, collection) {
+  await ensureNonces(config, identity);
   const me = identity.account;
   const limit = nonceCount(config, identity) + LOOKAHEAD;
   const nonces = Array.from({ length: limit }, (_, n) => mk.marketNonce(identity.secretKey, n));

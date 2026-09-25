@@ -32,6 +32,11 @@ const extensionPages = (mode) => ({
 export default defineConfig(({ mode }) => ({
   plugins: [extensionPages(mode)],
   build: {
+    // The oldest engines Nap runs on: iOS 16's WebKit (the app's minimum;
+    // AbortSignal.timeout and wasm-unsafe-eval arrived in Safari 16), the
+    // Android WebView of Chrome 103, Firefox 114. Syntax newer than these
+    // fails the build instead of the phone.
+    target: ['safari16', 'chrome103', 'firefox114'],
     rollupOptions: {
       input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html', bridge: 'bridge.html' },
     },

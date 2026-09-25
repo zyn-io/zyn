@@ -107,7 +107,10 @@ function readI128(b) {
   return v >= 1n << 127n ? v - (1n << 128n) : v;
 }
 
+/// Two's complement, refusing what does not fit: wrapping silently would sign
+/// a different number from the one shown (the 25 Sep audit's H1).
 function i128Bytes(v) {
+  if (typeof v !== 'bigint' || v >= 1n << 127n || v < -(1n << 127n)) throw new Error('An amount is outside what the ledger can hold');
   let u = v < 0n ? (1n << 128n) + v : v;
   const out = new Uint8Array(16);
   for (let i = 15; i >= 0; i--) { out[i] = Number(u & 0xffn); u >>= 8n; }
