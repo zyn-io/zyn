@@ -79,6 +79,66 @@ pub fn decode_deposit(tx: &Value, vault: &str) -> Option<(u64, Hash)> {
     Some((lamports, commitment?))
 }
 
+/// One token's units in `Fixed` (18 decimals), for a mint with `decimals`.
+pub fn fixed_of_units(units: u64, decimals: u8) -> Option<Fixed> {
+    let scale = 10i128.checked_pow(18u32.checked_sub(decimals as u32)?)?;
+    Some(Fixed((units as i128).checked_mul(scale)?))
+}
+
+/// Whole token units for `amount`, or `None` for an amount the mint cannot
+/// represent exactly.
+pub fn units_of(amount: Fixed, decimals: u8) -> Option<u64> {
+    let scale = 10i128.checked_pow(18u32.checked_sub(decimals as u32)?)?;
+    (amount.0 > 0 && amount.0 % scale == 0).then(|| u64::try_from(amount.0 / scale).ok()).flatten()
+}
+
+/// A deposit of an SPL token into the vault's token account `ata` for
+/// `mint`: every `transfer`/`transferChecked` into it, summed, and the one
+/// `zyn:` memo. A `transferChecked` naming another mint is not this token.
+pub fn decode_token_deposit(tx: &Value, ata: &str, mint: &str) -> Option<(u64, Hash)> {
+    if !tx.pointer("/meta/err").is_none_or(Value::is_null) {
+        return None;
+    }
+    let mut ixs: Vec<&Value> = tx.pointer("/transaction/message/instructions").and_then(Value::as_array).map(|a| a.iter().collect()).unwrap_or_default();
+    for set in tx.pointer("/meta/innerInstructions").and_then(Value::as_array).into_iter().flatten() {
+        ixs.extend(set.get("instructions").and_then(Value::as_array).into_iter().flatten());
+    }
+    let mut units: u64 = 0;
+    let mut commitment: Option<Hash> = None;
+    for ix in ixs {
+        let program = ix.get("programId").and_then(Value::as_str).unwrap_or("");
+        if MEMO_PROGRAMS.contains(&program) {
+            if let Some(c) = ix.get("parsed").and_then(Value::as_str).and_then(memo_commitment) {
+                if commitment.is_some_and(|x| x != c) {
+                    return None;
+                }
+                commitment = Some(c);
+            }
+            continue;
+        }
+        if ix.get("program").and_then(Value::as_str) != Some("spl-token") {
+            continue;
+        }
+        let Some(p) = ix.get("parsed") else { continue };
+        if p.pointer("/info/destination").and_then(Value::as_str) != Some(ata) {
+            continue;
+        }
+        let amount = match p.get("type").and_then(Value::as_str) {
+            Some("transfer") => p.pointer("/info/amount").and_then(Value::as_str)?.parse::<u64>().ok()?,
+            Some("transferChecked") => {
+                if p.pointer("/info/mint").and_then(Value::as_str) != Some(mint) {
+                    continue;
+                }
+                p.pointer("/info/tokenAmount/amount").and_then(Value::as_str)?.parse::<u64>().ok()?
+            }
+            _ => continue,
+        };
+        units = units.checked_add(amount)?;
+    }
+    (units > 0).then_some(())?;
+    Some((units, commitment?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +166,27 @@ mod tests {
         let mut failed = tx(json!([transfer(VAULT, 5), memo(&c)]));
         failed["meta"]["err"] = json!({"InstructionError": [0, "x"]});
         assert_eq!(decode_deposit(&failed, VAULT), None);
+    }
+
+    #[test]
+    fn a_memoed_token_transfer_into_the_vault_account_is_a_deposit() {
+        let c = format!("zyn:{}", "cd".repeat(32));
+        let checked = |dest: &str, mint: &str, amount: &str| {
+            json!({ "program": "spl-token", "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "parsed": { "type": "transferChecked", "info": { "destination": dest, "mint": mint, "tokenAmount": { "amount": amount, "decimals": 6 } } } })
+        };
+        let ok = tx(json!([checked("ATA1", "MINT1", "17000000"), memo(&c)]));
+        assert_eq!(decode_token_deposit(&ok, "ATA1", "MINT1"), Some((17_000_000, [0xcd; 32])));
+        assert_eq!(decode_token_deposit(&tx(json!([checked("ATA1", "OTHER", "5"), memo(&c)])), "ATA1", "MINT1"), None, "another mint");
+        assert_eq!(decode_token_deposit(&tx(json!([checked("ATA2", "MINT1", "5"), memo(&c)])), "ATA1", "MINT1"), None, "another account");
+        assert_eq!(decode_token_deposit(&tx(json!([checked("ATA1", "MINT1", "5")])), "ATA1", "MINT1"), None, "no code, no deposit");
+    }
+
+    #[test]
+    fn token_units_are_exact_both_ways() {
+        assert_eq!(fixed_of_units(1_000_000, 6), Some(Fixed::whole(1)), "one TESTZ is one TESTZ.zy");
+        assert_eq!(units_of(Fixed::whole(17), 6), Some(17_000_000));
+        assert_eq!(units_of(Fixed(1), 6), None, "not rounded");
+        assert_eq!(fixed_of_units(1, 19), None, "more decimals than Zyn carries");
     }
 
     #[test]

@@ -17,6 +17,13 @@
 //! can be rebroadcast and never repeated — and records `SettleExit` once
 //! Solana has finalized it. One payment in flight at a time.
 //!
+//! **Tokens** (`ZYN_SOL_MINTS`): an SPL token carried the same way — each is
+//! registered under §66.13's address for `solana-devnet` and its mint,
+//! deposited by a memo'd transfer into the vault's own token account, and
+//! paid out by a token transfer that opens the recipient's account if it
+//! has none. The network fee of a token-only payment comes from the vault's
+//! SOL buffer.
+//!
 //! ```text
 //!   ZYN_SOL_NODE         the object ledger's JSON-RPC     (http://127.0.0.1:8499)
 //!   ZYN_SUBMIT_TOKEN     the operator door's token (read from the node's env)
@@ -26,7 +33,8 @@
 //!   ZYN_SOL_CUSTODIANS   host:port,… of the share holders              (required)
 //!   ZYN_SOL_THRESHOLD    shares needed to sign                              (2)
 //!   ZYN_SOL_NONCE        the vault's durable nonce account             (required)
-//!   ZYN_SOL_STATE        dir for the deposit cursor and payments in flight
+//!   ZYN_SOL_MINTS        SPL tokens it also carries, `mint:decimals,…`  (none)
+//!   ZYN_SOL_STATE        dir for the deposit cursors and payments in flight
 //!   ZYN_SOL_POLL         seconds between passes in `run`                   (20)
 //! ```
 
@@ -40,7 +48,7 @@ use zyn_custody::solana::custody;
 use zyn_custody::solana::{base58_encode, Cluster, Rpc, TxStatus};
 use zyn_vm::spec::MicrochainVm;
 use zyn_vm::{program, Fixed};
-use zynzapd::sol_bridge::{decode_deposit, fixed_of, lamports_of, tx_ref, NETWORK_FEE};
+use zynzapd::sol_bridge::{decode_deposit, decode_token_deposit, fixed_of, fixed_of_units, lamports_of, tx_ref, units_of, NETWORK_FEE};
 
 fn env(k: &str, d: &str) -> String {
     std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| d.to_string())
@@ -67,6 +75,17 @@ struct Bridge {
     nonce: String,
     state: std::path::PathBuf,
     agent: ureq::Agent,
+    tokens: Vec<Token>,
+}
+
+/// An SPL token this bridge carries.
+struct Token {
+    mint: String,
+    mint_key: [u8; 32],
+    decimals: u8,
+    asset: [u8; 32],
+    /// The vault's own token account for this mint, where deposits land.
+    ata: String,
 }
 
 /// A settlement sent and not yet final. Written before it is broadcast.
@@ -112,6 +131,20 @@ fn bridge() -> Result<Bridge, String> {
     if nonce.is_empty() {
         return Err("set ZYN_SOL_NONCE to the vault's durable nonce account".into());
     }
+    let vault_key = custody::vault_address_of(&public);
+    let mut tokens = Vec::new();
+    for entry in env("ZYN_SOL_MINTS", "").split(',').filter(|s| !s.is_empty()) {
+        let (mint, decimals) = entry.split_once(':').ok_or_else(|| format!("ZYN_SOL_MINTS entry {entry} is not mint:decimals"))?;
+        let mint_key = zyn_custody::solana::pubkey(mint).ok_or_else(|| format!("{mint} is not a Solana address"))?;
+        let decimals: u8 = decimals.parse().map_err(|_| format!("{entry}: decimals must be a number"))?;
+        tokens.push(Token {
+            mint: mint.to_string(),
+            mint_key,
+            decimals,
+            asset: asset_of(network, &mint_key),
+            ata: base58_encode(&zyn_bridge::solana::associated_token_address(&vault_key, &mint_key)),
+        });
+    }
     let state = std::path::PathBuf::from(env("ZYN_SOL_STATE", "/var/lib/zyn/sol-bridge"));
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     Ok(Bridge {
@@ -127,6 +160,7 @@ fn bridge() -> Result<Bridge, String> {
         nonce,
         state,
         agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build(),
+        tokens,
     })
 }
 
@@ -153,16 +187,25 @@ impl Bridge {
         Ok(r.get("receipts").and_then(Value::as_str).unwrap_or("").to_string())
     }
 
-    /// New deposits since the cursor: each posted once; the chain refuses a
-    /// reference it has seen, so re-reading history is harmless.
+    /// New deposits since each cursor: SOL into the vault, and each token
+    /// into the vault's token account. Each is posted once; the chain refuses
+    /// a reference it has seen, so re-reading history is harmless.
     fn deposits(&self) -> Result<(), String> {
-        let cursor = self.state.join("deposit-cursor");
+        self.deposits_at(&self.vault, "deposit-cursor".into(), None)?;
+        for (i, t) in self.tokens.iter().enumerate() {
+            self.deposits_at(&t.ata, format!("deposit-cursor-{}", t.ata), Some(i))?;
+        }
+        Ok(())
+    }
+
+    fn deposits_at(&self, watched: &str, cursor_name: String, token: Option<usize>) -> Result<(), String> {
+        let cursor = self.state.join(cursor_name);
         let until = std::fs::read_to_string(&cursor).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let mut opts = json!({ "commitment": "finalized", "limit": 1000 });
         if let Some(u) = &until {
             opts["until"] = json!(u);
         }
-        let rows = self.solana("getSignaturesForAddress", json!([self.vault, opts]))?;
+        let rows = self.solana("getSignaturesForAddress", json!([watched, opts]))?;
         let rows = rows.as_array().cloned().unwrap_or_default();
         let newest = rows.first().and_then(|r| r["signature"].as_str()).map(String::from);
         for r in rows.iter().rev() {
@@ -171,21 +214,26 @@ impl Bridge {
                 continue;
             }
             let tx = self.solana("getTransaction", json!([sig, { "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "finalized" }]))?;
-            let Some((lamports, commitment)) = decode_deposit(&tx, &self.vault) else { continue };
-            let receipts = self.submit(&Op::DepositCommitted {
-                program: program::deposit(),
-                asset: self.asset,
-                gross: fixed_of(lamports),
-                external_ref: tx_ref(sig),
-                commitment,
-            })?;
+            let (asset, gross, commitment, what) = match token {
+                None => {
+                    let Some((lamports, c)) = decode_deposit(&tx, &self.vault) else { continue };
+                    (self.asset, fixed_of(lamports), c, format!("{lamports} lamports"))
+                }
+                Some(i) => {
+                    let t = &self.tokens[i];
+                    let Some((units, c)) = decode_token_deposit(&tx, &t.ata, &t.mint) else { continue };
+                    let Some(gross) = fixed_of_units(units, t.decimals) else { continue };
+                    (t.asset, gross, c, format!("{units} units of {}", t.mint))
+                }
+            };
+            let receipts = self.submit(&Op::DepositCommitted { program: program::deposit(), asset, gross, external_ref: tx_ref(sig), commitment })?;
             if receipts.contains("already credited") {
                 continue;
             }
             if receipts.contains("Refused") {
                 return Err(format!("{sig}: the ledger refused the deposit — {}", receipts.chars().take(160).collect::<String>()));
             }
-            println!("in:  {sig} — {lamports} lamports waiting for {}", hex(&commitment));
+            println!("in:  {sig} — {what} waiting for {}", hex(&commitment));
         }
         if let Some(n) = newest {
             std::fs::write(&cursor, n).map_err(|e| format!("{}: {e}", cursor.display()))?;
@@ -253,19 +301,27 @@ impl Bridge {
 
     /// Pay the revealed exits that fit one transaction.
     fn pay(&self) -> Result<(), String> {
-        let rows = zynzapd::object_client::call(&self.node, "zyn_bridgeExits", json!({ "token": self.token()?, "asset": hex(&self.asset) }))?;
+        // SOL first, then each token: one transaction can carry both.
         let mut payouts = Vec::new();
         let mut covers = Vec::new();
-        for r in rows.as_array().into_iter().flatten() {
-            let (Some(index), Some(to)) = (r["index"].as_u64(), r["to"].as_str()) else { continue };
-            let amount: i128 = r["amount"].as_str().and_then(|a| a.parse().ok()).unwrap_or(0);
-            let Some(lamports) = lamports_of(Fixed(amount)) else {
-                eprintln!("zyn-sol-bridge: exit {index} is not whole lamports; it waits");
-                continue;
-            };
-            let Some(to) = unhex(to).and_then(|b| <[u8; 32]>::try_from(b).ok()) else { continue };
-            payouts.push(zyn_bridge::solana::SolPayout::native(to, lamports));
-            covers.push(index as u32);
+        let kinds: Vec<([u8; 32], Option<&Token>)> = std::iter::once((self.asset, None)).chain(self.tokens.iter().map(|t| (t.asset, Some(t)))).collect();
+        for (asset, token) in kinds {
+            let rows = zynzapd::object_client::call(&self.node, "zyn_bridgeExits", json!({ "token": self.token()?, "asset": hex(&asset) }))?;
+            for r in rows.as_array().into_iter().flatten() {
+                let (Some(index), Some(to)) = (r["index"].as_u64(), r["to"].as_str()) else { continue };
+                let amount = Fixed(r["amount"].as_str().and_then(|a| a.parse().ok()).unwrap_or(0));
+                let Some(to) = unhex(to).and_then(|b| <[u8; 32]>::try_from(b).ok()) else { continue };
+                let payout = match token {
+                    None => lamports_of(amount).map(|l| zyn_bridge::solana::SolPayout::native(to, l)),
+                    Some(t) => units_of(amount, t.decimals).map(|u| zyn_bridge::solana::SolPayout::token(to, t.mint_key, u)),
+                };
+                let Some(payout) = payout else {
+                    eprintln!("zyn-sol-bridge: exit {index} is not a whole number of the asset's units; it waits");
+                    continue;
+                };
+                payouts.push(payout);
+                covers.push(index as u32);
+            }
         }
         if payouts.is_empty() {
             return Ok(());
@@ -276,12 +332,15 @@ impl Bridge {
         };
         let mut group = zyn_bridge::solana::chunk(accounts, &payouts).map_err(|e| format!("{e:?}"))?.remove(0);
         covers.truncate(group.len());
-        // The exit pays the network fee, so lamports leaving the vault equal
-        // what Zyn burned plus nothing.
-        if group[0].lamports <= NETWORK_FEE {
-            return Err(format!("exit {} cannot cover the {NETWORK_FEE}-lamport network fee", covers[0]));
+        // A SOL exit pays the network fee, so lamports leaving the vault equal
+        // what Zyn burned. A token-only payment's fee comes from the vault's
+        // SOL buffer, which a plain top-up (no memo) keeps up.
+        if let Some(first) = group.iter_mut().find(|p| p.token.is_none()) {
+            if first.lamports <= NETWORK_FEE {
+                return Err(format!("an exit cannot cover the {NETWORK_FEE}-lamport network fee"));
+            }
+            first.lamports -= NETWORK_FEE;
         }
-        group[0].lamports -= NETWORK_FEE;
         let mut quorum = RemoteSolanaQuorum::new(self.custodians.clone());
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let nonce = self.rpc.nonce_value(&self.nonce).map_err(|e| format!("{e:?}"))?;
@@ -317,12 +376,19 @@ fn main() {
             println!("asset    {}", hex(&b.asset));
             println!("vault    {}  ({} lamports)", b.vault, bal["value"]);
             println!("issued   {}", issued.map_or("not registered — run `register`".into(), |i| format!("{i} (Fixed, 18 decimals)")));
+            for t in &b.tokens {
+                println!("token    {} ({} decimals) → {} · vault account {}", t.mint, t.decimals, hex(&t.asset), t.ata);
+            }
             println!("in flight {}", b.inflight().len());
             Ok(())
         }
         "register" => {
             let r = b.submit(&Op::RegisterBridged { program: program::bridge_register(), network: b.network.to_vec(), origin: Vec::new(), decimals: 9 })?;
-            println!("register: {}", r.chars().take(160).collect::<String>());
+            println!("register SOL: {}", r.chars().take(120).collect::<String>());
+            for t in &b.tokens {
+                let r = b.submit(&Op::RegisterBridged { program: program::bridge_register(), network: b.network.to_vec(), origin: t.mint_key.to_vec(), decimals: t.decimals })?;
+                println!("register {}: {}", t.mint, r.chars().take(120).collect::<String>());
+            }
             Ok(())
         }
         "once" => b.once(),
