@@ -14,35 +14,14 @@
   <link rel="icon" href="/assets/favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/zyn-mark-3d.webp" as="image" type="image/webp">
   <link rel="stylesheet" href="/styles.css">
   <script src="/main.js" defer></script>
 </head>
 <body>
-  <svg class="defs" aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="jade" x1="0.1" y1="0" x2="0.9" y2="1">
-        <stop offset="0" stop-color="#58e8bb"/>
-        <stop offset="0.3" stop-color="#1aa982"/>
-        <stop offset="0.65" stop-color="#0b7a61"/>
-        <stop offset="1" stop-color="#054a3a"/>
-      </linearGradient>
-      <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0.35">
-        <stop offset="0.44" stop-color="#eafff7" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#eafff7" stop-opacity="0.42"/>
-        <stop offset="0.56" stop-color="#eafff7" stop-opacity="0"/>
-        <animateTransform attributeName="gradientTransform" type="translate" values="-1 0; 1 0; 1 0" keyTimes="0; 0.45; 1" dur="7s" repeatCount="indefinite"/>
-      </linearGradient>
-      <g id="z">
-        <path d="M17 38 C20 25 30 17.5 46 16 C62 14.6 80 13.8 94 13 C90 22.5 82 29 70 31 C58 33 44 34 33 35.2 C26 36 21 37 17 38 Z"/>
-        <path d="M72 31.2 C82 29.6 88.5 25 93 18.5 C84 40 66 60 47 74 C36 82 25 86.5 12 89 C19 76 30 64 43 54 C53 46.5 63 38.5 72 31.2 Z"/>
-        <path d="M29 88 C35 76 46 69.5 61 68 C71 67 81 66 91 65 C87 74 80 80 69 81.5 C58 83 45 84.5 38 85.5 C34 86.2 31 87 29 88 Z"/>
-      </g>
-    </defs>
-  </svg>
-
   <header class="top">
     <a class="lockup" href="/" aria-label="Zyn home">
-      <svg viewBox="0 0 100 100" class="mark-sm" aria-hidden="true"><use href="#z" fill="#13a07e"/></svg>
+      <img class="mark-sm" src="/assets/zyn-mark-3d-96.webp" width="96" height="96" alt="">
       <span>ZYN</span>
     </a>
     <nav aria-label="Sections">
@@ -65,10 +44,7 @@
         </div>
       </div>
       <div class="hero-mark" aria-hidden="true">
-        <svg viewBox="0 0 100 100" class="mark-lg">
-          <use href="#z" fill="url(#jade)" stroke="#b8ffe6" stroke-opacity=".55" stroke-width=".4" stroke-linejoin="round"/>
-          <use href="#z" fill="url(#sheen)" class="sheen"/>
-        </svg>
+        <img class="mark-lg" src="/assets/zyn-mark-3d.webp" width="800" height="800" alt="">
       </div>
     </section>
 
@@ -190,7 +166,7 @@
 
   <footer class="foot">
     <div class="foot-lockup">
-      <svg viewBox="0 0 100 100" class="mark-sm" aria-hidden="true"><use href="#z" fill="#13a07e"/></svg>
+      <img class="mark-sm" src="/assets/zyn-mark-3d-96.webp" width="96" height="96" alt="">
       <p><strong>Zyn</strong> — an application execution layer built for Zcash.</p>
     </div>
     <nav aria-label="Zyn apps">
