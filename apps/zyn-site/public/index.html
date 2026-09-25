@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zyn — applications for private ZEC</title>
+  <meta name="description" content="Zyn is an application execution layer built for Zcash. It runs deterministic application state machines, batches their activity, and anchors state commitments to Zcash.">
+  <meta name="theme-color" content="#06110E">
+  <meta property="og:title" content="Zyn — ZEC has private money. Zyn gives it applications.">
+  <meta property="og:description" content="An application execution layer built for Zcash: a wallet, a market, a launchpad, a collection and bridges, with the trust model stated up front.">
+  <meta property="og:image" content="https://zyn-site.pages.dev/assets/og.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/assets/favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/main.js" defer></script>
+</head>
+<body>
+  <svg class="defs" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="jade" x1="0.1" y1="0" x2="0.9" y2="1">
+        <stop offset="0" stop-color="#58e8bb"/>
+        <stop offset="0.3" stop-color="#1aa982"/>
+        <stop offset="0.65" stop-color="#0b7a61"/>
+        <stop offset="1" stop-color="#054a3a"/>
+      </linearGradient>
+      <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0.35">
+        <stop offset="0.44" stop-color="#eafff7" stop-opacity="0"/>
+        <stop offset="0.5" stop-color="#eafff7" stop-opacity="0.42"/>
+        <stop offset="0.56" stop-color="#eafff7" stop-opacity="0"/>
+        <animateTransform attributeName="gradientTransform" type="translate" values="-1 0; 1 0; 1 0" keyTimes="0; 0.45; 1" dur="7s" repeatCount="indefinite"/>
+      </linearGradient>
+      <g id="z">
+        <path d="M17 38 C20 25 30 17.5 46 16 C62 14.6 80 13.8 94 13 C90 22.5 82 29 70 31 C58 33 44 34 33 35.2 C26 36 21 37 17 38 Z"/>
+        <path d="M72 31.2 C82 29.6 88.5 25 93 18.5 C84 40 66 60 47 74 C36 82 25 86.5 12 89 C19 76 30 64 43 54 C53 46.5 63 38.5 72 31.2 Z"/>
+        <path d="M29 88 C35 76 46 69.5 61 68 C71 67 81 66 91 65 C87 74 80 80 69 81.5 C58 83 45 84.5 38 85.5 C34 86.2 31 87 29 88 Z"/>
+      </g>
+    </defs>
+  </svg>
+
+  <header class="top">
+    <a class="lockup" href="/" aria-label="Zyn home">
+      <svg viewBox="0 0 100 100" class="mark-sm" aria-hidden="true"><use href="#z" fill="#13a07e"/></svg>
+      <span>ZYN</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#apps">Apps</a>
+      <a href="#how">How it works</a>
+      <a href="#trust">Trust model</a>
+      <a class="nav-cta" href="https://nap.cavebro.win/">Open Nap <span aria-hidden="true">→</span></a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="label">Built for Zcash</p>
+        <h1>ZEC has private money. <em>Zyn gives it applications.</em></h1>
+        <p class="lede">Zyn is an application execution layer built for Zcash. It runs deterministic application state machines, batches their activity, and anchors state commitments to Zcash.</p>
+        <div class="ctas">
+          <a class="btn primary" href="https://nap.cavebro.win/">Open Nap Wallet <span aria-hidden="true">→</span></a>
+          <a class="btn ghost" href="#trust">Read the trust model</a>
+        </div>
+      </div>
+      <div class="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 100 100" class="mark-lg">
+          <use href="#z" fill="url(#jade)" stroke="#b8ffe6" stroke-opacity=".55" stroke-width=".4" stroke-linejoin="round"/>
+          <use href="#z" fill="url(#sheen)" class="sheen"/>
+        </svg>
+      </div>
+    </section>
+
+    <section class="live" aria-label="Live network status">
+      <div class="net" data-net="mainnet">
+        <p class="net-name"><span class="dot"></span>Mainnet <span class="chain">chain 26460</span></p>
+        <dl>
+          <div><dt>Epoch</dt><dd data-k="epoch">—</dd></div>
+          <div><dt>Last sealed</dt><dd data-k="sealed">—</dd></div>
+          <div><dt>Independent replay</dt><dd data-k="replay">—</dd></div>
+          <div><dt>Anchored to Zcash</dt><dd data-k="anchor">—</dd></div>
+        </dl>
+      </div>
+      <div class="net" data-net="testnet">
+        <p class="net-name"><span class="dot"></span>Testnet <span class="chain">chain 212</span></p>
+        <dl>
+          <div><dt>Epoch</dt><dd data-k="epoch">—</dd></div>
+          <div><dt>Transactions</dt><dd data-k="tx">—</dd></div>
+          <div><dt>Independent replay</dt><dd data-k="replay">—</dd></div>
+          <div><dt>Anchored to Zcash</dt><dd data-k="anchor">—</dd></div>
+        </dl>
+      </div>
+      <p class="live-note">Read live from <a href="https://zynscan.pages.dev/">ZynScan</a>, which rebuilds each network from its published journal. Testnet coins are for trying things out; they are worth nothing.</p>
+    </section>
+
+    <section id="apps" class="apps">
+      <div class="section-head">
+        <p class="label">What runs on Zyn</p>
+        <h2>One wallet, and the places it goes.</h2>
+        <p><strong>Cave</strong> is the first consumer app powered by Zyn: the Collection Z drop, its store, and the Jade launchpad.</p>
+      </div>
+
+      <ol class="app-list">
+        <li class="app">
+          <div class="app-name"><h3>Nap Wallet</h3><span class="chip">Mainnet</span><span class="chip">Testnet</span></div>
+          <p>Holds shielded ZEC and your Zyn notes side by side, in the browser today. The extension and the phone apps are on their way to the stores.</p>
+          <a class="go" href="https://nap.cavebro.win/">nap.cavebro.win <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app">
+          <div class="app-name"><h3>Market</h3><span class="chip">Built and enabled</span></div>
+          <p>Swaps and pools in the VM. Orders in an epoch clear together at one price, so there is nothing to sandwich inside a batch — the operator still sees every order, and can refuse or delay one.</p>
+          <a class="go" href="https://nap.cavebro.win/market">Nap Market <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app">
+          <div class="app-name"><h3>Jade</h3><span class="chip cave">Cave</span><span class="chip">Mainnet</span></div>
+          <p>A launchpad: a coin starts on a bonding curve and graduates into a market pool. Its reserve and fees are published on ZynScan.</p>
+          <a class="go" href="https://cave-jade.pages.dev/">cave-jade.pages.dev <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app app-art">
+          <div class="app-name"><h3>Collection Z</h3><span class="chip cave">Cave</span><span class="chip">Mainnet</span></div>
+          <p>4,444 pixel creatures in three species — Moles, Owls and Moths. The art and every manifest are published and frozen under one root.</p>
+          <div class="trio" aria-label="Three Mythic items from Collection Z">
+            <figure><img src="/assets/art/mole-1727.png" alt="Zyn Mole #1727, a Mythic mole in a cipher mining rig" width="192" height="192"><figcaption>Mole #1727</figcaption></figure>
+            <figure><img src="/assets/art/owl-0789.png" alt="Zyn Owl #0789, a Mythic owl in a cipher cowl" width="192" height="192"><figcaption>Owl #0789</figcaption></figure>
+            <figure><img src="/assets/art/moth-0865.png" alt="Zyn Moth #0865, a Mythic moonwhite moth with luminous eyes" width="192" height="192"><figcaption>Moth #0865</figcaption></figure>
+          </div>
+          <a class="go" href="https://cavebro.win/">cavebro.win <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app">
+          <div class="app-name"><h3>Cave store</h3><span class="chip cave">Cave</span><span class="chip">Mainnet</span></div>
+          <p>List, buy and take back Collection Z items. The order book is read from the ledger, and every write goes through your wallet.</p>
+          <a class="go" href="https://cave-market.pages.dev/">cave-market.pages.dev <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app">
+          <div class="app-name"><h3>Bridge</h3><span class="chip">ZEC · Mainnet</span><span class="chip">SOL · ETH · BTC · Testnet</span></div>
+          <p>ZEC in and out through a 2-of-3 threshold vault. SOL, ETH and BTC bridge on testnet (Solana devnet, Sepolia, Bitcoin signet), each deposit carrying a one-time code instead of your account; their test keys run on a single machine.</p>
+          <a class="go" href="https://nap.cavebro.win/bridge">Nap Bridge <span aria-hidden="true">→</span></a>
+        </li>
+        <li class="app">
+          <div class="app-name"><h3>ZynScan</h3><span class="chip">Mainnet</span><span class="chip">Testnet</span></div>
+          <p>The explorer that doesn't take the node's word for it: it replays each network's journal and checks every root it gets.</p>
+          <a class="go" href="https://zynscan.pages.dev/">zynscan.pages.dev <span aria-hidden="true">→</span></a>
+        </li>
+      </ol>
+    </section>
+
+    <section id="how" class="how">
+      <div class="section-head">
+        <p class="label">How an epoch works</p>
+        <h2>Batched on Zyn. Timestamped on Zcash.</h2>
+      </div>
+      <ol class="steps">
+        <li><span class="n">01</span><h3>Sign</h3><p>You sign an intent in your wallet. Value is held as notes that only your key opens, not as balances.</p></li>
+        <li><span class="n">02</span><h3>Batch</h3><p>The operator orders intents and applies them together, one epoch at a time. Market orders in the same epoch clear at one price.</p></li>
+        <li><span class="n">03</span><h3>Seal</h3><p>Each epoch seals into a state root and a journal. ZynScan replays the journal and checks the root.</p></li>
+        <li><span class="n">04</span><h3>Anchor</h3><p>Roots are committed to Zcash in anchor transactions. Zcash timestamps the commitment; it does not validate the state behind it.</p></li>
+      </ol>
+    </section>
+
+    <section id="trust" class="trust">
+      <div class="trust-inner">
+        <div class="trust-head">
+          <p class="label">The trust model</p>
+          <h2>Read this first.</h2>
+          <p>It decides whether anything else here matters to you. These are present-tense facts, not a roadmap.</p>
+        </div>
+        <ul class="facts">
+          <li><strong>Zyn is operator-sequenced.</strong> One sequencer orders transactions. There are no fraud proofs and no validity proofs.</li>
+          <li><strong>Withdrawals depend on the Zyn-operated custodians.</strong> Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault operated by the Zyn team.</li>
+          <li><strong>Zcash does not validate Zyn.</strong> It records deposits, withdrawals and anchor commitments. Built for Zcash, not of it: Zyn does not inherit Zcash's security.</li>
+          <li><strong>Hidden from the public, not from us.</strong> Who holds and trades what is not published. The operator and authorised verifiers can see it today; we are working toward a version where nobody can.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="checks">
+      <div class="section-head">
+        <p class="label">What you can check yourself</p>
+        <h2>Receipts, not adjectives.</h2>
+      </div>
+      <div class="check-grid">
+        <article><p class="k">zyn_status → issued</p><h3>The backing</h3><p>The ledger publishes what it has issued, per asset. The bridge checks every pass that the vault still holds that much, and anyone can compare the same figure with the vault's balance on Zcash, no key needed.</p></article>
+        <article><p class="k">replayed_root = node_root</p><h3>The replay</h3><p>ZynScan rebuilds every sealed epoch from the published journal and says it agrees only when its root matches the node's.</p></article>
+        <article><p class="k">anchor transaction</p><h3>The timestamp</h3><p>Sealed roots go to Zcash in ordinary transactions anyone can look up. A root cannot be rewritten later without the anchor showing it.</p></article>
+        <article><p class="k">keccak(address ‖ salt)</p><h3>The exit address</h3><p>Leaving writes only a commitment to where the money goes. The address is shown to the bridge that pays it, and to nobody else.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot-lockup">
+      <svg viewBox="0 0 100 100" class="mark-sm" aria-hidden="true"><use href="#z" fill="#13a07e"/></svg>
+      <p><strong>Zyn</strong> — an application execution layer built for Zcash.</p>
+    </div>
+    <nav aria-label="Zyn apps">
+      <a href="https://nap.cavebro.win/">Nap Wallet</a>
+      <a href="https://zynscan.pages.dev/">ZynScan</a>
+      <a href="https://cavebro.win/">Collection Z</a>
+      <a href="https://cave-jade.pages.dev/">Jade</a>
+    </nav>
+    <p class="fine">Precision. Permanence. Momentum. Privacy.</p>
+  </footer>
+</body>
+</html>
