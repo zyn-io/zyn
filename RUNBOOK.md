@@ -2637,6 +2637,20 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
 - **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
+## 5f-duodevicies. End-to-end suites on the public testnet (25 Sep 2026)
+
+Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chrome). Wallets are scratchpad test phrases; none holds anything of value.
+
+| Product | Test | Covers | Last pass |
+|---|---|---|---|
+| Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on cave-jade, Nap approval, content attached | 25 Sep, 12/12 |
+| Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | yard, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
+| DEX | `dex.e2e.mjs` (`A`, `B`, amounts) | open a pool, collect shares, batch swap, add/remove liquidity, collect each | 25 Sep, all |
+| NFT store | `store-trade.e2e.mjs` (`SELLER_PHRASE`, `BUYER_PHRASE`, `PRICE`) | list on cavebro.win, buy there and on the Cave store, seller collects | 25 Sep, 15/15 |
+| NFT sale | `sale.e2e.mjs` (`PHASE=buy|claim|mint`) | tickets, claims, open mint on cavebro.win/mint (operator half: §5f-sedecies) | 24 Sep |
+
+Not yet on testnet: a coin's **graduation** into a pool — it needs ~17 ZEC.zy raised on one curve, and testnet holds ~0.1 ZEC.zy in total.
+
 ## 5f-septendecies. SOL.zy and ETH.zy bridges, testnet (24 Sep 2026, DECISIONS §146)
 
 **SOL (Solana devnet ↔ testnet 212)** — `zyn-sol-bridge.service` on Hetzner, env `/etc/zyn/zyn-sol-bridge.env` plus the node's own env for the token. Vault `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` (FROST 2-of-3; public package `/var/zyn/solana-shares/public.bin`; custodians `127.0.0.1:8110/8111/8112`), durable nonce `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H`. State in `/var/lib/zyn/sol-bridge` (`deposit-cursor`, `inflight.json` — a damaged `inflight.json` stops the bridge on purpose: it is the record that prevents paying twice). `zyn-sol-bridge status` shows the vault balance against what Zyn has issued. Top up the vault's lamports for rent/fees with a plain transfer (no memo = credits nobody).

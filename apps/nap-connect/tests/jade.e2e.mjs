@@ -10,6 +10,9 @@ const JADE = process.env.JADE || 'http://localhost:4180';
 const NAP = process.env.NAP || 'http://localhost:4179';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const TOKEN = process.env.TOKEN;
+// The coin under test: its name and ticker as created (defaults: the first testnet coin).
+const NAME = process.env.NAME || 'Zyn Test Stone';
+const SYM = process.env.SYMBOL || 'ZTEST';
 const S = process.env.SHOTS || '/tmp';
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -18,16 +21,16 @@ const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('jade error:', e.message));
 await page.goto(`${JADE}/?network=testnet&nap=${NAP}`);
 await page.waitForSelector(`[data-coin="${TOKEN}"]`, { timeout: 20000 });
-ok(/Zyn Test Stone/.test(await page.textContent(`[data-coin="${TOKEN}"]`)) && /ZEC/.test(await page.textContent(`[data-coin="${TOKEN}"] .j-card-cap`)), 'the yard lists ZTEST with its market cap, from the public chain, without a wallet');
+ok(await page.textContent(`[data-coin="${TOKEN}"]`).then((t) => t.includes(NAME)) && /ZEC/.test(await page.textContent(`[data-coin="${TOKEN}"] .j-card-cap`)), `the yard lists ${SYM} with its market cap, from the public chain, without a wallet`);
 await page.screenshot({ path: `${S}/jade-yard.png` });
 await page.click(`[data-coin="${TOKEN}"]`);
-await page.waitForSelector('#coin-title:has-text("Zyn Test Stone")');
+await page.waitForSelector(`#coin-title:has-text("${NAME}")`);
 await page.waitForFunction(() => /ZEC/.test(document.querySelector('#coin-mcap').textContent));
 const drawn = await page.waitForSelector('#chart canvas', { timeout: 20000 }).then(() => true, () => false);
 ok(/%/.test(await page.textContent('#curve-pct')) && drawn, `coin page: cap ${await page.textContent('#coin-mcap')}, curve ${await page.textContent('#curve-pct')}, chart drawn`);
 await page.fill('#trade-input', '0.001');
 await page.waitForTimeout(200);
-ok(/ZTEST/.test(await page.textContent('#trade-output')) && /ZTEST/.test(await page.textContent('#trade-min')), `quote: ${await page.textContent('#trade-output')}, at least ${await page.textContent('#trade-min')}`);
+ok((await page.textContent('#trade-output')).includes(SYM) && (await page.textContent('#trade-min')).includes(SYM), `quote: ${await page.textContent('#trade-output')}, at least ${await page.textContent('#trade-min')}`);
 // Connect through Nap in the browser.
 await page.click('#wallet-button');
 await page.waitForSelector('.jade-wallet-option');
@@ -53,11 +56,11 @@ async function trade(label, check) {
   await page.waitForFunction(() => /Filled|Settled/.test(document.querySelector('#trade-status').textContent), null, { timeout: 180000 }).catch(() => {});
   ok(/Filled/.test(await page.textContent('#trade-status')), `${label}, collected without a prompt: ${await page.textContent('#trade-status')}`);
 }
-await trade('buy', (t) => /Buy ZTEST with 0\.001 ZEC\.zy/.test(t) && /If nobody else buys this epoch/.test(t));
+await trade('buy', (t) => t.includes(`Buy ${SYM} with 0.001 ZEC.zy`) && /If nobody else buys this epoch/.test(t));
 await page.click('[data-trade="sell"]');
 await page.fill('#trade-input', '12500');
 await page.waitForTimeout(200);
-await trade('sell', (t) => /Sell 12,500 ZTEST/.test(t));
+await trade('sell', (t) => t.includes(`Sell 12,500 ${SYM}`));
 await page.screenshot({ path: `${S}/jade-coin.png`, fullPage: true });
 await page.goto(`${JADE}/portfolio?network=testnet&nap=${NAP}`).catch(() => {});
 await b.close();

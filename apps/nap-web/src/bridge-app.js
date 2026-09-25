@@ -94,7 +94,16 @@ async function revealExits() {
 
 // ---------------------------------------------------------------------------
 
-async function refresh(quiet = false) {
+/// Whether the holder is typing into the view; a timed refresh must not
+/// redraw over a half-typed amount or address.
+function editing() {
+  const view = $('#view');
+  if (!view) return false;
+  const a = document.activeElement;
+  return view.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+}
+
+async function refresh(quiet = false, timed = false) {
   try {
     const status = await call('zyn_status');
     const epoch = checkedEpoch(status, config.chain);
@@ -116,7 +125,12 @@ async function refresh(quiet = false) {
       await revealExits();
     }
     state = next;
-    render();
+    if (timed && editing()) {
+      const e = $('#epoch');
+      if (e) e.textContent = `epoch ${state.epoch}`;
+    } else {
+      render();
+    }
     if (!quiet) notice(`Up to date at epoch ${epoch}.`);
   } catch (e) {
     notice(e.message === 'Failed to fetch' ? 'The chain is not answering. Nothing was sent.' : e.message, true);
@@ -366,5 +380,5 @@ function render() {
   frame();
   render();
   refresh(true);
-  setInterval(() => { if (identity && !busy) refresh(true); }, 30_000);
+  setInterval(() => { if (identity && !busy) refresh(true, true); }, 30_000);
 })();

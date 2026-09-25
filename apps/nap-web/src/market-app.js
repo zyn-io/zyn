@@ -25,7 +25,7 @@ let identity = null;
 let view = 'swap';
 /// Where to go back to after the wallet opens for an action that needed it.
 let returnTo = 'swap';
-let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], curves: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map() };
+let state = { epoch: 0n, epochSeconds: 0, pools: [], launches: [], curves: [], held: [], balances: new Map(), owed: [], offers: [], collections: [], items: new Map(), bridged: [] };
 let busy = false;
 let timer = null;
 const ui = { pool: null, sellA: true, slippage: 100 };
@@ -69,8 +69,19 @@ function collectionName(id) {
   return c ? String(c.name) : short(id);
 }
 
+/// A bridged asset's name from its origin (§146): the network's own coin is
+/// SOL.zy or ETH.zy; a token bridged from it is named by its short address.
+function bridgedName(b) {
+  if (b.origin) return `${short(b.origin)}.zy`;
+  if (b.network.startsWith('solana')) return 'SOL.zy';
+  if (b.network.startsWith('eip155:')) return 'ETH.zy';
+  return short(b.asset);
+}
+
 function name(assetHex) {
   if (assetHex === config.zecAsset) return 'ZEC.zy';
+  const bridged = state.bridged.find((b) => b.asset === assetHex);
+  if (bridged) return bridgedName(bridged);
   const item = state.items.get(assetHex);
   if (item) return `${collectionName(item.collection)} #${item.serial}`;
   const launch = state.launches.find((l) => l.token === assetHex);
@@ -149,16 +160,30 @@ const validLaunch = (l) => ['token', 'quote', 'meta'].every((k) => isHex(l[k]))
   && ['total_supply', 'sale_supply', 'pool_supply', 'soft_cap', 'hard_cap', 'raised'].every((k) => isInt(l[k]))
   && ['open', 'graduated', 'failed'].includes(l.state) && isSmall(l.closes_at_epoch) && isSmall(l.pool_bps) && isSmall(l.fee_bps);
 
-async function refresh(quiet = false) {
+/// Whether the holder is in the middle of something on the page: the cursor
+/// in a field, or an add/remove form open. A timed refresh must not redraw over that — it wiped a half-typed
+/// amount and closed the open form every 20 seconds.
+function editing() {
+  const view = $('#view');
+  if (!view) return false;
+  const a = document.activeElement;
+  if (view.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return true;
+  return [...view.querySelectorAll('form.mk-inline')].some((f) => !f.hidden);
+}
+
+/// `timed`: a background refresh. It updates what the page knows, but leaves
+/// the view alone while the holder is editing; the next render shows it.
+async function refresh(quiet = false, timed = false) {
   try {
     const status = await call('zyn_status');
     const epoch = checkedEpoch(status, config.chain);
     const me = identity;
-    const [market, published, owed, offerBook] = await Promise.all([
+    const [market, published, owed, offerBook, bridged] = await Promise.all([
       call('zyn_market'),
       me ? call('zyn_published') : null,
       me ? loadOwed() : [],
       call('zyn_offers').catch(() => ({ offers: [] })),
+      ledger.loadBridged(config),
     ]);
     // The wallet may have been locked while this was in flight.
     const mine = me && identity === me;
@@ -179,11 +204,12 @@ async function refresh(quiet = false) {
       offers: (offerBook?.offers || []).filter(validOffer),
       collections: (market.collections || []).filter((c) => isHex(c.asset) && isHex(c.quote) && isInt(c.floor) && isSmall(c.fee_bps)),
       items: new Map(),
+      bridged,
     };
     // Which held assets, and which listed ones, are items: asked by asset,
     // which says nothing an item's own listing or manifest does not.
     for (const o of state.offers) if (o.serial >= 0) state.items.set(o.asset, { collection: o.collection, serial: o.serial });
-    const unknown = [...new Set(held.map((h) => h.asset))].filter((a) => a !== config.zecAsset && !state.items.has(a));
+    const unknown = [...new Set(held.map((h) => h.asset))].filter((a) => a !== config.zecAsset && !state.items.has(a) && !bridged.some((b) => b.asset === a));
     if (unknown.length) {
       const found = await call('zyn_items', { assets: unknown.slice(0, 500).join(',') }).catch(() => []);
       for (const i of Array.isArray(found) ? found : []) {
@@ -191,7 +217,12 @@ async function refresh(quiet = false) {
       }
     }
     if (!ui.pool && state.pools.length) ui.pool = state.pools[0].id;
-    render();
+    if (timed && editing()) {
+      const e = $('#epoch');
+      if (e) e.textContent = `epoch ${state.epoch}`;
+    } else {
+      render();
+    }
     if (!quiet) notice(`Up to date at epoch ${epoch}.`);
   } catch (e) {
     notice(e.message === 'Failed to fetch' ? 'The chain is not answering. Nothing was sent.' : e.message, true);
@@ -204,14 +235,15 @@ async function refresh(quiet = false) {
 /// function from nonce to bytes, so a nonce another device used can be
 /// stepped over.
 async function submit(intent, what) {
-  if (busy) return;
+  // Said, not swallowed: a click that silently does nothing reads as broken.
+  if (busy) { notice('One moment — the last action is still settling. Try again in a few seconds.'); return false; }
   busy = true;
   setBusy(true);
   try {
     if (typeof intent === 'function') await ledger.submitFresh(config, identity, intent);
     else await ledger.submitIntent(config, identity, intent);
     notice(what);
-    await refresh(true);
+    await refresh(true, true);
     return true;
   } catch (e) {
     notice(e.message, true);
@@ -674,7 +706,7 @@ root.addEventListener('click', (e) => { if (e.target.closest('#refresh')) refres
     frame();
     render();
     refresh(true);
-    timer = setInterval(() => { if (!document.hidden && !busy) refresh(true); }, 20000);
+    timer = setInterval(() => { if (!document.hidden && !busy) refresh(true, true); }, 20000);
   } catch (e) {
     root.innerHTML = `<main class="fatal"><img src="/nap-mark.png" alt=""><h1>Market unavailable.</h1><p>${esc(e.message)}</p></main>`;
   }
