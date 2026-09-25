@@ -10,13 +10,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "Nap Wallet",
-        "width": 400,
-        "height": 820
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

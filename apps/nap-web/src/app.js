@@ -52,6 +52,7 @@ let refreshId = 0;
 const artUrls = new Set();
 function clearSession() {
   generation++; refreshId++;
+  napBrowser?.closeBrowser();
   clearTimeout(zecTimer); stopZec(); zecAccount = null;
   forgetIdentity(identity); identity = null;
   for (const r of receiving) forgetIdentity(r);
@@ -210,6 +211,15 @@ function bindKept() {
 const vault = IN_APP && window.__TAURI__?.core?.invoke
   ? { call: (cmd, args = {}) => window.__TAURI__.core.invoke(`plugin:napvault|${cmd}`, args) }
   : null;
+// The Nap browser (§152): sites beside the wallet, their requests answered
+// here. Loaded only in the phone app, so the web and extension never carry it.
+let napBrowser = null;
+if (IN_APP && window.__TAURI__?.core?.invoke) {
+  import('./nap-browser.js').then((m) => {
+    napBrowser = m;
+    return m.startBrowser(() => (identity && config ? { config, identity, zec: zecAccount } : null));
+  }).catch(() => { napBrowser = null; });
+}
 const bioName = (kind) => ({ faceId: 'Face ID', touchId: 'Touch ID', opticId: 'Optic ID' }[kind] || 'fingerprint');
 const vaultStatus = () => (vault ? vault.call('status').catch(() => null) : Promise.resolve(null));
 
@@ -371,7 +381,7 @@ function wallet(message = '') {
   shell(`<main class="wallet">
     <aside class="rail">
       <div><p class="kicker">YOUR ZYN ACCOUNT</p><button class="account-copy" id="copy-account"><b>${short(account)}</b><span>Copy full ID</span></button></div>
-      <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="bridge-link">Bridge</button><button id="recovery-link">Recovery</button></nav>
+      <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="bridge-link">Bridge</button>${napBrowser ? '<button id="browser-link">Browser</button>' : ''}<button id="recovery-link">Recovery</button></nav>
       <button class="quiet" id="forget">${keptWallet() ? 'Lock' : 'Lock &amp; forget key'}</button>
     </aside>
     <section class="content">
@@ -408,6 +418,7 @@ function wallet(message = '') {
   root.querySelector('#market-link').onclick = () => openPage('/market.html');
   root.querySelector('#bridge-link').onclick = () => openPage('/bridge.html');
   root.querySelector('#recovery-link').onclick = () => root.querySelector('#recovery-dialog').showModal();
+  root.querySelector('#browser-link')?.addEventListener('click', () => napBrowser.openBrowser('').catch((e) => note(String(e).slice(0, 160), true)));
   root.querySelector('#recovery-dialog .x').onclick = () => root.querySelector('#recovery-dialog').close();
   // Locking returns to whatever this device can actually offer: a password if
   // the wallet is kept here, the phrase if it is not.

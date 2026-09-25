@@ -59,6 +59,13 @@ app's WebAssembly), safe areas.
 Native libraries are linked for 16 KB pages (`src-tauri/.cargo/config.toml`),
 which Play requires for new apps targeting Android 15+.
 
+## The Nap browser
+
+`plugins/napbrowser` (DECISIONS §152, its README): sites in their own web view,
+finding Nap through its provider, approvals in native sheets. The wallet menu's
+"Browser" opens it; outside links from the wallet open there too. Android test:
+`tests/browser.android.e2e.mjs` (header says how to run it).
+
 ## Face ID / fingerprint
 
 `plugins/napvault` keeps the kept wallet's password behind the device's

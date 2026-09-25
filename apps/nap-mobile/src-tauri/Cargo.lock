@@ -1841,6 +1841,7 @@ version = "0.1.0"
 dependencies = [
  "tauri",
  "tauri-build",
+ "tauri-plugin-napbrowser",
  "tauri-plugin-napvault",
 ]
 
@@ -3182,6 +3183,17 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-napbrowser"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

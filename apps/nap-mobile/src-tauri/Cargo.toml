@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 # Face ID / fingerprint unlock of the kept wallet (§151).
 tauri-plugin-napvault = { path = "../plugins/napvault" }
+# The Nap browser: sites beside the wallet, their requests approved here (§152).
+tauri-plugin-napbrowser = { path = "../plugins/napbrowser" }
 
 # Its own workspace: the phone shell shares no Rust with the rest of the repo.
 [workspace]

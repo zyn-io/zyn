@@ -6520,3 +6520,17 @@ Before the first App Store review (guideline 4.2 reads thin web wrappers as
 | 151.3 | **Offered, not imposed:** once, after the password opens the wallet; "Not now" is final for the session. Forgetting the device removes it. Web and extension builds carry none of this | ✅ |
 | 151.4 | **One native plugin, no third-party code:** `apps/nap-mobile/plugins/napvault` (Swift + Kotlin + Rust), exposed only to the app's own pages through a capability | ✅ |
 
+## §152 — The Nap browser in the phone app (25 Sep 2026)
+
+"Why can't iphone app open link. Phantom and jupiter has some browser
+features" → "so build it". The audit (same day) found outside links did
+nothing on iOS and loaded inside the wallet on Android.
+
+| # | Decision | |
+|---|---|---|
+| 152.1 | **Sites open in the Nap browser, a separate native web view** with an address bar and a start page of Nap's sites (Cave store, Jade, Collection Z, ZynScan). It has no Tauri IPC and no access to the wallet's origin, storage or Face ID | 🔒 |
+| 152.2 | **Every https site in it can reach Nap** through the same provider as the extension (Nap Connect), named by the origin the platform reports for the main frame | 🔒 |
+| 152.3 | **The wallet serves those requests with connect-ops' methods**: public at once, the holder's data after connecting, every write approved in a native sheet (Approve armed after 0.8 s). The connect sheet says holdings are visible when asked — the audit's H1 wording fix, here first | ✅ |
+| 152.4 | **The wallet's own view never leaves the app's pages**; outside links and new windows open in the Nap browser | 🔒 |
+| 152.5 | **One Zcash account per wallet page:** sites use the wallet's own (its address once open; payments wait for its sync), never a second one in the same worker | ✅ |
+
