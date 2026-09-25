@@ -10,7 +10,23 @@ const devProxy = () => {
   return Object.keys(proxy).length ? { proxy } : {};
 };
 
-export default defineConfig({
+// `vite build --mode extension` builds the same pages for the browser
+// extension (apps/extension): the endpoints stay on Nap's server
+// (`VITE_NAP_API` in .env.extension), so each page's policy admits that
+// origin too, and the web app's install manifest does not apply.
+const extensionPages = (mode) => ({
+  name: 'nap-extension-pages',
+  transformIndexHtml(html) {
+    if (mode !== 'extension') return html;
+    const api = new URL(process.env.VITE_NAP_API || 'https://nap.cavebro.win').origin;
+    return html
+      .replace(/connect-src 'self'/, `connect-src 'self' ${api}`)
+      .replace(/\s*<link rel="manifest"[^>]*>/, '');
+  },
+});
+
+export default defineConfig(({ mode }) => ({
+  plugins: [extensionPages(mode)],
   build: {
     rollupOptions: {
       input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html', bridge: 'bridge.html' },
@@ -23,4 +39,4 @@ export default defineConfig({
   // shipped CSP rightly blocks, so the built pages are what to look at.
   server: devProxy(),
   preview: devProxy(),
-});
+}));

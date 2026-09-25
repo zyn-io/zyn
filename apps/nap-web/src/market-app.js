@@ -15,6 +15,7 @@ import * as ledger from './ledger.js';
 import { isHex, isInt, isSmall, validOffer, PER_CLAIM } from './ledger.js';
 import * as mk from './market.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
+import { endpoint } from './origin.js';
 import './styles.css';
 import './market.css';
 
@@ -131,11 +132,10 @@ async function loadConfig() {
 }
 
 function checkedNetwork(chosen, networks) {
-  const url = new URL(chosen.rpcUrl, location.origin);
-  if (url.origin !== location.origin) throw new Error('rpcUrl must be a same-origin path');
+  const rpcUrl = endpoint(chosen.rpcUrl, 'rpcUrl');
   if (chosen.kind !== 'object') throw new Error('The market runs on an object ledger, and this network is not one');
   if (!/^[0-9a-f]{64}$/.test(String(chosen.zecAsset))) throw new Error('This network names no ZEC asset');
-  return { ...chosen, rpcUrl: url.pathname, networks };
+  return { ...chosen, rpcUrl, networks };
 }
 
 /// Move to another chain, the wallet's way: the key stays open — the same

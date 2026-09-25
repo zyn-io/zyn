@@ -17,6 +17,7 @@ import * as mk from './market.js';
 import * as sol from './solana.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
+import { endpoint } from './origin.js';
 import './styles.css';
 import './market.css';
 import './bridge.css';
@@ -75,9 +76,7 @@ async function loadConfig() {
 }
 
 function checkedNetwork(chosen, networks) {
-  const url = new URL(chosen.rpcUrl, location.origin);
-  if (url.origin !== location.origin) throw new Error('rpcUrl must be a same-origin path');
-  return { ...chosen, rpcUrl: url.pathname, networks, bridges: bridgesOf(chosen) };
+  return { ...chosen, rpcUrl: endpoint(chosen.rpcUrl, 'rpcUrl'), networks, bridges: bridgesOf(chosen) };
 }
 
 /// The first network that bridges anything, for the "not here" screen.

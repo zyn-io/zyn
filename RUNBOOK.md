@@ -1384,38 +1384,39 @@ The Rust core compiles for `aarch64-apple-ios`, `aarch64-apple-ios-sim`,
 `aarch64-linux-android` (targets installed here). Proving an exit on a
 phone takes about a minute and a few hundred MB; it runs off the UI thread.
 
-**Browser extension — `apps/extension`** (Manifest V3). It does not hold
-keys. The popup is the same page pointed at the local app on
-`127.0.0.1:8977`, and `window.zyn` is a provider for sites:
+**Browser extension — `apps/extension`** (Manifest V3, Chrome and Firefox).
+Since 25 Sep 2026 (0.2.0) it is a wallet by itself — no desktop app. It is
+Nap in the browser, packaged: `npm run build` in `apps/extension` builds
+`apps/nap-web` in extension mode (`vite build --mode extension`,
+`.env.extension` sets `VITE_NAP_API=https://nap.cavebro.win`, see
+`src/origin.js`) and adds three small files:
 
-```js
-const { account, address, network } = await window.zyn.request({ method: 'zyn_account' });
-await window.zyn.request({ method: 'zyn_swap', params: { asset_in: 1, asset_out: 2, amount: '0.01' } });
-```
+- the toolbar popup is the wallet (`index.html?popup=1`, 400 px wide; Market
+  and Bridge open in tabs). Keys live in the extension's own storage, sealed
+  under the holder's password if they keep them — as on nap.cavebro.win;
+- `content.js` + `inpage.js` announce Nap to https pages (`nap:announceProvider`,
+  and `window.zyn`) and carry a site's requests over a runtime port straight to
+  `connect.html` — the same connect window as the web, which answers each
+  port at the origin the browser names;
+- `background.js` only opens (or focuses) that window.
 
-Reads (`zyn_account`, `zyn_balances`, `zyn_assets`, `zyn_pools`, `zyn_quote`,
-`zyn_curves`, `zyn_curve`, `zyn_curveQuote`) answer at once. Writes
-(`zyn_transfer`, `zyn_swap`, `zyn_deposit`, `zyn_withdraw`, `zyn_launchCurve`,
-`zyn_buyCurve`, `zyn_sellCurve`) open an approval window naming the site and
-the action; nothing is submitted until it is approved. Launch approval names
-the immutable fee, 0.01 ZEC.zy creation cost and optional dev-buy ceiling;
-curve trades name the exact token amount and maximum/minimum ZEC.zy. The local app answers
-CORS only for `chrome-extension://`, `moz-extension://` and
-`safari-web-extension://` origins, and still requires the `X-Zyn` header,
-so a web page cannot reach it directly.
+Endpoints: everything goes to nap.cavebro.win (the one host permission) —
+`/rpc`, `/zec`, `/media`, `/claim`, the same Pages Functions the web wallet
+uses. Bridging from Phantom or MetaMask needs their providers, which don't
+inject into extension pages; bring SOL or ETH in from nap.cavebro.win/bridge.
 
 ```sh
-cd apps/extension && node build.mjs     # dist/ — load unpacked at chrome://extensions
+cd apps/extension && npm run build     # dist/, dist-firefox/, release/*.zip
+npm run source                         # release/nap-wallet-<v>-source.zip for AMO
+npm test                               # what ships: permissions, pages, packages
+# end to end, no desktop app (Playwright's Chrome for Testing loads it):
+cd ../nap-connect && PHRASE_FILE=… POOL=… SELL=… IN=… OUT=… node tests/extension.e2e.mjs
 ```
 
-To install: `chrome://extensions` → Developer mode → Load unpacked →
-`apps/extension/dist`. Start `nap-wallet` (or the desktop app) first; the
-popup says plainly when it is not running. Firefox needs the same files
-with a `browser_specific_settings` id; Safari needs `xcrun
-safari-web-extension-converter` — both later.
-
-The extension needs `nap-wallet` (or the desktop app, once it also listens —
-see §5) running on the machine.
+Store listing, permission reasons and data declarations:
+`apps/extension/store/LISTING.md`; images in `apps/extension/store/`; privacy
+policy at https://nap.cavebro.win/privacy. The source package rebuilds the
+Firefox add-on byte for byte (checked 25 Sep).
 
 ## 4r. ZynZap, the front (`apps/zynzap`)
 
@@ -2646,6 +2647,7 @@ Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chro
 | Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on cave-jade, Nap approval, content attached | 25 Sep, 12/12 |
 | Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | yard, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
 | DEX | `dex.e2e.mjs` (`A`, `B`, `SELL`, amounts) | open a pool (or use the A/B pool), collect shares, batch swap, add/remove liquidity, collect each | 25 Sep, 9/9 on SOL.zy/ETH.zy and on the graduated TGRAD/TESTZ.zy pool |
+| Extension | `extension.e2e.mjs` (`PHRASE_FILE`, `POOL`, `SELL`, `IN`, `OUT`) | the standalone extension: popup restores and reads testnet, a site finds it, connects in its window, a swap approved and collected, reopen after close | 25 Sep, 12/12 |
 | DEX via a site | `swap.e2e.mjs` (`POOL`, `SELL`, `AMOUNT`, `IN`, `OUT`) | a bare site asks Nap Connect for `zyn_swap`; Nap's approval names both sides; auto-collect | 25 Sep, 4/4 on TGRAD/TESTZ.zy |
 | NFT store | `store-trade.e2e.mjs` (`SELLER_PHRASE`, `BUYER_PHRASE`, `PRICE`) | list on cavebro.win, buy there and on the Cave store, seller collects | 25 Sep, 15/15 |
 | NFT sale | `sale.e2e.mjs` (`PHASE=buy|claim|mint`) | tickets, claims, open mint on cavebro.win/mint (operator half: §5f-sedecies) | 24 Sep |

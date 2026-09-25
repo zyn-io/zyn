@@ -5,9 +5,14 @@
 // request, the holder sees who is asking and what it would do — in a window
 // the site cannot draw on or script — and the site gets back an answer.
 //
+// In the extension the same page is the extension's own window, and sites
+// reach it through the extension's content script over a runtime port; the
+// browser, not the page, names each port's origin.
+//
 // The rules this page keeps:
-// - It answers only the window that opened it, and only at the origin that
-//   window had when it first spoke. A message from anywhere else is dropped.
+// - On the web it answers only the window that opened it, and only at the
+//   origin that window had when it first spoke. A message from anywhere else
+//   is dropped. In the extension it answers each site on that site's port.
 // - It will not run inside a frame, where a site could dress it up.
 // - Connecting shows the site the Zyn account and a Zcash address, nothing
 //   else. Every write is approved one at a time, and the approval describes
@@ -18,6 +23,7 @@
 import { deriveIdentity, forgetIdentity, openSealedWallet } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
+import { endpoint, IN_EXTENSION } from './origin.js';
 import './styles.css';
 import './connect.css';
 
@@ -38,7 +44,7 @@ function forget(origin) { const c = connections(); delete c[origin]; write(CONNE
 let networks = [];
 let config = null;
 let identity = null;
-let site = null; // the opener's origin, fixed by its first message
+let site = null; // web: the opener's origin, fixed by its first message; extension: the origin of the request in hand
 const queue = [];
 let working = false;
 let zecAccount = null;
@@ -54,9 +60,7 @@ async function loadNetworks() {
   return list.filter((n) => n.kind === 'object').map((n) => {
     for (const key of ['rpcUrl', 'lightdUrl']) {
       if (!n[key]) continue;
-      const url = new URL(n[key], location.origin);
-      if (url.origin !== location.origin) throw new Error(`${key} must be a same-origin path`);
-      n[key] = url.pathname;
+      n[key] = endpoint(n[key], key);
     }
     return n;
   });
@@ -93,15 +97,40 @@ function context() {
 // ---------------------------------------------------------------------------
 // Messages.
 
-function reply(id, result, error) {
-  if (!site || !window.opener) return;
+function reply(job, result, error) {
+  const { id } = job;
   const msg = error
     ? { nap: 'response', id, error: { code: error.code || -32603, message: error.message || String(error) } }
     : { nap: 'response', id, result: result === undefined ? null : result };
+  if (job.port) { try { job.port.postMessage(msg); } catch { /* the site's tab went away */ } return; }
+  if (!site || !window.opener) return;
   window.opener.postMessage(msg, site);
 }
 
+/// The extension's door: one port per site tab, opened by its content script.
+/// Its origin comes from the browser (`port.sender`), so a page cannot speak
+/// for another; only http(s) pages in a tab are answered.
+function listenForSites() {
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== 'nap-site' || !port.sender?.tab) return;
+    let origin = port.sender.origin;
+    try { origin = origin || new URL(port.sender.url).origin; } catch { origin = null; }
+    if (!origin || !/^https?:\/\//.test(origin)) { port.disconnect(); return; }
+    port.onMessage.addListener((d) => {
+      if (!d || d.nap !== 'request' || typeof d.method !== 'string') return;
+      queue.push({ id: d.id, method: d.method, params: d.params && typeof d.params === 'object' ? d.params : {}, origin, port });
+      pump();
+    });
+    // A closed tab's queued requests are nobody's to answer.
+    port.onDisconnect.addListener(() => {
+      for (let i = queue.length - 1; i > 0; i--) if (queue[i].port === port) queue.splice(i, 1);
+    });
+    port.postMessage({ nap: 'ready', version: 1 });
+  });
+}
+
 window.addEventListener('message', (ev) => {
+  if (IN_EXTENSION) return;
   if (!window.opener || ev.source !== window.opener) return;
   const d = ev.data;
   if (!d || d.nap !== 'request' || typeof d.method !== 'string') return;
@@ -116,11 +145,12 @@ async function pump() {
   const job = queue[0];
   if (!job) { render(); return; }
   working = true;
+  if (job.origin) site = job.origin;
   try {
     const result = await handle(job);
-    reply(job.id, result);
+    reply(job, result);
   } catch (e) {
-    reply(job.id, undefined, e);
+    reply(job, undefined, e);
     if (e.code !== ERR.REJECTED) flash(e.message, true);
   } finally {
     queue.shift();
@@ -264,7 +294,7 @@ function flash(text, bad = false) {
 
 function render() {
   if (working || answer) return;
-  if (!site) { show('<p class="kicker">NAP CONNECT</p><h2>Waiting for the site…</h2><p class="muted">This window answers the page that opened it.</p>'); return; }
+  if (!site) { show(`<p class="kicker">NAP CONNECT</p><h2>Waiting for the site…</h2><p class="muted">${IN_EXTENSION ? 'This window answers sites that ask for Nap.' : 'This window answers the page that opened it.'}</p>`); return; }
   const connected = config && isConnected(site, config.id);
   show(`<p class="kicker">NAP CONNECT</p><h2>${connected ? `Connected to ${siteName()}.` : `${siteName()} is not connected.`}</h2>
     <p class="muted">${connected ? 'Keep this window open while you use the site; it asks you here before anything moves. Closing it locks Nap for that site.' : 'Nothing was shared.'}</p>
@@ -279,7 +309,7 @@ window.addEventListener('pagehide', () => { forgetIdentity(identity); identity =
   // Inside a frame a site could cover this page with its own and borrow the
   // clicks; without an opener there is nobody to answer. Either way, stop.
   if (window.top !== window.self) { document.body.textContent = 'Nap does not run inside another page.'; return; }
-  if (!window.opener) {
+  if (!IN_EXTENSION && !window.opener) {
     root.innerHTML = frame('<p class="kicker">NAP CONNECT</p><h2>Nothing is asking.</h2><p class="muted">This window opens when a site asks to connect to Nap. To use your wallet directly, <a href="/">open Nap</a>.</p>');
     return;
   }
@@ -287,7 +317,8 @@ window.addEventListener('pagehide', () => { forgetIdentity(identity); identity =
     networks = await loadNetworks();
     render();
     // Only now can the page answer; saying so earlier would lose requests.
-    window.opener.postMessage({ nap: 'ready', version: 1 }, '*');
+    if (IN_EXTENSION) listenForSites();
+    else window.opener.postMessage({ nap: 'ready', version: 1 }, '*');
   } catch (e) {
     root.innerHTML = frame(`<h2>Nap cannot open.</h2><p class="muted">${esc(e.message)}</p>`);
   }

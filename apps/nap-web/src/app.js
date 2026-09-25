@@ -7,6 +7,7 @@ import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveI
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
+import { endpoint, IN_POPUP, openPage } from './origin.js';
 import './styles.css';
 
 const root = document.querySelector('#app');
@@ -79,9 +80,7 @@ function checkedNetwork(value) {
   const out = { ...value, collections: Array.isArray(value.collections) ? value.collections : [] };
   for (const key of ['rpcUrl', 'claimUrl', 'mediaGateway', 'lightdUrl']) {
     if (key === 'lightdUrl' && !value[key]) continue; // optional: no Zcash wallet on this network
-    const url = new URL(value[key], location.origin);
-    if (!value[key] || url.origin !== location.origin || url.username || url.password || url.search || url.hash) throw new Error(`${key} must be a same-origin path`);
-    out[key] = url.pathname;
+    out[key] = endpoint(value[key], key);
   }
   return out;
 }
@@ -334,8 +333,8 @@ function wallet(message = '') {
   root.querySelector('#copy-account').onclick = async () => { await navigator.clipboard.writeText(account); note('Account ID copied.'); };
   root.querySelector('#receive-link').onclick = () => root.querySelector('.account-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Same origin, same kept key: the market opens it with the same password.
-  root.querySelector('#market-link').onclick = () => { location.href = '/market.html'; };
-  root.querySelector('#bridge-link').onclick = () => { location.href = '/bridge.html'; };
+  root.querySelector('#market-link').onclick = () => openPage('/market.html');
+  root.querySelector('#bridge-link').onclick = () => openPage('/bridge.html');
   root.querySelector('#recovery-link').onclick = () => root.querySelector('#recovery-dialog').showModal();
   root.querySelector('#recovery-dialog .x').onclick = () => root.querySelector('#recovery-dialog').close();
   // Locking returns to whatever this device can actually offer: a password if
@@ -1153,6 +1152,8 @@ async function claimGift() {
   } catch (e) { if (generation === current) note(e.message === 'Failed to fetch' ? 'Gift coordinator unavailable. Outcome unknown; retry with this same card and account.' : e.message, true); }
   finally { button.disabled = false; }
 }
+
+if (IN_POPUP) document.documentElement.classList.add('in-popup');
 
 try {
   const local = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);

@@ -6463,3 +6463,19 @@ The user: airdrop a small portion to Cave and Nap NFT holders; release ZYN at mi
 | 147.6 | **The Nap Mole half needs the 333 on this ledger first:** they retired with the AMM chain, all still held by the treasury (RUNBOOK). They are re-minted on the object ledger and given out through the claim-code gift path before the snapshot; any the treasury still holds at genesis are excluded | ⏳ re-mint + gift path |
 | 147.7 | **To build, on the object ledger:** ZYN issuance at genesis into keyless pots (§71.19–21 were built on the AMM chain), the opening pool, the milestone release operation with its notice period, and the snapshot airdrop operation | ⏳ |
 
+## §148 — The Nap extension is a wallet by itself (25 Sep 2026)
+
+The extension was a window onto desktop Nap (`127.0.0.1:8977`), and desktop
+Nap has no public download: from a store it would have opened onto "Nap isn't
+running". The holder's call: "Extension wallet should be able to work by
+itself."
+
+| # | Decision | |
+|---|---|---|
+| 148.1 | **The extension is Nap in the browser, packaged.** Its pages are apps/nap-web built in extension mode; one wallet codebase serves nap.cavebro.win and the extension. Keys live on the extension's origin, sealed under the holder's password when kept; the phrase is never stored | ✅ |
+| 148.2 | **One server.** Every endpoint is on nap.cavebro.win (the only host permission); on the web every endpoint stays a same-origin path. `src/origin.js` enforces both | 🔒 |
+| 148.3 | **Sites reach Nap's connect window directly**, over a runtime port from the content script; the browser names the port's origin, so a page cannot speak for another. The background only opens the window; nothing a site waits on lives in the service worker | 🔒 |
+| 148.4 | **The provider goes to https pages** (and localhost for development), not every URL | ✅ |
+| 148.5 | **Desktop Nap is no longer behind the extension.** Its own UI stays; whether the extension should also reach it (when it runs) is open | ⏳ |
+| 148.6 | **Stores:** Chrome Web Store and Firefox Add-ons, from `apps/extension/release/`. Firefox gets the source package (rebuilds byte for byte) and declares `financialAndPaymentInfo` — the signed transactions that leave the device | ✅ |
+

@@ -1,0 +1,4 @@
+dist/
+dist-firefox/
+release/
+node_modules/

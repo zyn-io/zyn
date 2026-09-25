@@ -124,3 +124,8 @@
    push the dialog wider than the phone. */
 .review, .descriptor { grid-template-columns: auto minmax(0, 1fr); }
 .review b, .descriptor b { overflow-wrap: anywhere; text-align: right; }
+
+/* The extension's toolbar popup (index.html?popup=1) is at most 800x600 and
+   has no viewport to speak of: give it a phone's width, and the phone layout
+   follows. */
+html.in-popup, html.in-popup body { width: 400px; min-height: 580px; }

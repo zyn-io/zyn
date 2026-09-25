@@ -60,7 +60,7 @@ export function discover({ timeout = 400, web = NAP_WEB } = {}) {
       const list = [...found.values()];
       // An extension from before announcements: it only sets window.zyn.
       if (!list.length && typeof window.zyn?.request === 'function') {
-        list.push({ info: Object.freeze({ uuid: 'legacy-window-zyn', name: 'Nap Wallet', detail: 'Extension, with desktop Nap', rdns: LEGACY_RDNS, icon: '' }), provider: window.zyn });
+        list.push({ info: Object.freeze({ uuid: 'legacy-window-zyn', name: 'Nap Wallet', detail: 'Extension', rdns: LEGACY_RDNS, icon: '' }), provider: window.zyn });
       }
       if (web) {
         list.push({
