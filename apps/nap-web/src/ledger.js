@@ -159,7 +159,7 @@ export async function loadBridged(config) {
 }
 
 /// A bridged asset's name from its origin (§146): the network's own coin is
-/// SOL.zy or ETH.zy; a token bridged from it takes the symbol the deployment
+/// SOL.zy, ETH.zy or BTC.zy; a token bridged from it takes the symbol the deployment
 /// gives its mint, else its short address.
 export function bridgedName(config, b) {
   const short = (h) => `${h.slice(0, 8)}…`;
@@ -171,6 +171,7 @@ export function bridgedName(config, b) {
   }
   if (b.network.startsWith('solana')) return 'SOL.zy';
   if (b.network.startsWith('eip155:')) return 'ETH.zy';
+  if (b.network.startsWith('bitcoin')) return 'BTC.zy';
   return short(b.asset);
 }
 

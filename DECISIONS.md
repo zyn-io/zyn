@@ -6547,3 +6547,19 @@ connections, phone app) found no critical issue and four high ones. "do them":
 | 153.4 | **iOS 16 is the phone app's minimum** (AbortSignal.timeout and wasm-unsafe-eval arrived in Safari 16); the web build targets safari16 / chrome103 / firefox114 so newer syntax fails the build, not the phone. Supersedes §149.3's iOS 15 | ✅ |
 | 153.5 | **Open from the audit:** the kept wallet's KDF and password rule (Argon2, 12+ characters, phone backups), one connect window with a rate limit, per-asset approval labels and token ids, exit salts that survive lost storage, /rpc allowlist, app privacy screen and auto-lock, Firefox 127 minimum, broken `href="/"` links in the extension | ⏳ |
 
+
+## §154 — BTC.zy: Bitcoin signet on the bridge (25 Sep 2026)
+
+"is there a possibility to bridge monero on Zyn" → "or get BTC on the bridge
+now, easier" → "build it". Monero waits: no threshold-signing library we would
+trust, and view keys that break its privacy model. Bitcoin has both.
+
+| # | Decision | |
+|---|---|---|
+| 154.1 | **One Taproot key, 2-of-3 FROST** (`frost-secp256k1-tr`, BIP-340/341 compatible), made by `zyn-ceremony bitcoin`; the custodians sign it on their own ops (7 and 8) beside the Solana and Zcash ones. Testnet runs all three shares on one box, as SOL does — stated, not hidden | 🔒 |
+| 154.2 | **The deposit code is the address.** Bitcoin wallets cannot attach a memo, so a deposit goes to the vault's internal key tweaked with `taggedHash("Zyn/BtcDeposit", commitment)` standing where a script tree's root would be. Only the key path spends it; no script is ever revealed. Nap derives the address itself (`bitcoin.js`, vectors pinned against `zyn-custody`) and never takes one from a server | 🔒 |
+| 154.3 | **The bridge watches only codes it was told about**: Nap calls `zyn_depositWatch {network, commitment}` (public, registered bitcoin networks only, capped at 200,000) when it shows an address. The node already learns the commitment when the deposit is credited, so this tells it nothing new except earlier | ✅ |
+| 154.4 | **Credited at 2 confirmations, once per output** (`DepositCommitted` with the outpoint as reference); several sends to one address add up and are claimed together. Change and fee buffer sit at the vault's key-path address (BIP-86 tweak) | ✅ |
+| 154.5 | **Exits pay segwit and Taproot addresses only** (the revealed destination is the output script, 22–42 bytes, never OP_RETURN); legacy addresses are refused in Nap before anything is burned. Whole satoshi, at least 0.0001 BTC | 🔒 |
+| 154.6 | **The network fee comes out of the payouts**, shared equally across the exits one transaction pays; an exit too small to carry its share waits. What leaves the vault is what Zyn burned. The signed transaction is written to `inflight.json` before it is broadcast, so a crash rebroadcasts rather than pays twice | 🔒 |
+| 154.7 | **Signet, not testnet3 or testnet4, and not mainnet.** `bitcoin-signet` is the registered network; `ZYN_BTC_NETWORK=testnet4` is supported but unused. Mainnet needs custodians on separate boxes first | ⏳ |

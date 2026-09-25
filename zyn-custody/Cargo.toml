@@ -48,6 +48,10 @@ frost-rerandomized = "3"
 # Solana custody: plain FROST over ed25519. Same major as the Zcash pair above,
 # so one `frost-core` underlies all three ciphersuites.
 frost-ed25519 = "3"
+# Bitcoin custody (§154): FROST over secp256k1 with BIP-341 tweaks, and the
+# bitcoin crate for addresses, sighashes and transactions. Same secp256k1 0.29.
+frost-secp256k1-tr = "3"
+bitcoin = "0.32"
 frost-core = "3"
 # Checks an aggregated ed25519 signature the way Solana will, before it is
 # broadcast. Pinned to 2.x with the rest of the Zcash-era digest stack.

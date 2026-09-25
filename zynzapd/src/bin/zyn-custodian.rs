@@ -13,6 +13,7 @@
 //! ```text
 //!   ZYN_CUSTODY_SHARE         a Zcash share directory: one share-*.bin + public.bin
 //!   ZYN_CUSTODY_SOLANA_SHARE  a Solana share directory, same shape
+//!   ZYN_CUSTODY_BITCOIN_SHARE a Bitcoin (Taproot) share directory, same shape
 //!   ZYN_CUSTODY_LISTEN        host:port to serve on   (127.0.0.1:8110)
 //! ```
 
@@ -78,8 +79,9 @@ fn main() {
     let treasury_dir = std::env::var("ZYN_CUSTODY_TREASURY_SHARE")
         .ok()
         .map(PathBuf::from);
-    if zcash_dir.is_none() && solana_dir.is_none() && treasury_dir.is_none() {
-        eprintln!("zyn-custodian: set ZYN_CUSTODY_SHARE, ZYN_CUSTODY_SOLANA_SHARE and/or ZYN_CUSTODY_TREASURY_SHARE (a directory with one share-*.bin and public.bin)");
+    let bitcoin_dir = std::env::var("ZYN_CUSTODY_BITCOIN_SHARE").ok().map(PathBuf::from);
+    if zcash_dir.is_none() && solana_dir.is_none() && treasury_dir.is_none() && bitcoin_dir.is_none() {
+        eprintln!("zyn-custodian: set ZYN_CUSTODY_SHARE, ZYN_CUSTODY_SOLANA_SHARE, ZYN_CUSTODY_TREASURY_SHARE and/or ZYN_CUSTODY_BITCOIN_SHARE (a directory with one share-*.bin and public.bin)");
         std::process::exit(1);
     }
     let listen = std::env::var("ZYN_CUSTODY_LISTEN").unwrap_or_else(|_| "127.0.0.1:8110".into());
@@ -95,6 +97,11 @@ fn main() {
         let (id, keys) = one_share::<Solana>(dir, "solana");
         held.push(format!("solana {}", id));
         custodian.solana = Some(zyn_custody::custodian::solana::Participant::new(keys));
+    }
+    if let Some(dir) = &bitcoin_dir {
+        let (id, keys) = one_share::<zyn_custody::bitcoin::Bitcoin>(dir, "bitcoin");
+        held.push(format!("bitcoin {}", id));
+        custodian.bitcoin = Some(zyn_custody::bitcoin::participant::Participant::new(keys));
     }
     if let Some(dir) = &treasury_dir {
         let (id, keys) = one_share::<Solana>(dir, "treasury");

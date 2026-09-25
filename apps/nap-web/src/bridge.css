@@ -18,3 +18,10 @@
 /* No bridge on this network: the way to one. */
 .br-none { display: grid; gap: 4px; max-width: 420px; }
 .br-none .primary { margin-top: 0; }
+/* BTC: the deposit address is the code, shown with its QR. */
+.br-btc { display: grid; gap: 12px; justify-items: start; }
+.br-btc[hidden] { display: none; }
+.br-qr { border-radius: 8px; background: #f8f2e4; }
+.br-btc-addr { display: flex; gap: 10px; align-items: center; width: 100%; min-width: 0; }
+.br-btc-addr code { flex: 1; min-width: 0; font: 12px Mono; padding: 8px 10px; }
+.br-card .go[hidden] { display: none; }

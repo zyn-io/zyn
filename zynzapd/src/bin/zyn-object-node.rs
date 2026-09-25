@@ -521,6 +521,9 @@ type AddressRegister = std::sync::Arc<Mutex<std::collections::BTreeMap<[u8; 11],
 /// its account instead, credited when the account registers.
 static ISSUED: std::sync::OnceLock<(AddressRegister, std::path::PathBuf)> = std::sync::OnceLock::new();
 
+/// Deposit codes being watched, as `network commitment` lines (§154).
+static WATCHED: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+
 /// Zatoshi the vault holds for other people. Kept current by the anchoring
 /// loop, read by the anchor builder, which refuses a fee that would dip into it.
 static BACKING_FLOOR: std::sync::OnceLock<std::sync::Arc<std::sync::atomic::AtomicU64>> = std::sync::OnceLock::new();
@@ -1001,8 +1004,14 @@ fn handle(
                 let Some(o) = st.market.bridged.get(&asset) else {
                     return err("that asset is not bridged here");
                 };
-                let width = if o.network.starts_with(b"eip155:") { 20 } else { 32 };
-                if address.len() != width {
+                // Bitcoin exits reveal the output script itself (§154): any
+                // standard kind, 22–42 bytes, never an OP_RETURN.
+                let ok = if o.network.starts_with(b"bitcoin") {
+                    (22..=42).contains(&address.len()) && address[0] != 0x6a
+                } else {
+                    address.len() == if o.network.starts_with(b"eip155:") { 20 } else { 32 }
+                };
+                if !ok {
                     return err("that address is the wrong length for its chain");
                 }
                 st.exits.iter().any(|e| e.paid_by.is_none() && e.asset == asset && e.destination == commitment)
@@ -1028,6 +1037,58 @@ fn handle(
         // The unpaid exits of one bridged asset, with where each goes when
         // its holder has said (§146). Operator only: a revealed address is
         // for the bridge that pays it, not for the public.
+        // Deposit codes a bridge should watch (§154). Bitcoin wallets cannot
+        // attach a memo, so each code has its own address — derived from the
+        // vault's key and the code — and the bridge needs to know which codes
+        // exist. A code names no account; saying "watch this" reveals nothing
+        // but that a deposit may come. Public, bounded, remembered on disk.
+        "zyn_depositWatch" => {
+            let network = field(body, "network").unwrap_or_default();
+            let Some(commitment) = field(body, "commitment").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("give the network and the deposit commitment (64 hex)");
+            };
+            let known = {
+                let n = node.lock().unwrap();
+                n.state().market.bridged.values().any(|o| o.network == network.as_bytes() && o.network.starts_with(b"bitcoin"))
+            };
+            if !known {
+                return err("that network has no address-per-deposit bridge here");
+            }
+            let path = std::path::Path::new(dir).join(format!("chain-{chain}.deposit-watch"));
+            let set = WATCHED.get_or_init(|| {
+                Mutex::new(std::fs::read_to_string(&path).unwrap_or_default().lines().map(str::to_string).collect())
+            });
+            let line = format!("{network} {}", hex(&commitment));
+            let mut w = set.lock().unwrap();
+            if !w.contains(&line) {
+                if w.len() >= 200_000 {
+                    return err("the deposit watch list is full; try again later");
+                }
+                use std::io::Write as _;
+                let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+                    return err("cannot record the watch");
+                };
+                if writeln!(f, "{line}").is_err() {
+                    return err("cannot record the watch");
+                }
+                w.insert(line);
+            }
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":true}".to_string()
+        }
+        "zyn_depositWatched" => {
+            match submit_token() {
+                Some(want) if token_matches(&field(body, "token").unwrap_or_default(), want) => {}
+                _ => return err("zyn_depositWatched is the bridge's, and needs the operator's token"),
+            }
+            let network = field(body, "network").unwrap_or_default();
+            let path = std::path::Path::new(dir).join(format!("chain-{chain}.deposit-watch"));
+            let rows: Vec<String> = std::fs::read_to_string(&path)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| l.strip_prefix(&format!("{network} ")).map(|c| format!("\"{c}\"")))
+                .collect();
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{}]}}", rows.join(","))
+        }
         "zyn_bridgeExits" => {
             match submit_token() {
                 Some(want) if token_matches(&field(body, "token").unwrap_or_default(), want) => {}

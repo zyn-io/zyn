@@ -1,4 +1,4 @@
-// Nap Bridge: SOL and ETH in and out of Zyn as SOL.zy and ETH.zy
+// Nap Bridge: SOL, ETH and BTC in and out of Zyn as SOL.zy, ETH.zy and BTC.zy
 // (DECISIONS §146).
 //
 // In: a deposit on the other chain carries a code from this wallet — a
@@ -15,6 +15,8 @@ import { hex, scan, unhex, withdrawIntent } from './object.js';
 import * as ledger from './ledger.js';
 import * as mk from './market.js';
 import * as sol from './solana.js';
+import * as btc from './bitcoin.js';
+import QRCode from 'qrcode';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import { endpoint } from './origin.js';
@@ -42,6 +44,8 @@ const read = (k) => { try { return localStorage.getItem(k); } catch { return nul
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
 const short = (h) => `${h.slice(0, 6)}…${h.slice(-4)}`;
 const LAMPORT = 1_000_000_000n; // one lamport in WAD
+const SAT = 10_000_000_000n; // one satoshi in WAD
+const MIN_BTC_OUT = 10_000n * SAT; // the network fee comes out of it
 
 function fmt(raw, places = 9) {
   const v = BigInt(raw);
@@ -61,6 +65,13 @@ function bridgesOf(net) {
   }
   if (b.eth && /^0x[0-9a-fA-F]{40}$/.test(b.eth.vault || '') && Number.isSafeInteger(b.eth.chainId)) {
     out.push({ key: 'eth', symbol: 'ETH', zy: 'ETH.zy', decimals: 18, network: `eip155:${b.eth.chainId}`, asset: hex(mk.bridgedAsset(`eip155:${b.eth.chainId}`)), ...b.eth });
+  }
+  if (b.btc && /^[0-9a-f]{64}$/.test(b.btc.internal || '')) {
+    // The Bitcoin network the vault key pays on, and the name Zyn registered
+    // the coin under (§154).
+    const chain = ['bitcoin', 'testnet4'].includes(b.btc.network) ? b.btc.network : 'signet';
+    const network = { bitcoin: 'bitcoin', testnet4: 'bitcoin-test', signet: 'bitcoin-signet' }[chain];
+    out.push({ ...b.btc, key: 'btc', symbol: 'BTC', zy: 'BTC.zy', decimals: 8, chain, network, asset: hex(mk.bridgedAsset(network)), vault: btc.vaultAddress(b.btc.internal, chain) });
   }
   return out;
 }
@@ -233,12 +244,26 @@ async function depositEth(b, amountText, say) {
   return eth.request({ method: 'eth_sendTransaction', params: [{ from, to: b.vault, value: `0x${wei.toString(16)}`, data }] });
 }
 
+/// Bitcoin wallets cannot attach a memo, so the code is the address: the
+/// vault key tweaked by this deposit's commitment. Nap derives it here and
+/// asks the bridge to watch it; it never takes the address from the server.
+async function depositBtc(b) {
+  const { commitment } = await ledger.bridgeMemo(config, identity);
+  await call('zyn_depositWatch', { network: b.network, commitment });
+  return btc.depositAddress(b.internal, unhex(commitment), b.chain);
+}
+
 // ---------------------------------------------------------------------------
 // Out.
 
 function destinationBytes(b, text) {
   const t = String(text).trim();
   if (b.key === 'sol') return sol.solanaKey(t);
+  if (b.key === 'btc') {
+    const script = btc.scriptOf(t, b.chain);
+    if (!script) throw new Error(`That is not a ${b.chain === 'bitcoin' ? 'bc1' : 'tb1'}… address. Legacy addresses (1…, 3…, m…, n…, 2…) are not supported.`);
+    return script;
+  }
   if (!/^0x[0-9a-fA-F]{40}$/.test(t)) throw new Error('That is not an Ethereum address');
   return unhex(t.slice(2).toLowerCase());
 }
@@ -247,6 +272,8 @@ async function withdraw(b, to, amountText) {
   const raw = parseAmount(amountText);
   if (b.key === 'sol' && raw % LAMPORT !== 0n) throw new Error('SOL has nine decimal places');
   if (b.key === 'sol' && raw <= 5_000n * LAMPORT) throw new Error('Withdraw more than the 0.000005 SOL network fee');
+  if (b.key === 'btc' && raw % SAT !== 0n) throw new Error('BTC has eight decimal places');
+  if (b.key === 'btc' && raw < MIN_BTC_OUT) throw new Error('Send out at least 0.0001 BTC; the Bitcoin network fee comes out of it');
   const address = destinationBytes(b, to);
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const destination = mk.exitCommitment(address, salt);
@@ -316,30 +343,31 @@ function balanceOf(b) {
 function renderNone() {
   const there = bridgingNetwork();
   $('#view').innerHTML = `${heading('BRIDGES', 'Not on this network yet.', there
-    ? `SOL and ETH bridge on ${there.network} today (Solana devnet, Ethereum Sepolia). Testnet coins are for trying it out; they are worth nothing.`
-    : 'No network on this deployment bridges SOL or ETH yet.')}
+    ? `${bridgesOf(there).map((b) => b.symbol).join(', ')} bridge on ${there.network} today (${bridgesOf(there).map((b) => ({ sol: 'Solana devnet', eth: 'Ethereum Sepolia', btc: `Bitcoin ${b.chain}` })[b.key]).join(', ')}). Testnet coins are for trying it out; they are worth nothing.`
+    : 'No network on this deployment bridges another chain yet.')}
     ${there ? `<div class="br-none"><button class="primary mk-act" id="switch-bridge" data-network="${esc(there.id)}">Switch to ${esc(there.network)} <span>→</span></button><p class="mk-fine">The wallet follows: it opens on ${esc(there.network)} too, and you can switch back from the header.</p></div>` : ''}`;
   $('#switch-bridge')?.addEventListener('click', (e) => switchNetwork(e.currentTarget.dataset.network));
 }
 
 function renderIn() {
   if (!config.bridges.length) { renderNone(); return; }
-  $('#view').innerHTML = `${heading('BRING IN', 'SOL and ETH, private on Zyn.', 'Send from your own Solana or Ethereum wallet. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
+  $('#view').innerHTML = `${heading('BRING IN', `${config.bridges.map((b) => b.symbol).join(', ').replace(/, ([^,]*)$/, ' and $1')}, private on Zyn.`, 'Send from your own wallet on the other chain. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
     <div class="br-cards">${config.bridges.map((b) => `<section class="mk-card br-card" data-bridge="${b.key}">
       <p class="eyebrow">${esc(b.symbol)} · ${esc(b.network)}</p>
       <h3>${esc(b.zy)} <span>${identity ? `you hold ${fmt(balanceOf(b), b.decimals)}` : ''}</span></h3>
       ${b.live === false ? '<p class="br-say error">This network has not registered it yet.</p>' : ''}
-      <label class="mk-field"><span>Amount of ${esc(b.symbol)}</span><input class="amt" inputmode="decimal" autocomplete="off" placeholder="0.05"></label>
+      ${b.key === 'btc' ? btcCard(b) : `<label class="mk-field"><span>Amount of ${esc(b.symbol)}</span><input class="amt" inputmode="decimal" autocomplete="off" placeholder="0.05"></label>
       ${identity
     ? `<button class="primary go" ${b.live ? '' : 'disabled'}>Deposit from a${b.key === 'eth' ? 'n Ethereum' : ' Solana'} wallet <span>→</span></button>`
     : '<button class="primary open-first" type="button">Open your wallet to deposit <span>→</span></button>'}
       <p class="br-say say" role="status"></p>
-      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>
+      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>`}
     </section>`).join('')}</div>`;
   root.querySelectorAll('[data-bridge]').forEach((card) => {
     const b = config.bridges.find((x) => x.key === card.dataset.bridge);
     const say = (t, bad = false) => { const el = card.querySelector('.say'); el.textContent = t; el.classList.toggle('error', bad); };
     card.querySelector('.open-first')?.addEventListener('click', () => { returnTo = 'in'; view = 'wallet'; render(); });
+    if (b.key === 'btc') { bindBtcCard(b, card, say); return; }
     if (!card.querySelector('.go')) return;
     card.querySelector('.go').onclick = async () => {
       if (busy || !identity) return;
@@ -357,21 +385,69 @@ function renderIn() {
   });
 }
 
+const BTC_NAMES = { signet: 'signet', testnet4: 'testnet4', bitcoin: 'Bitcoin' };
+let btcShown = null; // { chain, account, address } — kept across re-renders
+
+function btcCard(b) {
+  const shown = btcShown && identity && btcShown.account === identity.accountHex && btcShown.chain === config.chain ? btcShown.address : '';
+  return `${identity
+    ? `<button class="primary go" ${b.live ? '' : 'disabled'} ${shown ? 'hidden' : ''}>Show my deposit address <span>→</span></button>`
+    : '<button class="primary open-first" type="button">Open your wallet to deposit <span>→</span></button>'}
+      <div class="br-btc" ${shown ? '' : 'hidden'}>
+        <canvas class="br-qr" width="164" height="164" aria-label="QR code of the deposit address"></canvas>
+        <div class="br-btc-addr"><code class="addr">${esc(shown)}</code><button class="quiet copy" type="button">Copy</button></div>
+        <p class="mk-fine">Send any amount of ${esc(BTC_NAMES[b.chain])} BTC here, from any Bitcoin wallet. This address carries your one-time code; nobody else's deposits land on it.</p>
+      </div>
+      <p class="br-say say" role="status"></p>
+      <p class="mk-fine">Held by a 2-of-3 Taproot key (vault <code>${esc(b.vault)}</code>). Arrives after ${Number(b.confirmations) || 2} confirmations (about ${(Number(b.confirmations) || 2) * 10} minutes), and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>`;
+}
+
+function showBtcAddress(card, address) {
+  const box = card.querySelector('.br-btc');
+  box.hidden = false;
+  card.querySelector('.go')?.setAttribute('hidden', '');
+  box.querySelector('.addr').textContent = address;
+  QRCode.toCanvas(box.querySelector('.br-qr'), `bitcoin:${address}`, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
+}
+
+function bindBtcCard(b, card, say) {
+  if (btcShown && identity && btcShown.account === identity.accountHex && btcShown.chain === config.chain) showBtcAddress(card, btcShown.address);
+  card.querySelector('.copy')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(card.querySelector('.addr').textContent); say('Copied.'); } catch { say('Select the address and copy it.', true); }
+  });
+  const go = card.querySelector('.go');
+  if (!go) return;
+  go.onclick = async () => {
+    if (busy || !identity) return;
+    busy = true;
+    say('Deriving your address…');
+    try {
+      const address = await depositBtc(b);
+      btcShown = { chain: config.chain, account: identity.accountHex, address };
+      showBtcAddress(card, address);
+      say('');
+      for (const wait of [60_000, 300_000, 900_000, 1_500_000, 2_400_000, 3_600_000]) setTimeout(() => refresh(true), wait);
+    } catch (e) {
+      say(e.message === 'Failed to fetch' ? 'The bridge is not answering; try again shortly.' : e.message, true);
+    } finally { busy = false; }
+  };
+}
+
 function renderOut() {
   const live = config.bridges.filter((b) => b.live);
   if (!config.bridges.length) { renderNone(); return; }
   if (!identity) {
-    $('#view').innerHTML = `${heading('SEND OUT', 'Open your wallet to send out.', 'Sending SOL.zy or ETH.zy back spends notes only your key can open.')}<div class="br-none"><button class="primary mk-act" id="out-open" type="button">Open wallet <span>→</span></button></div>`;
+    $('#view').innerHTML = `${heading('SEND OUT', 'Open your wallet to send out.', `Sending ${config.bridges.map((b) => b.zy).join(' or ')} back spends notes only your key can open.`)}<div class="br-none"><button class="primary mk-act" id="out-open" type="button">Open wallet <span>→</span></button></div>`;
     $('#out-open').onclick = () => { returnTo = 'out'; view = 'wallet'; render(); };
     return;
   }
-  $('#view').innerHTML = `${heading('SEND OUT', 'Back to Solana or Ethereum.', 'The chain records only a commitment to where it goes. The address is then shown to the bridge that pays it, and to nobody else.')}
+  $('#view').innerHTML = `${heading('SEND OUT', `Back to ${config.bridges.map((b) => ({ sol: 'Solana', eth: 'Ethereum', btc: 'Bitcoin' })[b.key]).join(', ').replace(/, ([^,]*)$/, ' or $1')}.`, 'The chain records only a commitment to where it goes. The address is then shown to the bridge that pays it, and to nobody else.')}
     <section class="mk-card"><form id="out-form" class="br-out">
       <label class="mk-field"><span>From</span><select id="out-asset">${live.map((b) => `<option value="${b.key}">${esc(b.zy)} — you hold ${fmt(balanceOf(b), b.decimals)}</option>`).join('')}</select></label>
-      <label class="mk-field"><span>To address</span><input id="out-to" autocomplete="off" spellcheck="false" placeholder="a Solana address, or 0x… on Ethereum"></label>
+      <label class="mk-field"><span>To address</span><input id="out-to" autocomplete="off" spellcheck="false" placeholder="${esc(live.map((b) => ({ sol: 'a Solana address', eth: '0x… on Ethereum', btc: `${b.chain === 'bitcoin' ? 'bc1' : 'tb1'}… on Bitcoin` })[b.key]).join(', ') || 'an address')}"></label>
       <label class="mk-field"><span>Amount</span><input id="out-amt" inputmode="decimal" autocomplete="off" placeholder="0.02"></label>
       <button class="primary" type="submit" ${live.length ? '' : 'disabled'}>Send out <span>→</span></button>
-      <p class="mk-fine">${state.bps ? `A ${Number(state.bps) / 100}% bridge fee rides on top. ` : ''}SOL pays its 0.000005 network fee out of the amount. The bridge pays once the other chain finalizes it.</p>
+      <p class="mk-fine">${state.bps ? `A ${Number(state.bps) / 100}% bridge fee rides on top. ` : ''}${live.some((b) => b.key === 'sol') ? 'SOL pays its 0.000005 network fee out of the amount. ' : ''}${live.some((b) => b.key === 'btc') ? 'BTC pays its network fee out of the amount (at least 0.0001 BTC, to a segwit or Taproot address). ' : ''} The bridge pays once the other chain finalizes it.</p>
     </form></section>`;
   $('#out-form').onsubmit = async (e) => {
     e.preventDefault();
@@ -380,7 +456,7 @@ function renderOut() {
     try {
       const b = config.bridges.find((x) => x.key === $('#out-asset').value);
       await withdraw(b, $('#out-to').value, $('#out-amt').value);
-      notice(`Sent out. The bridge pays it once it is final on ${b.key === 'sol' ? 'Solana' : 'Ethereum'}.`);
+      notice(`Sent out. The bridge pays it once it is final on ${({ sol: 'Solana', eth: 'Ethereum', btc: 'Bitcoin' })[b.key]}.`);
       await refresh(true);
     } catch (err) { notice(err.message, true); } finally { busy = false; }
   };

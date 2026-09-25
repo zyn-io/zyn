@@ -29,6 +29,9 @@ zyn = { path = "../zyn" }
 zyn-vm = { path = "../zyn-vm" }
 swapvm = { path = "../swapvm" }
 zyn-custody = { path = "../zyn-custody" }
+# Bitcoin addresses and transactions for the BTC bridge (§154); the same
+# crate zyn-custody signs with.
+bitcoin = "0.32"
 objectvm = { path = "../objectvm" }
 # The allocation engine. This crate wires it to a chain and a clock; the engine
 # itself owns neither, which is what lets anyone replay an allocation offline.
