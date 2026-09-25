@@ -4,6 +4,7 @@
 pub mod alert;
 pub mod anchor;
 pub mod allocation;
+pub mod attend;
 pub mod app;
 pub mod backing;
 pub mod cave_z;
@@ -33,6 +34,7 @@ pub mod reveal;
 mod restore;
 pub mod rpc;
 pub mod sale;
+pub mod tap;
 pub mod burn_watch;
 pub mod sale_draw;
 pub mod eth_bridge;

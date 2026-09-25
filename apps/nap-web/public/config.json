@@ -26,7 +26,8 @@
       "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
       "lightdUrl": "/zec/mainnet",
       "zecBirthday": 3440000,
-      "launchpadUrl": "https://cave-jade.pages.dev/"
+      "launchpadUrl": "https://cave-jade.pages.dev/",
+      "attendUrl": "/attend"
     },
     {
       "id": "testnet",
@@ -51,7 +52,11 @@
           "rpc": "https://api.devnet.solana.com",
           "explorer": "https://explorer.solana.com/tx/{tx}?cluster=devnet",
           "tokens": [
-            { "mint": "FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9", "symbol": "TESTZ", "decimals": 6 }
+            {
+              "mint": "FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9",
+              "symbol": "TESTZ",
+              "decimals": 6
+            }
           ]
         },
         "eth": {
@@ -60,7 +65,8 @@
           "assetId": 1,
           "explorer": "https://sepolia.etherscan.io/tx/{tx}"
         }
-      }
+      },
+      "attendUrl": "/attend/testnet"
     }
   ],
   "collections": [
@@ -73,5 +79,6 @@
   "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
   "lightdUrl": "/zec/mainnet",
   "zecBirthday": 3440000,
-  "launchpadUrl": "https://cave-jade.pages.dev/"
+  "launchpadUrl": "https://cave-jade.pages.dev/",
+  "attendUrl": "/attend"
 }

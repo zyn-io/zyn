@@ -7,6 +7,8 @@ const devProxy = () => {
   if (process.env.NAP_DEV_RPC) proxy['/rpc'] = { target: process.env.NAP_DEV_RPC, changeOrigin: true, rewrite: () => '/' };
   // A block server's HTTP door (`ZYN_LIGHTD_HTTP`), for the Zcash wallet.
   if (process.env.NAP_DEV_ZEC) proxy['/zec'] = { target: process.env.NAP_DEV_ZEC, changeOrigin: true, rewrite: () => '/' };
+  // A local zyn-attend (§150): `/attend[/testnet]/<door>` → `<door>`.
+  if (process.env.NAP_DEV_ATTEND) proxy['/attend'] = { target: process.env.NAP_DEV_ATTEND, changeOrigin: true, rewrite: (p) => p.replace(/^\/attend(\/testnet)?/, '') };
   return Object.keys(proxy).length ? { proxy } : {};
 };
 

@@ -135,3 +135,9 @@ html.in-popup, html.in-popup body { width: 400px; min-height: 580px; }
 html.in-app body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 /* What scrolls up passes under a solid strip, not under the clock. */
 html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; height: env(safe-area-inset-top); background: #f8f2e4; z-index: 2147483000; pointer-events: none; }
+
+/* An event tag was tapped before the wallet was open (§150). */
+.tap-note { margin: 18px 0 4px; padding: 14px 16px; border-left: 3px solid #e8a916; background: rgba(232, 169, 22, .12); border-radius: 0 10px 10px 0; font-size: 15px; line-height: 1.5; }
+
+/* The claim card stacks on a phone, so its button never runs off it. */
+@media (max-width: 800px) { .claim { flex-direction: column; align-items: stretch; } .claim button { align-self: flex-start; } }

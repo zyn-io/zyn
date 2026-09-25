@@ -16,6 +16,8 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 serde_json = "1"
 zcash_address = "0.13.0"
 sha2 = "0.10"
+# AES-128 for NFC tap checks (src/tap.rs); already in the tree via orchard.
+aes = "0.8"
 zcash_transparent = "0.10.0"
 zcash_protocol = "0.10.5"
 orchard = "0.15.5"

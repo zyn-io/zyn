@@ -31,6 +31,16 @@ let zecAccount = null;
 let zecTimer = 0;
 /// A wallet made in this session has no history to scan back through.
 let zecFresh = false;
+/// A tap on an event's NFC tag (§150): `/tap?e=<event>&picc=…&cmac=…`, the
+/// URL the tag writes on every read. Kept until the wallet is open, then the
+/// certificate is collected into it.
+let tapLink = (() => {
+  if (!/\/tap\/?$/.test(location.pathname)) return null;
+  const q = new URLSearchParams(location.search);
+  const [e, picc, cmac] = ['e', 'picc', 'cmac'].map((k) => String(q.get(k) || '').toLowerCase());
+  return /^[0-9a-f]{64}$/.test(e) && /^[0-9a-f]{32}$/.test(picc) && /^[0-9a-f]{16}$/.test(cmac) ? { event: e, picc, cmac } : null;
+})();
+if (/\/tap\/?$/.test(location.pathname)) history.replaceState(null, '', '/');
 const giftUrl = new URL(location.href);
 const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || giftUrl.searchParams.get('claim') || '';
 // Fragment links keep the card secret out of HTTP access logs. Scrub legacy
@@ -78,8 +88,8 @@ function checkedNetwork(value) {
     throw new Error('Each network must name its Zcash network and address prefix');
   }
   const out = { ...value, collections: Array.isArray(value.collections) ? value.collections : [] };
-  for (const key of ['rpcUrl', 'claimUrl', 'mediaGateway', 'lightdUrl']) {
-    if (key === 'lightdUrl' && !value[key]) continue; // optional: no Zcash wallet on this network
+  for (const key of ['rpcUrl', 'claimUrl', 'mediaGateway', 'lightdUrl', 'attendUrl']) {
+    if ((key === 'lightdUrl' || key === 'attendUrl') && !value[key]) continue; // optional: no Zcash wallet, no certificates on this network
     out[key] = endpoint(value[key], key);
   }
   return out;
@@ -202,6 +212,7 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
       <p class="eyebrow">${WHERE.eyebrow}</p>
       <h1>Your pocket,<br><em>between blocks.</em></h1>
       <p class="lede">Receive the Nap Mole in person, then open the same account wherever Nap runs with one recovery phrase.</p>
+      ${tapLink ? '<div class="tap-note"><b>You tapped an event tag.</b> Open or create your wallet and the certificate goes straight into it.</div>' : ''}
       <div class="promise"><span>01</span><p><b>No account server.</b><br>Your key is derived and used on this device.</p></div>
       <div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>${WHERE.closing} forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>
     </section>
@@ -312,6 +323,7 @@ function wallet(message = '') {
       <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>
       <div class="notice ${message ? 'show' : ''}" id="notice">${escapeHtml(message)}</div>
       ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD DETECTED</p><h2>Your mole is waiting.</h2><p>The coordinator sees this public account ID—not your phrase or key.</p></div><button id="claim">Claim gift <span>→</span></button></section>` : ''}
+      ${tapLink ? `<section class="claim"><div><p class="kicker">EVENT TAG TAPPED</p><h2>Your certificate is waiting.</h2><p>It goes into this wallet privately: the certificate service learns this account ID and nothing else, and nobody can see who holds it.</p></div><button id="attend">Collect certificate <span>→</span></button></section>` : ''}
       ${zecSection()}
       <section><div class="section-title"><h2>Coins</h2><span id="coin-count">—</span></div><div class="coins" id="coins"><div class="skeleton"></div></div></section>
       <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork — fetches each item's picture from the gateway, which tells that host your IP, which items you hold, and when. Off by default.</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
@@ -358,6 +370,7 @@ function wallet(message = '') {
   };
   bindZec();
   root.querySelector('#claim')?.addEventListener('click', claimGift);
+  root.querySelector('#attend')?.addEventListener('click', collectCertificate);
 }
 // ---------------------------------------------------------------------------
 // Zcash: plain shielded ZEC, synced, received and sent from this tab.
@@ -829,11 +842,17 @@ async function refreshObject(epoch, announce, active) {
     } catch { /* names only */ }
     if (!active()) return;
   }
-  const collectionName = (id) => ((config.collections || []).find((c) => String(c.id).toLowerCase() === id) || {}).name || `Collection ${id.slice(0, 6)}`;
+  // Event certificates (§150) are named by the event they came from.
+  if (config.attendUrl && [...items.values()].some((i) => !(config.collections || []).some((c) => String(c.id).toLowerCase() === i.collection))) {
+    await loadEventNames();
+    if (!active()) return;
+  }
+  const collectionName = (id) => ((config.collections || []).find((c) => String(c.id).toLowerCase() === id) || {}).name || eventNames.get(id)?.name || `Collection ${id.slice(0, 6)}`;
   assets = seen.map((id) => ({
     id,
     symbol: id === zec ? 'ZEC.zy' : items.has(id) ? `${collectionName(items.get(id).collection)} #${items.get(id).serial}` : tickers.get(id) || `asset ${id.slice(0, 8)}…`,
     item: items.has(id),
+    event: items.has(id) ? eventNames.get(items.get(id).collection) || null : null,
   }));
   if (zec && !seen.includes(zec)) assets.unshift({ id: zec, symbol: 'ZEC.zy' });
 
@@ -903,7 +922,7 @@ function renderItems() {
   // redeeming are the Cave store's.
   if (config.kind === 'object') {
     root.querySelector('#item-count').textContent = String(held.length);
-    root.querySelector('#items').innerHTML = held.length ? held.map((h, i) => `<article class="item" data-index="${i}"><div class="art"><img src="/nap-mark.png" alt=""></div><div><p class="kicker">ITEM</p><h3>${escapeHtml(h.meta.symbol)}</h3><p class="media-status">Trade it in the Cave store.</p><button>Send →</button></div></article>`).join('') : '<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Items you buy in the Cave store appear here.</p></div>';
+    root.querySelector('#items').innerHTML = held.length ? held.map((h, i) => `<article class="item" data-index="${i}"><div class="art"><img src="/nap-mark.png" alt=""></div><div><p class="kicker">ITEM</p><h3>${escapeHtml(h.meta.symbol)}</h3><p class="media-status">${h.meta.event ? `${escapeHtml(h.meta.event.date)}${h.meta.event.place ? ` · ${escapeHtml(h.meta.event.place)}` : ''}. Proof you were there; only you can see you hold it.` : 'Trade it in the Cave store.'}</p><button>Send →</button></div></article>`).join('') : '<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Items you buy in the Cave store appear here.</p></div>';
     root.querySelectorAll('.item').forEach((el) => {
       const h = held[Number(el.dataset.index)];
       el.querySelector('button').onclick = () => openObjectSend({ asset: h.asset, amount: h.amount, meta: h.meta });
@@ -1137,6 +1156,42 @@ function openObjectSend(coin) {
   dialog.showModal();
 }
 const note_ = (text) => note(text);
+
+/// Events by collection ({name, date}), from the certificate service's public list.
+const eventNames = new Map();
+async function loadEventNames() {
+  if (!config.attendUrl || eventNames.size) return;
+  try {
+    const r = await fetch(`${config.attendUrl.replace(/\/$/, '')}/events`, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000) });
+    for (const e of (await r.json()).events || []) {
+      if (/^[0-9a-f]{64}$/.test(e.collection) && typeof e.manifest?.name === 'string') eventNames.set(e.collection, { name: e.manifest.name.slice(0, 64), date: String(e.manifest.date || '').slice(0, 10), place: String(e.manifest.place || '').slice(0, 64) });
+    }
+  } catch { /* names only */ }
+}
+
+/// Collect the certificate for the tag this page was opened from (§150).
+async function collectCertificate() {
+  const owner = identity, current = generation, tap = tapLink;
+  const button = root.querySelector('#attend'); if (button) button.disabled = true;
+  try {
+    if (!config.attendUrl) throw new Error(`Certificates are not handed out on ${config.network}. Switch networks and tap again if the event is on another.`);
+    // The certificate is sealed to the key this account published; publish it
+    // first if this wallet has never been opened on this network.
+    const published = await objectCall(config.rpcUrl, 'zyn_viewingKey', { account: owner.accountHex }).then((r) => /^[0-9a-f]{64}$/.test(String(r?.viewing || '')), () => false);
+    if (generation !== current) return;
+    if (!published && owner.viewing) await registerObjectAccount(owner);
+    if (generation !== current) return;
+    const response = await fetch(`${config.attendUrl.replace(/\/$/, '')}/attend`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: tap.event, picc: tap.picc, cmac: tap.cmac, account: owner.accountHex }), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000) });
+    const body = await response.json().catch(() => ({}));
+    if (generation !== current) return;
+    if (!response.ok) throw new Error(String(body.error || 'The certificate service did not answer.').slice(0, 200));
+    tapLink = null;
+    root.querySelector('#attend')?.closest('section')?.remove();
+    note(`${String(body.event || 'Your certificate').slice(0, 64)} — certificate #${Number(body.serial)} is in your wallet.`);
+    await refresh(false);
+  } catch (e) { if (generation === current) note(e.message === 'Failed to fetch' ? 'The certificate service is not answering. Tap the tag again in a moment.' : e.message, true); }
+  finally { const b = root.querySelector('#attend'); if (b) b.disabled = false; }
+}
 
 async function claimGift() {
   const owner = identity, current = generation;

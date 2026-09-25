@@ -6493,3 +6493,18 @@ the web wallet already runs Zcash in WebAssembly and is laid out for phones.
 | 149.4 | **Publishing needs the holder:** Apple Developer Program as an organization (3.1.5), Google Play account (12 testers × 14 days if personal), the upload key (`scripts/make-upload-key.sh`) | ⏳ |
 | 149.5 | **Next, before review:** biometric unlock through Keychain/Keystore (4.2), and a decision on whether iOS ships Nap Market (3.1.5(iii)) | ⏳ |
 
+## §150 — Attendance certificates: tap an event's NFC tag, get a private certificate (25 Sep 2026)
+
+The holder's direction: fun features for the app — NFC at crypto events,
+"more like attend certificate", and "prepare the tech part so future
+integration will be possible" without yet deciding who issues them.
+
+| # | Decision | |
+|---|---|---|
+| 150.1 | **An event is a collection; a certificate is one of its items.** The event's manifest (name, date, place, issuer, art hash, cap, mode) is canonicalised and hashed, and the collection address is derived from the hash (`objectvm.attend.event.v1`), so an event cannot be reworded after it is registered | 🔒 |
+| 150.2 | **Taps are NTAG 424 DNA SUN reads** (NXP AN12196): encrypted UID and counter plus an 8-byte CMAC, checked in `zynzapd::tap` (RFC 4493 CMAC; NXP's example tap is a test vector). A copied link is worth one tap | 🔒 |
+| 150.3 | **Two modes.** `badge`: one certificate per tag (badges, wristbands), the first account to claim a tag keeps it; `door`: one shared tag, one certificate per account, each tap good once. Either way one per account, a claim binds once and a retry reaches the same serial | ✅ |
+| 150.4 | **The mint is the operator's** (`zyn_mintItem`), from `zyn-attend`, like the Cave sale's delivery — trusted and said so. Opening this to any organiser is one consensus step: a mint signed by the collection's own issuer. Not built until that is decided | ⏳ |
+| 150.5 | **Nap:** a tag opens `nap.cavebro.win/tap?e=…&picc=…&cmac=…`; the wallet keeps the tap through unlock or creation, publishes its receiving key if needed, collects, and names certificates by their event. `/attend[/testnet]` relays to the network's service (503 until configured) | ✅ |
+| 150.6 | **Open:** phone-app deep links (need the Apple team id and Play signing key), soulbound certificates, and proving attendance privately (a signed read of holding one item of a collection) | ⏳ |
+

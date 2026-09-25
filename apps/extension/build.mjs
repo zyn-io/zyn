@@ -12,7 +12,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 const WEB = '../nap-web';
 const PAGES = `${WEB}/dist-extension`;
 // What the web deployment serves that has no meaning inside an extension.
-const WEB_ONLY = ['sw.js', 'manifest.webmanifest', '_headers'];
+const WEB_ONLY = ['sw.js', 'manifest.webmanifest', '_headers', '_redirects', 'privacy.html'];
 
 if (!process.argv.includes('--no-web')) execFileSync('npm', ['run', 'build:extension'], { cwd: WEB, stdio: 'inherit' });
 if (!existsSync(`${PAGES}/index.html`)) throw new Error(`no extension build of the wallet at ${PAGES}`);

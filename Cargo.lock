@@ -6272,6 +6272,7 @@ dependencies = [
 name = "zynzapd"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "bip39",
  "cave-randomness",
  "chacha20poly1305",

@@ -4360,3 +4360,36 @@ journalctl -u zyn-signer -n 5    # "verified N anchor(s); through epoch …"
 
 If a verifier halts on a sealed file, it has the wrong key or no key — those
 report differently on purpose, because the fixes differ.
+
+## 5f-undevicies. Attendance certificates (§150)
+
+`zyn-attend` hands out event certificates for NFC taps. An event is two files
+in `ZYN_ATTEND_EVENTS`: `<name>.json` (public) and `<name>.keys.json` (tag keys,
+0600 — whoever holds them can make taps).
+
+```sh
+cat > events/zcon.json <<'JSON'
+{"name":"Zcon","date":"2026-10-15","place":"Denver","issuer":"Cave","art":"","cap":500,"mode":"badge"}
+JSON
+zyn-attend event zcon                  # its collection address (fixed by the manifest)
+zyn-attend keys zcon                   # fresh tag keys → events/zcon.keys.json (never printed)
+zyn-attend register zcon <creator>     # operator: register the collection (needs ZYN_SUBMIT_TOKEN)
+zyn-attend tap zcon 04a1b2c3d4e5f6 1   # the link a tag would write — rehearsal without a tag
+zyn-attend serve                       # POST /attend, GET /events on ZYN_ATTEND_LISTEN
+```
+
+**Tags:** NTAG 424 DNA. With NXP's TagWriter (or TagXplorer), enable Secure
+Dynamic Messaging on the NDEF file with encrypted PICC data (UID + read
+counter) and a CMAC over nothing but itself, the meta-read and file-read keys
+from `<name>.keys.json`, and the URL
+`https://nap.cavebro.win/tap?e=<collection>&picc=<32 hex placeholder>&cmac=<16 hex placeholder>`
+with the mirrors on the two placeholders. `badge` events want a tag per
+attendee; `door` events one tag everyone taps.
+
+**Wiring:** set `ZYN_ATTEND_URL` (mainnet) / `ZYN_ATTEND_TESTNET_URL` on the
+`nap-web` Pages project to reach the service; until then `/attend` answers
+"not handed out on this network". Rehearsed 25 Sep on a local ledger: badge
+first-claimant, retry, other-wallet refusal, one-per-account, forged tap,
+door replay and cap, and the wallet flow (tap link → new wallet → collect →
+certificate named by its event).
+
