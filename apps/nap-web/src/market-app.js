@@ -69,19 +69,10 @@ function collectionName(id) {
   return c ? String(c.name) : short(id);
 }
 
-/// A bridged asset's name from its origin (§146): the network's own coin is
-/// SOL.zy or ETH.zy; a token bridged from it is named by its short address.
-function bridgedName(b) {
-  if (b.origin) return `${short(b.origin)}.zy`;
-  if (b.network.startsWith('solana')) return 'SOL.zy';
-  if (b.network.startsWith('eip155:')) return 'ETH.zy';
-  return short(b.asset);
-}
-
 function name(assetHex) {
   if (assetHex === config.zecAsset) return 'ZEC.zy';
   const bridged = state.bridged.find((b) => b.asset === assetHex);
-  if (bridged) return bridgedName(bridged);
+  if (bridged) return ledger.bridgedName(config, bridged);
   const item = state.items.get(assetHex);
   if (item) return `${collectionName(item.collection)} #${item.serial}`;
   const launch = state.launches.find((l) => l.token === assetHex);

@@ -93,6 +93,20 @@ async function oneCurve(ctx, token) {
   return { market, c, terms };
 }
 
+/// What an approval calls an asset: ZEC.zy, a bridged coin, a curve token by
+/// its symbol, else its short address.
+async function namer(ctx, market) {
+  const bridged = await ledger.loadBridged(ctx.config);
+  return (a) => {
+    if (a === ctx.config.zecAsset) return 'ZEC.zy';
+    const b = bridged.find((x) => x.asset === a);
+    if (b) return ledger.bridgedName(ctx.config, b);
+    const c = (market.curves || []).find((x) => x.token === a);
+    const meta = c && isHex(c.meta) ? mk.decodeMeta(c.meta) : null;
+    return meta?.symbol || `${a.slice(0, 8)}…`;
+  };
+}
+
 const tokenText = (raw) => { const v = BigInt(raw) / WAD; return v.toLocaleString('en-US'); };
 
 export const METHODS = {
@@ -202,26 +216,27 @@ export const METHODS = {
   zyn_curveBuy: {
     kind: 'write',
     async prepare(ctx, p) {
-      const { c } = await oneCurve(ctx, p.token);
+      const { market, c } = await oneCurve(ctx, p.token);
+      const q$ = (await namer(ctx, market))(c.quote);
       if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
       const amount = parseAmount(String(p.amount ?? ''));
-      if (amount < mk.MIN_CURVE_BUY) throw bad('A buy is at least 0.001 ZEC.zy');
+      if (amount < mk.MIN_CURVE_BUY) throw bad(`A buy is at least 0.001 ${q$}`);
       const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps);
       if (q.lots === 0) throw bad('That buys less than one lot at the current price');
       const minLots = p.minTokens != null ? BigInt(parseAmount(String(p.minTokens))) / mk.LOT : 0n;
       return {
-        title: `Buy ${c.symbol} with ${wadText(amount)} ZEC.zy`,
+        title: `Buy ${c.symbol} with ${wadText(amount)} ${q$}`,
         rows: [
           ['Token', `${c.name} (${c.symbol})`],
           ['If nobody else buys this epoch', `${tokenText(q.tokens)} tokens`],
-          ['Fee', c.fee_bps ? `${wadText(q.fee)} ZEC.zy (${c.fee_bps / 100}%)` : 'none'],
-          ['Unspent', `${wadText(q.refund)} ZEC.zy comes back`],
+          ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
+          ['Unspent', `${wadText(q.refund)} ${q$} comes back`],
           ...(minLots ? [['At least', `${tokenText(minLots * mk.LOT)} tokens, or the whole buy comes back`]] : []),
         ],
         note: 'Everyone buying this epoch pays one price, set when it closes; nobody can buy ahead of you. Collect the tokens once it settles.',
         run: async () => {
           const h = await holdings(ctx);
-          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), amount);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.quote), amount);
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.curveTradeIntent({
             trader: ctx.identity.account, token: unhex(c.token), buy: true, amountIn: amount, minOut: minLots * mk.LOT, inputs, change, nonce: n,
           }));
@@ -234,7 +249,8 @@ export const METHODS = {
   zyn_curveSell: {
     kind: 'write',
     async prepare(ctx, p) {
-      const { c } = await oneCurve(ctx, p.token);
+      const { market, c } = await oneCurve(ctx, p.token);
+      const q$ = (await namer(ctx, market))(c.quote);
       if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
       const tokens = parseAmount(String(p.tokens ?? ''));
       if (tokens % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
@@ -244,11 +260,11 @@ export const METHODS = {
       return {
         title: `Sell ${tokenText(tokens)} ${c.symbol}`,
         rows: [
-          ['If nobody else sells this epoch', `${wadText(q.net)} ZEC.zy`],
-          ['Fee', c.fee_bps ? `${wadText(q.fee)} ZEC.zy (${c.fee_bps / 100}%)` : 'none'],
-          ...(minZec ? [['At least', `${wadText(minZec)} ZEC.zy, or the tokens come back`]] : []),
+          ['If nobody else sells this epoch', `${wadText(q.net)} ${q$}`],
+          ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
+          ...(minZec ? [['At least', `${wadText(minZec)} ${q$}, or the tokens come back`]] : []),
         ],
-        note: 'Sellers this epoch share one price, set when it closes. Collect the ZEC.zy once it settles.',
+        note: `Sellers this epoch share one price, set when it closes. Collect the ${q$} once it settles.`,
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.token), tokens);
@@ -274,9 +290,11 @@ export const METHODS = {
       const slippage = Number.isInteger(p.slippageBps) && p.slippageBps >= 0 && p.slippageBps <= 1000 ? p.slippageBps : 100;
       const minOut = mk.withSlippage(quote, slippage);
       const sold = sellA ? pool.a : pool.b;
+      const name = await namer(ctx, market);
+      const [inName, outName] = [name(sold), name(sellA ? pool.b : pool.a)];
       return {
-        title: `Swap in pool ${p.pool.slice(0, 8)}…`,
-        rows: [['You put in', wadText(amountIn)], ['If nobody else trades this epoch', wadText(quote)], ['At least', `${wadText(minOut)} (${slippage / 100}% slippage)`]],
+        title: `Swap ${inName} for ${outName}`,
+        rows: [['You put in', `${wadText(amountIn)} ${inName}`], ['If nobody else trades this epoch', `${wadText(quote)} ${outName}`], ['At least', `${wadText(minOut)} ${outName} (${slippage / 100}% slippage)`], ['Pool', `${p.pool.slice(0, 8)}…`]],
         note: 'Swaps in one epoch clear together at one price.',
         run: async () => {
           const h = await holdings(ctx);

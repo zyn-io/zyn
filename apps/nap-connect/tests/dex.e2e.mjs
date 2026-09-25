@@ -12,6 +12,13 @@ const S = process.env.SHOTS || '/tmp';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const A = process.env.A;
 const B = process.env.B;
+const NODE = process.env.NODE_URL || 'https://zyn-rpc.cavebro.win/object';
+/// The pool for A and B, if the ledger has one (testnet carries several).
+async function poolOf() {
+  const r = await fetch(NODE, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'zyn_market', params: [] }) });
+  const pools = (await r.json()).result?.pools || [];
+  return pools.find((p) => (p.a === A && p.b === B) || (p.a === B && p.b === A))?.id || null;
+}
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -56,8 +63,8 @@ await notice(/Up to date/);
 
 // Open the pool.
 await tab('pools');
-ok(/SOL\.zy|ETH\.zy/.test(await bal(A) + await bal(B)), `the page names the bridged assets: ${(await bal(A)).trim()} and ${(await bal(B)).trim()}`);
-if (!(await page.locator('.mk-pool').count())) {
+ok(/\.zy/.test(await bal(A) + await bal(B)), `the page names the bridged assets: ${(await bal(A)).trim()} and ${(await bal(B)).trim()}`);
+if (!(await poolOf())) {
   await page.selectOption('#create-pool select[name="a"]', A);
   await page.selectOption('#create-pool select[name="b"]', B);
   await page.fill('#create-pool input[name="amount_a"]', process.env.AMOUNT_A || '0.1');
@@ -69,13 +76,14 @@ if (!(await page.locator('.mk-pool').count())) {
 } else {
   console.log('the pool already exists; continuing from the swap');
 }
-await page.waitForSelector('.mk-pool', { timeout: 60000 });
-const poolId = await page.getAttribute('.mk-pool [data-trade]', 'data-trade');
+const poolId = await poolOf();
+await page.waitForSelector(`[data-trade="${poolId}"]`, { timeout: 60000 });
 ok(!!poolId, `the pool is listed (${String(poolId).slice(0, 10)}…)`);
 await page.screenshot({ path: `${S}/dex-pool.png`, fullPage: true });
 
-// Swap in a batch.
-await tab('swap');
+// Swap in a batch, in this pool.
+await page.click(`[data-trade="${poolId}"]`);
+await page.waitForTimeout(400);
 // Sell the asset named SELL (default SOL.zy): a pool orders its pair by
 // address, so the page's first side may be either.
 const SELL = process.env.SELL || 'SOL.zy';

@@ -49,7 +49,10 @@
           "cluster": "devnet",
           "vault": "7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA",
           "rpc": "https://api.devnet.solana.com",
-          "explorer": "https://explorer.solana.com/tx/{tx}?cluster=devnet"
+          "explorer": "https://explorer.solana.com/tx/{tx}?cluster=devnet",
+          "tokens": [
+            { "mint": "FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9", "symbol": "TESTZ", "decimals": 6 }
+          ]
         },
         "eth": {
           "chainId": 11155111,

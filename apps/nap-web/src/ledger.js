@@ -8,6 +8,7 @@
 import { checkedEpoch } from './core.js';
 import { hex, scan, signedFrame, submitSigned, unhex } from './object.js';
 import * as mk from './market.js';
+import { b58decode } from './solana.js';
 
 /// Epochs a signature stays valid. Long enough to survive a slow submit,
 /// short enough that a frame found later is useless.
@@ -93,6 +94,22 @@ export async function waitSpent(config, identity, commitments, timeoutMs = 90_00
 export async function loadBridged(config) {
   const rows = await call(config, 'zyn_bridged').catch(() => []);
   return (Array.isArray(rows) ? rows : []).filter((r) => isHex(r.asset) && typeof r.network === 'string' && isSmall(r.decimals));
+}
+
+/// A bridged asset's name from its origin (§146): the network's own coin is
+/// SOL.zy or ETH.zy; a token bridged from it takes the symbol the deployment
+/// gives its mint, else its short address.
+export function bridgedName(config, b) {
+  const short = (h) => `${h.slice(0, 8)}…`;
+  if (b.origin) {
+    const token = b.network.startsWith('solana') && (config.bridges?.sol?.tokens || []).find((t) => {
+      try { return hex(b58decode(String(t.mint))) === b.origin; } catch { return false; }
+    });
+    return `${token ? String(token.symbol) : short(b.origin)}.zy`;
+  }
+  if (b.network.startsWith('solana')) return 'SOL.zy';
+  if (b.network.startsWith('eip155:')) return 'ETH.zy';
+  return short(b.asset);
 }
 
 const bridgeKey = (config, identity) => `nap.bridge.${config.chain}.${identity.accountHex}`;
