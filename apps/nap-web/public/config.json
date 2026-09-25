@@ -64,6 +64,12 @@
           "vault": "0xe17bb5943b34133f6a8a5D221BE4eD9493B3ef27",
           "assetId": 1,
           "explorer": "https://sepolia.etherscan.io/tx/{tx}"
+        },
+        "btc": {
+          "network": "signet",
+          "internal": "0050d350a8b966fb662c2ca9ed1439a480971da30ed65944f9b71da0de1d67db",
+          "confirmations": 2,
+          "explorer": "https://mempool.space/signet/tx/{tx}"
         }
       },
       "attendUrl": "/attend/testnet"
