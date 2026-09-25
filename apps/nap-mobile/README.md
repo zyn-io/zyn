@@ -59,10 +59,18 @@ app's WebAssembly), safe areas.
 Native libraries are linked for 16 KB pages (`src-tauri/.cargo/config.toml`),
 which Play requires for new apps targeting Android 15+.
 
+## Face ID / fingerprint
+
+`plugins/napvault` keeps the kept wallet's password behind the device's
+biometrics (DECISIONS §151, its README). iOS needs `NSFaceIDUsageDescription`
+(in `gen/apple/project.yml`; run `xcodegen generate` in `gen/apple` after
+editing it). The app's pages reach it through `withGlobalTauri` and the
+`capabilities/default.json` grant.
+
 ## Local toolchain note
 
-On this machine the NDK 27.1 wrappers `aarch64-linux-android24-clang` and
-`…-clang++` call themselves instead of `clang`, and every arm64 link fails with
-"Argument list too long". `scripts/android-env.sh` builds against a shadow NDK
-in /tmp with those two wrappers restored, leaving the SDK untouched. The clean
-fix is to reinstall NDK 27.1.12297006 from Android Studio's SDK Manager.
+On 25 Sep 2026 this machine's NDK 27.1 wrappers `aarch64-linux-android24-clang`
+and `…-clang++` called themselves instead of `clang` ("Argument list too
+long"). They were restored to the NDK's own wrapper (the broken copies are kept
+beside them as `*.broken-bak-20260925`). `scripts/android-env.sh` still detects
+and works around the broken form if it comes back.

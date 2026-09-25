@@ -6508,3 +6508,15 @@ integration will be possible" without yet deciding who issues them.
 | 150.5 | **Nap:** a tag opens `nap.cavebro.win/tap?e=…&picc=…&cmac=…`; the wallet keeps the tap through unlock or creation, publishes its receiving key if needed, collects, and names certificates by their event. `/attend[/testnet]` relays to the network's service (503 until configured) | ✅ |
 | 150.6 | **Open:** phone-app deep links (need the Apple team id and Play signing key), soulbound certificates, and proving attendance privately (a signed read of holding one item of a collection) | ⏳ |
 
+## §151 — Face ID / fingerprint unlock in the phone app (25 Sep 2026)
+
+Before the first App Store review (guideline 4.2 reads thin web wrappers as
+"just a website") and because typing a password on a phone is the slow path.
+
+| # | Decision | |
+|---|---|---|
+| 151.1 | **What biometrics release is the kept wallet's password**, not a key: the sealed wallet stays exactly as on the web, the password still opens it, the phrase still restores it | 🔒 |
+| 151.2 | **The password lives in the platform's secure store**, released only to this device's current biometrics — Keychain `.biometryCurrentSet` (+ an explicit `evaluatePolicy`), Android Keystore key with per-use strong-biometric auth. New faces/fingers invalidate it; it never leaves the device | 🔒 |
+| 151.3 | **Offered, not imposed:** once, after the password opens the wallet; "Not now" is final for the session. Forgetting the device removes it. Web and extension builds carry none of this | ✅ |
+| 151.4 | **One native plugin, no third-party code:** `apps/nap-mobile/plugins/napvault` (Swift + Kotlin + Rust), exposed only to the app's own pages through a capability | ✅ |
+

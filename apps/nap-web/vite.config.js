@@ -22,7 +22,9 @@ const extensionPages = (mode) => ({
     if (mode !== 'extension' && mode !== 'mobile') return html;
     const api = new URL(process.env.VITE_NAP_API || 'https://nap.cavebro.win').origin;
     return html
-      .replace(/connect-src 'self'/, `connect-src 'self' ${api}`)
+      // The phone app's pages also reach its native side (Tauri IPC), for
+      // biometric unlock (§151).
+      .replace(/connect-src 'self'/, `connect-src 'self' ${api}${mode === 'mobile' ? ' ipc: http://ipc.localhost' : ''}`)
       .replace(/\s*<link rel="manifest"[^>]*>/, '');
   },
 });

@@ -181,7 +181,7 @@ function shell(content) {
 }
 
 function unlockForm() {
-  return `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><p class="muted">Your key is held here, sealed. It opens with the password you chose — not your recovery phrase.</p><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
+  return `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><p class="muted">Your key is held here, sealed. It opens with the password you chose — not your recovery phrase.</p><div id="bio-slot"></div><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
 }
 
 function bindKept() {
@@ -189,14 +189,68 @@ function bindKept() {
     event.preventDefault();
     const button = root.querySelector('.primary');
     button.disabled = true;
-    try { await openKept(root.querySelector('#kept-password').value); }
+    const password = root.querySelector('#kept-password').value;
+    try { await openKept(password); offerBiometrics(password); }
     catch (e) { root.querySelector('#form-error').textContent = e.message; button.disabled = false; }
   };
+  showBiometricUnlock();
   root.querySelector('#use-phrase').onclick = (e) => { e.preventDefault(); onboarding('restore'); };
   root.querySelector('#forget-kept').onclick = (e) => {
     e.preventDefault();
     forgetKept();
+    vault?.call('forget').catch(() => {});
     onboarding('restore');
+  };
+}
+
+// Face ID / fingerprint unlock — the phone app only (§151). The kept wallet's
+// password goes to the Keychain / Android Keystore behind this device's
+// biometrics (the app's `napvault` plugin) and comes back only for a face or
+// finger. The password still opens the wallet; the phrase still restores it.
+const vault = IN_APP && window.__TAURI__?.core?.invoke
+  ? { call: (cmd, args = {}) => window.__TAURI__.core.invoke(`plugin:napvault|${cmd}`, args) }
+  : null;
+const bioName = (kind) => ({ faceId: 'Face ID', touchId: 'Touch ID', opticId: 'Optic ID' }[kind] || 'fingerprint');
+const vaultStatus = () => (vault ? vault.call('status').catch(() => null) : Promise.resolve(null));
+
+/// On the unlock screen: an "Open with Face ID" button, pressed once for the holder.
+async function showBiometricUnlock() {
+  const st = await vaultStatus();
+  const slot = root.querySelector('#bio-slot');
+  if (!st?.available || !st.stored || !slot) return;
+  slot.innerHTML = `<button type="button" class="primary bio" id="bio-unlock">Open with ${bioName(st.kind)} <span>→</span></button><p class="muted bio-or">or with your password</p>`;
+  const go = async () => {
+    const error = root.querySelector('#form-error');
+    try {
+      const { secret } = await vault.call('unlock', { reason: 'Open your Nap wallet' });
+      try { await openKept(secret); }
+      catch {
+        // The kept wallet was sealed again under another password since.
+        await vault.call('forget').catch(() => {});
+        if (error) error.textContent = `${bioName(st.kind)} no longer matches this wallet; open it with your password.`;
+      }
+    } catch (e) {
+      if (error && !/cancel/i.test(String(e))) error.textContent = String(e).slice(0, 160);
+    }
+  };
+  root.querySelector('#bio-unlock').onclick = go;
+  go();
+}
+
+/// After the password opened (or kept) the wallet: offer biometrics, once.
+async function offerBiometrics(password) {
+  const st = await vaultStatus();
+  if (!st?.available || st.stored || !password) return;
+  const at = root.querySelector('#notice');
+  if (!at) return;
+  const name = bioName(st.kind);
+  at.insertAdjacentHTML('afterend', `<section class="claim bio-offer"><div><p class="kicker">FASTER NEXT TIME</p><h2>Open Nap with ${name}.</h2><p>Your password is kept in this phone's secure storage and released only to your ${name === 'fingerprint' ? 'fingerprint' : 'face'}. Nothing leaves the phone.</p></div><div class="bio-actions"><button id="bio-yes">Use ${name} <span>→</span></button><button class="quiet" id="bio-no">Not now</button></div></section>`);
+  const card = root.querySelector('.bio-offer');
+  root.querySelector('#bio-no').onclick = () => { card.remove(); password = ''; };
+  root.querySelector('#bio-yes').onclick = async () => {
+    try { await vault.call('store', { secret: password }); card.remove(); note(`${name} opens Nap from now on.`); }
+    catch (e) { if (!/cancel/i.test(String(e))) note(String(e).slice(0, 160), true); }
+    finally { password = ''; }
   };
 }
 
@@ -292,6 +346,7 @@ async function unlock(words, passphrase, index, keepPassword = '', fresh = false
   root.querySelectorAll('textarea,input').forEach((el) => { if (el.type !== 'checkbox') el.value = ''; });
   wallet(kept ? 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.' : '');
   refresh();
+  if (kept) offerBiometrics(keepPassword);
 }
 
 /// Open a wallet this device already holds.

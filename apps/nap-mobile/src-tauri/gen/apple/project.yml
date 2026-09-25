@@ -42,6 +42,7 @@ targets:
       path: nap-mobile_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        NSFaceIDUsageDescription: Face ID opens your Nap wallet instead of typing its password.
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:

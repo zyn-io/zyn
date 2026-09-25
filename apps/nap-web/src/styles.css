@@ -141,3 +141,7 @@ html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; heigh
 
 /* The claim card stacks on a phone, so its button never runs off it. */
 @media (max-width: 800px) { .claim { flex-direction: column; align-items: stretch; } .claim button { align-self: flex-start; } }
+
+/* Biometric unlock (the phone app, §151). */
+.bio{margin-top:8px}.bio-or{text-align:center;margin:12px 0 0;font-size:13px}
+.bio-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}.bio-actions .quiet{color:#3d3000;padding:6px 0}

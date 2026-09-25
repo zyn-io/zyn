@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "default",
+  "description": "Nap's own pages (nothing remote loads in the app) may use biometric unlock.",
+  "windows": ["main"],
+  "permissions": ["napvault:default"]
+}
