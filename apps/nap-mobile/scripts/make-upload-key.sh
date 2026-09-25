@@ -2,6 +2,9 @@
 # Creates the Google Play upload key and tells the Android build where it is.
 # Run it yourself: keytool asks for the passwords, and they stay on this machine.
 set -e
+# Everything this writes is a secret: owner-only from the moment it exists,
+# not after a chmod.
+umask 077
 cd "$(dirname "$0")/.."
 JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
 DIR="$HOME/.nap-release"; KEY="$DIR/nap-upload.jks"
