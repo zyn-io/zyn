@@ -307,6 +307,44 @@ contract ZynVaultTest is Test {
     }
 
     /// Deposits pause; withdrawals do not. No role here can trap funds.
+    // A Safe that is the signer pays out by executing the call itself.
+
+    function test_the_signer_can_pay_out_directly() public {
+        token.mint(address(vault), 10e18);
+        ZynVault.Payout[] memory p = _one(address(0xBEEF), 4e18);
+        vm.prank(signerAddr);
+        vault.withdrawAsSigner(0, 7, p);
+        assertEq(token.balanceOf(address(0xBEEF)), 4e18);
+        assertEq(vault.nonce(), 1);
+    }
+
+    function test_nobody_else_can_pay_out_directly() public {
+        token.mint(address(vault), 10e18);
+        ZynVault.Payout[] memory p = _one(address(0xBEEF), 4e18);
+        vm.expectRevert(ZynVault.NotSigner.selector);
+        vm.prank(admin);
+        vault.withdrawAsSigner(0, 7, p);
+        vm.expectRevert(ZynVault.NotSigner.selector);
+        vault.withdrawAsSigner(0, 7, p);
+    }
+
+    function test_a_direct_payout_shares_the_nonce_with_signed_ones() public {
+        token.mint(address(vault), 10e18);
+        ZynVault.Payout[] memory p = _one(address(0xBEEF), 1e18);
+        vm.prank(signerAddr);
+        vault.withdrawAsSigner(0, 7, p);
+        // the same settlement cannot be paid again either way
+        vm.expectRevert(ZynVault.BadNonce.selector);
+        vm.prank(signerAddr);
+        vault.withdrawAsSigner(0, 7, p);
+        bytes memory sig = _sign(0, 7, p);
+        vm.expectRevert(ZynVault.BadNonce.selector);
+        vault.withdraw(0, 7, p, sig);
+        // and the next one follows on
+        vault.withdraw(1, 8, p, _sign(1, 8, p));
+        assertEq(token.balanceOf(address(0xBEEF)), 2e18);
+    }
+
     function test_pausing_deposits_does_not_pause_exits() public {
         vm.prank(admin);
         vault.pauseDeposits(true);

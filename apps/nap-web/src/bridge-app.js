@@ -161,7 +161,11 @@ async function refresh(quiet = false, timed = false) {
     if (stale()) return;
     const live = new Set(bridged.map((b) => b.asset));
     const next = { ...state, epoch, bridged, bps: BigInt(Number(market?.fees?.bridge_bps) || 0) };
-    for (const b of config.bridges) b.live = live.has(b.asset);
+    for (const b of config.bridges) {
+      b.live = live.has(b.asset);
+      const row = bridged.find((x) => x.asset === b.asset);
+      b.issued = /^\d+$/.test(String(row?.issued ?? '')) ? BigInt(row.issued) : null;
+    }
     if (identity) {
       const me = identity;
       let waiting = await ledger.loadWaiting(config, me, bridged).catch(() => []);
@@ -224,17 +228,35 @@ async function depositSol(b, amountText, say) {
   return sol.signAndSend(w, account, sol.unsigned(message), `solana:${b.cluster || 'devnet'}`);
 }
 
+/// What a capped bridge still takes, in its smallest unit; null when uncapped
+/// or when the chain's total is not known yet.
+function capRoom(b) {
+  if (!/^\d+$/.test(String(b.capWei ?? '')) || b.issued === null || b.issued === undefined) return null;
+  const room = BigInt(b.capWei) - b.issued;
+  return room > 0n ? room : 0n;
+}
+
+function pilotNote(b) {
+  if (!b.capWei) return '';
+  const room = capRoom(b);
+  return `<p class="mk-fine br-pilot"><strong>Pilot.</strong> At most ${fmt(BigInt(b.capWei), 18)} ETH in total${room === null ? '' : ` (${fmt(room, 18)} left)`}. The vault is held by a ${esc(b.custody || 'multisig')}${b.safe ? ` (<code>${esc(b.safe.toLowerCase())}</code>)` : ''}: its owners approve every payout, so sending out can take hours, and they could move what the vault holds. The vault contract is not audited.</p>`;
+}
+
 const selector = (s) => keccak_256(new TextEncoder().encode(s)).slice(0, 4);
 
 async function depositEth(b, amountText, say) {
   const wei = parseAmount(amountText);
   const eth = window.ethereum;
   if (!eth?.request) throw new Error('No Ethereum wallet in this browser. Install one (MetaMask, Rabby) and reload.');
+  // A capped pilot (§155): what fits under the cap is checked here, and the
+  // bridge lists anything over it for a refund rather than crediting it.
+  const room = capRoom(b);
+  if (room !== null && wei > room) throw new Error(room > 0n ? `The pilot takes at most ${fmt(room, 18)} ETH more right now.` : 'The pilot is full for now — nothing more can come in.');
   const { commitment } = await ledger.bridgeMemo(config, identity);
   const [from] = await eth.request({ method: 'eth_requestAccounts' });
   const chainHex = `0x${b.chainId.toString(16)}`;
   if ((await eth.request({ method: 'eth_chainId' })) !== chainHex) {
-    say('Switch your wallet to Sepolia…');
+    say(`Switch your wallet to ${b.chainId === 1 ? 'Ethereum' : 'Sepolia'}…`);
     await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
   }
   const asset = new Uint8Array(32);
@@ -361,7 +383,7 @@ function renderIn() {
     ? `<button class="primary go" ${b.live ? '' : 'disabled'}>Deposit from a${b.key === 'eth' ? 'n Ethereum' : ' Solana'} wallet <span>→</span></button>`
     : '<button class="primary open-first" type="button">Open your wallet to deposit <span>→</span></button>'}
       <p class="br-say say" role="status"></p>
-      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>`}
+      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>${b.key === 'eth' ? pilotNote(b) : ''}`}
     </section>`).join('')}</div>`;
   root.querySelectorAll('[data-bridge]').forEach((card) => {
     const b = config.bridges.find((x) => x.key === card.dataset.bridge);
@@ -447,7 +469,7 @@ function renderOut() {
       <label class="mk-field"><span>To address</span><input id="out-to" autocomplete="off" spellcheck="false" placeholder="${esc(live.map((b) => ({ sol: 'a Solana address', eth: '0x… on Ethereum', btc: `${b.chain === 'bitcoin' ? 'bc1' : 'tb1'}… on Bitcoin` })[b.key]).join(', ') || 'an address')}"></label>
       <label class="mk-field"><span>Amount</span><input id="out-amt" inputmode="decimal" autocomplete="off" placeholder="0.02"></label>
       <button class="primary" type="submit" ${live.length ? '' : 'disabled'}>Send out <span>→</span></button>
-      <p class="mk-fine">${state.bps ? `A ${Number(state.bps) / 100}% bridge fee rides on top. ` : ''}${live.some((b) => b.key === 'sol') ? 'SOL pays its 0.000005 network fee out of the amount. ' : ''}${live.some((b) => b.key === 'btc') ? 'BTC pays its network fee out of the amount (at least 0.0001 BTC, to a segwit or Taproot address). ' : ''} The bridge pays once the other chain finalizes it.</p>
+      <p class="mk-fine">${state.bps ? `A ${Number(state.bps) / 100}% bridge fee rides on top. ` : ''}${live.some((b) => b.key === 'sol') ? 'SOL pays its 0.000005 network fee out of the amount. ' : ''}${live.some((b) => b.key === 'btc') ? 'BTC pays its network fee out of the amount (at least 0.0001 BTC, to a segwit or Taproot address). ' : ''}${live.some((b) => b.key === 'eth' && b.capWei) ? 'ETH goes out once two of the vault Safe’s owners approve it. ' : ''} The bridge pays once the other chain finalizes it.</p>
     </form></section>`;
   $('#out-form').onsubmit = async (e) => {
     e.preventDefault();

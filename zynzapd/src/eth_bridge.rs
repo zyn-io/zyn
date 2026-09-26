@@ -141,6 +141,31 @@ pub fn digest_call(nonce: u64, epoch: u64, payouts: &[Payout]) -> Vec<u8> {
     out
 }
 
+/// Calldata for `withdrawAsSigner(uint64 nonce, uint64 epoch, Payout[] payouts)`:
+/// the payout a Safe that is the vault's signer executes itself (§155).
+pub fn withdraw_as_signer_call(nonce: u64, epoch: u64, payouts: &[Payout]) -> Vec<u8> {
+    let mut out = digest_call(nonce, epoch, payouts);
+    out[..4].copy_from_slice(&selector("withdrawAsSigner(uint64,uint64,(address,uint256,uint256)[])"));
+    out
+}
+
+/// Calldata for a Safe's `getTransactionHash(...)` for a plain CALL with no
+/// gas refund, so the hash Safe{Wallet} will show is the one the chain computes.
+pub fn safe_tx_hash_call(to: &Address20, value: u128, data: &[u8], safe_nonce: u64) -> Vec<u8> {
+    let mut out = selector("getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,uint256)").to_vec();
+    out.extend_from_slice(&word_addr(to));
+    out.extend_from_slice(&word_u(value));
+    out.extend_from_slice(&word_u(32 * 10)); // offset of `data`
+    for _ in 0..6 {
+        out.extend_from_slice(&[0u8; 32]); // operation, safeTxGas, baseGas, gasPrice, gasToken, refundReceiver
+    }
+    out.extend_from_slice(&word_u(safe_nonce as u128));
+    out.extend_from_slice(&word_u(data.len() as u128));
+    out.extend_from_slice(data);
+    out.resize(out.len() + (32 - data.len() % 32) % 32, 0);
+    out
+}
+
 /// Calldata for `depositNative(bytes32 commitment, uint32 asset)`.
 pub fn deposit_native_call(commitment: &[u8; 32], asset: u32) -> Vec<u8> {
     let mut out = selector("depositNative(bytes32,uint32)").to_vec();
@@ -243,6 +268,20 @@ impl Tx {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_safe_path_selectors_are_the_ones_cast_computes() {
+        let p = [Payout { to: [0x11; 20], asset: 1, amount: 5 }];
+        assert_eq!(&withdraw_as_signer_call(3, 9, &p)[..4], &[0xe6, 0x6d, 0x58, 0x31]);
+        // the rest is the digest call's encoding, which the contract already cross-checks
+        assert_eq!(&withdraw_as_signer_call(3, 9, &p)[4..], &digest_call(3, 9, &p)[4..]);
+        let c = safe_tx_hash_call(&[0x22; 20], 0, &[1, 2, 3], 7);
+        assert_eq!(&c[..4], &[0xd8, 0xd1, 0x1f, 0x78]);
+        // 10 head words, the length word, one padded data word
+        assert_eq!(c.len(), 4 + 32 * 12);
+        assert_eq!(c[4 + 32 * 9 + 31], 7);
+        assert_eq!(&c[4 + 32 * 11..4 + 32 * 11 + 3], &[1, 2, 3]);
+    }
+
     use super::*;
 
     fn hex(b: &[u8]) -> String {

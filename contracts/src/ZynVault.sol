@@ -115,6 +115,7 @@ contract ZynVault is ReentrancyGuard {
     error NotRepresentable();
     error InexactScaling();
     error WrongAssetKind();
+    error NotSigner();
 
     modifier onlyAdmin() {
         if (msg.sender != admin) revert NotAdmin();
@@ -220,6 +221,26 @@ contract ZynVault is ReentrancyGuard {
             revert BadSignature();
         }
 
+        _pay(nonce_, epoch, payouts);
+    }
+
+    /// Pay out one settlement as the signer itself.
+    ///
+    /// When the signer is a Safe, its owners can approve the payout as an
+    /// ordinary Safe transaction instead of producing an EIP-1271 signature
+    /// for someone else to submit. The authority is the same (the signer's
+    /// own approval) and so are the checks: the next nonce, the same payout
+    /// rules. Only the signer can call it, so it adds no new key.
+    function withdrawAsSigner(uint64 nonce_, uint64 epoch, Payout[] calldata payouts)
+        external
+        nonReentrant
+    {
+        if (msg.sender != signer) revert NotSigner();
+        if (nonce_ != nonce) revert BadNonce();
+        _pay(nonce_, epoch, payouts);
+    }
+
+    function _pay(uint64 nonce_, uint64 epoch, Payout[] calldata payouts) private {
         // Consume before paying. The guard already blocks reentry; ordering it
         // this way means even a future refactor that drops the guard cannot
         // replay this settlement from inside a token callback.
