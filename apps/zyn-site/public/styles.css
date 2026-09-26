@@ -50,19 +50,25 @@ h1, h2, p { margin: 0; }
 .grain { position: fixed; inset: -50%; z-index: 0; pointer-events: none; opacity: 0.06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
 /* ---------------------------------------------------------------- hero */
-.hero { position: relative; min-height: min(100svh, 980px); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: radial-gradient(90% 70% at 78% 30%, #10251f 0%, var(--obsidian) 62%); isolation: isolate; }
-/* no z-index: it would isolate the logo's screen blend from the hero behind it */
-.top { position: relative; width: 100%; max-width: var(--max); margin: 0 auto; padding: 22px var(--gutter); display: flex; align-items: center; justify-content: space-between; }
+.hero { position: relative; min-height: min(100svh, 980px); padding-top: 76px; display: grid; grid-template-rows: 1fr auto; overflow: hidden; background: radial-gradient(90% 70% at 78% 30%, #10251f 0%, var(--obsidian) 62%); isolation: isolate; }
+/* The header stays at the top; once the page moves it becomes a frosted
+   obsidian bar, and the link for the section in view is lit. */
+.top { position: fixed; z-index: 30; top: 0; left: 0; right: 0; padding: 18px max(var(--gutter), calc((100vw - var(--max)) / 2 + var(--gutter))); display: flex; align-items: center; justify-content: space-between; transition: background .35s, padding .35s, box-shadow .35s; }
+.top.scrolled { padding-top: 12px; padding-bottom: 12px; background: rgba(6, 17, 14, 0.74); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 rgba(242, 241, 235, 0.08); }
+.top nav a[aria-current='true'] { color: var(--mineral); }
+.top nav a[aria-current='true']:not(.nav-open)::after { content: ''; display: block; height: 1px; margin-top: 3px; background: var(--jade-3); }
 .lockup { display: flex; align-items: center; gap: 12px; text-decoration: none; font: 850 22px/1 var(--display); font-stretch: 125%; letter-spacing: 0.02em; }
-.lockup img { width: 36px; height: 36px; mix-blend-mode: screen; }
+.lockup img { width: 36px; height: 36px; }
 .top nav { display: flex; align-items: center; gap: 30px; font-size: 15px; }
 .top nav a { text-decoration: none; color: var(--steel); transition: color .2s; }
 .top nav a:hover { color: var(--mineral); }
 .top .nav-open { color: var(--mineral); padding-bottom: 2px; border-bottom: 1px solid var(--jade-2); }
+.menu { display: none; font: 600 12px/1 var(--display); font-stretch: 120%; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mineral); background: none; border: 1px solid rgba(242, 241, 235, 0.25); padding: 10px 14px; cursor: pointer; }
+.menu[aria-expanded='true'] { background: var(--mineral); color: var(--ink); }
 
 /* The blend lives on the container: its transform makes it a stacking
    context, and a blend inside one only sees the container, not the page. */
-.mark { position: absolute; z-index: 1; right: -6vw; top: 46%; width: min(58vw, 860px); aspect-ratio: 1; mix-blend-mode: screen; transform: translateY(-50%); animation: mark-in 1.6s cubic-bezier(.2, .7, .1, 1) both; }
+.mark { position: absolute; z-index: 1; pointer-events: none; right: -6vw; top: 46%; width: min(58vw, 860px); aspect-ratio: 1; mix-blend-mode: screen; transform: translateY(-50%); animation: mark-in 1.6s cubic-bezier(.2, .7, .1, 1) both; }
 .mark img { width: 100%; height: 100%; display: block; }
 .mark .sweep { position: absolute; inset: 0; mix-blend-mode: overlay; background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.85) 50%, transparent 62%) no-repeat; background-size: 250% 100%; background-position: 160% 0; animation: sweep 7s 1.2s ease-in-out infinite; }
 @keyframes mark-in { from { opacity: 0; transform: translateY(-46%) scale(.96); filter: brightness(.3); } }
@@ -173,7 +179,7 @@ h1, h2, p { margin: 0; }
 .tile-go span { color: var(--jade); }
 
 /* ---------------------------------------------------------------- trust + hallmarks */
-.trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter) clamp(88px, 10vw, 140px); }
+.trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: clamp(92px, 9vw, 120px) var(--gutter) clamp(88px, 10vw, 140px); }
 .trust-wrap { background: var(--mineral); }
 .disclose, .marks { display: grid; gap: 22px; align-content: start; }
 .marks { padding-top: clamp(28px, 3vw, 44px); }
@@ -233,7 +239,14 @@ h1, h2, p { margin: 0; }
 }
 @media (max-width: 560px) {
   .tiles { grid-template-columns: 1fr; }
-  .top nav a:not(.nav-open) { display: none; }
+  /* clear the fixed header when a section settles at the top */
+  .strata, .product, .api, .index { padding-top: 88px; }
+  .menu { display: inline-block; }
+  .top nav { position: absolute; top: 100%; left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 0; padding: 6px var(--gutter) 14px; background: rgba(6, 17, 14, 0.94); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 1px 0 rgba(242, 241, 235, 0.08); display: none; }
+  .top nav.open { display: flex; }
+  .top nav a, .top nav a:not(.nav-open) { display: block; padding: 14px 0; font-size: 17px; border-bottom: 1px solid rgba(242, 241, 235, 0.08); }
+  .top nav .nav-open { border-bottom: 0; color: var(--jade-3); }
+  .top nav a[aria-current='true']:not(.nav-open)::after { display: none; }
   .layer .root { display: none; }
   .punches { grid-template-columns: 1fr; }
   .readout { justify-content: flex-start; }

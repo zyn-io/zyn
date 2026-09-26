@@ -138,6 +138,8 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObse
   });
 }
 
+let glideTo = null; // set by the section lock below, used by in-page links
+
 // Section lock. The page never comes to rest across two sections: when
 // scrolling stops with a section boundary inside the screen, it finishes the
 // move in the direction you were going (down: the next section fills the
@@ -168,10 +170,10 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
     return e - prev <= H * 1.25 ? prev : e - H;
   }
 
-  function glide(to) {
+  function glide(to, done) {
     const from = scrollY;
     const d = to - from;
-    if (Math.abs(d) < 2) return;
+    if (Math.abs(d) < 2) { if (done) done(); return; }
     const dur = Math.min(720, 320 + Math.abs(d) * 0.5);
     const t0 = performance.now();
     gliding = true;
@@ -182,7 +184,7 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
       const e = 1 - (1 - k) ** 3;
       scrollTo({ top: from + d * e, behavior: 'instant' });
       if (k < 1) requestAnimationFrame(step);
-      else { gliding = false; lastY = scrollY; }
+      else { gliding = false; lastY = scrollY; if (done) done(); }
     };
     requestAnimationFrame(step);
   }
@@ -210,6 +212,60 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
   addEventListener('touchstart', () => { touching = true; stop(); }, { passive: true });
   addEventListener('touchend', () => { touching = false; }, { passive: true });
   addEventListener('keydown', stop);
-  // an in-page link lands where it points, and is not moved on from there
-  document.addEventListener('click', (e) => { if (e.target.closest('a[href^="#"]')) { stop(); dir = 1; } });
+  glideTo = (y, done) => { stop(); dir = Math.sign(y - scrollY) || 1; glide(y, done); };
+}
+
+// In-page links (the navbar, "What you are trusting") glide to their section
+// the same way the lock does. On a long jump the headings passed on the way
+// skip their crumble, so the landing is not a shower of cubes.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  const target = document.querySelector(a.getAttribute('href'));
+  if (!target) return;
+  e.preventDefault();
+  const section = target.closest('.trust-wrap') || target;
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const y = Math.max(0, Math.min(max, Math.round(section.getBoundingClientRect().top + scrollY)));
+  history.replaceState(null, '', a.getAttribute('href'));
+  const land = () => { delete document.documentElement.dataset.jump; target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); };
+  if (glideTo) {
+    if (Math.abs(y - scrollY) > innerHeight * 1.2) document.documentElement.dataset.jump = '1';
+    glideTo(y, land);
+  } else {
+    scrollTo({ top: y, behavior: 'instant' });
+    land();
+  }
+});
+
+// The phone menu: the section links in a panel under the header.
+{
+  const btn = document.getElementById('menu');
+  const nav = document.getElementById('nav');
+  const set = (open) => { nav.classList.toggle('open', open); btn.setAttribute('aria-expanded', String(open)); btn.textContent = open ? 'Close' : 'Menu'; };
+  btn.addEventListener('click', () => set(!nav.classList.contains('open')));
+  nav.addEventListener('click', (e) => { if (e.target.closest('a')) set(false); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') set(false); });
+  addEventListener('scroll', () => { if (nav.classList.contains('open') && !document.documentElement.dataset.jump) set(false); }, { passive: true });
+}
+
+// The header: frosted once the page has moved, and the link for the section
+// in view lit.
+{
+  const top = document.getElementById('top');
+  const links = [...document.querySelectorAll('#nav a[href^="#"]')];
+  const map = [['.strata', '#strata'], ['.api', '#strata'], ['.product', '#product'], ['.index', '#index'], ['.trust-wrap', '#trust']];
+  let queued = false;
+  const update = () => {
+    queued = false;
+    top.classList.toggle('scrolled', scrollY > 8);
+    let current = null;
+    for (const [sel, href] of map) {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      if (r.top <= innerHeight * 0.4 && r.bottom > innerHeight * 0.4) current = href;
+    }
+    for (const l of links) l.setAttribute('aria-current', String(l.getAttribute('href') === current));
+  };
+  addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(update); } }, { passive: true });
+  update();
 }

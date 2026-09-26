@@ -127,6 +127,8 @@
       const r = item.el.getBoundingClientRect();
       const g = goal(item, r);
       if (item.shown === null) item.shown = g; // no animation for where the page opens
+      // a long jump from the navbar: headings passed on the way just go
+      if (g < 0 && document.documentElement.dataset.jump) item.shown = g;
       if (item.shown !== g) {
         const rate = Math.abs(g) > Math.abs(item.shown) ? APART : TOGETHER;
         const step = rate * dt;
