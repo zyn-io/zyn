@@ -5,8 +5,8 @@
 // rules as the full wallet (app.js), which stays the reference for each.
 import { x25519 } from '@noble/curves/ed25519.js';
 import { checkedEpoch, hex, parseAmount, unhex } from './core.js';
-import { decodeMeta, fund } from './market.js';
-import { bridgedName, call, loadBridged, submitIntent } from './ledger.js';
+import { claimIntent, decodeMeta, fund, quoteAlone, redeem, swapIntent, withSlippage } from './market.js';
+import { bridgedName, call, loadBridged, loadOwed, PER_CLAIM, submitFresh, submitIntent } from './ledger.js';
 import { objectCall, PROGRAM, registerIntent, scan, sealNote, spendIntent, withdrawIntent } from './object.js';
 import { endpoint } from './origin.js';
 
@@ -73,23 +73,26 @@ export async function loadPocket(config, identity) {
   // bridged coin by its origin, a pool share by its pair, anything else by id.
   const names = new Map([[zec, 'ZEC.zy']]);
   const origin = new Map([[zec, 'Zcash']]);
-  if (others.some((a) => !items.has(a))) {
-    try {
-      const market = await objectCall(config.rpcUrl, 'zyn_market');
-      for (const c of market.curves || []) {
-        const m = /^[0-9a-f]{64}$/.test(c.token) && typeof c.meta === 'string' ? decodeMeta(c.meta) : null;
-        if (m) { names.set(c.token, m.symbol); origin.set(c.token, 'Launchpad'); }
-      }
-      for (const b of await loadBridged(config)) {
-        names.set(b.asset, bridgedName(config, b));
-        origin.set(b.asset, ({ 'eip155:1': 'Ethereum', 'eip155:11155111': 'Sepolia', 'solana-devnet': 'Solana devnet', 'bitcoin-signet': 'Bitcoin signet', bitcoin: 'Bitcoin' })[b.network] || b.network);
-      }
-      const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
-      for (const p of market.pools || []) {
-        if (/^[0-9a-f]{64}$/.test(p.lp)) { names.set(p.lp, `LP ${nameOf(p.a)}/${nameOf(p.b)}`); origin.set(p.lp, 'Pool share'); }
-      }
-    } catch { /* names only */ }
-  }
+  let pools = [], epochSeconds = 0;
+  try {
+    const market = await objectCall(config.rpcUrl, 'zyn_market');
+    epochSeconds = Number(market.epoch_seconds) || 0;
+    pools = (market.pools || []).filter((p) => ['id', 'a', 'b'].every((k) => /^[0-9a-f]{64}$/.test(p[k]))
+      && /^\d+$/.test(String(p.reserve_a)) && /^\d+$/.test(String(p.reserve_b)) && BigInt(p.reserve_a) > 0n && BigInt(p.reserve_b) > 0n
+      && Number.isSafeInteger(p.fee_bps));
+    for (const c of market.curves || []) {
+      const m = /^[0-9a-f]{64}$/.test(c.token) && typeof c.meta === 'string' ? decodeMeta(c.meta) : null;
+      if (m) { names.set(c.token, m.symbol); origin.set(c.token, 'Launchpad'); }
+    }
+    for (const b of await loadBridged(config)) {
+      names.set(b.asset, bridgedName(config, b));
+      origin.set(b.asset, ({ 'eip155:1': 'Ethereum', 'eip155:11155111': 'Sepolia', 'solana-devnet': 'Solana devnet', 'bitcoin-signet': 'Bitcoin signet', bitcoin: 'Bitcoin' })[b.network] || b.network);
+    }
+    const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
+    for (const p of market.pools || []) {
+      if (/^[0-9a-f]{64}$/.test(p.lp)) { names.set(p.lp, `LP ${nameOf(p.a)}/${nameOf(p.b)}`); origin.set(p.lp, 'Pool share'); }
+    }
+  } catch { /* names only */ }
 
   const sums = new Map();
   for (const h of held) sums.set(h.asset, (sums.get(h.asset) || 0n) + h.amount);
@@ -100,7 +103,46 @@ export async function loadPocket(config, identity) {
   coins.sort((a, b) => (a.asset === zec ? -1 : b.asset === zec ? 1 : a.symbol.localeCompare(b.symbol)));
   const owned = [...sums].filter(([a, v]) => items.has(a) && v > 0n)
     .map(([asset]) => ({ asset, collection: items.get(asset).collection, serial: items.get(asset).serial, name: `${collectionName(items.get(asset).collection)} #${items.get(asset).serial}` }));
-  return { epoch, coins, items: owned, held };
+  // What finished swaps owe this wallet: collected on the next pass.
+  const owed = await loadOwed(config, identity).catch(() => []);
+  const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
+  return { epoch, coins, items: owned, held, pools, epochSeconds, owed, nameOf };
+}
+
+// ---------------------------------------------------------------------------
+// Swapping. A swap is an order in the pool's current batch: every order in
+// an epoch clears at one price when it seals, and what it pays (the coin
+// bought, or the whole input back if the price moved past the minimum)
+// waits as a claim. The compact wallet collects those claims itself, so to
+// the holder a swap is placed, then arrives.
+
+/// The quote if this were the only order in the batch, and the minimum the
+/// order is signed for.
+export function quoteSwap(pool, sellA, amountIn, slippageBps) {
+  const out = quoteAlone(pool, sellA, amountIn);
+  const x = BigInt(pool.reserve_a), y = BigInt(pool.reserve_b);
+  const spot = sellA ? (amountIn * y) / x : (amountIn * x) / y;
+  const impactBps = spot > 0n ? Number(((spot - out) * 10_000n) / spot) : 0;
+  return { out, min: withSlippage(out, slippageBps), impactBps };
+}
+
+export async function placeSwap(config, identity, held, pool, sellA, amountIn, slippageBps) {
+  const sell = unhex(sellA ? pool.a : pool.b, 32);
+  const { min } = quoteSwap(pool, sellA, amountIn, slippageBps);
+  if (min <= 0n) throw new Error('Too small to trade');
+  const { inputs, change } = fund(identity, held, sell, amountIn);
+  await submitFresh(config, identity, (nonce) => swapIntent({ trader: identity.account, pool: unhex(pool.id, 32), sellA, amountIn, minOut: min, inputs, change, nonce }));
+}
+
+/// Collect everything the market owes this wallet. Returns how many.
+export async function collectOwed(config, identity, owed) {
+  let done = 0;
+  for (let i = 0; i < owed.length; i += PER_CLAIM) {
+    const batch = owed.slice(i, i + PER_CLAIM);
+    await submitIntent(config, identity, claimIntent(redeem(identity, batch)));
+    done += batch.length;
+  }
+  return done;
 }
 
 // ---------------------------------------------------------------------------

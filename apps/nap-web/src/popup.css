@@ -210,3 +210,24 @@ details.more summary { cursor: pointer; font-size: 12px; color: var(--muted); li
 details.more summary::-webkit-details-marker { display: none; }
 details.more[open] summary { margin-bottom: 10px; }
 .two { display: grid; grid-template-columns: 1fr 96px; gap: 10px; }
+
+/* ---- swap --------------------------------------------------------------- */
+.leg { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.leg-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+.leg-top .bad { color: var(--bad); }
+.bal { border: 0; background: none; padding: 0; font: 11px Mono; color: var(--amber); }
+.leg-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.leg-row input, .leg-row output { flex: 1; min-width: 0; border: 0; background: none; padding: 0; outline: none; font: 700 26px/1.2 Bricolage; font-variant-numeric: tabular-nums; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.leg-row output { color: var(--soft); }
+.chip { flex: none; display: flex; align-items: center; gap: 7px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--raise); padding: 5px 10px 5px 5px; font-size: 13px; font-weight: 600; }
+.chip .tok { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 700 11px Bricolage; color: var(--amber-ink); }
+.chip i { font-style: normal; font-size: 10px; color: var(--muted); }
+.flip { align-self: center; width: 36px; height: 36px; margin: -20px 0; z-index: 1; display: grid; place-items: center; border: 3px solid var(--ground); border-radius: 12px; background: var(--raise); color: var(--text); }
+.flip svg { width: 16px; height: 16px; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; padding: 2px 4px; font-size: 12.5px; }
+.facts span { color: var(--muted); }
+.facts b { text-align: right; font-weight: 500; }
+.slips { display: flex; justify-content: flex-end; gap: 4px; }
+.slips button { border: 1px solid var(--line-strong); border-radius: 7px; background: none; padding: 1px 7px; font: 11px Mono; color: var(--muted); }
+.slips button.on { border-color: var(--amber); color: var(--amber); }
+.sheet button.on { color: var(--amber); }

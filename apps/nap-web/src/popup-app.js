@@ -14,7 +14,7 @@ import { deriveCollectionAccount, deriveIdentity, forgetIdentity, newMnemonic, o
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { IN_APP } from './origin.js';
 import { parsePaymentRequest } from './zip321.js';
-import { activity, chooseNetwork, depositAddress, loadConfig, loadPocket, logActivity, payOnZyn, resolveRecipient, revealExits, withdrawZec } from './pocket.js';
+import { activity, chooseNetwork, collectOwed, depositAddress, loadConfig, loadPocket, logActivity, payOnZyn, placeSwap, quoteSwap, resolveRecipient, revealExits, withdrawZec } from './pocket.js';
 import { endSession, loadSession, saveSession } from './session.js';
 import './popup.css';
 
@@ -348,7 +348,7 @@ function home() {
   $('#menu').onclick = mainMenu;
   $('#a-receive').onclick = () => receive();
   $('#a-send').onclick = () => sendPick();
-  $('#a-swap').onclick = () => openTab('market.html');
+  $('#a-swap').onclick = () => swap();
   $('#a-bridge').onclick = () => openTab('bridge.html');
   $('#a-browse')?.addEventListener('click', () => (napBrowser ? napBrowser.openBrowser('').catch((e) => toast(String(e).slice(0, 120), true)) : toast('The browser is not available here', true)));
   pop.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { tab = b.dataset.tab; pop.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); renderPanel(); }; });
@@ -430,12 +430,28 @@ async function refresh() {
     if (g !== generation) return;
     pocket = next; pocketError = '';
     void revealExits(config, identity);
+    if (next.owed?.length && !collecting) void collect(next);
   } catch (e) {
     if (g !== generation) return;
     pocketError = e.message === 'Failed to fetch' ? 'Check your connection; your keys are safe.' : e.message;
   }
   renderPanel();
   timer = setTimeout(refresh, 20_000);
+}
+
+// Finished swaps pay into claims; the wallet collects them itself.
+let collecting = false;
+async function collect(p) {
+  const g = generation;
+  collecting = true;
+  try {
+    await collectOwed(config, identity, p.owed);
+    if (g !== generation) return;
+    const byAsset = new Map();
+    for (const o of p.owed) byAsset.set(o.asset, (byAsset.get(o.asset) || 0n) + BigInt(o.amount));
+    toast(`Received ${[...byAsset].map(([a, v]) => `${wadText(v)} ${p.nameOf(a)}`).join(', ')}`);
+    setTimeout(refresh, 1500);
+  } catch { /* tried again on the next pass */ } finally { collecting = false; }
 }
 
 async function startZec() {
@@ -561,6 +577,105 @@ function receive(which = identity.zec ? 'zcash' : 'zyn') {
   };
   s.querySelectorAll('[data-r]').forEach((b) => { b.onclick = () => show(b.dataset.r); });
   show(which);
+}
+
+// ---------------------------------------------------------------------------
+// Swap: pay, receive, one tap. The full market (pools, launchpad) is in the
+// menu; this is the everyday trade.
+
+let swapPrefs = { pay: null, get: null, slip: 100 };
+
+function swap() {
+  if (!pocket) { toast('Still reading your balances…'); return; }
+  const pools = pocket.pools || [];
+  if (!pools.length) {
+    screen('Swap', `<div class="empty"><img src="/nap-mark.png" alt=""><b>No pools on ${esc(config.network)} yet.</b>Pools and launches are in the full market.</div>`, '<button class="btn ghost" id="w-market">Open the market</button>');
+    $('#w-market').onclick = () => openTab('market.html');
+    return;
+  }
+  const name = pocket.nameOf;
+  const bal = (a) => (pocket.coins.find((c) => c.asset === a)?.amount || 0n);
+  const tokens = [...new Set(pools.flatMap((p) => [p.a, p.b]))];
+  const partners = (a) => [...new Set(pools.filter((p) => p.a === a || p.b === a).map((p) => (p.a === a ? p.b : p.a)))];
+  const poolOf = (a, b) => pools.find((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a));
+  let pay = tokens.includes(swapPrefs.pay) ? swapPrefs.pay : (tokens.find((t) => t === config.zecAsset) || tokens[0]);
+  let get = poolOf(pay, swapPrefs.get) ? swapPrefs.get : partners(pay)[0];
+
+  const s = screen('Swap', `
+    <div class="leg"><div class="leg-top"><span>You pay</span><button type="button" class="bal" id="w-max"></button></div>
+      <div class="leg-row"><input id="w-amt" inputmode="decimal" autocomplete="off" placeholder="0"><button type="button" class="chip" id="w-pay"></button></div></div>
+    <button type="button" class="flip" id="w-flip" aria-label="Flip">${ICON.swap}</button>
+    <div class="leg"><div class="leg-top"><span>You receive</span><span id="w-impact"></span></div>
+      <div class="leg-row"><output id="w-out">0</output><button type="button" class="chip" id="w-get"></button></div></div>
+    <div class="facts" id="w-facts"></div>
+    <p class="hint" id="w-err" role="alert"></p>`,
+    '<button class="btn" id="w-go" disabled>Swap</button>');
+  const amt = $('#w-amt', s);
+  const chip = (el, a) => { el.innerHTML = `<span class="tok" data-sym="${esc(name(a))}">${esc(name(a).slice(0, 1))}</span>${esc(name(a))}<i>▾</i>`; tokenDisc($('.tok', el), name(a)); };
+  const readAmount = () => { try { return amt.value.trim() ? parseAmount(amt.value.trim().replace(/,/g, '')) : 0n; } catch { return -1n; } };
+  const draw = () => {
+    chip($('#w-pay', s), pay); chip($('#w-get', s), get);
+    $('#w-max', s).textContent = `Balance ${wadText(bal(pay))}`;
+    const pool = poolOf(pay, get);
+    const raw = readAmount();
+    const go = $('#w-go', s), err = $('#w-err', s);
+    err.textContent = ''; err.classList.remove('bad');
+    const q = pool && raw > 0n ? quoteSwap(pool, pool.a === pay, raw, swapPrefs.slip) : null;
+    $('#w-out', s).textContent = q ? wadText(q.out) : '0';
+    $('#w-impact', s).textContent = q && q.impactBps >= 50 ? `${(q.impactBps / 100).toFixed(2)}% impact` : '';
+    $('#w-impact', s).classList.toggle('bad', !!q && q.impactBps >= 500);
+    const x = BigInt(pool.reserve_a), y = BigInt(pool.reserve_b);
+    const rate = pool.a === pay ? (y * WAD) / x : (x * WAD) / y;
+    $('#w-facts', s).innerHTML = `<span>Rate</span><b>1 ${esc(name(pay))} ≈ ${esc(wadText(rate))} ${esc(name(get))}</b>
+      ${q ? `<span>Minimum</span><b>${esc(wadText(q.min))} ${esc(name(get))}</b>` : ''}
+      <span>Slippage</span><b class="slips">${[50, 100, 300].map((b) => `<button type="button" data-slip="${b}" class="${swapPrefs.slip === b ? 'on' : ''}">${b / 100}%</button>`).join('')}</b>
+      <span>Pool fee</span><b>${(pool.fee_bps / 100).toFixed(2)}%</b>`;
+    s.querySelectorAll('[data-slip]').forEach((b) => { b.onclick = () => { swapPrefs.slip = Number(b.dataset.slip); draw(); }; });
+    if (raw < 0n) { err.textContent = 'Enter a number'; err.classList.add('bad'); }
+    else if (raw > bal(pay)) { err.textContent = `You have ${wadText(bal(pay))} ${name(pay)}`; err.classList.add('bad'); }
+    go.disabled = !(q && q.min > 0n && raw <= bal(pay));
+    go.textContent = raw > 0n ? `Swap ${name(pay)} for ${name(get)}` : 'Enter an amount';
+  };
+  const pick = (which) => {
+    const list = which === 'pay' ? tokens : partners(pay);
+    sheet(list.map((a) => `<button data-t="${esc(a)}" class="${a === (which === 'pay' ? pay : get) ? 'on' : ''}">${esc(name(a))}<span>${esc(wadText(bal(a)))}</span></button>`).join(''), (el) => {
+      el.querySelectorAll('[data-t]').forEach((b) => {
+        b.onclick = () => {
+          closeSheet();
+          if (which === 'pay') { pay = b.dataset.t; if (!poolOf(pay, get) || get === pay) get = partners(pay)[0]; } else get = b.dataset.t;
+          swapPrefs = { ...swapPrefs, pay, get };
+          draw();
+        };
+      });
+    });
+  };
+  $('#w-pay', s).onclick = () => pick('pay');
+  $('#w-get', s).onclick = () => pick('get');
+  $('#w-flip', s).onclick = () => { [pay, get] = [get, pay]; swapPrefs = { ...swapPrefs, pay, get }; amt.value = ''; draw(); };
+  $('#w-max', s).onclick = () => { amt.value = wadText(bal(pay), 18).replace(/,/g, ''); draw(); };
+  amt.oninput = draw;
+  $('#w-go', s).onclick = async () => {
+    const go = $('#w-go', s), err = $('#w-err', s);
+    const pool = poolOf(pay, get), raw = readAmount();
+    go.disabled = true; go.textContent = 'Signing…';
+    const g = generation;
+    try {
+      const q = quoteSwap(pool, pool.a === pay, raw, swapPrefs.slip);
+      await placeSwap(config, identity, pocket.held, pool, pool.a === pay, raw, swapPrefs.slip);
+      if (g !== generation) return;
+      logActivity(config, identity, { kind: 'out', title: `Swapped ${name(pay)} → ${name(get)}`, symbol: name(get), amount: `≈ ${wadText(q.out)} ${name(get)}` });
+      s.remove();
+      const secs = pocket.epochSeconds || 0;
+      toast(secs ? `Swap placed — fills in about ${secs}s` : 'Swap placed — fills at the end of this batch');
+      setTimeout(refresh, (secs + 4) * 1000);
+      refresh();
+    } catch (x) {
+      if (g !== generation) return;
+      err.textContent = x.message; err.classList.add('bad'); go.disabled = false; go.textContent = 'Try again';
+    }
+  };
+  draw();
+  amt.focus();
 }
 
 // ---------------------------------------------------------------------------
