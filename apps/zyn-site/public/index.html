@@ -15,7 +15,7 @@
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="preload" href="/assets/fonts/Archivo-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/assets/zyn-mark-3d.webp" as="image" type="image/webp">
+  <link rel="preload" as="image" type="image/webp" href="/assets/zyn-mark-3d-900.webp" imagesrcset="/assets/zyn-mark-3d-900.webp 900w, /assets/zyn-mark-3d.webp 1800w" imagesizes="(max-width: 900px) 112vw, min(58vw, 860px)">
   <link rel="stylesheet" href="/styles.css">
   <script src="/main.js" defer></script>
 </head>
@@ -35,7 +35,7 @@
     </header>
 
     <div class="mark" aria-hidden="true">
-      <img src="/assets/zyn-mark-3d.webp" width="800" height="800" alt="">
+      <img src="/assets/zyn-mark-3d-900.webp" srcset="/assets/zyn-mark-3d-900.webp 900w, /assets/zyn-mark-3d.webp 1800w" sizes="(max-width: 900px) 112vw, min(58vw, 860px)" width="900" height="900" alt="" fetchpriority="high">
       <span class="sweep"></span>
     </div>
 

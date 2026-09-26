@@ -30,6 +30,7 @@
   --gutter: clamp(16px, 4.5vw, 64px);
   --max: 1280px;
   --brushed: linear-gradient(100deg, #0a6b55 0%, #1fb489 22%, #7af5cf 38%, #16a07d 52%, #0b7a61 70%, #3fd8a8 86%, #0b7a61 100%);
+  --brushed-text: linear-gradient(100deg, #2fc497 0%, #6ff0c8 30%, #c6fff0 42%, #45dcac 56%, #20b387 76%, #5ee9bd 100%);
   color-scheme: dark;
 }
 
@@ -41,11 +42,12 @@ a { color: inherit; }
 h1, h2, p { margin: 0; }
 
 /* film grain over everything, like the soft-touch surfaces in the brand kit */
-.grain { position: fixed; inset: -50%; z-index: 50; pointer-events: none; opacity: 0.07; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.grain { position: fixed; inset: -50%; z-index: 0; pointer-events: none; opacity: 0.06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
 /* ---------------------------------------------------------------- hero */
 .hero { position: relative; min-height: min(100svh, 980px); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: radial-gradient(90% 70% at 78% 30%, #10251f 0%, var(--obsidian) 62%); isolation: isolate; }
-.top { position: relative; z-index: 3; width: 100%; max-width: var(--max); margin: 0 auto; padding: 22px var(--gutter); display: flex; align-items: center; justify-content: space-between; }
+/* no z-index: it would isolate the logo's screen blend from the hero behind it */
+.top { position: relative; width: 100%; max-width: var(--max); margin: 0 auto; padding: 22px var(--gutter); display: flex; align-items: center; justify-content: space-between; }
 .lockup { display: flex; align-items: center; gap: 12px; text-decoration: none; font: 850 22px/1 var(--display); font-stretch: 125%; letter-spacing: 0.02em; }
 .lockup img { width: 36px; height: 36px; mix-blend-mode: screen; }
 .top nav { display: flex; align-items: center; gap: 30px; font-size: 15px; }
@@ -55,19 +57,19 @@ h1, h2, p { margin: 0; }
 
 /* The blend lives on the container: its transform makes it a stacking
    context, and a blend inside one only sees the container, not the page. */
-.mark { position: absolute; z-index: 1; right: -10vw; top: 46%; width: min(58vw, 860px); aspect-ratio: 1; mix-blend-mode: screen; transform: translateY(-50%) rotate(-4deg); animation: mark-in 1.6s cubic-bezier(.2, .7, .1, 1) both; }
+.mark { position: absolute; z-index: 1; right: -6vw; top: 46%; width: min(58vw, 860px); aspect-ratio: 1; mix-blend-mode: screen; transform: translateY(-50%); animation: mark-in 1.6s cubic-bezier(.2, .7, .1, 1) both; }
 .mark img { width: 100%; height: 100%; display: block; }
 .mark .sweep { position: absolute; inset: 0; mix-blend-mode: overlay; background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.85) 50%, transparent 62%) no-repeat; background-size: 250% 100%; background-position: 160% 0; animation: sweep 7s 1.2s ease-in-out infinite; }
-@keyframes mark-in { from { opacity: 0; transform: translateY(-46%) rotate(-10deg) scale(.94); filter: brightness(.3); } }
+@keyframes mark-in { from { opacity: 0; transform: translateY(-46%) scale(.96); filter: brightness(.3); } }
 @keyframes sweep { 0% { background-position: 160% 0; } 40%, 100% { background-position: -60% 0; } }
 
 .hero-copy { position: relative; z-index: 2; align-self: end; width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter) clamp(28px, 5vh, 56px); display: grid; gap: 26px; }
-.hero h1 { font: 800 clamp(44px, 5.8vw, 100px)/0.9 var(--display); font-stretch: 125%; letter-spacing: -0.035em; max-width: 11ch; text-shadow: 0 2px 40px rgba(6, 17, 14, 0.6); }
+.hero h1 { font: 800 clamp(44px, 5.8vw, 100px)/0.9 var(--display); font-stretch: 125%; letter-spacing: -0.035em; max-width: 11ch; color: #fbfaf5; text-rendering: geometricPrecision; }
 .hero h1 .line { display: inline-block; animation: rise 1s cubic-bezier(.2, .7, .1, 1) both; }
 .hero h1 .line:nth-child(2) { animation-delay: .08s; }
 .hero h1 .line:nth-child(3) { animation-delay: .16s; }
 .hero h1 .line:nth-child(4) { animation-delay: .24s; }
-.jade { background: var(--brushed); background-size: 180% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.jade { background: var(--brushed-text); background-size: 180% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @keyframes rise { from { opacity: 0; transform: translateY(0.35em); } }
 .lede { max-width: 48ch; font-size: clamp(17px, 1.4vw, 19px); color: #c3c9c2; animation: rise 1s .34s both; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 30px; animation: rise 1s .42s both; }
@@ -189,8 +191,8 @@ h1, h2, p { margin: 0; }
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 900px) {
   .hero { min-height: auto; }
-  .mark { position: relative; top: auto; right: auto; width: 112vw; margin: -8vw -34vw -10vw auto; transform: rotate(-4deg); }
-  @keyframes mark-in { from { opacity: 0; transform: rotate(-10deg) scale(.94); filter: brightness(.3); } }
+  .mark { position: relative; top: auto; right: auto; width: 112vw; margin: -8vw -34vw -10vw auto; transform: none; }
+  @keyframes mark-in { from { opacity: 0; transform: scale(.96); filter: brightness(.3); } }
   .hero-copy { padding-top: 0; }
   .strata { grid-template-columns: 1fr; }
   .strata-copy { position: static; }
