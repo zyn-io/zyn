@@ -6,6 +6,7 @@ https://zyn-site.pages.dev (Cloudflare Pages project `zyn-site`).
     /opt/homebrew/bin/wrangler pages deploy public --project-name zyn-site --branch main
 
 - The ledger table reads ZynScan (`zyn-rpc.cavebro.win/scan*/api/{summary,epochs,txs}`); `_headers` allows only that origin.
+- The FAQ (ten questions) answers inside the same limits as the trust section: operator-sequenced, custodian-dependent withdrawals, privacy from the public but not the operator, test bridges on one machine, no permissionless deploys.
 - Copy follows `docs/MESSAGING.md`: every claim here is one that page lists, or one checked against the object ledger's code.
 - The Z is `brandkit/zyn-mark-jade.png` cut to `assets/zyn-mark-3d*.webp` with its edges faded to black (it is screen-blended onto the page); `assets/og.png` is rendered from the page itself.
 - Fonts: Archivo (display, widest cut; OFL), Geist and Geist Mono (OFL), all self-hosted in `assets/fonts`.

@@ -36,7 +36,7 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: clip; }
-.strata, .api { min-height: 100svh; align-content: center; }
+.strata, .api, .trust { min-height: 100svh; align-content: center; }
 .product { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; }
 .product-head, .showcase { width: 100%; }
 /* the canvas the headings come apart on */
@@ -54,7 +54,7 @@ h1, h2, p { margin: 0; }
 /* The header stays at the top; once the page moves it becomes a frosted
    obsidian bar, and the link for the section in view is lit. */
 .top { position: fixed; z-index: 30; top: 0; left: 0; right: 0; padding: 18px max(var(--gutter), calc((100vw - var(--max)) / 2 + var(--gutter))); display: flex; align-items: center; justify-content: space-between; transition: background .35s, padding .35s, box-shadow .35s; }
-.top.scrolled { padding-top: 12px; padding-bottom: 12px; background: rgba(6, 17, 14, 0.74); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 rgba(242, 241, 235, 0.08); }
+.top.scrolled { padding-top: 12px; padding-bottom: 12px; background: rgba(6, 17, 14, 0.92); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 rgba(242, 241, 235, 0.08); }
 .top nav a[aria-current='true'] { color: var(--mineral); }
 .top nav a[aria-current='true']:not(.nav-open)::after { content: ''; display: block; height: 1px; margin-top: 3px; background: var(--jade-3); }
 .lockup { display: flex; align-items: center; gap: 12px; text-decoration: none; font: 850 22px/1 var(--display); font-stretch: 125%; letter-spacing: 0.02em; }
@@ -179,7 +179,7 @@ h1, h2, p { margin: 0; }
 .tile-go span { color: var(--jade); }
 
 /* ---------------------------------------------------------------- trust + hallmarks */
-.trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: clamp(92px, 9vw, 120px) var(--gutter) clamp(88px, 10vw, 140px); }
+.trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: clamp(92px, 9vw, 120px) var(--gutter) clamp(32px, 4vw, 56px); }
 .trust-wrap { background: var(--mineral); }
 .disclose, .marks { display: grid; gap: 22px; align-content: start; }
 .marks { padding-top: clamp(28px, 3vw, 44px); }
@@ -198,6 +198,22 @@ h1, h2, p { margin: 0; }
 .p-shield { border-radius: 6px 6px 40px 40px; }
 .p-cut { clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%); }
 .p-oct { clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% calc(100% - 16px), calc(100% - 16px) 100%, 16px 100%, 0 calc(100% - 16px), 0 16px); }
+
+/* ---------------------------------------------------------------- faq */
+.faq { max-width: var(--max); margin: 0 auto; padding: clamp(92px, 9vw, 120px) var(--gutter) clamp(88px, 10vw, 140px); display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr); gap: clamp(28px, 5vw, 80px); align-items: start; color: var(--ink); box-shadow: 0 0 0 100vmax var(--mineral); clip-path: inset(0 -100vmax); background: var(--mineral); }
+.faq h2 { font: 800 clamp(34px, 4.6vw, 64px)/0.95 var(--display); font-stretch: 118%; letter-spacing: -0.03em; }
+.faq-head { display: grid; gap: 18px; position: sticky; top: 110px; }
+.faq-head p { color: var(--ink-2); max-width: 36ch; }
+.faq a { color: var(--jade); text-underline-offset: 3px; }
+.faq-list { border-top: 1px solid var(--mineral-3); }
+.qa { border-bottom: 1px solid var(--mineral-3); }
+.qa summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; justify-content: space-between; gap: 24px; padding: 22px 0; font: 600 clamp(17px, 1.5vw, 20px)/1.35 var(--sans); letter-spacing: -0.01em; color: var(--ink); }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after { content: '+'; flex: none; font: 400 26px/1 var(--mono); color: var(--jade); transition: transform .3s cubic-bezier(.2, .7, .1, 1); }
+.qa[open] summary::after { transform: rotate(45deg); }
+.qa summary:hover { color: var(--jade); }
+.qa p { margin: -6px 0 24px; max-width: 64ch; color: var(--ink-2); font-size: 16px; line-height: 1.65; }
+.qa[open] p { animation: rise .45s cubic-bezier(.2, .7, .1, 1) both; }
 
 /* ---------------------------------------------------------------- transitions */
 /* Where the page turns from obsidian to mineral and back, it does so through
@@ -235,12 +251,14 @@ h1, h2, p { margin: 0; }
   .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .trust { grid-template-columns: 1fr; }
+  .faq { grid-template-columns: 1fr; }
+  .faq-head { position: static; }
   .seam { height: 64px; }
 }
 @media (max-width: 560px) {
   .tiles { grid-template-columns: 1fr; }
   /* clear the fixed header when a section settles at the top */
-  .strata, .product, .api, .index { padding-top: 88px; }
+  .strata, .product, .api, .index, .faq { padding-top: 88px; }
   .menu { display: inline-block; }
   .top nav { position: absolute; top: 100%; left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 0; padding: 6px var(--gutter) 14px; background: rgba(6, 17, 14, 0.94); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 1px 0 rgba(242, 241, 235, 0.08); display: none; }
   .top nav.open { display: flex; }

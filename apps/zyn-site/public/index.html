@@ -31,6 +31,7 @@
       <a href="#product">Product</a>
       <a href="#index">Apps</a>
       <a href="#trust">Trust</a>
+      <a href="#faq">FAQ</a>
       <a class="nav-open" href="https://nap.cavebro.win/">Open Nap</a>
     </nav>
   </header>
@@ -192,6 +193,55 @@
       </div>
     </section>
     </div>
+
+    <section id="faq" class="faq">
+      <div class="faq-head">
+        <h2 data-cubes="section">Questions</h2>
+        <p>Straight answers, including the uncomfortable ones. The short version is in <a href="#trust">what you are trusting</a>.</p>
+      </div>
+      <div class="faq-list">
+          <details class="qa">
+            <summary>What is Zyn?</summary>
+            <p>An application execution layer built for Zcash. It runs deterministic application state machines (a wallet, a market, a launchpad, a collection), batches their activity into epochs, and anchors each sealed state root to Zcash.</p>
+          </details>
+          <details class="qa">
+            <summary>Is Zyn a Zcash layer 2, a rollup or its own chain?</summary>
+            <p>No. Zyn is operator-sequenced: one sequencer orders transactions, and there are no fraud proofs or validity proofs. Zcash records its deposits, withdrawals and anchor commitments but does not validate its state transitions, so Zyn does not inherit Zcash's security. Built for Zcash, not part of it.</p>
+          </details>
+          <details class="qa">
+            <summary>How do I start?</summary>
+            <p>Open <a href="https://nap.cavebro.win/">Nap Wallet</a> in your browser and create or restore a wallet with a 24-word recovery phrase. There is no account server: your keys are derived on your device. Try it on testnet first; testnet coins are worth nothing.</p>
+          </details>
+          <details class="qa">
+            <summary>How does ZEC get in and out?</summary>
+            <p>Send shielded ZEC to your Nap deposit address and it arrives on Zyn as ZEC.zy. Withdrawing burns ZEC.zy on Zyn and the bridge pays ZEC back to the Zcash address you give. Withdrawals depend on the Zyn-operated custodians: the ZEC sits in a 2-of-3 threshold vault run by the Zyn team.</p>
+          </details>
+          <details class="qa">
+            <summary>Is what I do private?</summary>
+            <p>From the public, yes: who holds and trades what is not published, and a withdrawal records only a hash of where the money goes. It is visible to the operator and authorised verifiers today. We are working toward a version where it is not visible to anyone.</p>
+          </details>
+          <details class="qa">
+            <summary>How can I tell the ZEC is really there?</summary>
+            <p>The ledger publishes what it has issued of each asset, and the bridge checks every pass that the vault still holds that much. Anyone can compare the same figure with the vault's balance on Zcash. ZynScan separately replays every epoch and checks its root against the node's.</p>
+          </details>
+          <details class="qa">
+            <summary>What does anchored mean?</summary>
+            <p>Each sealed epoch has a state root. The operator writes that root into an ordinary Zcash transaction, so it is timestamped in a Zcash block anyone can look up, and it cannot later be rewritten without contradicting that block. Zcash stores the commitment; it does not check the state behind it.</p>
+          </details>
+          <details class="qa">
+            <summary>What if the operator stops or refuses my transaction?</summary>
+            <p>The operator can refuse or delay a transaction, and leaving depends on the custodians. The published journal and the anchored roots are evidence of what the ledger held; they do not release money by themselves. That is the trust you are extending today, which is why it is stated up front.</p>
+          </details>
+          <details class="qa">
+            <summary>Are the SOL, ETH and BTC bridges live?</summary>
+            <p>On test networks only: Solana devnet, Ethereum Sepolia and Bitcoin signet, with their test keys on a single machine. They exist to show the design (a one-time deposit code instead of your account, an exit address only the paying bridge sees), not to hold real value.</p>
+          </details>
+          <details class="qa">
+            <summary>Can I build my own app on Zyn?</summary>
+            <p>Not by deploying a contract. Zyn is a programmable architecture, but applications are compiled into the node rather than uploaded by anyone. What runs today is listed above.</p>
+          </details>
+      </div>
+    </section>
   </main>
 
   <div class="seam seam-up"><svg class="seam-svg" viewBox="0 0 1440 140" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="1440" height="140" fill="#0b1915"/><path d="M0 13.1 C30.0 13.1 30.0 13.5 60.0 13.5 C90.0 13.5 90.0 12.9 120.0 12.9 C150.0 12.9 150.0 10.9 180.0 10.9 C210.0 10.9 210.0 7.4 240.0 7.4 C270.0 7.4 270.0 3.1 300.0 3.1 C330.0 3.1 330.0 -1.1 360.0 -1.1 C390.0 -1.1 390.0 -4.1 420.0 -4.1 C450.0 -4.1 450.0 -5.2 480.0 -5.2 C510.0 -5.2 510.0 -4.2 540.0 -4.2 C570.0 -4.2 570.0 -1.4 600.0 -1.4 C630.0 -1.4 630.0 2.3 660.0 2.3 C690.0 2.3 690.0 5.9 720.0 5.9 C750.0 5.9 750.0 8.5 780.0 8.5 C810.0 8.5 810.0 9.9 840.0 9.9 C870.0 9.9 870.0 10.2 900.0 10.2 C930.0 10.2 930.0 10.0 960.0 10.0 C990.0 10.0 990.0 10.1 1020.0 10.1 C1050.0 10.1 1050.0 11.1 1080.0 11.1 C1110.0 11.1 1110.0 13.1 1140.0 13.1 C1170.0 13.1 1170.0 15.8 1200.0 15.8 C1230.0 15.8 1230.0 18.4 1260.0 18.4 C1290.0 18.4 1290.0 19.9 1320.0 19.9 C1350.0 19.9 1350.0 19.6 1380.0 19.6 C1410.0 19.6 1410.0 17.2 1440.0 17.2 L1440 140 L0 140 Z" fill="#14271f"/><path d="M0 20.1 C30.0 20.1 30.0 21.7 60.0 21.7 C90.0 21.7 90.0 22.7 120.0 22.7 C150.0 22.7 150.0 22.7 180.0 22.7 C210.0 22.7 210.0 22.0 240.0 22.0 C270.0 22.0 270.0 21.3 300.0 21.3 C330.0 21.3 330.0 21.5 360.0 21.5 C390.0 21.5 390.0 23.1 420.0 23.1 C450.0 23.1 450.0 26.4 480.0 26.4 C510.0 26.4 510.0 30.8 540.0 30.8 C570.0 30.8 570.0 35.4 600.0 35.4 C630.0 35.4 630.0 39.1 660.0 39.1 C690.0 39.1 690.0 41.1 720.0 41.1 C750.0 41.1 750.0 40.8 780.0 40.8 C810.0 40.8 810.0 38.6 840.0 38.6 C870.0 38.6 870.0 35.1 900.0 35.1 C930.0 35.1 930.0 31.4 960.0 31.4 C990.0 31.4 990.0 28.5 1020.0 28.5 C1050.0 28.5 1050.0 26.7 1080.0 26.7 C1110.0 26.7 1110.0 26.2 1140.0 26.2 C1170.0 26.2 1170.0 26.3 1200.0 26.3 C1230.0 26.3 1230.0 26.3 1260.0 26.3 C1290.0 26.3 1290.0 25.4 1320.0 25.4 C1350.0 25.4 1350.0 23.5 1380.0 23.5 C1410.0 23.5 1410.0 20.6 1440.0 20.6 L1440 140 L0 140 Z" fill="#2a3f37"/><path d="M0 47.4 C30.0 47.4 30.0 46.6 60.0 46.6 C90.0 46.6 90.0 45.0 120.0 45.0 C150.0 45.0 150.0 42.9 180.0 42.9 C210.0 42.9 210.0 40.9 240.0 40.9 C270.0 40.9 270.0 39.6 300.0 39.6 C330.0 39.6 330.0 39.4 360.0 39.4 C390.0 39.4 390.0 40.6 420.0 40.6 C450.0 40.6 450.0 42.8 480.0 42.8 C510.0 42.8 510.0 45.6 540.0 45.6 C570.0 45.6 570.0 48.4 600.0 48.4 C630.0 48.4 630.0 50.4 660.0 50.4 C690.0 50.4 690.0 51.5 720.0 51.5 C750.0 51.5 750.0 51.6 780.0 51.6 C810.0 51.6 810.0 51.2 840.0 51.2 C870.0 51.2 870.0 50.6 900.0 50.6 C930.0 50.6 930.0 50.4 960.0 50.4 C990.0 50.4 990.0 50.8 1020.0 50.8 C1050.0 50.8 1050.0 51.6 1080.0 51.6 C1110.0 51.6 1110.0 52.4 1140.0 52.4 C1170.0 52.4 1170.0 52.8 1200.0 52.8 C1230.0 52.8 1230.0 52.3 1260.0 52.3 C1290.0 52.3 1290.0 50.7 1320.0 50.7 C1350.0 50.7 1350.0 48.1 1380.0 48.1 C1410.0 48.1 1410.0 45.1 1440.0 45.1 L1440 140 L0 140 Z" fill="#5e716a"/><path d="M0 66.9 C30.0 66.9 30.0 67.4 60.0 67.4 C90.0 67.4 90.0 68.0 120.0 68.0 C150.0 68.0 150.0 68.4 180.0 68.4 C210.0 68.4 210.0 68.7 240.0 68.7 C270.0 68.7 270.0 68.7 300.0 68.7 C330.0 68.7 330.0 68.4 360.0 68.4 C390.0 68.4 390.0 68.0 420.0 68.0 C450.0 68.0 450.0 67.5 480.0 67.5 C510.0 67.5 510.0 67.1 540.0 67.1 C570.0 67.1 570.0 66.8 600.0 66.8 C630.0 66.8 630.0 66.7 660.0 66.7 C690.0 66.7 690.0 66.7 720.0 66.7 C750.0 66.7 750.0 66.7 780.0 66.7 C810.0 66.7 810.0 66.7 840.0 66.7 C870.0 66.7 870.0 66.5 900.0 66.5 C930.0 66.5 930.0 66.1 960.0 66.1 C990.0 66.1 990.0 65.8 1020.0 65.8 C1050.0 65.8 1050.0 65.5 1080.0 65.5 C1110.0 65.5 1110.0 65.4 1140.0 65.4 C1170.0 65.4 1170.0 65.6 1200.0 65.6 C1230.0 65.6 1230.0 66.1 1260.0 66.1 C1290.0 66.1 1290.0 66.7 1320.0 66.7 C1350.0 66.7 1350.0 67.3 1380.0 67.3 C1410.0 67.3 1410.0 67.8 1440.0 67.8 L1440 140 L0 140 Z" fill="#aeb6ae"/><path d="M0 86.6 C30.0 86.6 30.0 86.6 60.0 86.6 C90.0 86.6 90.0 86.7 120.0 86.7 C150.0 86.7 150.0 86.7 180.0 86.7 C210.0 86.7 210.0 86.8 240.0 86.8 C270.0 86.8 270.0 86.9 300.0 86.9 C330.0 86.9 330.0 86.9 360.0 86.9 C390.0 86.9 390.0 87.0 420.0 87.0 C450.0 87.0 450.0 86.9 480.0 86.9 C510.0 86.9 510.0 86.9 540.0 86.9 C570.0 86.9 570.0 86.8 600.0 86.8 C630.0 86.8 630.0 86.7 660.0 86.7 C690.0 86.7 690.0 86.6 720.0 86.6 C750.0 86.6 750.0 86.5 780.0 86.5 C810.0 86.5 810.0 86.5 840.0 86.5 C870.0 86.5 870.0 86.5 900.0 86.5 C930.0 86.5 930.0 86.6 960.0 86.6 C990.0 86.6 990.0 86.6 1020.0 86.6 C1050.0 86.6 1050.0 86.6 1080.0 86.6 C1110.0 86.6 1110.0 86.5 1140.0 86.5 C1170.0 86.5 1170.0 86.5 1200.0 86.5 C1230.0 86.5 1230.0 86.5 1260.0 86.5 C1290.0 86.5 1290.0 86.5 1320.0 86.5 C1350.0 86.5 1350.0 86.5 1380.0 86.5 C1410.0 86.5 1410.0 86.6 1440.0 86.6 L1440 140 L0 140 Z" fill="#d8d6cb"/><path d="M0 104.8 C30.0 104.8 30.0 104.7 60.0 104.7 C90.0 104.7 90.0 104.2 120.0 104.2 C150.0 104.2 150.0 103.4 180.0 103.4 C210.0 103.4 210.0 102.7 240.0 102.7 C270.0 102.7 270.0 102.2 300.0 102.2 C330.0 102.2 330.0 102.4 360.0 102.4 C390.0 102.4 390.0 103.4 420.0 103.4 C450.0 103.4 450.0 104.9 480.0 104.9 C510.0 104.9 510.0 106.9 540.0 106.9 C570.0 106.9 570.0 108.7 600.0 108.7 C630.0 108.7 630.0 110.0 660.0 110.0 C690.0 110.0 690.0 110.6 720.0 110.6 C750.0 110.6 750.0 110.4 780.0 110.4 C810.0 110.4 810.0 109.7 840.0 109.7 C870.0 109.7 870.0 108.9 900.0 108.9 C930.0 108.9 930.0 108.2 960.0 108.2 C990.0 108.2 990.0 107.8 1020.0 107.8 C1050.0 107.8 1050.0 107.8 1080.0 107.8 C1110.0 107.8 1110.0 108.0 1140.0 108.0 C1170.0 108.0 1170.0 108.0 1200.0 108.0 C1230.0 108.0 1230.0 107.6 1260.0 107.6 C1290.0 107.6 1290.0 106.7 1320.0 106.7 C1350.0 106.7 1350.0 105.3 1380.0 105.3 C1410.0 105.3 1410.0 103.6 1440.0 103.6 L1440 140 L0 140 Z" fill="#e7e5dc"/><path d="M0 134.1 C30.0 134.1 30.0 134.5 60.0 134.5 C90.0 134.5 90.0 133.7 120.0 133.7 C150.0 133.7 150.0 132.2 180.0 132.2 C210.0 132.2 210.0 130.9 240.0 130.9 C270.0 130.9 270.0 130.3 300.0 130.3 C330.0 130.3 330.0 130.4 360.0 130.4 C390.0 130.4 390.0 131.1 420.0 131.1 C450.0 131.1 450.0 131.6 480.0 131.6 C510.0 131.6 510.0 131.2 540.0 131.2 C570.0 131.2 570.0 129.4 600.0 129.4 C630.0 129.4 630.0 126.3 660.0 126.3 C690.0 126.3 690.0 122.3 720.0 122.3 C750.0 122.3 750.0 118.4 780.0 118.4 C810.0 118.4 810.0 115.5 840.0 115.5 C870.0 115.5 870.0 114.2 900.0 114.2 C930.0 114.2 930.0 114.9 960.0 114.9 C990.0 114.9 990.0 117.2 1020.0 117.2 C1050.0 117.2 1050.0 120.3 1080.0 120.3 C1110.0 120.3 1110.0 123.4 1140.0 123.4 C1170.0 123.4 1170.0 125.8 1200.0 125.8 C1230.0 125.8 1230.0 127.0 1260.0 127.0 C1290.0 127.0 1290.0 127.2 1320.0 127.2 C1350.0 127.2 1350.0 127.1 1380.0 127.1 C1410.0 127.1 1410.0 127.3 1440.0 127.3 L1440 140 L0 140 Z" fill="#f2f1eb"/></svg></div>

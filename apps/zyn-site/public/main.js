@@ -148,7 +148,7 @@ let glideTo = null; // set by the section lock below, used by in-page links
 // The glide is its own eased animation, identical in every browser, and any
 // new wheel, touch or key input stops it at once.
 if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  const SECTIONS = '.hero, .strata, .product, .api, .index, .trust-wrap';
+  const SECTIONS = '.hero, .strata, .product, .api, .index, .trust-wrap, .faq';
   const maxY = () => document.documentElement.scrollHeight - innerHeight;
   const tops = () => [...document.querySelectorAll(SECTIONS)].map((el) => Math.round(el.getBoundingClientRect().top + scrollY));
   let lastY = scrollY;
@@ -254,7 +254,7 @@ document.addEventListener('click', (e) => {
 {
   const top = document.getElementById('top');
   const links = [...document.querySelectorAll('#nav a[href^="#"]')];
-  const map = [['.strata', '#strata'], ['.api', '#strata'], ['.product', '#product'], ['.index', '#index'], ['.trust-wrap', '#trust']];
+  const map = [['.strata', '#strata'], ['.api', '#strata'], ['.product', '#product'], ['.index', '#index'], ['.trust-wrap', '#trust'], ['.faq', '#faq']];
   let queued = false;
   const update = () => {
     queued = false;
