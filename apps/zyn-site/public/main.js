@@ -137,3 +137,43 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObse
     }
   });
 }
+
+// Soft section lock. When scrolling has come to rest near a section edge,
+// the page settles onto that edge instead of stopping across two sections; in
+// the middle of a long section it is left alone. Done here rather than with
+// CSS scroll-snap, whose "proximity" mode behaves differently in every
+// browser. Any new wheel, touch or key input wins over a settle in progress.
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const REACH = 0.3; // settle when within 30% of a screen of an edge
+  const STILL = 260; // ms without scrolling before it counts as at rest
+  const edges = () => {
+    const tops = [...document.querySelectorAll('.hero, .strata, .product, .api, .index, .trust-wrap')].map((el) => el.getBoundingClientRect().top + scrollY);
+    tops.push(document.documentElement.scrollHeight - innerHeight);
+    return tops.map(Math.round);
+  };
+  let target = null; // where a settle is heading, while it runs
+  let timer = 0;
+  let held = false; // a finger is on the screen
+  const settle = () => {
+    if (held || target !== null) return;
+    const y = scrollY;
+    let best = null;
+    for (const e of edges()) if (best === null || Math.abs(e - y) < Math.abs(best - y)) best = e;
+    const d = best - y;
+    if (Math.abs(d) > 2 && Math.abs(d) < innerHeight * REACH) {
+      target = best;
+      scrollTo({ top: best, behavior: 'smooth' });
+    }
+  };
+  addEventListener('scroll', () => {
+    if (target !== null) { if (Math.abs(scrollY - target) < 2) target = null; return; }
+    clearTimeout(timer);
+    timer = setTimeout(settle, STILL);
+  }, { passive: true });
+  const userInput = () => { target = null; clearTimeout(timer); };
+  addEventListener('wheel', userInput, { passive: true });
+  addEventListener('touchstart', () => { held = true; userInput(); }, { passive: true });
+  addEventListener('touchend', () => { held = false; clearTimeout(timer); timer = setTimeout(settle, STILL); }, { passive: true });
+  addEventListener('keydown', () => { userInput(); target = -1; setTimeout(() => { if (target === -1) target = null; }, 900); });
+  document.addEventListener('click', (e) => { if (e.target.closest('a[href^="#"]')) { userInput(); target = -1; setTimeout(() => { if (target === -1) target = null; }, 1200); } });
+}
