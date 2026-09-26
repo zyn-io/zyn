@@ -5,6 +5,7 @@
 //   TOKEN=<64-hex curve token on testnet>   PHRASE_FILE=<a funded testnet wallet's phrase>
 //   node tests/jade.e2e.mjs
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 const JADE = process.env.JADE || 'http://localhost:4180';
 const NAP = process.env.NAP || 'http://localhost:4179';
@@ -35,9 +36,7 @@ ok((await page.textContent('#trade-output')).includes(SYM) && (await page.textCo
 await page.click('#wallet-button');
 await page.waitForSelector('.jade-wallet-option');
 const [popup] = await Promise.all([ctx.waitForEvent('page'), page.click('.jade-wallet-option:has-text("Nap in the browser")')]);
-await popup.waitForSelector('#unlock');
-await popup.fill('#words', WORDS);
-await popup.click('#unlock button[type=submit]');
+await unlockNap(popup, WORDS);
 await popup.waitForSelector('#yes');
 await popup.click('#yes');
 await page.waitForFunction(() => !/Connect wallet/.test(document.querySelector('#wallet-button').textContent), null, { timeout: 60000 });

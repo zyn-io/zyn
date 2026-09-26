@@ -3,7 +3,7 @@
 // One interface, `provider.request({ method, params })`, over whichever Nap
 // the visitor has:
 //
-//   - The Nap extension (desktop Nap behind it). It announces itself the way
+//   - The Nap extension. It announces itself the way
 //     EIP-6963 has Ethereum wallets do it — a `nap:announceProvider` event in
 //     answer to `nap:requestProvider` — so several wallets can coexist and
 //     the site lists them rather than grabbing whichever wrote a global
@@ -14,8 +14,10 @@
 //     origin, and every approval is drawn by Nap, where this page cannot
 //     reach.
 //
-// Methods (errors carry EIP-1193 codes: 4001 rejected, 4100 not connected,
-// 4200 unsupported):
+// Methods (errors carry EIP-1193 codes: 4001 the holder said no, 4100 not
+// connected, 4200 unsupported, 4900 Nap's window closed or could not open —
+// the message says which, and whether it closed after the holder approved;
+// -32602 a bad parameter):
 //
 //   nap_connect {network?}   → {account, network, chain, zcash: {network, address} | null}
 //   nap_session              → the same, or null; never prompts
@@ -27,8 +29,9 @@
 //   zyn_collect
 //   zyn_saleInfo {collection?}, zyn_saleTickets {collection?},
 //   zyn_buyTickets {count, pay?}, zyn_claimItems, zyn_mintOpen {count},
-//   zyn_burnMemo → {memo, commitment}  (a burn on Solana with this memo
-//     becomes this wallet's tickets, §145)
+//   zyn_burnMemo {fresh?} → {memo, commitment}  (a burn on Solana with this
+//     memo becomes this wallet's tickets, §145; ask fresh:true right before
+//     each burn, so two burns never share a code)
 //     (the sale, §144; collection defaults to Collection Z)
 //
 // Call `request` from a click. Opening Nap's window is a popup, and browsers
@@ -77,6 +80,17 @@ class NapError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
+/// This tab's name for Nap's window: its own, so two tabs of a site never
+/// share (and reload) one window, and the same across this tab's reloads, so
+/// a reloaded page finds the window it had.
+function windowName() {
+  try {
+    let n = sessionStorage.getItem('nap.window');
+    if (!n) { n = `nap-connect-${Math.random().toString(36).slice(2, 10)}`; sessionStorage.setItem('nap.window', n); }
+    return n;
+  } catch { return 'nap-connect'; }
+}
+
 /// Nap in the browser, reached through its connect window.
 export function webWallet({ url = NAP_WEB, width = 440, height = 680 } = {}) {
   const origin = new URL(url).origin;
@@ -90,14 +104,23 @@ export function webWallet({ url = NAP_WEB, width = 440, height = 680 } = {}) {
 
   const emit = (name, value) => (listeners.get(name) || []).forEach((fn) => { try { fn(value); } catch { /* a listener's problem */ } });
 
+  /// Every waiting request fails with `message`; one the holder had already
+  /// approved says so, because something may have happened.
+  function failPending(message) {
+    for (const p of pending.values()) {
+      p.reject(new NapError(4900, p.approved
+        ? `${message} after you approved. Check your wallet before trying again.`
+        : `${message}. Nothing was approved.`));
+    }
+    pending.clear();
+  }
+
   function closed() {
     clearInterval(watch);
     popup = null;
     ready = null;
-    const err = new NapError(4001, "Nap's window was closed");
-    for (const p of pending.values()) p.reject(err);
-    pending.clear();
-    emit('disconnect', err);
+    failPending("Nap's window was closed");
+    emit('disconnect', new NapError(4900, "Nap's window was closed"));
   }
 
   window.addEventListener('message', (ev) => {
@@ -105,7 +128,16 @@ export function webWallet({ url = NAP_WEB, width = 440, height = 680 } = {}) {
     if (ev.origin !== origin || !popup || ev.source !== popup) return;
     const d = ev.data;
     if (!d || typeof d !== 'object') return;
-    if (d.nap === 'ready') { markReady?.(); return; }
+    if (d.nap === 'ready') {
+      // A second "ready" is the window starting over (it was reloaded):
+      // whatever it held is gone and will not be answered.
+      if (!markReady) failPending("Nap's window reloaded");
+      markReady?.(); markReady = null;
+      return;
+    }
+    if (d.nap === 'error') { failPending(String(d.message || 'Nap could not open')); return; }
+    if (d.nap === 'attention') { try { popup.focus(); } catch { /* some browsers refuse */ } return; }
+    if (d.nap === 'progress') { const p = pending.get(d.id); if (p) p.approved = true; return; }
     if (d.nap !== 'response') return;
     const p = pending.get(d.id);
     if (!p) return;
@@ -118,9 +150,24 @@ export function webWallet({ url = NAP_WEB, width = 440, height = 680 } = {}) {
     if (popup && !popup.closed) return;
     const left = Math.max(0, (window.screenX || 0) + (window.outerWidth || width) - width - 24);
     const top = Math.max(0, (window.screenY || 0) + 64);
-    popup = window.open(`${origin}/connect.html`, 'nap-connect', `popup,width=${width},height=${height},left=${left},top=${top}`);
-    if (!popup) throw new NapError(4001, "The browser blocked Nap's window. Allow pop-ups for this site, then try again.");
-    ready = new Promise((resolve) => { markReady = resolve; });
+    // Nap's window may still be open from before this page reloaded — still
+    // unlocked, still remembering this site. Asked for by name with no
+    // address it comes back as it is; a new window comes back blank and is
+    // sent to Nap. One that no longer answers as Nap's connect page is
+    // loaded again.
+    const w = window.open('', windowName(), `popup,width=${width},height=${height},left=${left},top=${top}`);
+    if (!w) throw new NapError(4900, "The browser blocked Nap's window. Allow pop-ups for this site, then try again.");
+    let blank = true;
+    try { blank = w.location.href === 'about:blank'; } catch { blank = false; } // Nap's origin: not ours to read
+    let isReady = false;
+    popup = w;
+    ready = new Promise((resolve) => { markReady = () => { isReady = true; markReady = null; resolve(); }; });
+    const load = () => { try { w.location.href = `${origin}/connect.html`; } catch { /* closed meanwhile */ } };
+    if (blank) load();
+    else {
+      w.postMessage({ nap: 'hello' }, origin);
+      setTimeout(() => { if (popup === w && !isReady) load(); }, 1500);
+    }
     clearInterval(watch);
     watch = setInterval(() => { if (!popup || popup.closed) closed(); }, 500);
   }
@@ -142,8 +189,9 @@ export function webWallet({ url = NAP_WEB, width = 440, height = 680 } = {}) {
         pending.set(id, { resolve, reject });
         ready.then(() => {
           if (!popup || popup.closed) return;
+          // Not focused here: reads are answered without the holder, and the
+          // window says when it needs them ("attention").
           popup.postMessage({ nap: 'request', id, method, params: params || {} }, origin);
-          try { popup.focus(); } catch { /* some browsers refuse; harmless */ }
         });
       });
     },

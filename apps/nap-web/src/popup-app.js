@@ -201,12 +201,14 @@ function restoreWallet() {
       <label class="field"><span>Account</span><input id="r-index" type="number" min="0" value="0" inputmode="numeric"></label>
     </div></details>
     <label class="field"><span>Password for this phone (8+ characters)</span><input id="r-pw" type="password" autocomplete="new-password" minlength="8"></label>
+    ${keptWallet() ? '<label class="check"><input type="checkbox" id="r-replace"><span>This replaces the wallet saved on this phone. I have its recovery phrase — the only way back to it.</span></label>' : ''}
     <p class="hint" id="r-err" role="alert">Your phrase is used here to derive the keys, then dropped; only the keys are kept, sealed under the password.</p>`,
     '<button class="btn" id="r-go">Restore wallet</button>');
   const go = $('#r-go', s);
   go.onclick = async () => {
     go.disabled = true; go.textContent = 'Restoring…';
     try {
+      if ($('#r-replace', s) && !$('#r-replace', s).checked) throw new Error('Tick the box to confirm replacing the wallet saved on this phone');
       const words = $('#r-words', s).value;
       await setUp(words, $('#r-pass', s).value, Number($('#r-index', s).value) || 0, $('#r-pw', s).value, false);
     } catch (e) { $('#r-err', s).textContent = e.message; $('#r-err', s).classList.add('bad'); go.disabled = false; go.textContent = 'Restore wallet'; }

@@ -44,7 +44,17 @@ let tapLink = (() => {
 if (/\/tap\/?$/.test(location.pathname)) history.replaceState(null, '', '/');
 // The toolbar popup sends setting up here (`?setup=create|restore`): 24 words
 // want more room than a popup has.
-const setupMode = ['create', 'restore'].includes(new URLSearchParams(location.search).get('setup')) ? new URLSearchParams(location.search).get('setup') : '';
+// Kept for this tab (sessionStorage) so a reload mid-setup is still setup —
+// the site's Nap window is waiting for the wallet it makes.
+const setupMode = (() => {
+  const asked = new URLSearchParams(location.search).get('setup');
+  try {
+    if (['create', 'restore'].includes(asked)) sessionStorage.setItem('nap.setup', asked);
+    const kept = sessionStorage.getItem('nap.setup');
+    return ['create', 'restore'].includes(kept) ? kept : '';
+  } catch { return ['create', 'restore'].includes(asked) ? asked : ''; }
+})();
+const endSetup = () => { try { sessionStorage.removeItem('nap.setup'); } catch { /* nothing kept */ } };
 const giftUrl = new URL(location.href);
 giftUrl.searchParams.delete('setup');
 const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || giftUrl.searchParams.get('claim') || '';
@@ -288,7 +298,9 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
       <p class="lede">Receive the Nap Mole in person, then open the same account wherever Nap runs with one recovery phrase.</p>
       ${tapLink ? '<div class="tap-note"><b>You tapped an event tag.</b> Open or create your wallet and the certificate goes straight into it.</div>' : ''}
       <div class="promise"><span>01</span><p><b>No account server.</b><br>Your key is derived and used on this device.</p></div>
-      <div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>${WHERE.closing} forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>
+      ${IN_EXTENSION || setupMode
+    ? '<div class="promise"><span>02</span><p><b>Kept here, sealed.</b><br>Only the key is stored, sealed under your password — never your phrase.</p></div>'
+    : `<div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>${WHERE.closing} forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>`}
     </section>
     <section class="entry panel">
       ${mode === 'kept' ? '' : `<div class="tabs"><button data-mode="restore" class="${mode === 'restore' ? 'active' : ''}">Restore</button><button data-mode="create" class="${mode === 'create' ? 'active' : ''}">Create new</button></div>`}
@@ -304,9 +316,23 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
 /// this password — and so does a setup sent here by a connect window or the
 /// popup (`?setup=`): there the field is required, not optional.
 function keepField() {
-  return IN_EXTENSION || setupMode
-    ? '<label>Password for this browser <span class="muted">(8+ characters — the toolbar wallet opens with it)</span><input id="keep-password" type="password" autocomplete="new-password" required minlength="8"></label>'
+  const why = IN_EXTENSION ? 'the toolbar wallet opens with it' : 'Nap opens with it in this browser';
+  const field = IN_EXTENSION || setupMode
+    ? `<label>Password for this browser <span class="muted">(8+ characters — ${why})</span><input id="keep-password" type="password" autocomplete="new-password" required minlength="8"></label>`
     : '<label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label>';
+  // Saving over a wallet already kept here loses it on this device: said, and
+  // confirmed, before anything is replaced.
+  return field + (keptWallet()
+    ? '<label class="check"><input id="replace-ack" type="checkbox"><span>This replaces the wallet saved in this browser. I have its recovery phrase — the only way back to it.</span></label>'
+    : '');
+}
+
+/// The replace confirmation, when a wallet is kept and a password would save
+/// over it.
+function replaceConfirmed() {
+  const box = root.querySelector('#replace-ack');
+  const saving = !!root.querySelector('#keep-password')?.value;
+  if (box && saving && !box.checked) throw new Error('Tick the box to confirm replacing the wallet saved in this browser');
 }
 
 function restoreForm() {
@@ -315,12 +341,13 @@ function restoreForm() {
 function createForm() {
   if (!generatedWords) generatedWords = newMnemonic();
   const numbered = generatedWords.split(' ').map((w, i) => `<span><i>${String(i + 1).padStart(2, '0')}</i>${w}</span>`).join('');
-  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p>${keptWallet() ? '<p class="error">Kept on this device, the new wallet replaces the one saved in this browser. Keep the old wallet\'s phrase: it is the only way back to it.</p>' : ''}<div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function bindRestore() {
   root.querySelector('#restore-form').onsubmit = async (event) => {
     event.preventDefault();
     try {
+      replaceConfirmed();
       await unlock(
         root.querySelector('#words').value,
         root.querySelector('#passphrase').value,
@@ -338,6 +365,7 @@ function bindCreate() {
     event.preventDefault();
     if (!ack.checked) return;
     try {
+      replaceConfirmed();
       await unlock(generatedWords, '', 0, root.querySelector('#keep-password')?.value || '', true);
       generatedWords = '';
     } catch (e) { root.querySelector('#form-error').textContent = e.message; }
@@ -375,8 +403,12 @@ async function unlock(words, passphrase, index, keepPassword = '', fresh = false
   clearSession(); identity = nextIdentity; receiving = nextReceiving; zecFresh = fresh;
   if (kept) void saveSession(identity, receiving);
   root.querySelectorAll('textarea,input').forEach((el) => { if (el.type !== 'checkbox') el.value = ''; });
-  wallet(kept ? (IN_EXTENSION ? 'Your wallet is ready. Open it any time from the Nap icon in your toolbar (pin it from the puzzle-piece menu).' : setupMode ? 'Your wallet is kept in this browser. Go back to the Nap window the site opened — it asks for this password now.' : 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.') : '');
-  refresh();
+  const siteWaiting = setupMode ? ' If a site opened a Nap window for this, go back to it — it asks for this password now.' : '';
+  if (kept) endSetup();
+  wallet(kept ? (IN_EXTENSION ? `Your wallet is ready. Open it any time from the Nap icon in your toolbar (pin it from the puzzle-piece menu).${siteWaiting}` : setupMode ? 'Your wallet is kept in this browser. Go back to the Nap window the site opened — it asks for this password now.' : 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.') : '');
+  // Quietly: a first sync announcing its epoch would replace the message
+  // above before anyone reads it.
+  refresh(!kept);
   if (kept) offerBiometrics(keepPassword);
 }
 
@@ -775,7 +807,9 @@ async function submitObject(intent) {
 /// a payer who cannot read it cannot pay — and it cannot spend anything.
 async function registerObjectAccount(owner) {
   await submitObject(registerIntent(owner.account, x25519.getPublicKey(owner.viewing)));
-  note('Registered this account to receive ZEC. Deposits to the address below are credited to it.');
+  // Done on its own when the wallet opens: said only if nothing more useful
+  // (what to do next, after setting up) is already on show.
+  if (!root.querySelector('#notice')?.classList.contains('show')) note('Registered this account to receive ZEC. Deposits to the address below are credited to it.');
 }
 
 const EXITS_KEY = () => `nap.exits.${config.chain}.${identity.accountHex}`;

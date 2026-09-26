@@ -5,6 +5,7 @@
 //   PHRASE_FILE=<wallet holding what it sells>  POOL=<pool hex>  SELL=<asset hex>
 //   AMOUNT=0.1  IN=TESTZ.zy OUT=TGRAD  node tests/swap.e2e.mjs
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 
@@ -52,9 +53,7 @@ const answer = async () => {
 
 // Connect.
 const [popup] = await Promise.all([ctx.waitForEvent('page'), page.click('#connect')]);
-await popup.waitForSelector('#unlock');
-await popup.fill('#words', WORDS);
-await popup.click('#unlock button[type=submit]');
+await unlockNap(popup, WORDS);
 await popup.waitForSelector('#yes');
 await popup.click('#yes');
 const session = await answer();

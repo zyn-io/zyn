@@ -276,10 +276,13 @@ export async function loadTickets(config, identity, collection) {
 /// `zyn:<commitment>`, from this account and a nonce only it derives. The
 /// same memo comes back until a burn with it lands, so a site asking again
 /// does not use up nonces.
-export async function burnMemo(config, identity) {
+/// `fresh`: a new code even if the last one has not landed yet — for a burn
+/// about to be signed, so a second burn before the first is posted gets its
+/// own tickets instead of reusing a code the chain will refuse.
+export async function burnMemo(config, identity, { fresh = false } = {}) {
   const key = `nap.burn.${config.chain}.${identity.accountHex}`;
   const saved = read(key);
-  if (saved != null) {
+  if (saved != null && !fresh) {
     const commitment = mk.voucherCommitment(identity.account, mk.marketNonce(identity.secretKey, Number(saved)));
     const landed = await call(config, 'zyn_tickets', { ids: hex(mk.voucherTicketId(commitment, 0)) });
     if (!(Array.isArray(landed) && landed.length)) return { memo: `zyn:${hex(commitment)}`, commitment: hex(commitment) };

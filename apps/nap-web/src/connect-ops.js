@@ -27,7 +27,12 @@ const bad = (m) => new ProviderError(ERR.PARAMS, m);
 
 const ZAT = 100_000_000n;
 const zecText = (zat) => { const v = BigInt(zat); const f = (v % ZAT).toString().padStart(8, '0').replace(/0+$/, ''); return `${v / ZAT}${f ? `.${f}` : ''}`; };
-const wadText = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, '').slice(0, 8); return `${v / WAD}${f ? `.${f}` : ''}`; };
+/// A ledger amount in full: an approval shows exactly what is signed, never
+/// a rounded figure.
+const wadText = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, ''); return `${v / WAD}${f ? `.${f}` : ''}`; };
+/// An amount a site sent, or a parameter error that says which.
+const amountOf = (v, what) => { try { return parseAmount(String(v ?? '')); } catch (e) { throw bad(`${what}: ${e.message}`); } };
+const NO_ZEC = 'This wallet has no Zcash keys on this device yet. Open Nap, choose Zcash, add your Zcash wallet, then try again.';
 const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
 /// Collection Z's species share one index space (§86.1).
@@ -49,9 +54,10 @@ function saleCollection(p) {
 /// a balance, not a note, not a viewing key.
 export async function session(ctx) {
   let zcash = null;
+  // The Zcash address is a courtesy: if its wallet cannot open here, the
+  // site still gets the account rather than a connection that never works.
   if (ctx.zec) {
-    const view = await ctx.zec();
-    zcash = { network: view.network, address: view.address };
+    try { const view = await ctx.zec(); zcash = { network: view.network, address: view.address }; } catch { zcash = null; }
   }
   return { account: ctx.identity.accountHex, network: ctx.config.id, chain: ctx.config.chain, zcash };
 }
@@ -60,6 +66,18 @@ async function holdings(ctx) {
   const offers = await ledger.loadOffers(ctx.config);
   const mine = await ledger.loadHoldings(ctx.config, ctx.identity, offers);
   return { offers, ...mine };
+}
+
+/// Refuse before asking the holder to approve something they cannot pay for.
+async function mustHold(ctx, asset, amount, name) {
+  const h = await holdings(ctx);
+  const have = h.held.filter((x) => x.asset === asset).reduce((a, x) => a + BigInt(x.amount), 0n);
+  if (have < amount) throw bad(`That needs ${wadText(amount)} ${name}; this wallet holds ${wadText(have)}`);
+}
+
+/// What an approval calls the coin a payment is made in.
+async function quoteName(ctx, asset) {
+  return (await namer(ctx, await ledger.call(ctx.config, 'zyn_market')))(asset);
 }
 
 function heldItem(h, asset) {
@@ -118,7 +136,7 @@ export const METHODS = {
   zec_getAddress: {
     kind: 'read',
     run: async (ctx) => {
-      if (!ctx.zec) throw new ProviderError(ERR.UNSUPPORTED, 'This wallet has no Zcash keys on this device yet');
+      if (!ctx.zec) throw new ProviderError(ERR.UNSUPPORTED, NO_ZEC);
       const v = await ctx.zec();
       return { network: v.network, address: v.address };
     },
@@ -219,11 +237,11 @@ export const METHODS = {
       const { market, c } = await oneCurve(ctx, p.token);
       const q$ = (await namer(ctx, market))(c.quote);
       if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
-      const amount = parseAmount(String(p.amount ?? ''));
+      const amount = amountOf(p.amount, 'amount');
       if (amount < mk.MIN_CURVE_BUY) throw bad(`A buy is at least 0.001 ${q$}`);
       const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps);
       if (q.lots === 0) throw bad('That buys less than one lot at the current price');
-      const minLots = p.minTokens != null ? BigInt(parseAmount(String(p.minTokens))) / mk.LOT : 0n;
+      const minLots = p.minTokens != null ? BigInt(amountOf(p.minTokens, 'minTokens')) / mk.LOT : 0n;
       return {
         title: `Buy ${c.symbol} with ${wadText(amount)} ${q$}`,
         rows: [
@@ -252,11 +270,11 @@ export const METHODS = {
       const { market, c } = await oneCurve(ctx, p.token);
       const q$ = (await namer(ctx, market))(c.quote);
       if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
-      const tokens = parseAmount(String(p.tokens ?? ''));
+      const tokens = amountOf(p.tokens, 'tokens');
       if (tokens % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
       const lots = Number(tokens / mk.LOT);
       const q = mk.previewCurveSell(c.sold, lots, c.fee_bps);
-      const minZec = p.minZec != null ? parseAmount(String(p.minZec)) : 0n;
+      const minZec = p.minZec != null ? amountOf(p.minZec, 'minZec') : 0n;
       return {
         title: `Sell ${tokenText(tokens)} ${c.symbol}`,
         rows: [
@@ -285,7 +303,7 @@ export const METHODS = {
       const pool = (market.pools || []).find((x) => x.id === p.pool);
       if (!pool) throw bad('No such pool');
       const sellA = !!p.sellA;
-      const amountIn = parseAmount(String(p.amount ?? ''));
+      const amountIn = amountOf(p.amount, 'amount');
       const quote = mk.quoteAlone(pool, sellA, amountIn);
       const slippage = Number.isInteger(p.slippageBps) && p.slippageBps >= 0 && p.slippageBps <= 1000 ? p.slippageBps : 100;
       const minOut = mk.withSlippage(quote, slippage);
@@ -311,7 +329,7 @@ export const METHODS = {
   zec_pay: {
     kind: 'write',
     async prepare(ctx, p) {
-      if (!ctx.zec) throw new ProviderError(ERR.UNSUPPORTED, 'This wallet has no Zcash keys on this device yet');
+      if (!ctx.zec) throw new ProviderError(ERR.UNSUPPORTED, NO_ZEC);
       let req;
       if (p.uri) req = parsePaymentRequest(p.uri);
       else {
@@ -321,7 +339,11 @@ export const METHODS = {
       if (req.zatoshi == null || req.zatoshi <= 0) throw bad('The request names no amount');
       const net = ctx.config.zcashPrefix === 'u1' ? 'mainnet' : 'testnet';
       const shielded = req.address.startsWith(ctx.config.zcashPrefix);
-      if (!shielded && !/^t[a-z0-9]{20,}$/i.test(req.address)) throw bad(`That is not a ${net} Zcash address`);
+      // Transparent: t1/t3 on mainnet, tm/t2 on testnet. Sapling (zs…) is not
+      // something this wallet sends to.
+      const transparent = (net === 'mainnet' ? /^t[13][a-km-zA-HJ-NP-Z1-9]{33}$/ : /^t[m2][a-km-zA-HJ-NP-Z1-9]{33}$/).test(req.address);
+      if (/^z(s|testsapling)1/.test(req.address)) throw bad('That is a Sapling address; ask for a unified (u1…) or transparent address');
+      if (!shielded && !transparent) throw bad(`That is not a ${net} Zcash address`);
       if (!shielded && req.memo) throw bad('A memo only reaches a shielded address');
       return {
         title: `Pay ${zecText(req.zatoshi)} ZEC`,
@@ -352,10 +374,12 @@ export const METHODS = {
       const pay = BigInt(o.pay_raw);
       // The site shows a price; the chain has one. If they differ the holder
       // would be approving a number they were not shown.
-      if (p.pay != null && parseAmount(String(p.pay)) !== pay) throw bad('The price changed since the page loaded; reload and try again');
+      if (p.pay != null && amountOf(p.pay, 'pay') !== pay) throw bad('The price changed since the page loaded; reload and try again');
+      const q = await quoteName(ctx, o.price_asset);
+      await mustHold(ctx, o.price_asset, pay, q);
       return {
         title: `Buy ${itemName(o.collection, o.serial)}`,
-        rows: [['Price', `${wadText(o.price_raw)} ZEC.zy`], ['Collection fee', `${wadText(o.fee_raw)} ZEC.zy`], ['You pay', `${wadText(pay)} ZEC.zy`]],
+        rows: [['Price', `${wadText(o.price_raw)} ${q}`], ['Collection fee', `${wadText(o.fee_raw)} ${q}`], ['You pay', `${wadText(pay)} ${q}`]],
         note: 'The item arrives in this wallet. The seller is paid by the ledger; you never learn who they are.',
         run: async () => {
           const h = await holdings(ctx);
@@ -373,7 +397,8 @@ export const METHODS = {
   zyn_nftList: {
     kind: 'write',
     async prepare(ctx, p) {
-      const price = parseAmount(String(p.price ?? ''));
+      const price = amountOf(p.price, 'price');
+      if (price <= 0n) throw bad('price must be above zero');
       const h = await holdings(ctx);
       const { note, item } = heldItem(h, p.asset);
       if (h.offers.some((o) => o.item === note.commitment)) throw bad('That item is already listed');
@@ -381,9 +406,10 @@ export const METHODS = {
       const terms = (market.collections || []).find((c) => c.asset === item.collection);
       const quote = terms && isHex(terms.quote) ? terms.quote : ctx.config.zecAsset;
       const feeBps = terms ? Number(terms.fee_bps) || 0 : 0;
+      const q = (await namer(ctx, market))(quote);
       return {
         title: `List ${itemName(item.collection, item.serial)}`,
-        rows: [['Price', `${wadText(price)} ZEC.zy`], ['Fee', feeBps ? `${feeBps / 100}% from each side` : 'none'], ['You receive', `${wadText(price - (price * BigInt(feeBps)) / 10_000n)} ZEC.zy when it sells`]],
+        rows: [['Price', `${wadText(price)} ${q}`], ['Fee', feeBps ? `${feeBps / 100}% from each side` : 'none'], ['You receive', `${wadText(price - (price * BigInt(feeBps)) / 10_000n)} ${q} when it sells`]],
         note: 'The listing names no seller. When it sells, your proceeds wait as a claim only this wallet can find.',
         run: async () => {
           const c = unhex(note.commitment);
@@ -422,10 +448,13 @@ export const METHODS = {
       const { note, item } = heldItem(h, p.asset);
       const market = await ledger.call(ctx.config, 'zyn_market');
       const terms = (market.collections || []).find((c) => c.asset === item.collection);
-      const share = terms && BigInt(terms.outstanding || '0') > 0n ? BigInt(terms.floor) / BigInt(terms.outstanding) : 0n;
+      if (!terms || !(BigInt(terms.outstanding || '0') > 0n)) throw bad('This collection has no floor to redeem from yet');
+      const share = BigInt(terms.floor) / BigInt(terms.outstanding);
+      if (share <= 0n) throw bad('The floor is empty; redeeming now would burn the item for nothing');
+      const q = (await namer(ctx, market))(terms.quote);
       return {
         title: `Redeem ${itemName(item.collection, item.serial)} for the floor`,
-        rows: [['Floor share', `${wadText(share)} ZEC.zy`], ['The item', 'is burned — this cannot be undone']],
+        rows: [['Floor share', `${wadText(share)} ${q}`], ['The item', 'is burned — this cannot be undone']],
         note: 'Your share of the floor waits as a claim; collect it afterwards.',
         danger: true,
         run: async () => {
@@ -473,7 +502,7 @@ export const METHODS = {
   // binds this one without saying which. Nothing moves, so no approval.
   zyn_burnMemo: {
     kind: 'read',
-    run: async (ctx) => ledger.burnMemo(ctx.config, ctx.identity),
+    run: async (ctx, p) => ledger.burnMemo(ctx.config, ctx.identity, { fresh: p?.fresh === true }),
   },
 
   zyn_buyTickets: {
@@ -486,10 +515,12 @@ export const METHODS = {
       if (!s) throw bad('There is no sale for that collection');
       if (s.sale.phase !== 'open') throw bad('The sale is closed');
       const total = BigInt(s.sale.ticket_price) * BigInt(count);
-      if (p.pay != null && parseAmount(String(p.pay)) !== total) throw bad('The price changed since the page loaded; reload and try again');
+      if (p.pay != null && amountOf(p.pay, 'pay') !== total) throw bad('The price changed since the page loaded; reload and try again');
+      const q = await quoteName(ctx, s.quote);
+      await mustHold(ctx, s.quote, total, q);
       return {
         title: `Buy ${count} ticket${count > 1 ? 's' : ''} in the ${collection === CAVE_Z ? 'Collection Z' : `${collection.slice(0, 6)}…`} sale`,
-        rows: [['Per ticket', `${wadText(s.sale.ticket_price)} ZEC.zy`], ['Tickets', String(count)], ['You pay', `${wadText(total)} ZEC.zy`]],
+        rows: [['Per ticket', `${wadText(s.sale.ticket_price)} ${q}`], ['Tickets', String(count)], ['You pay', `${wadText(total)} ${q}`]],
         note: 'Each ticket is drawn after the sale closes. A winning ticket claims its items at the claim price; the ticket price is not refunded.',
         run: async () => {
           const h = await holdings(ctx);
@@ -515,10 +546,12 @@ export const METHODS = {
       if (!mine.length) throw bad('This wallet has no unclaimed winning tickets');
       const serials = mine.flatMap((t) => s.draw.won[index.get(t.ticket)].serials);
       const total = BigInt(s.sale.claim_price) * BigInt(serials.length);
+      const q = await quoteName(ctx, s.quote);
+      await mustHold(ctx, s.quote, total, q);
       return {
         title: `Claim ${serials.length} item${serials.length > 1 ? 's' : ''}`,
         rows: [...serials.slice(0, 6).map((x) => ['Item', itemName(collection, x)]), ...(serials.length > 6 ? [['…', `and ${serials.length - 6} more`]] : []),
-          ['Per item', `${wadText(s.sale.claim_price)} ZEC.zy`], ['You pay', `${wadText(total)} ZEC.zy`]],
+          ['Per item', `${wadText(s.sale.claim_price)} ${q}`], ['You pay', `${wadText(total)} ${q}`]],
         note: 'Each item is minted straight into this wallet. Unclaimed wins go to the open mint when claims close.',
         run: async () => {
           const claimed = [];
@@ -559,9 +592,11 @@ export const METHODS = {
       const left = s.sale.open_count - s.sale.open_next;
       if (left < count) throw bad(left ? `Only ${left} left` : 'The open mint is sold out');
       const total = BigInt(s.sale.open_price) * BigInt(count);
+      const q = await quoteName(ctx, s.quote);
+      await mustHold(ctx, s.quote, total, q);
       return {
         title: `Mint ${count} from the open mint`,
-        rows: [['Per item', `${wadText(s.sale.open_price)} ZEC.zy`], ['Items', String(count)], ['You pay', `${wadText(total)} ZEC.zy`], ['Left', String(left)]],
+        rows: [['Per item', `${wadText(s.sale.open_price)} ${q}`], ['Items', String(count)], ['You pay', `${wadText(total)} ${q}`], ['Left', String(left)]],
         note: 'Items come in the order posted after the draw — the next ones in line, whichever they are.',
         run: async () => {
           const minted = [];

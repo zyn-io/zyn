@@ -6,6 +6,7 @@
 //
 //   PHASE=buy|claim|mint  BUYER_PHRASE=<file>  node tests/sale.e2e.mjs
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 
 const SITE = process.env.SITE || 'https://cavebro.win';
@@ -42,11 +43,7 @@ async function connect() {
   const before = new Set(ctx.pages());
   await page.click('.zwallet-option:has-text("Nap in the browser")');
   nap = await ctx.waitForEvent('page', { timeout: 15000 }).catch(() => ctx.pages().find((x) => !before.has(x)));
-  await nap.waitForSelector('#unlock, #yes', { timeout: 30000 });
-  if (await nap.locator('#unlock').isVisible().catch(() => false)) {
-    await nap.fill('#words', words);
-    await nap.click('#unlock button[type=submit]');
-  }
+  await unlockNap(nap, words);
   await nap.waitForSelector('#yes', { timeout: 30000 });
   await nap.click('#yes');
   await page.waitForFunction(() => /Nap ·/.test(document.querySelector('[data-wallet-button]')?.textContent || ''), null, { timeout: 30000 });

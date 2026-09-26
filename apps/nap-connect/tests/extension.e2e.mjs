@@ -11,6 +11,7 @@
 // extensions from the command line). Build first: `npm run build` in
 // apps/extension.
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -91,9 +92,9 @@ try {
   const [win] = await Promise.all([ctx.waitForEvent('page'), page.click('#connect')]);
   await win.waitForLoadState();
   ok(win.url() === `chrome-extension://${id}/connect.html`, "Nap's own window opens for the site");
-  await win.waitForSelector('#pw');
-  await win.fill('#pw', PASSWORD);
-  await win.click('#unlock button[type=submit]');
+  // The popup's setup already opened a session for this browser, so the
+  // window may skip the password and show the card straight away.
+  await unlockNap(win, WORDS, { password: PASSWORD });
   await win.waitForSelector('#yes');
   const card = (await win.textContent('main')).replace(/\s+/g, ' ');
   ok(card.includes(new URL(SITE).host), `the connect card names the site: ${card.slice(0, 80)}…`);
@@ -105,7 +106,7 @@ try {
     await page.click('#swap');
     await win.waitForSelector('#yes', { timeout: 60000 });
     const approval = (await win.textContent('main')).replace(/\s+/g, ' ');
-    ok((!process.env.IN || approval.includes(`Swap ${process.env.IN} for ${process.env.OUT}`)) && approval.includes(new URL(SITE).host.toUpperCase()), `the swap is approved in Nap's window: ${approval.slice(0, 110)}…`);
+    ok((!process.env.IN || approval.includes(`Swap ${process.env.IN} for ${process.env.OUT}`)) && approval.toLowerCase().includes(new URL(SITE).host.toLowerCase()), `the swap is approved in Nap's window: ${approval.slice(0, 110)}…`);
     await win.screenshot({ path: `${S}/ext-approve.png` });
     await win.click('#yes');
     const placed = await answer();
@@ -119,14 +120,13 @@ try {
     ok(got > 0, `collected after the batch cleared (${got})`);
   }
 
-  // Closing Nap's window locks Nap for the site; the next request opens it
-  // again, locked, and waits for the holder.
+  // Closing Nap's window does not lock the extension (the toolbar's session
+  // lives on until Lock or 15 idle minutes): the next request reopens the
+  // window and is answered without a password. Lock ends that.
   await win.close();
   const [again] = await Promise.all([ctx.waitForEvent('page', { timeout: 30000 }), page.click('#collect')]);
-  await again.waitForSelector('#pw', { timeout: 30000 });
-  ok(again.url() === `chrome-extension://${id}/connect.html`, 'after closing it, the next request reopens Nap locked');
-  await again.fill('#pw', PASSWORD);
-  await again.click('#unlock button[type=submit]');
+  ok(again.url() === `chrome-extension://${id}/connect.html`, 'after closing it, the next request reopens Nap');
+  await unlockNap(again, WORDS, { password: PASSWORD }).catch(() => {});
   const after = await answer();
   ok(typeof after.collected === 'number', `unlocked again, the request is answered: ${JSON.stringify(after)}`);
 } finally {

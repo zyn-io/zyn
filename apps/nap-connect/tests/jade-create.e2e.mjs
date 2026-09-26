@@ -5,6 +5,7 @@
 //   JADE=https://cave-jade.pages.dev NAP=https://nap.cavebro.win
 //   PHRASE_FILE=<a testnet wallet's phrase>  IMAGE=<a png>  node tests/jade-create.e2e.mjs
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 
 const JADE = process.env.JADE || 'https://cave-jade.pages.dev';
@@ -27,9 +28,7 @@ await page.goto(`${JADE}/launch?network=testnet&nap=${NAP}`);
 await page.click('#wallet-button');
 await page.waitForSelector('.jade-wallet-option');
 const [popup] = await Promise.all([ctx.waitForEvent('page'), page.click('.jade-wallet-option:has-text("Nap in the browser")')]);
-await popup.waitForSelector('#unlock');
-await popup.fill('#words', WORDS);
-await popup.click('#unlock button[type=submit]');
+await unlockNap(popup, WORDS);
 await popup.waitForSelector('#yes');
 await popup.click('#yes');
 await page.waitForFunction(() => !/Connect wallet/.test(document.querySelector('#wallet-button').textContent), null, { timeout: 60000 });

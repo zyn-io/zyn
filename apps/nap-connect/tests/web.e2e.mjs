@@ -2,6 +2,7 @@
 // the browser (localhost:4179) on testnet, headless. See README for setup.
 // Store (localhost:4178) ⇄ Nap in the browser (localhost:4179), headless, on testnet.
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 import { deriveIdentity } from '../../nap-web/src/core.js';
 import { initSync, spendingKeyFromPhrase, ZecWallet } from '../../nap-web/src/zec-pkg/nap_zec.js';
@@ -31,13 +32,13 @@ ok(names.includes('Nap in the browser'), `picker lists ${JSON.stringify(names)}`
 // 2. Choosing it opens Nap's window on Nap's origin, naming the store.
 const [popup] = await Promise.all([ctx.waitForEvent('page'), store.click('.wallet-option:has-text("Nap in the browser")')]);
 popup.on('pageerror', (e) => console.log('popup error:', e.message));
-await popup.waitForSelector('#unlock');
+await popup.waitForSelector('#setup-create, #pw, #unlock');
+ok(!(await popup.$('#words')), 'a new visitor is offered setup, not a phrase box');
 ok(new URL(popup.url()).origin === new URL(NAP).origin, `Nap's window is on ${new URL(popup.url()).origin}`);
 ok((await popup.textContent('.site')) === new URL(STORE).host, `it names the asking site: ${await popup.textContent('.site')}`);
 
 // 3. Unlock with the test phrase, see the connect card, connect.
-await popup.fill('#words', WORDS);
-await popup.click('#unlock button[type=submit]');
+await unlockNap(popup, WORDS);
 await popup.waitForSelector('#yes');
 const card = await popup.textContent('main');
 ok(/wants to connect/.test(card) && /Zcash address/.test(card) && /Zyn testnet/.test(card), 'connect card says who, what it shares, and the network');
@@ -71,15 +72,18 @@ ok(badBuy === '-32602', `buying a listing that does not exist → ${badBuy}`);
 const unknown = await code('eth_sendTransaction', {});
 ok(unknown === '4200', `an unknown method → ${unknown}`);
 
-// 7. A second window on another origin cannot talk to Nap's window.
+// 7. A page on another origin cannot talk to Nap's window: it posts a request
+// straight at it, and Nap neither answers nor changes what it shows.
 const other = await ctx.newPage();
 await other.goto(local ? 'http://127.0.0.1:4178/' : 'https://example.com/');
-const stray = await popup.evaluate(() => new Promise((resolve) => {
-  let got = false;
-  window.addEventListener('message', () => { got = true; });
-  setTimeout(() => resolve(document.querySelector('main').textContent), 800);
-}));
-ok(!/127\.0\.0\.1|example\.com/.test(stray), 'a message from anywhere but the opener is ignored');
+const before = await popup.textContent('main');
+const handle = await other.evaluate((name) => { const w = window.open('', name); return !!w; }, await popup.evaluate(() => window.name));
+await other.evaluate((origin) => {
+  const w = window.open('', window.name === '' ? 'nap-probe' : window.name);
+  try { w?.postMessage({ nap: 'request', id: 99, method: 'zec_getAddress', params: {} }, origin); } catch { /* not reachable at all: also fine */ }
+}, new URL(NAP).origin);
+await popup.waitForTimeout(800);
+ok((await popup.textContent('main')) === before, `a request from ${local ? '127.0.0.1' : 'example.com'} changes nothing in Nap's window (reached: ${handle})`);
 
 // 8. Closing Nap's window disconnects the store.
 await popup.close();

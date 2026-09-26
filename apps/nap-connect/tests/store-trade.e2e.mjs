@@ -6,6 +6,7 @@
 //   SITE=https://cavebro.win STORE=https://cave-market.pages.dev NAP=https://nap.cavebro.win
 //   SELLER_PHRASE=<file> BUYER_PHRASE=<file>  node tests/store-trade.e2e.mjs
 import { chromium } from 'playwright-core';
+import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 
 const SITE = process.env.SITE || 'https://cavebro.win';
@@ -33,9 +34,7 @@ async function connectNap(p, buttonSel, optionSel) {
   await p.page.waitForSelector(optionSel);
   const [popup] = await Promise.all([p.ctx.waitForEvent('page'), p.page.click(`${optionSel}:has-text("Nap in the browser")`)]);
   p.popup = popup;
-  await popup.waitForSelector('#unlock');
-  await popup.fill('#words', p.words);
-  await popup.click('#unlock button[type=submit]');
+  await unlockNap(popup, p.words);
   await popup.waitForSelector('#yes');
   await popup.click('#yes');
 }
@@ -48,11 +47,7 @@ async function chooseNap(p, page, optionSel) {
   const fresh = await p.ctx.waitForEvent('page', { timeout: 8000 }).catch(() => null);
   const nap = fresh || p.ctx.pages().find((x) => !before.has(x) || /nap\.cavebro\.win|connect/.test(x.url()));
   p.popup = nap;
-  await nap.waitForSelector('#unlock, #yes', { timeout: 30000 }).catch(() => {});
-  if (await nap.locator('#unlock').isVisible().catch(() => false)) {
-    await nap.fill('#words', p.words);
-    await nap.click('#unlock button[type=submit]');
-  }
+  await unlockNap(nap, p.words);
   await nap.waitForSelector('#yes', { timeout: 30000 }).then(() => nap.click('#yes')).catch(() => {});
 }
 
@@ -107,7 +102,7 @@ await buyer.page.locator('#rows button', { hasText: 'Connect to buy' }).first().
 await buyer.page.waitForSelector('.zwallet-option');
 const [bp] = await Promise.all([buyer.ctx.waitForEvent('page'), buyer.page.click('.zwallet-option:has-text("Nap in the browser")')]);
 buyer.popup = bp;
-await bp.waitForSelector('#unlock'); await bp.fill('#words', buyer.words); await bp.click('#unlock button[type=submit]');
+await unlockNap(bp, buyer.words);
 await bp.waitForSelector('#yes'); await bp.click('#yes');
 await buyer.page.waitForSelector('#rows button:has-text("Buy")', { timeout: 60000 });
 firstName = listed[0].name;
@@ -126,7 +121,7 @@ await store.click('.header-wallet');
 await store.waitForSelector('.wallet-option, [data-wallet-choice]', { timeout: 15000 }).catch(() => {});
 const optionSel = await store.locator('.wallet-option').count() ? '.wallet-option' : '[data-wallet-choice]';
 const [sp] = await Promise.all([buyer.ctx.waitForEvent('page'), store.click(`${optionSel}:has-text("Nap in the browser")`)]);
-await sp.waitForSelector('#unlock'); await sp.fill('#words', buyer.words); await sp.click('#unlock button[type=submit]');
+await unlockNap(sp, buyer.words);
 await sp.waitForSelector('#yes'); await sp.click('#yes');
 await store.waitForSelector('.trade-card button:has-text("Buy with Nap")', { timeout: 60000 });
 await store.locator('.trade-card', { hasText: listed[1].name }).locator('button').click();

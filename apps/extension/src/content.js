@@ -11,9 +11,13 @@ s.src = chrome.runtime.getURL('inpage.js');
 s.onload = () => s.remove();
 (document.head || document.documentElement).appendChild(s);
 
-const pending = new Map(); // page request id -> true, while Nap holds it
+const pending = new Map(); // page request id -> { approved }, while Nap holds it
 let port = null;
 const toPage = (msg) => window.postMessage({ target: 'nap-inpage', ...msg }, location.origin);
+
+/// After an extension update this page's script is cut off from Nap.
+const cutOff = (e) => /context invalidated/i.test(String(e?.message || e));
+const CUT_OFF = 'Nap was updated. Reload this page to reach it again.';
 
 /// One attempt to reach an open connect window: resolves once it says ready.
 function tryConnect() {
@@ -34,29 +38,45 @@ function tryConnect() {
 function adopt(p) {
   port = p;
   p.onMessage.addListener((m) => {
-    if (!m || m.nap !== 'response' || !pending.has(m.id)) return;
+    if (!m) return;
+    // The holder approved: if the window closes now, say so.
+    if (m.nap === 'progress' && pending.has(m.id)) { pending.get(m.id).approved = true; return; }
+    // The window needs the holder: bring it forward.
+    if (m.nap === 'attention') { try { chrome.runtime.sendMessage({ kind: 'nap:open' }).catch(() => {}); } catch { /* cut off */ } return; }
+    if (m.nap !== 'response' || !pending.has(m.id)) return;
     pending.delete(m.id);
     toPage({ id: m.id, result: m.result, error: m.error });
   });
   p.onDisconnect.addListener(() => {
     if (port === p) port = null;
-    for (const id of pending.keys()) toPage({ id, error: { code: 4001, message: "Nap's window was closed" } });
+    for (const [id, job] of pending) {
+      toPage({ id, error: { code: 4900, message: job.approved ? "Nap's window was closed after you approved. Check your wallet before trying again." : "Nap's window was closed. Nothing was approved." } });
+    }
     pending.clear();
   });
   return p;
 }
 
-/// The port to Nap, opening its window first when `open` is set.
-async function reach(open) {
-  if (port) return port;
-  try { return adopt(await tryConnect()); } catch { /* not open */ }
-  if (!open) return null;
-  const r = await chrome.runtime.sendMessage({ kind: 'nap:open' });
-  if (r && r.error) throw new Error(r.error);
-  for (let i = 0; i < 20; i++) {
-    try { return adopt(await tryConnect()); } catch { await new Promise((ok) => setTimeout(ok, 300)); }
-  }
-  throw new Error("Nap's window did not open");
+/// The port to Nap, opening its window first when `open` is set. One attempt
+/// at a time: requests fired together share it, so they cannot open two
+/// windows.
+let reaching = null;
+function reach(open) {
+  if (port) return Promise.resolve(port);
+  if (reaching && (!open || reaching.open)) return reaching.promise;
+  const promise = (async () => {
+    try { return adopt(await tryConnect()); } catch (e) { if (cutOff(e)) throw new Error(CUT_OFF); }
+    if (!open) return null;
+    let r;
+    try { r = await chrome.runtime.sendMessage({ kind: 'nap:open' }); } catch (e) { throw new Error(cutOff(e) ? CUT_OFF : "Nap's window did not open"); }
+    if (r && r.error) throw new Error(r.error);
+    for (let i = 0; i < 20; i++) {
+      try { return adopt(await tryConnect()); } catch { await new Promise((ok) => setTimeout(ok, 300)); }
+    }
+    throw new Error("Nap's window did not open");
+  })().finally(() => { if (reaching?.promise === promise) reaching = null; });
+  reaching = { open, promise };
+  return promise;
 }
 
 window.addEventListener('message', async (ev) => {
@@ -64,13 +84,15 @@ window.addEventListener('message', async (ev) => {
   const { id, method, params } = ev.data;
   if (typeof method !== 'string') return;
   try {
-    // Asking whether a session exists never opens a window by itself.
-    const p = await reach(method !== 'nap_session');
-    if (!p) { toPage({ id, result: null }); return; }
-    pending.set(id, true);
+    // Asking whether a session exists, or forgetting the site, never opens a
+    // window by itself: with no window there is no session to report or end.
+    const quiet = method === 'nap_session' || method === 'nap_disconnect';
+    const p = await reach(!quiet);
+    if (!p) { toPage({ id, result: method === 'nap_disconnect' ? true : null }); return; }
+    pending.set(id, { approved: false });
     p.postMessage({ nap: 'request', id, method, params: params && typeof params === 'object' ? params : {} });
   } catch (e) {
     pending.delete(id);
-    toPage({ id, error: { code: 4001, message: e.message || 'Nap could not be reached' } });
+    toPage({ id, error: { code: 4900, message: e.message || 'Nap could not be reached' } });
   }
 });
