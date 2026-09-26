@@ -65,6 +65,17 @@ pub fn withdrawal_digest(chain_id: u64, vault: &Address20, nonce: u64, epoch: u6
 }
 
 /// The address a key signs as.
+/// An address in EIP-55 mixed case, as the Safe transaction service insists.
+pub fn checksummed(a: &Address20) -> String {
+    let lower: String = a.iter().map(|b| format!("{b:02x}")).collect();
+    let h = keccak(&[lower.as_bytes()]);
+    let mixed: String = lower.chars().enumerate().map(|(i, c)| {
+        let nibble = (h[i / 2] >> if i % 2 == 0 { 4 } else { 0 }) & 0xf;
+        if c.is_ascii_alphabetic() && nibble >= 8 { c.to_ascii_uppercase() } else { c }
+    }).collect();
+    format!("0x{mixed}")
+}
+
 pub fn address_of(key: &SigningKey) -> Address20 {
     let point = key.verifying_key().to_encoded_point(false);
     let h = keccak(&[&point.as_bytes()[1..]]);
@@ -268,6 +279,14 @@ impl Tx {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn addresses_are_checksummed_as_eip55_says() {
+        for a in ["0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359", "0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983"] {
+            let raw: Address20 = (0..20).map(|i| u8::from_str_radix(&a[2 + 2 * i..4 + 2 * i], 16).unwrap()).collect::<Vec<_>>().try_into().unwrap();
+            assert_eq!(super::checksummed(&raw), a);
+        }
+    }
+
     #[test]
     fn the_safe_path_selectors_are_the_ones_cast_computes() {
         let p = [Payout { to: [0x11; 20], asset: 1, amount: 5 }];

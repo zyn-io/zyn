@@ -307,7 +307,7 @@ impl Bridge {
     /// one already proposed until the owners execute (or reject) it.
     fn pay_safe(&self) -> Result<(), String> {
         let safe = self.safe.ok_or("not in Safe mode")?;
-        let safe_hex = format!("0x{}", hex(&safe));
+        let safe_hex = eth::checksummed(&safe);
         if let Ok(raw) = std::fs::read(self.proposal_path()) {
             // A damaged record is not "nothing proposed": that would propose again.
             let p: Value = serde_json::from_slice(&raw).unwrap_or_else(|_| panic!("{} is damaged — fix it before proposing again", self.proposal_path().display()));
@@ -363,7 +363,7 @@ impl Bridge {
         let nonce = self.vault_nonce()?;
         let epoch = zynzapd::object_client::call(&self.node, "zyn_status", json!({}))?["epoch"].as_u64().unwrap_or(0);
         let data = eth::withdraw_as_signer_call(nonce, epoch, &payouts);
-        let vault_hex = format!("0x{}", hex(&self.vault));
+        let vault_hex = eth::checksummed(&self.vault);
         // Simulate it as the Safe first: owners are only asked to approve a
         // payout the vault would accept (right nonce, enough ETH, known asset).
         self.eth("eth_call", json!([{ "from": safe_hex, "to": vault_hex, "data": format!("0x{}", hex(&data)) }, "latest"]))
@@ -378,12 +378,12 @@ impl Bridge {
         let safe_tx_hash: [u8; 32] = h.as_slice().try_into().map_err(|_| "getTransactionHash answered oddly")?;
         let proposer = self.proposer.as_ref().ok_or("no proposer key")?;
         let signature = eth::sign(proposer, &safe_tx_hash)?;
-        let zero = format!("0x{}", hex(&[0u8; 20]));
+        let zero = eth::checksummed(&[0u8; 20]);
         let body = json!({
             "to": vault_hex, "value": "0", "data": format!("0x{}", hex(&data)), "operation": 0,
             "safeTxGas": "0", "baseGas": "0", "gasPrice": "0", "gasToken": zero, "refundReceiver": zero,
             "nonce": safe_nonce, "contractTransactionHash": format!("0x{}", hex(&safe_tx_hash)),
-            "sender": format!("0x{}", hex(&eth::address_of(proposer))), "signature": format!("0x{}", hex(&signature)),
+            "sender": eth::checksummed(&eth::address_of(proposer)), "signature": format!("0x{}", hex(&signature)),
             "origin": format!("Zyn bridge: pay out {} ETH.zy withdrawal(s)", payouts.len()),
         });
         let record = json!({ "safe_tx_hash": format!("0x{}", hex(&safe_tx_hash)), "safe_nonce": safe_nonce, "vault_nonce": nonce, "covers": covers, "body": body });
@@ -507,8 +507,8 @@ fn main() {
             println!("asset    {}", hex(&b.asset));
             println!("vault    0x{}  ({bal} wei, withdrawal nonce {})", hex(&b.vault), b.vault_nonce()?);
             if let Some(safe) = b.safe {
-                let proposer = format!("0x{}", hex(&eth::address_of(b.proposer.as_ref().unwrap())));
-                let listed = b.safe_get(&format!("/api/v2/delegates/?safe=0x{}&delegate={proposer}", hex(&safe)))?.and_then(|v| v["count"].as_u64()).unwrap_or(0) > 0;
+                let proposer = eth::checksummed(&eth::address_of(b.proposer.as_ref().unwrap()));
+                let listed = b.safe_get(&format!("/api/v2/delegates/?safe={}&delegate={proposer}", eth::checksummed(&safe)))?.and_then(|v| v["count"].as_u64()).unwrap_or(0) > 0;
                 println!("signer   Safe 0x{} (nonce {})", hex(&safe), b.safe_nonce()?);
                 println!("proposer {proposer} — {}", if listed { "listed as a proposer on the Safe" } else { "NOT yet a proposer on the Safe: add it in Safe{Wallet} → Settings → Setup → Proposers" });
                 println!("proposal {}", std::fs::read_to_string(b.proposal_path()).ok().and_then(|r| serde_json::from_str::<Value>(&r).ok()).map_or("none".into(), |p| format!("{} (Safe nonce {})", p["safe_tx_hash"].as_str().unwrap_or(""), p["safe_nonce"])));
