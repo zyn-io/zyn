@@ -35,3 +35,7 @@
 .cn .quiet:hover { border-color: #ffffff70; }
 .cn > .quiet { justify-self: start; }
 .cn .actions .quiet { width: 100%; min-height: 52px; }
+
+/* The second of two setup choices: the same size, quieter. */
+.cn .primary.cn-alt { background: transparent; border: 1px solid #f8f2e438; color: #f8f2e4; }
+.cn .primary.cn-alt:hover { border-color: #e8a916; }

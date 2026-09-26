@@ -209,25 +209,62 @@ async function unlock(method) {
   const held = await loadSession();
   if (held) { identity = held.identity; return; }
   return new Promise((resolve, reject) => {
-    const kept = keptWallet();
     const why = method === 'nap_connect' ? 'wants to connect to your Nap' : 'is asking your Nap';
-    show(`<p class="kicker">UNLOCK</p><h2>${siteName()} ${why}.</h2>
-      ${kept ? `<form id="unlock"><label>Password<input id="pw" type="password" autocomplete="current-password" autofocus></label>
+    const done = (id) => { window.removeEventListener('storage', onStored); identity = id; resolve(); };
+    const deny = () => { window.removeEventListener('storage', onStored); reject(new ProviderError(ERR.REJECTED, 'The holder did not unlock')); };
+
+    // A wallet kept in this browser opens with its password.
+    const askPassword = (kept) => {
+      show(`<p class="kicker">UNLOCK</p><h2>${siteName()} ${why}.</h2>
+        <form id="unlock"><label>Password<input id="pw" type="password" autocomplete="current-password" autofocus></label>
         <button class="primary" type="submit">Unlock <span>→</span></button></form>
-        <p class="muted"><a href="" id="use-phrase">Use the recovery phrase instead</a></p>`
-      : phraseForm()}
-      <button class="quiet" id="deny">Not now</button><p class="error" id="err" role="alert"></p>`);
-    const done = (id) => { identity = id; resolve(); };
-    root.querySelector('#deny').onclick = () => reject(new ProviderError(ERR.REJECTED, 'The holder did not unlock'));
-    root.querySelector('#use-phrase')?.addEventListener('click', (e) => { e.preventDefault(); root.querySelector('#unlock').outerHTML = phraseForm(); bindPhrase(done); });
-    const form = root.querySelector('#unlock');
-    if (kept) {
-      form.onsubmit = async (e) => {
+        <p class="muted"><a href="" id="use-phrase">Use the recovery phrase instead</a></p>
+        <button class="quiet" id="deny">Not now</button><p class="error" id="err" role="alert"></p>`);
+      root.querySelector('#deny').onclick = deny;
+      root.querySelector('#use-phrase').onclick = (e) => { e.preventDefault(); askPhrase(); };
+      root.querySelector('#unlock').onsubmit = async (e) => {
         e.preventDefault();
         try { const opened = await openSealedWallet(kept, root.querySelector('#pw').value); await saveSession(opened.identity, opened.receiving); done(opened.identity); }
         catch (err) { root.querySelector('#err').textContent = err.message; }
       };
-    } else bindPhrase(done);
+    };
+
+    // No wallet here yet: set one up in a full tab rather than typing 24
+    // words into a window a website opened. The phrase stays possible, once,
+    // behind a link.
+    const noWallet = () => {
+      show(`<p class="kicker">NO WALLET HERE YET</p><h2>${siteName()} ${why}.</h2>
+        <p class="muted">This browser has no Nap wallet yet. Set one up in a Nap tab — create a new one, or restore yours from its recovery phrase — and choose a password. This window then asks only for that password.</p>
+        <button class="primary" id="setup-create" type="button">Create a Nap wallet <span>→</span></button>
+        <button class="primary cn-alt" id="setup-restore" type="button">Restore from my phrase <span>→</span></button>
+        <p class="muted" id="setup-wait" hidden>Finish in the Nap tab — this window picks it up by itself.</p>
+        <p class="muted"><a href="" id="use-phrase">Type my recovery phrase here, just this once</a></p>
+        <button class="quiet" id="deny">Not now</button><p class="error" id="err" role="alert"></p>`);
+      root.querySelector('#deny').onclick = deny;
+      root.querySelector('#use-phrase').onclick = (e) => { e.preventDefault(); askPhrase(); };
+      const setup = (mode) => { window.open(`/index.html?setup=${mode}`, '_blank'); root.querySelector('#setup-wait').hidden = false; };
+      root.querySelector('#setup-create').onclick = () => setup('create');
+      root.querySelector('#setup-restore').onclick = () => setup('restore');
+    };
+
+    const askPhrase = () => {
+      show(`<p class="kicker">RECOVERY PHRASE</p><h2>${siteName()} ${why}.</h2>${phraseForm()}
+        <p class="muted">Used in this window to open the wallet, then dropped; nothing is kept.</p>
+        <button class="quiet" id="deny">Not now</button><p class="error" id="err" role="alert"></p>`);
+      root.querySelector('#deny').onclick = deny;
+      bindPhrase(done);
+    };
+
+    // A wallet set up in another Nap tab of this browser appears here.
+    function onStored(e) {
+      if (e.key !== KEPT_KEY || !e.newValue) return;
+      const kept = keptWallet();
+      if (kept) askPassword(kept);
+    }
+    window.addEventListener('storage', onStored);
+
+    const kept = keptWallet();
+    if (kept) askPassword(kept); else noWallet();
   });
 }
 

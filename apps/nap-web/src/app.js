@@ -300,9 +300,10 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
 }
 
 /// The extension keeps its wallet by definition — the toolbar opens it with
-/// this password — so there the field is required, not optional.
+/// this password — and so does a setup sent here by a connect window or the
+/// popup (`?setup=`): there the field is required, not optional.
 function keepField() {
-  return IN_EXTENSION
+  return IN_EXTENSION || setupMode
     ? '<label>Password for this browser <span class="muted">(8+ characters — the toolbar wallet opens with it)</span><input id="keep-password" type="password" autocomplete="new-password" required minlength="8"></label>'
     : '<label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label>';
 }
@@ -347,7 +348,7 @@ const knownCollections = () => (config.collections || [])
   .map((c) => ({ name: String(c.name || 'Collection'), id: unhex(c.id, 32) }));
 
 async function unlock(words, passphrase, index, keepPassword = '', fresh = false) {
-  if (IN_EXTENSION && !keepPassword) throw new Error('Choose a password for this browser (8+ characters)');
+  if ((IN_EXTENSION || setupMode) && !keepPassword) throw new Error('Choose a password for this browser (8+ characters)');
   const nextIdentity = deriveIdentity(words, passphrase, index);
   // The Zcash keys come from the same words, so this is the moment for them
   // too. If the Zcash code cannot load here, the Zyn wallet still opens and
@@ -373,7 +374,7 @@ async function unlock(words, passphrase, index, keepPassword = '', fresh = false
   clearSession(); identity = nextIdentity; receiving = nextReceiving; zecFresh = fresh;
   if (kept) void saveSession(identity, receiving);
   root.querySelectorAll('textarea,input').forEach((el) => { if (el.type !== 'checkbox') el.value = ''; });
-  wallet(kept ? (IN_EXTENSION ? 'Your wallet is ready. Open it any time from the Nap icon in your toolbar (pin it from the puzzle-piece menu).' : 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.') : '');
+  wallet(kept ? (IN_EXTENSION ? 'Your wallet is ready. Open it any time from the Nap icon in your toolbar (pin it from the puzzle-piece menu).' : setupMode ? 'Your wallet is kept in this browser. Go back to the Nap window the site opened — it asks for this password now.' : 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.') : '');
   refresh();
   if (kept) offerBiometrics(keepPassword);
 }
