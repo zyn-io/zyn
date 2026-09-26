@@ -286,7 +286,9 @@ async function itemPage() {
   document.title = `${d.name} — Cave`;
   el('art').innerHTML = art(d, 'art big');
   el('facts').innerHTML = Object.entries(d.traits).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')
-    + `<div><dt>Serial</dt><dd>${serial}</dd></div>`;
+    // The chain counts serials from 0 across the collection; the name counts
+    // each species from 1. Both shown, labelled, so neither looks like a typo.
+    + `<div><dt>Chain serial</dt><dd>${serial} (from 0)</dd></div>`;
 
   let offer = null;
   let mine = null;
