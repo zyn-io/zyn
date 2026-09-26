@@ -121,3 +121,19 @@ function pick(btn) {
 }
 tabs.forEach((b) => b.addEventListener('click', () => pick(b)));
 show('testnet');
+
+// Sections below the first screen settle in as they arrive. Only elements
+// that start off-screen are held back, so nothing on screen at load, in a
+// thumbnail or with motion reduced is ever hidden.
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.remove('pre'); io.unobserve(e.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  document.querySelectorAll('.reveal').forEach((el, i) => {
+    if (el.getBoundingClientRect().top > innerHeight) {
+      el.classList.add('pre');
+      if (el.matches('.entries li')) el.style.transitionDelay = `${(i % 7) * 0.04}s`;
+      io.observe(el);
+    }
+  });
+}

@@ -35,7 +35,7 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: clip; }
 body { margin: 0; background: var(--obsidian); color: var(--mineral); font: 400 17px/1.6 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--mint); outline-offset: 3px; }
@@ -146,7 +146,7 @@ h1, h2, p { margin: 0; }
 .terminal pre .n { color: #e8c46a; }
 
 /* ---------------------------------------------------------------- index */
-.index { background: var(--mineral); color: var(--ink); padding: clamp(80px, 10vw, 140px) 0 clamp(64px, 8vw, 110px); position: relative; }
+.index { background: var(--mineral); color: var(--ink); padding: clamp(56px, 7vw, 96px) 0 clamp(72px, 9vw, 120px); position: relative; }
 .index-head { max-width: var(--max); margin: 0 auto clamp(36px, 5vw, 60px); padding: 0 var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; }
 .index-head p { color: var(--ink-2); max-width: 46ch; }
 .entries { list-style: none; margin: 0 auto; padding: 0 var(--gutter); max-width: var(--max); counter-reset: e; }
@@ -162,9 +162,11 @@ h1, h2, p { margin: 0; }
 .art img { width: 72px; height: 72px; image-rendering: pixelated; }
 
 /* ---------------------------------------------------------------- trust + hallmarks */
-.trust { background: var(--mineral-2); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.disclose, .marks { padding: clamp(72px, 9vw, 128px) var(--gutter); display: grid; gap: 22px; align-content: start; }
-.disclose { background: var(--ink); color: #c2c9c3; }
+.trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter) clamp(88px, 10vw, 140px); }
+.trust-wrap { background: var(--mineral); }
+.disclose, .marks { display: grid; gap: 22px; align-content: start; }
+.marks { padding-top: clamp(28px, 3vw, 44px); }
+.disclose { background: var(--ink); color: #c2c9c3; padding: clamp(32px, 4vw, 52px); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%); box-shadow: 0 30px 60px -30px rgba(6, 17, 14, 0.5); }
 .disclose h2 { color: var(--mineral); margin-bottom: 12px; }
 .disclose p { max-width: 50ch; font-size: 17px; }
 .disclose b { color: var(--mineral); font-weight: 600; }
@@ -173,12 +175,26 @@ h1, h2, p { margin: 0; }
 .punches li { display: grid; gap: 14px; align-content: start; }
 .punches p { font-size: 15px; color: var(--ink-2); }
 .punches b { color: var(--ink); display: block; }
-.punch { justify-self: start; display: inline-grid; place-items: center; min-width: 150px; height: 64px; padding: 0 22px; font: 800 14px/1 var(--display); font-stretch: 125%; letter-spacing: 0.14em; color: #9d9b8e; background: var(--mineral-2); text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.8), -1px -1px 0 rgba(0, 0, 0, 0.22); box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.18), inset -3px -3px 6px rgba(255, 255, 255, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.06); transition: transform .3s; }
+.punch { justify-self: start; display: inline-grid; place-items: center; min-width: 150px; height: 64px; padding: 0 22px; font: 800 14px/1 var(--display); font-stretch: 125%; letter-spacing: 0.14em; color: #9d9b8e; background: var(--mineral); text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.8), -1px -1px 0 rgba(0, 0, 0, 0.22); box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.18), inset -3px -3px 6px rgba(255, 255, 255, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.06); transition: transform .3s; }
 .punches li:hover .punch { transform: scale(0.97); }
 .p-oval { border-radius: 999px; }
 .p-shield { border-radius: 6px 6px 40px 40px; }
 .p-cut { clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%); }
 .p-oct { clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% calc(100% - 16px), calc(100% - 16px) 100%, 16px 100%, 0 calc(100% - 16px), 0 16px); }
+
+/* ---------------------------------------------------------------- transitions */
+/* Where the page turns from obsidian to mineral and back, it does so through
+   strata: bands of stone in between, the ledger section's geology at page scale. */
+.seam { position: relative; height: clamp(70px, 9vw, 140px); line-height: 0; background: var(--mineral); margin: -1px 0; z-index: 1; }
+.seam-svg { display: block; width: 100%; height: 100%; }
+.seam-up { transform: scaleY(-1); }
+.seam-down::before { content: ''; position: absolute; left: 0; right: 0; top: -120px; height: 120px; background: linear-gradient(transparent, #0b1915); pointer-events: none; }
+.rule { border: 0; height: 1px; max-width: var(--max); margin: 0 auto clamp(72px, 9vw, 120px); background: linear-gradient(90deg, transparent, rgba(88, 232, 187, 0.35) 30%, rgba(242, 241, 235, 0.14) 70%, transparent); }
+.product { position: relative; }
+.product::before { content: ''; position: absolute; z-index: -1; left: 0; right: 0; top: 18%; height: 70%; background: radial-gradient(50% 50% at 62% 50%, rgba(19, 160, 126, 0.13), transparent 70%); pointer-events: none; }
+.reveal { transition: transform .9s cubic-bezier(.2, .7, .1, 1), opacity .9s cubic-bezier(.2, .7, .1, 1); }
+.reveal.pre { opacity: 0.001; transform: translateY(28px); }
+.entries li.reveal.pre { transform: translateY(16px); }
 
 /* ---------------------------------------------------------------- footer */
 .foot { position: relative; overflow: hidden; padding: clamp(56px, 7vw, 88px) var(--gutter) 0; background: var(--obsidian); }
@@ -203,6 +219,7 @@ h1, h2, p { margin: 0; }
   .entries a { grid-template-columns: 1fr; gap: 10px; }
   .entries .where { text-align: left; }
   .trust { grid-template-columns: 1fr; }
+  .seam { height: 64px; }
 }
 @media (max-width: 560px) {
   .top nav a:not(.nav-open) { display: none; }
