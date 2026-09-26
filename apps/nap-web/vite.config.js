@@ -25,7 +25,10 @@ const extensionPages = (mode) => ({
       // The phone app's pages also reach its native side (Tauri IPC), for
       // biometric unlock (§151).
       .replace(/connect-src 'self'/, `connect-src 'self' ${api}${mode === 'mobile' ? ' ipc: http://ipc.localhost' : ''}`)
-      .replace(/\s*<link rel="manifest"[^>]*>/, '');
+      .replace(/\s*<link rel="manifest"[^>]*>/, '')
+      // Ignored in a <meta> policy, and Chrome lists that under the
+      // extension's Errors; the manifest's own policy governs these pages.
+      .replace(mode === 'extension' ? / frame-ancestors 'none';/ : /$^/, '');
   },
 });
 
