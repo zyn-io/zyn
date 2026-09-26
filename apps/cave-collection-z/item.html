@@ -82,7 +82,7 @@
       <p class="lede" id="lede">
         Every object here is an asset the chain can move exactly once at a time. What it is — its
         art, traits and rarity — is public. Whether <strong>you</strong> hold it is asked of your own
-        Nap, and never told to this site.
+        Nap in your browser, and never told to the cave's server.
       </p>
 
       <div class="ledger">
@@ -145,19 +145,19 @@
             <!-- Someone else's, and for sale. -->
             <div id="buy" hidden>
               <p class="say">
-                <strong>This one is for sale.</strong> Taking it pays the asking price from your
+                <strong>This one is for sale.</strong> Taking it pays the asking price plus the 1% collection fee from your
                 ZEC.zy and moves the object to you in the same step — neither half can happen
                 without the other.
               </p>
               <button class="act" id="take" type="button">Take it</button>
             </div>
 
-            <p class="out" id="out"></p>
+            <p class="out" id="out" role="status" aria-live="polite"></p>
             <button class="act ghost" id="again" type="button">Read again</button>
           </section>
 
           <section class="state" id="s-broke" hidden>
-            <p class="say">The wallet could not answer.</p>
+            <p class="say">Nap or the chain did not answer.</p>
             <p class="out bad" id="broke"></p>
             <button class="act ghost" id="retry" type="button">Try again</button>
           </section>
@@ -172,6 +172,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=4"></script>
+    <script type="module" src="/zstore.js?v=5"></script>
   </body>
 </html>

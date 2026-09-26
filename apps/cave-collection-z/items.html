@@ -4,15 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070807" />
-    <meta name="description" content="What you hold in the cave. Read from your own key — the site is told nothing." />
+    <meta name="description" content="What you hold in the cave. Read from your own key — the cave's server is told nothing." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/items" />
     <meta property="og:title" content="Cave — what you hold" />
-    <meta property="og:description" content="Your shelf. Read from your own key; the site is told nothing." />
+    <meta property="og:description" content="Your shelf. Read from your own key; the cave's server is told nothing." />
     <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Cave — what you hold" />
-    <meta name="twitter:description" content="Your shelf. Read from your own key; the site is told nothing." />
+    <meta name="twitter:description" content="Your shelf. Read from your own key; the cave's server is told nothing." />
     <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <title>Cave — what you hold</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
@@ -81,8 +81,8 @@
       <h1><span>What you</span><span>hold</span></h1>
 
       <p class="lede">
-        Your shelf, read from <strong>your own key</strong>. This page asks the wallet and the
-        wallet asks the chain — the site is never told what is here, which is the
+        Your shelf, read from <strong>your own key</strong>. This page asks your Nap, in your browser, and
+        Nap reads the chain — the cave's server is never told what is here, which is the
         difference between a gallery of your things and a gallery of everyone's.
       </p>
 
@@ -113,8 +113,8 @@
 
           <section class="state" id="s-empty" hidden>
             <p class="say">
-              <strong>Nothing on the shelf yet.</strong> Items arrive when a place in a
-              collection is drawn and claimed, or when someone sends you one.
+              <strong>Nothing on the shelf yet.</strong> Items arrive when you claim a win,
+              mint in the open mint, buy one on the market, or someone sends you one.
             </p>
             <a class="act" href="/mint">Take a place</a>
           </section>
@@ -122,12 +122,12 @@
           <section class="state" id="s-shelf" hidden>
             <div class="owed" id="owed" hidden><span></span><button class="act" id="collect" type="button">Collect with Nap</button></div>
             <div class="shelf" id="shelf"></div>
-            <p class="out" id="out"></p>
+            <p class="out" id="out" role="status" aria-live="polite"></p>
             <button class="act ghost" id="again" type="button">Read again</button>
           </section>
 
           <section class="state" id="s-broke" hidden>
-            <p class="say">The wallet could not answer.</p>
+            <p class="say">Nap or the chain did not answer.</p>
             <p class="out bad" id="broke"></p>
             <button class="act ghost" id="retry" type="button">Try again</button>
           </section>
@@ -143,6 +143,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=4"></script>
+    <script type="module" src="/zstore.js?v=5"></script>
   </body>
 </html>

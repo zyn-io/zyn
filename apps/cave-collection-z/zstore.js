@@ -26,15 +26,40 @@ const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const isInt = (v) => typeof v === 'string' && /^\d{1,40}$/.test(v);
 const withNet = (path) => (NETWORK === 'testnet' ? `${path}${path.includes('?') ? '&' : '?'}network=testnet` : path);
 
+/// A ZEC.zy amount for display, to 8 decimals (cut, never rounded up).
 function zec(raw) {
   const v = BigInt(raw);
   const frac = (v % WAD).toString().padStart(18, '0').replace(/0+$/, '').slice(0, 8);
   return `${v / WAD}${frac ? `.${frac}` : ''}`;
 }
+/// The same amount in full, for what is paid: Nap checks it to the last digit
+/// against the chain, and a price with a 1% fee can run past 8 decimals.
+function exact(raw) {
+  const v = BigInt(raw);
+  const frac = (v % WAD).toString().padStart(18, '0').replace(/0+$/, '');
+  return `${v / WAD}${frac ? `.${frac}` : ''}`;
+}
+
+/// A whole number from a field, within 1..max, or null.
+function whole(id, max) {
+  const raw = String(el(id)?.value ?? '').trim();
+  const n = Number(raw);
+  return /^\d+$/.test(raw) && n >= 1 && n <= max ? n : null;
+}
+
+/// What a failed request means to the holder. 4001 is Nap's "no" — nothing
+/// happened; anything else (a closed or blocked window, the chain) says so
+/// in its own words.
+const failText = (e, no) => (e?.code === 4001 ? no : e?.message || String(e));
 
 function show(name) {
   document.querySelectorAll('.ledger-body > .state').forEach((s) => { s.hidden = s.id !== `s-${name}`; });
 }
+
+/// Look again after a write: an epoch seals about once a minute, so a few
+/// looks over two minutes rather than one that comes too early. A look from a
+/// page since left does nothing (each read checks its generation).
+const later = (fn) => { for (const t of [15000, 40000, 70000, 110000]) setTimeout(fn, t); };
 
 function say(text, bad = false) {
   const out = el('out');
@@ -67,18 +92,32 @@ const rarityTag = (d) => (d.rarity ? `<span class="tag rarity r-${esc(d.rarity.t
 // ---------------------------------------------------------------------------
 // The chain's public order book.
 
-async function publicOffers() {
-  const id = crypto.randomUUID();
-  const r = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'zyn_offers', params: [] }),
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  });
-  const body = await r.json();
+/// One read of the chain: a clear error for an HTTP failure or a hang, never
+/// "Unexpected token '<'" or a spinner forever.
+async function chain(method) {
+  let r;
+  try {
+    r = await fetch(RPC, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method, params: [] }),
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) {
+    throw new Error(e?.name === 'TimeoutError' ? 'The chain took too long to answer. Try again shortly.' : 'The chain could not be reached. Check your connection and try again.');
+  }
+  if (!r.ok) throw new Error(`The chain did not answer (HTTP ${r.status}). Try again shortly.`);
+  const body = await r.json().catch(() => null);
+  if (!body) throw new Error('The chain sent something unreadable. Try again shortly.');
   if (body.error) throw new Error(body.error.message || 'The chain did not answer');
-  return (body.result?.offers || []).filter((o) => isHex(o.item) && isHex(o.asset) && isHex(o.collection)
+  return body.result;
+}
+
+async function publicOffers() {
+  const result = await chain('zyn_offers');
+  return (result?.offers || []).filter((o) => isHex(o.item) && isHex(o.asset) && isHex(o.collection)
     && isInt(o.pay_raw) && isInt(o.price_raw) && Number.isSafeInteger(o.serial) && o.serial >= 0);
 }
 
@@ -91,8 +130,17 @@ const walletListeners = new Set();
 /// left must not write into the page you are on.
 let generation = 0;
 
+/// Whether a read can be answered without putting Nap's window in front of
+/// the holder: Nap in the browser only while its window is open; the
+/// extension only while its window holds an unlocked session for this site —
+/// asked with nap_session, which never opens anything.
 function canAskQuietly() {
   return !!current && (!current.provider.isNapWeb || current.provider.isOpen());
+}
+async function quietly() {
+  if (!canAskQuietly()) return false;
+  if (current.provider.isNapWeb) return true;
+  try { return !!(await current.provider.request({ method: 'nap_session' })); } catch { return false; }
 }
 
 function ask(method, p) {
@@ -123,27 +171,39 @@ async function pick() {
   if (current) {
     body.innerHTML = `<p class="say">Connected: <strong>${esc(current.info.name)}</strong> · <code>${esc(current.session.account.slice(0, 10))}…</code> · ${esc(current.session.network)}</p>
       <button type="button" class="act ghost zwallet-off">Disconnect</button>`;
-    body.querySelector('.zwallet-off').onclick = () => { current = null; renderWalletButtons(); walletListeners.forEach((f) => f()); dialog.close(); };
+    body.querySelector('.zwallet-off').onclick = () => {
+      // Nap forgets this site too, so connecting again asks the holder again.
+      const was = current;
+      current = null;
+      if (was.provider.isNapWeb ? was.provider.isOpen() : true) was.provider.request({ method: 'nap_disconnect' }).catch(() => {});
+      renderWalletButtons(); walletListeners.forEach((f) => f()); dialog.close();
+    };
     return;
   }
   body.innerHTML = '<p class="say">Looking for Nap…</p>';
   const list = await discover({ web: NAP });
   body.innerHTML = list.map((w, i) => `<button type="button" class="act zwallet-option" data-i="${i}">${esc(w.info.name)}</button>`).join('')
-    + '<p class="out" id="zwallet-status"></p><p class="say small">Connecting tells this site your Zyn account on this network — not your balances or keys. Every sale, purchase and collection is approved in Nap.</p>';
-  body.querySelectorAll('[data-i]').forEach((b) => {
+    + `<p class="out" id="zwallet-status" role="status" aria-live="polite"></p><p class="say small">Connecting shares your Zyn account and a Zcash address with this site, and lets it read your items, tickets and what the market owes you. It never sees your keys. Every payment is approved in Nap.${NETWORK === 'testnet' ? ' <strong>Testnet:</strong> nothing here has value.' : ''}</p>`;
+  const options = [...body.querySelectorAll('[data-i]')];
+  options.forEach((b) => {
     b.onclick = async () => {
       const entry = list[Number(b.dataset.i)];
       const status = body.querySelector('#zwallet-status');
-      status.textContent = entry.provider.isNapWeb ? "Nap's window is open — unlock it there and approve." : 'Approve the connection in Nap.';
+      status.classList.remove('bad');
+      status.textContent = entry.provider.isNapWeb ? "Nap's window is open — finish there." : 'Approve the connection in Nap.';
+      options.forEach((o) => { o.disabled = true; });
       try {
-        current = await connect(entry, { network: NETWORK });
+        const got = await connect(entry, { network: NETWORK });
+        if (got.session?.network !== NETWORK) throw new Error(`Nap answered on ${got.session?.network || 'another network'}, and this page is on ${NETWORK}. Connect again.`);
+        current = got;
         current.provider.on?.('disconnect', () => { current = null; renderWalletButtons(); walletListeners.forEach((f) => f()); });
         renderWalletButtons();
         dialog.close();
         walletListeners.forEach((f) => f());
       } catch (e) {
-        status.textContent = e.code === 4001 ? 'Not connected. Nothing was shared.' : e.message;
-      }
+        status.textContent = failText(e, 'Not connected. Nothing was shared.');
+        status.classList.toggle('bad', e?.code !== 4001);
+      } finally { options.forEach((o) => { o.disabled = false; }); }
     };
   });
 }
@@ -161,10 +221,12 @@ async function shelfPage() {
   const read = async () => {
     if (gen !== generation) return;
     if (!current) return show('connect');
-    if (!canAskQuietly()) return show('ready');
+    if (!(await quietly())) { if (gen === generation) show('ready'); return; }
+    if (gen !== generation) return;
     show('looking');
     try {
       const [mine, owed] = await Promise.all([ask('zyn_nftItems'), ask('zyn_owed')]);
+      if (gen !== generation) return;
       const items = (mine?.items || []).filter((i) => isHex(i.asset) && isHex(i.collection) && Number.isSafeInteger(i.serial));
       const claims = (owed?.owed || []).filter((c) => isHex(c.asset) && isInt(c.amount));
       el('count').textContent = String(items.length);
@@ -180,9 +242,11 @@ async function shelfPage() {
           <span class="tag ${it.listed ? 'listed' : ''}">${it.listed ? 'Listed' : 'Held'}</span> ${rarityTag(d)}
         </a>`;
       }));
+      if (gen !== generation) return;
       el('shelf').innerHTML = cards.join('');
       show('shelf');
     } catch (e) {
+      if (gen !== generation) return;
       el('broke').textContent = e.message;
       show('broke');
     }
@@ -197,7 +261,7 @@ async function shelfPage() {
       const r = await ask('zyn_collect', {});
       say(`Collected${r?.collected ? ` ${r.collected}` : ''}. It is in your Nap wallet.`);
       await read();
-    } catch (e) { say(e.message, true); } finally { el('collect').disabled = false; }
+    } catch (e) { say(failText(e, 'Not collected.'), e?.code !== 4001); } finally { if (el('collect')) el('collect').disabled = false; }
   };
   walletListeners.add(read);
   if (current) read(); else show('connect');
@@ -208,9 +272,15 @@ async function shelfPage() {
 
 async function itemPage() {
   const collection = isHex(params.get('collection')) ? params.get('collection') : CAVE_Z;
-  const serial = Number(params.get('serial'));
-  if (!Number.isSafeInteger(serial) || serial < 0) return show('noid');
+  const raw = params.get('serial');
+  // A serial is a whole number the collection has: no serial is not item 0,
+  // and Collection Z stops at 4,443.
+  if (!/^\d{1,5}$/.test(raw ?? '') || (collection === CAVE_Z && Number(raw) >= 4444)) return show('noid');
+  const serial = Number(raw);
+  show('looking');
+  const gen = generation;
   const d = await describe(collection, serial);
+  if (gen !== generation) return;
   el('name').textContent = d.name;
   el('sub').textContent = d.rarity ? `${d.rarity} · rank ${d.rank} of 4,444` : 'in the cave';
   document.title = `${d.name} — Cave`;
@@ -220,21 +290,22 @@ async function itemPage() {
 
   let offer = null;
   let mine = null;
-  const gen = generation;
   const read = async () => {
     if (gen !== generation) return;
     say('');
     try {
       offer = (await publicOffers()).find((o) => o.collection === collection && o.serial === serial) || null;
-    } catch (e) { say(`The order book could not be read: ${e.message}`, true); }
+    } catch (e) { if (gen === generation) say(`The order book could not be read: ${e.message}`, true); }
+    if (gen !== generation) return;
     mine = null;
-    if (current && canAskQuietly()) {
+    if (current && (await quietly())) {
       try {
         mine = (await ask('zyn_nftItems'))?.items?.find((i) => i.collection === collection && i.serial === serial) || null;
       } catch { /* the public half still stands */ }
     }
-    el('state-tag').textContent = mine ? (mine.listed ? 'yours · listed' : 'yours') : offer ? 'for sale' : 'held';
-    el('asking').textContent = offer ? `${zec(offer.price_raw)} ZEC.zy (you pay ${zec(offer.pay_raw)})` : 'not listed';
+    if (gen !== generation) return;
+    el('state-tag').textContent = mine ? (mine.listed ? 'yours · listed' : 'yours') : offer ? 'for sale' : 'not for sale';
+    el('asking').textContent = offer ? `${zec(offer.price_raw)} ZEC.zy (you pay ${exact(offer.pay_raw)} with the 1% fee)` : 'not listed';
     el('sell').hidden = !(mine && !mine.listed);
     el('unsell').hidden = !(mine && mine.listed);
     el('buy').hidden = !(offer && !mine);
@@ -246,19 +317,19 @@ async function itemPage() {
     const price = el('price').value.trim();
     if (!/^\d+(\.\d{1,8})?$/.test(price) || Number(price) <= 0) return say('Name a price in ZEC.zy, like 0.05.', true);
     el('list').disabled = true;
-    try { await ask('zyn_nftList', { asset: mine.asset, price }); say('Listed. It rests on the book once the epoch seals.'); setTimeout(read, 12000); }
-    catch (e) { say(e.message, true); } finally { el('list').disabled = false; }
+    try { await ask('zyn_nftList', { asset: mine.asset, price }); say('Listed. It rests on the book once the epoch seals — about a minute.'); later(read); }
+    catch (e) { say(failText(e, 'Not listed.'), e?.code !== 4001); } finally { if (el('list')) el('list').disabled = false; }
   };
   el('cancel').onclick = async () => {
     el('cancel').disabled = true;
-    try { await ask('zyn_nftCancel', { asset: mine.asset }); say('Taken back. It is yours to hold or list again.'); setTimeout(read, 12000); }
-    catch (e) { say(e.message, true); } finally { el('cancel').disabled = false; }
+    try { await ask('zyn_nftCancel', { asset: mine.asset }); say('Taken back once the epoch seals — about a minute. It is yours to hold or list again.'); later(read); }
+    catch (e) { say(failText(e, 'Not cancelled.'), e?.code !== 4001); } finally { if (el('cancel')) el('cancel').disabled = false; }
   };
   el('take').onclick = async () => {
     if (!current) return pick();
     el('take').disabled = true;
-    try { await ask('zyn_nftBuy', { item: offer.item, pay: zec(offer.pay_raw) }); say(`Bought ${d.name}. It is in your Nap wallet once the epoch seals.`); setTimeout(read, 12000); }
-    catch (e) { say(e.message, true); } finally { el('take').disabled = false; }
+    try { await ask('zyn_nftBuy', { item: offer.item, pay: exact(offer.pay_raw) }); say(`Bought ${d.name}. It is in your Nap wallet once the epoch seals — about a minute.`); later(read); }
+    catch (e) { say(failText(e, 'Not bought. Nothing was paid.'), e?.code !== 4001); } finally { if (el('take')) el('take').disabled = false; }
   };
   el('again').onclick = read;
   el('open-nap').onclick = async () => { await pick(); };
@@ -275,17 +346,19 @@ async function marketPage() {
     if (gen !== generation) return;
     show('looking');
     let offers;
-    try { offers = await publicOffers(); } catch (e) { el('broke').textContent = e.message; return show('broke'); }
+    try { offers = await publicOffers(); } catch (e) { if (gen !== generation) return; el('broke').textContent = e.message; return show('broke'); }
+    if (gen !== generation) return;
     el('count').textContent = String(offers.length);
     if (!offers.length) return show('empty');
     // The book does not say whose a listing is. The holder's own Nap does,
     // so their listings read "Yours" instead of offering them to themselves.
     const yours = new Set();
-    if (current && canAskQuietly()) {
+    if (current && (await quietly())) {
       try {
         for (const it of (await ask('zyn_nftItems'))?.items || []) if (it.listed) yours.add(it.asset);
       } catch { /* the public book still stands */ }
     }
+    if (gen !== generation) return;
     const rows = await Promise.all(offers.map(async (o, i) => {
       const d = await describe(o.collection, o.serial);
       const action = yours.has(o.asset)
@@ -298,6 +371,7 @@ async function marketPage() {
         <td class="r">${action}</td>
       </tr>`;
     }));
+    if (gen !== generation) return;
     el('rows').innerHTML = rows.join('');
     el('rows').querySelectorAll('[data-buy]').forEach((b) => {
       b.onclick = async () => {
@@ -305,10 +379,10 @@ async function marketPage() {
         const o = offers[Number(b.dataset.buy)];
         b.disabled = true;
         try {
-          await ask('zyn_nftBuy', { item: o.item, pay: zec(o.pay_raw) });
-          say(`Bought ${(await describe(o.collection, o.serial)).name}. It is in your Nap wallet once the epoch seals.`);
-          setTimeout(read, 12000);
-        } catch (e) { say(e.message, true); b.disabled = false; }
+          await ask('zyn_nftBuy', { item: o.item, pay: exact(o.pay_raw) });
+          say(`Bought ${(await describe(o.collection, o.serial)).name}. It is in your Nap wallet once the epoch seals — about a minute.`);
+          later(read);
+        } catch (e) { say(failText(e, 'Not bought. Nothing was paid.'), e?.code !== 4001); b.disabled = false; }
       };
     });
     show('book');
@@ -325,17 +399,8 @@ async function marketPage() {
 // can say, because only the wallet that bought one can derive its id.
 
 async function chainSale() {
-  const id = crypto.randomUUID();
-  const r = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'zyn_market', params: [] }),
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  });
-  const body = await r.json();
-  if (body.error) throw new Error(body.error.message || 'The chain did not answer');
-  const s = (body.result?.sales || []).find((x) => x.collection === CAVE_Z);
+  const result = await chain('zyn_market');
+  const s = (result?.sales || []).find((x) => x.collection === CAVE_Z);
   if (!s || !['ticket_price', 'claim_price', 'open_price'].every((k) => isInt(s[k]))) return null;
   return s;
 }
@@ -372,7 +437,9 @@ const units = (raw, decimals) => {
 /// Burn for `tickets`: Nap's memo, the holder's Solana wallet, one signed
 /// transaction. Returns the Solana signature.
 async function burnForTickets(cfg, tickets, report) {
-  const { memo } = await ask('zyn_burnMemo', {});
+  // A fresh code every burn: two burns never share one, so a second burn made
+  // before the first is posted still earns its own tickets.
+  const { memo } = await ask('zyn_burnMemo', { fresh: true });
   if (!/^zyn:[0-9a-f]{64}$/.test(memo || '')) throw new Error('Nap did not give a burn code.');
   const wallets = sol.solanaWallets();
   await new Promise((r) => setTimeout(r, 300));
@@ -396,23 +463,50 @@ async function burnForTickets(cfg, tickets, report) {
 }
 
 const PHASE_LABEL = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' };
+/// §144.8: claims run for the terms' 16,128 Zcash blocks after the close.
+const CLAIM_BLOCKS = 16128;
 
 async function mintPage() {
   const gen = generation;
   let sale = null;
+  let cfg = null;
+  const burnMax = () => Math.max(0, Math.min(20, Number(sale?.voucher_cap || 0) - Number(sale?.voucher_tickets || 0)));
   const setTotal = () => {
-    if (!sale) return;
-    const n = Math.max(1, Math.min(20, Number(el('count-in').value) || 1));
-    el('total').textContent = `${zec(BigInt(sale.ticket_price) * BigInt(n))} ZEC.zy`;
+    if (!sale || !el('total')) return;
+    const n = whole('count-in', 20);
+    el('total').textContent = n ? `${exact(BigInt(sale.ticket_price) * BigInt(n))} ZEC.zy` : 'a whole number from 1 to 20';
+    el('buy').disabled = !n;
+  };
+  const setBurnTotal = () => {
+    if (!cfg || !el('burn-total')) return;
+    const max = burnMax();
+    el('burn-in').max = String(Math.max(1, max));
+    const n = whole('burn-in', max);
+    el('burn-total').textContent = n ? `${units(sol.burnAmount(n, cfg.per_ticket), cfg.decimals)} ${cfg.symbol}` : `a whole number from 1 to ${max}`;
+    el('burn-go').disabled = !n;
+  };
+  const setMintTotal = () => {
+    if (!sale || !el('mint')) return;
+    const left = sale.open_count - sale.open_next;
+    const n = whole('mint-in', Math.min(10, left));
+    el('mint').disabled = !n;
+    el('mint').textContent = n ? `Mint ${n} for ${exact(BigInt(sale.open_price) * BigInt(n))} ZEC.zy` : `Mint 1 to ${Math.min(10, left)}`;
   };
   const mine = async () => {
     const box = el('mine-box');
-    if (!current || !canAskQuietly()) { box.hidden = true; return null; }
+    if (!current || !(await quietly())) { if (box) box.hidden = true; return null; }
     const r = await ask('zyn_saleTickets', {});
+    if (gen !== generation) return null;
     const tickets = (r?.tickets || []).filter((t) => isHex(t.ticket) && Number.isSafeInteger(t.index) && Array.isArray(t.serials));
     box.hidden = !tickets.length;
-    el('mine').innerHTML = tickets.map((t) => `<li class="${t.result === 'won' ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}${t.burned ? ' · burned' : ''}</span>
-      <b>${t.result === 'won' ? esc((t.names || []).join(', ')) : t.result === 'claimed' ? 'claimed' : t.result === 'no win' ? 'no item this time' : 'waiting for the draw'}</b></li>`).join('');
+    const late = sale?.phase === 'openmint';
+    el('mine').innerHTML = tickets.map((t) => {
+      const text = t.result === 'claimed' ? 'claimed'
+        : t.result === 'won' ? (late ? 'not claimed in time — back in the open mint' : esc((t.names || []).join(', ')))
+          : t.result === 'no win' ? 'no item this time'
+            : sale?.phase === 'open' || sale?.phase === 'closed' ? 'waiting for the draw' : 'Nap could not check the draw yet';
+      return `<li class="${t.result === 'won' && !late ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}${t.burned ? ' · burned' : ''}</span><b>${text}</b></li>`;
+    }).join('');
     return tickets;
   };
   const read = async () => {
@@ -421,84 +515,110 @@ async function mintPage() {
       sale = await chainSale();
       if (gen !== generation) return;
       el('phase').textContent = sale ? PHASE_LABEL[sale.phase] || sale.phase : 'not open';
+      // The lede sells tickets; once tickets are over it would be selling the past.
+      el('lede').hidden = !!sale && sale.phase !== 'open';
       if (!sale) return show('none');
       el('lede-price').textContent = `${zec(sale.ticket_price)} ZEC.zy`;
       el('claim-price').textContent = `${zec(sale.claim_price)} ZEC.zy`;
       el('open-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
       setTotal();
-      const cfg = await burnToken();
-      const left = Math.max(0, Number(sale.voucher_cap || 0) - Number(sale.voucher_tickets || 0));
+      cfg = await burnToken();
+      if (gen !== generation) return;
+      const left = burnMax();
       el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0);
       if (cfg) {
         document.querySelectorAll('[data-burn-symbol]').forEach((x) => { x.textContent = cfg.symbol; });
         el('burn-rate').textContent = `${units(cfg.per_ticket, cfg.decimals)} ${cfg.symbol}`;
-        el('burn-left').textContent = String(left);
-        const n = Math.max(1, Math.min(20, left, Number(el('burn-in').value) || 1));
-        el('burn-total').textContent = `${units(sol.burnAmount(n, cfg.per_ticket), cfg.decimals)} ${cfg.symbol}`;
+        el('burn-left').textContent = String(Math.max(0, Number(sale.voucher_cap || 0) - Number(sale.voucher_tickets || 0)));
+        setBurnTotal();
       }
       if (sale.phase === 'openmint') {
-        const left = sale.open_count - sale.open_next;
-        el('left').textContent = String(left);
-        show(left > 0 ? 'openmint' : 'soldout');
+        const open = sale.open_count - sale.open_next;
+        el('left').textContent = String(open);
+        show(open > 0 ? 'openmint' : 'soldout');
+        setMintTotal();
       } else show(sale.phase === 'open' ? 'open' : sale.phase === 'closed' ? 'closed' : 'drawn');
+      if (sale.phase === 'drawn' && Number.isSafeInteger(sale.close_zcash_height)) {
+        el('claim-deadline').textContent = `Claims close at Zcash block ${(sale.close_zcash_height + CLAIM_BLOCKS).toLocaleString('en-US')} — about two weeks after the door shut. A win not claimed by then goes to the open mint.`;
+      }
       const tickets = await mine().catch(() => null);
       if (gen !== generation || sale.phase !== 'drawn') return;
       const wins = (tickets || []).filter((t) => t.result === 'won');
+      const unchecked = (tickets || []).some((t) => t.result === 'waiting');
       const serials = wins.flatMap((t) => t.serials);
       el('claim').disabled = !serials.length;
       el('claim-total-row').hidden = !serials.length;
-      el('claim-total').textContent = `${zec(BigInt(sale.claim_price) * BigInt(serials.length))} ZEC.zy`;
+      el('claim-total').textContent = `${exact(BigInt(sale.claim_price) * BigInt(serials.length))} ZEC.zy`;
       const cards = await Promise.all(serials.map(async (x) => { const d = await describe(CAVE_Z, x); return `<figure>${art(d)}<figcaption>${esc(d.name)} ${rarityTag(d)}</figcaption></figure>`; }));
+      if (gen !== generation) return;
       el('won-art').innerHTML = cards.join('');
-      if (!current) el('out-claim').textContent = 'Connect Nap to see what your tickets drew.';
-      else if (!tickets) el('out-claim').textContent = "Nap's window is closed — connect again to see your tickets.";
-      else if (!serials.length) el('out-claim').textContent = (tickets || []).some((t) => t.result === 'claimed') ? 'Everything this wallet drew is claimed.' : 'None of this wallet’s tickets drew an item.';
-      else el('out-claim').textContent = '';
+      const out = el('out-claim');
+      out.classList.remove('bad');
+      if (!current) out.textContent = 'Connect Nap to see what your tickets drew.';
+      else if (!tickets) out.textContent = current.provider.isNapWeb ? "Nap's window is closed — connect again to see your tickets." : 'Open Nap to see your tickets.';
+      else if (unchecked) { out.textContent = 'Nap could not check the posted draw against the chain yet. Try again in a moment — nothing is lost.'; out.classList.add('bad'); }
+      else if (!serials.length) out.textContent = tickets.some((t) => t.result === 'claimed') ? 'Everything this wallet drew is claimed.' : (tickets.length ? 'None of this wallet’s tickets drew an item.' : 'This wallet has no tickets in this sale.');
+      else out.textContent = '';
     } catch (e) {
+      if (gen !== generation) return;
       el('broke').textContent = e.message;
       show('broke');
     }
   };
-  const act = (button, out, method, p, done) => async () => {
+  const act = (button, out, method, p, done, no) => async () => {
     if (!current) return pick();
+    const params_ = p();
+    if (!params_) return;
     el(button).disabled = true;
     el(out).classList.remove('bad');
     el(out).textContent = "Approve it in Nap's window.";
     try {
-      const r = await ask(method, p());
+      const r = await ask(method, params_);
+      if (gen !== generation) return;
       el(out).textContent = done(r);
-      setTimeout(read, 12000);
+      later(read);
     } catch (e) {
-      el(out).textContent = e.code === 4001 ? 'Not approved. Nothing was paid.' : e.message;
-      el(out).classList.add('bad');
-    } finally { el(button).disabled = false; }
+      if (gen !== generation) return;
+      el(out).textContent = failText(e, no);
+      el(out).classList.toggle('bad', e?.code !== 4001);
+    } finally { if (el(button)) el(button).disabled = false; }
   };
   el('count-in').oninput = setTotal;
-  el('burn-in').oninput = read;
+  el('burn-in').oninput = setBurnTotal;
+  el('mint-in').oninput = setMintTotal;
   el('burn-go').onclick = async () => {
     if (!current) return pick();
-    const cfg = await burnToken();
-    if (!cfg || !sale || sale.phase !== 'open') return;
-    const n = Math.max(1, Math.min(20, Number(el('burn-in').value) || 1));
     const out = el('out-burn');
-    el('burn-go').disabled = true;
     out.classList.remove('bad');
+    // The sale again, right before burning: a burn for more tickets than are
+    // left is refused whole by the chain, and the tokens are gone either way.
+    try { sale = await chainSale(); } catch (e) { out.textContent = e.message; out.classList.add('bad'); return; }
+    cfg = await burnToken();
+    if (gen !== generation || !cfg || !sale || sale.phase !== 'open') { out.textContent = 'Burning is closed.'; out.classList.add('bad'); return; }
+    const max = burnMax();
+    const n = whole('burn-in', max);
+    if (!n) { out.textContent = max ? `Burn for 1 to ${max} tickets — that is how many burn tickets are left.` : 'The burn tickets are all taken.'; out.classList.add('bad'); setBurnTotal(); return; }
+    el('burn-go').disabled = true;
     try {
       const sig = await burnForTickets(cfg, n, (t) => { out.textContent = t; });
       out.textContent = `Burned. Your ${n} ticket${n > 1 ? 's' : ''} appear below once Solana finalizes it and the burn is posted — usually within a minute or two. Solana: ${sig.slice(0, 12)}…`;
-      for (const wait of [30000, 60000, 120000]) setTimeout(read, wait);
+      for (const wait of [30000, 60000, 120000, 240000]) setTimeout(read, wait);
     } catch (e) {
       out.textContent = e.code === 4001 || /reject|declin|cancel/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message;
       out.classList.add('bad');
-    } finally { el('burn-go').disabled = false; }
+    } finally { if (el('burn-go')) el('burn-go').disabled = false; }
   };
   el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {
-    const count = Math.max(1, Math.min(20, Number(el('count-in').value) || 1));
-    return { count, pay: zec(BigInt(sale.ticket_price) * BigInt(count)) };
-  }, (r) => `${r?.tickets?.length || 0} ticket${r?.tickets?.length === 1 ? '' : 's'} bought. They are drawn once the door shuts.`);
-  el('claim').onclick = act('claim', 'out-claim', 'zyn_claimItems', () => ({}), (r) => `Claimed ${r?.claimed?.length || 0}. They are in your Nap wallet once the epoch seals.`);
-  el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => ({ count: Math.max(1, Math.min(10, Number(el('mint-in').value) || 1)) }),
-    (r) => `Minted ${(r?.names || []).join(', ') || 'nothing'}.`);
+    const count = whole('count-in', 20);
+    if (!count) { el('out').textContent = 'Enter a whole number of tickets, 1 to 20.'; el('out').classList.add('bad'); return null; }
+    return { count, pay: exact(BigInt(sale.ticket_price) * BigInt(count)) };
+  }, (r) => `${r?.tickets?.length || 0} ticket${r?.tickets?.length === 1 ? '' : 's'} bought. They are drawn once the door shuts.`, 'Not bought. Nothing was paid.');
+  el('claim').onclick = act('claim', 'out-claim', 'zyn_claimItems', () => ({}), (r) => `Claimed ${r?.claimed?.length || 0}. They are in your Nap wallet once the epoch seals — about a minute.`, 'Not claimed. Nothing was paid.');
+  el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => {
+    const count = whole('mint-in', Math.min(10, sale.open_count - sale.open_next));
+    if (!count) { el('out-mint').textContent = 'Enter a whole number to mint, 1 to 10.'; el('out-mint').classList.add('bad'); return null; }
+    return { count };
+  }, (r) => `Minted ${(r?.names || []).join(', ') || 'nothing'}.`, 'Not minted. Nothing was paid.');
   el('retry').onclick = read;
   walletListeners.add(read);
   await read();
@@ -517,7 +637,19 @@ function start(page) {
   generation += 1;
   walletListeners.clear();
   wireWallet();
-  PAGES[page]?.();
+  testnetBanner();
+  // A page that fails to start says so on its own; nothing is left unhandled.
+  Promise.resolve(PAGES[page]?.()).catch((e) => { const b = el('broke'); if (b) { b.textContent = e?.message || String(e); show('broke'); } });
+}
+
+/// Testnet is a different chain with worthless coins: said on every page.
+function testnetBanner() {
+  if (NETWORK !== 'testnet' || document.querySelector('.testnet-banner')) return;
+  const b = document.createElement('p');
+  b.className = 'testnet-banner';
+  b.setAttribute('role', 'note');
+  b.textContent = 'Testnet — prices, listings and coins here are for trying things out and have no value.';
+  document.body.prepend(b);
 }
 
 async function go(url, push = true) {
@@ -525,6 +657,10 @@ async function go(url, push = true) {
   const next = new DOMParser().parseFromString(html, 'text/html');
   const page = next.body.dataset.page;
   if (!PAGES[page]) { location.href = url.href; return; }
+  // Each page keeps its own layout in <head><style>; the next page's styles
+  // come with its <main>, or it renders in the last page's.
+  document.querySelectorAll('head style').forEach((st) => st.remove());
+  next.querySelectorAll('head style').forEach((st) => document.head.append(document.adoptNode(st)));
   document.querySelector('main').replaceWith(document.adoptNode(next.querySelector('main')));
   // The top bar is outside <main> and stays; only its current-page mark moves.
   const here = url.pathname.replace(/\/$/, '');
@@ -537,6 +673,10 @@ async function go(url, push = true) {
   if (push) history.pushState({}, '', url.href);
   params = new URLSearchParams(url.search);
   window.scrollTo(0, 0);
+  // Screen readers and keyboards land on the new page, not the old link.
+  const main = document.querySelector('main');
+  main.setAttribute('tabindex', '-1');
+  main.focus({ preventScroll: true });
   start(page);
 }
 

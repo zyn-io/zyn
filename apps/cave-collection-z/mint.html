@@ -329,7 +329,7 @@
     <main class="register">
       <h1><span>Take a place</span><span>in the cave</span></h1>
 
-      <p class="lede">
+      <p class="lede" id="lede">
         A ticket costs <strong id="lede-price">0.01 ZEC.zy</strong> and buys a place in the draw — not a
         chosen creature. <strong>What you get is decided after the door shuts</strong>, by a
         number nobody can see yet. That is the whole design: there is no early look and
@@ -344,7 +344,7 @@
         <div class="ledger-body">
 
           <section class="state" id="s-looking">
-            <p class="say">Reading the sale from the chain…</p>
+            <p class="say" role="status">Reading the sale from the chain…</p>
           </section>
 
           <section class="state" id="s-none" hidden>
@@ -390,7 +390,7 @@
               <p class="say">
                 <strong>Or burn <span data-burn-symbol>the token</span> for tickets.</strong>
                 <span id="burn-rate">—</span> on Solana is one ticket, into the same draw at the same odds.
-                The burn carries a code from your Nap, so the tickets are yours and nobody's else — without
+                The burn carries a code from your Nap, so the tickets are yours and nobody else's — without
                 your Solana wallet ever naming your Zyn account. <span id="burn-left">—</span> burn tickets left.
               </p>
               <label class="field">
@@ -404,8 +404,9 @@
               <button class="act ghost" id="burn-go" type="button">Burn with a Solana wallet</button>
               <p class="say small">
                 A burn cannot be undone. A burn ticket costs nothing into the pool; if it wins, its items are
-                claimed at the claim price like any other. Burns that arrive after the sale closes, or after the
-                burn tickets run out, earn no tickets.
+                claimed at the claim price like any other. Burns that arrive after the sale closes, after the
+                burn tickets run out, or for more tickets than are left earn no tickets — this page lets you burn
+                only for what is left.
               </p>
               <p class="out" id="out-burn" role="status" aria-live="polite"></p>
             </div>
@@ -430,6 +431,7 @@
               <span>To claim</span>
               <b id="claim-total">—</b>
             </div>
+            <p class="say small" id="claim-deadline"></p>
             <button class="act" id="claim" type="button">Claim what I drew</button>
             <p class="out" id="out-claim" role="status" aria-live="polite"></p>
           </section>
@@ -486,6 +488,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=4"></script>
+    <script type="module" src="/zstore.js?v=5"></script>
   </body>
 </html>

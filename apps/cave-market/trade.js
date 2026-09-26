@@ -16,10 +16,17 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 const isInt = (v) => typeof v === 'string' && /^\d{1,40}$/.test(v);
 
-/// A WAD amount as a decimal, exactly.
+/// A WAD amount for display, to 8 decimals (cut, never rounded up).
 function zec(raw) {
   const v = BigInt(raw);
   const frac = (v % WAD).toString().padStart(18, '0').replace(/0+$/, '').slice(0, 8);
+  return `${v / WAD}${frac ? `.${frac}` : ''}`;
+}
+/// The same amount in full, for what is paid: Nap checks it to the last digit
+/// against the chain, and a price with a 1% fee can run past 8 decimals.
+function exact(raw) {
+  const v = BigInt(raw);
+  const frac = (v % WAD).toString().padStart(18, '0').replace(/0+$/, '');
   return `${v / WAD}${frac ? `.${frac}` : ''}`;
 }
 
@@ -94,7 +101,7 @@ async function loadMarket() {
       try {
         // Asked before anything is awaited: Nap in the browser may need to
         // open its window, and only this click may open it.
-        await ask('zyn_nftBuy', { item: o.item, pay: zec(o.pay_raw) });
+        await ask('zyn_nftBuy', { item: o.item, pay: exact(o.pay_raw) });
         say($('#trade-note-market'), `Bought ${itemName(o.collection, o.serial)}. It is in your Nap wallet.`);
         loadMarket();
       } catch (e) {

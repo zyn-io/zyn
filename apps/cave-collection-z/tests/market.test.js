@@ -16,11 +16,17 @@ const exit = await read('exit.html');
 const deposit = await read('deposit.html');
 const zstore = await read('zstore.js');
 const napOps = await readFile(new URL('../../nap-web/src/connect-ops.js', import.meta.url), 'utf8').catch(() => null);
-const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8').catch(() => null);
+// Since §148 the extension is Nap in the browser, packaged: its build ships
+// nap-web's pages, and its connect window answers every method from the same
+// connect-ops.js. So "both Naps serve it" is: connect-ops has it, the connect
+// window dispatches connect-ops, and the extension build ships that window.
+const connectApp = await readFile(new URL('../../nap-web/src/connect-app.js', import.meta.url), 'utf8').catch(() => null);
+const extBuild = await readFile(new URL('../../extension/build.mjs', import.meta.url), 'utf8').catch(() => null);
+const content = await readFile(new URL('../../extension/src/content.js', import.meta.url), 'utf8').catch(() => null);
 
 // The wallets live beside the store in the monorepo. Checked out on its own,
 // these cross-app assertions skip with a reason rather than passing quietly.
-const WALLET = napOps && background
+const WALLET = napOps && connectApp && extBuild && content
   ? false
   : 'apps/nap-web or apps/extension is not checked out — run in the monorepo to check the store against both Naps';
 
@@ -32,9 +38,11 @@ test('every method the store asks Nap for exists in both Naps', { skip: WALLET }
   // not answer", which reads as the holder's problem rather than ours.
   assert.ok(walletCalls.length >= 6, `the store asks for ${walletCalls.join(', ')}`);
   for (const m of walletCalls) {
-    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap in the browser serves ${m}`);
-    assert.match(background, new RegExp(`\\b${m}\\s*:`), `the extension serves ${m}`);
+    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap serves ${m}`);
   }
+  assert.match(connectApp, /import \{[^}]*\bMETHODS\b[^}]*\} from '\.\/connect-ops\.js'/, 'the connect window answers from connect-ops');
+  assert.match(extBuild, /'build:extension'/, 'the extension ships nap-web\'s pages (§148)');
+  assert.match(content, /nap: 'request', id, method/, 'the extension forwards any method to the connect window');
 });
 
 test('the whole journey is reachable', () => {
@@ -43,7 +51,7 @@ test('the whole journey is reachable', () => {
   for (const m of ['zyn_nftItems', 'zyn_nftList', 'zyn_nftCancel', 'zyn_nftBuy', 'zyn_owed', 'zyn_collect']) {
     assert.ok(walletCalls.includes(m), `the store carries ${m}`);
   }
-  assert.match(zstore, /method: 'zyn_offers'/, 'the market reads the public book');
+  assert.match(zstore, /chain\('zyn_offers'\)/, 'the market reads the public book');
   for (const page of [deposit, exit]) assert.match(page, /href="https:\/\/nap\.cavebro\.win"/, 'deposit and exit hand off to Nap');
   for (const page of [items, item, market]) assert.match(page, /<script type="module" src="\/zstore\.js/);
 });
@@ -65,14 +73,19 @@ test('the store reads only public things itself, and nothing with an account in 
   // to make public by burning (§145).
   assert.deepEqual([...new Set(fetches)].sort(), ["'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
-  assert.match(zstore, /method: 'zyn_offers', params: \[\]/);
-  assert.match(zstore, /method: 'zyn_market', params: \[\]/, 'the sale is read from the public market');
+  // Every chain read goes through one helper that sends no params: nothing
+  // with an account in it.
+  assert.match(zstore, /body: JSON\.stringify\(\{ jsonrpc: '2\.0', id: crypto\.randomUUID\(\), method, params: \[\] \}\)/);
+  assert.match(zstore, /chain\('zyn_offers'\)/);
+  assert.match(zstore, /chain\('zyn_market'\)/, 'the sale is read from the public market');
   assert.doesNotMatch(zstore, /127\.0\.0\.1:\d|:8096|:8099/);
   assert.match(zstore, /LOCAL && initial\.get\('nap'\)/, 'the Nap override is for localhost only');
 });
 
 test('an item named in the address bar is validated before use', () => {
-  assert.match(zstore, /Number\.isSafeInteger\(serial\) \|\| serial < 0/);
+  // A whole serial the collection has; no serial is not item 0.
+  assert.match(zstore, /\/\^\\d\{1,5\}\$\/\.test\(raw \?\? ''\)/);
+  assert.match(zstore, /Number\(raw\) >= 4444/);
   assert.match(zstore, /isHex\(params\.get\('collection'\)\)/);
 });
 
@@ -88,7 +101,7 @@ test('the market never offers someone their own listing', () => {
 
 test('a write is followed by a re-read, never an optimistic update', () => {
   const writes = (zstore.match(/await ask\('zyn_nft(List|Cancel|Buy)'/g) || []).length;
-  const rereads = (zstore.match(/setTimeout\(read, 12000\)/g) || []).length;
+  const rereads = (zstore.match(/later\(read\)/g) || []).length;
   assert.ok(writes >= 4 && rereads >= writes, `${writes} writes, ${rereads} re-reads`);
 });
 

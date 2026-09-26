@@ -46,7 +46,9 @@
 
 * { box-sizing: border-box; }
 
-html { scroll-behavior: smooth; }
+/* Decoration (the grain, the torch glows) may reach past the screen's edge;
+   on a phone that must not widen the page. */
+html { scroll-behavior: smooth; overflow-x: clip; }
 
 body {
   margin: 0;
@@ -545,6 +547,7 @@ h1 i { color: var(--acid); font-weight: 400; padding-left: .13em; }
 .release-line { display: flex; align-items: center; gap: 7px; }
 .release-line i { display: block; height: 1px; background: var(--line); flex: 1; }
 .release-line b { display: block; width: 4px; height: 4px; border: 1px solid var(--acid); transform: rotate(45deg); }
+a.enter-button { text-decoration: none; display: block; }
 .enter-button { min-width: 210px; border: 0; border-left: 1px solid var(--line); background: none; color: var(--ink); padding: 13px 0 13px 30px; text-align: left; cursor: pointer; }
 .enter-button span { display: block; font-family: var(--serif); text-transform: uppercase; font-size: 17px; }
 .enter-button small { display: block; color: #5f635c; margin-top: 5px; text-transform: uppercase; font-size: 7px; letter-spacing: .14em; }
@@ -720,3 +723,6 @@ dialog.zwallet .zwallet-option { display: block; width: 100%; margin: 0 0 8px; }
 /* A link styled as a button is a button: no underline (deposit, mint and
    exit style .act without resetting it). */
 a.act { text-decoration: none; }
+
+/* Testnet is its own chain with coins worth nothing: said on every page. */
+.testnet-banner { position: sticky; top: 0; z-index: 30; margin: 0; padding: 7px 16px; text-align: center; background: var(--acid); color: #070807; font: 10px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; }

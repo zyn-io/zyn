@@ -57,12 +57,15 @@ async function choose(entry) {
   status.textContent = entry.provider.isNapWeb ? "Nap's window is open — unlock it there and approve." : 'Approve the connection in Nap.';
   status.dataset.tone = 'ok';
   try {
-    current = await connect(entry, { network: NETWORK });
+    const got = await connect(entry, { network: NETWORK });
+    if (got.session?.network !== NETWORK) throw new Error(`Nap answered on ${got.session?.network || 'another network'}, and this page is on ${NETWORK}. Connect again.`);
+    current = got;
     rememberChoice(entry.info.rdns);
     entry.provider.on?.('disconnect', () => { if (current?.provider === entry.provider) { current = null; changed(); } });
     dialog.close();
     changed();
   } catch (e) {
+    // 4001 is Nap's "no"; a closed or blocked window says so in its own words.
     status.textContent = e.code === 4001 ? 'Not connected. Nothing was shared.' : e.message;
     status.dataset.tone = 'bad';
   }
@@ -143,7 +146,8 @@ async function resume() {
   if (!entry) return;
   try {
     const session = await entry.provider.request({ method: 'nap_session' });
-    if (session) { current = { ...entry, session }; changed(); }
+    // A session on another network is not this page's.
+    if (session && session.network === NETWORK) { current = { ...entry, session }; changed(); }
   } catch { /* an older extension without sessions: connect again by hand */ }
 }
 

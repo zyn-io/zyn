@@ -103,8 +103,9 @@ await cp(new URL('functions', root), new URL('functions', output), { recursive: 
 // 404 has to be a real file before the rule below means anything.
 await writeFile(
   new URL('404.html', output),
-  '<!doctype html><meta charset="utf-8"><title>Not here</title>\n'
-    + '<p>No object with that name.\n',
+  '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Not here — Cave</title>\n'
+    + '<link rel="stylesheet" href="/styles.css" /><main class="register"><h1><span>Not</span><span>here</span></h1>\n'
+    + '<p class="lede">Nothing in the cave has that name. <a href="/">Back to the cave</a> · <a href="/mint">Mint</a> · <a href="/market">The market</a></p></main>\n',
 );
 
 // No `_redirects`. The site is one page with no client-side routes, so Pages

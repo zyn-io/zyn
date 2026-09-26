@@ -5,12 +5,18 @@ import { test } from 'node:test';
 const page = await readFile(new URL('../mint.html', import.meta.url), 'utf8');
 const zstore = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
 const napOps = await readFile(new URL('../../nap-web/src/connect-ops.js', import.meta.url), 'utf8').catch(() => null);
-const background = await readFile(new URL('../../extension/src/background.js', import.meta.url), 'utf8').catch(() => null);
+// Since §148 the extension is Nap in the browser, packaged: its build ships
+// nap-web's pages, and its connect window answers every method from the same
+// connect-ops.js. So "both Naps serve it" is: connect-ops has it, the connect
+// window dispatches connect-ops, and the extension build ships that window.
+const connectApp = await readFile(new URL('../../nap-web/src/connect-app.js', import.meta.url), 'utf8').catch(() => null);
+const extBuild = await readFile(new URL('../../extension/build.mjs', import.meta.url), 'utf8').catch(() => null);
+const content = await readFile(new URL('../../extension/src/content.js', import.meta.url), 'utf8').catch(() => null);
 
 // The wallet provider lives beside the store in the monorepo. When the store
 // is checked out on its own, these cross-repo assertions cannot run — so they
 // skip with a reason rather than passing quietly.
-const WALLET = napOps && background
+const WALLET = napOps && connectApp && extBuild && content
   ? false
   : 'apps/nap-web and apps/extension are not checked out — run in the monorepo to check the store against both Naps';
 
@@ -28,9 +34,10 @@ test('the checkout is the store\'s mint page, on Nap', () => {
 test('every step of the sale is a Nap call, served by both Naps', { skip: WALLET }, () => {
   for (const m of SALE) {
     assert.match(zstore, new RegExp(`'${m}'`), `the page asks for ${m}`);
-    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap in the browser serves ${m}`);
-    assert.match(background, new RegExp(`\\b${m}\\s*:`), `the extension serves ${m}`);
+    assert.match(napOps, new RegExp(`\\n  ${m}: \\{`), `Nap serves ${m}`);
   }
+  assert.match(connectApp, /import \{[^}]*\bMETHODS\b[^}]*\} from '\.\/connect-ops\.js'/, 'the connect window answers from connect-ops');
+  assert.match(extBuild, /'build:extension'/, 'the extension ships nap-web\'s pages (§148)');
 });
 
 test('the retired checkout is gone: no payment address, no relay, no reservation', () => {
@@ -53,7 +60,8 @@ test('it does not promise an item at payment time', () => {
 test('the price the holder approves is the price the page showed', () => {
   // Nap refuses a buy whose `pay` differs from the chain's price, so a page
   // that quietly showed a stale price cannot get it approved.
-  assert.match(zstore, /zyn_buyTickets', \(\) => \{[\s\S]*?pay: zec\(/);
+  // Sent in full (exact), since Nap compares to the last digit.
+  assert.match(zstore, /zyn_buyTickets', \(\) => \{[\s\S]*?pay: exact\(/);
 });
 
 test('the built site serves the checkout at /mint', async () => {
