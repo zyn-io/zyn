@@ -254,3 +254,8 @@ footer a { color: #d8e6e0; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* What is wrong with the amount typed, apart from the last order's status. */
+.j-hint { min-height: 0; margin: 8px 0 0; color: #b0452f; font-size: 12.5px; line-height: 1.45; }
+.j-hint:empty { display: none; }
+.j-link { margin-left: 6px; padding: 0; border: 0; background: none; color: var(--jade); font: inherit; text-decoration: underline; cursor: pointer; }

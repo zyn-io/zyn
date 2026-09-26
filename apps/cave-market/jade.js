@@ -47,11 +47,17 @@ function wad(raw, places = 6) {
 }
 const decimal = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, ''); return `${v / WAD}${f ? `.${f}` : ''}`; };
 function parseDecimal(value) {
-  const s = String(value || '').trim();
+  // Many phone keypads offer a comma: read it as the decimal point.
+  const s = String(value || '').trim().replace(',', '.');
   if (!/^\d+(\.\d{1,18})?$/.test(s)) throw new Error('Enter an amount');
   const [w, f = ''] = s.split('.');
   return BigInt(w) * WAD + BigInt(f.padEnd(18, '0'));
 }
+/// An amount in full, with thousands marks: what is shown is what is signed.
+const full = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().padStart(18, '0').replace(/0+$/, ''); return `${(v / WAD).toLocaleString('en-US')}${f ? `.${f}` : ''}`; };
+/// The page's own links keep the network, so a coin opened in a new tab is
+/// the same coin on the same chain.
+const withNet = (path) => (NETWORK === 'testnet' ? `${path}?network=testnet` : path);
 const zecText = (zec) => (zec >= 1000 ? zec.toLocaleString('en-US', { maximumFractionDigits: 0 }) : zec >= 1 ? zec.toLocaleString('en-US', { maximumFractionDigits: 2 }) : zec.toLocaleString('en-US', { maximumSignificantDigits: 3 }));
 const usdText = (usd) => (usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : usd >= 1e3 ? `$${(usd / 1e3).toFixed(1)}K` : `$${usd.toFixed(2)}`);
 function ago(t) {
@@ -90,12 +96,16 @@ function poolQuote(pool, sellA, amountIn) {
 }
 
 /// A token's name lives in its 32 bytes of meta: 8 for the ticker, 24 for the name.
+/// The same rules as Nap's (market.js): printable ASCII, zero padding all the
+/// way, so the name shown here is the name Nap's approval shows.
 function decodeMeta(hexMeta) {
   const b = Uint8Array.from(hexMeta.match(/../g).map((h) => parseInt(h, 16)));
   const text = (x) => { const end = x.indexOf(0); return new TextDecoder().decode(end === -1 ? x : x.subarray(0, end)); };
   const symbol = text(b.subarray(0, 8));
   const name = text(b.subarray(8));
-  return /^[A-Z0-9]{1,8}$/.test(symbol) && name ? { symbol, name } : { symbol: '?', name: 'Unnamed stone' };
+  const zeros = (from, to) => b.subarray(from, to).every((x) => x === 0);
+  const good = /^[A-Z0-9]{1,8}$/.test(symbol) && name && /^[\x20-\x7e]+$/.test(name) && zeros(symbol.length, 8) && zeros(8 + name.length, 32);
+  return good ? { symbol, name } : { symbol: '?', name: 'Unnamed stone' };
 }
 
 // ---------------------------------------------------------------------------
@@ -113,19 +123,35 @@ let currentCoin = null;
 let tradeSide = 'buy';
 let unit = 'zec';
 let tf = 300;
-let history = [];
+/// Each coin's epoch points, by token, so one coin's chart never shows under another.
+const histories = new Map();
+const historyOf = (token) => histories.get(token) || [];
+/// The last order's status, per coin: written by the order, kept across the
+/// page's refreshes, shown only on its own coin's page.
+const orderStatus = new Map();
+function setOrder(token, text) {
+  orderStatus.set(token, text);
+  if (currentCoin?.token === token) $('#trade-status').textContent = text;
+}
+let creating = false;
 const content = new Map(); // token -> {description, image} | null (none) | 'loading'
 
 async function rpc(method, fields = {}) {
   const id = crypto.randomUUID();
-  const r = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  });
-  const body = await r.json();
+  let r;
+  try {
+    r = await fetch(RPC, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch { throw new Error('The chain could not be reached. Check your connection.'); }
+  if (!r.ok) throw new Error(`The chain did not answer (HTTP ${r.status}). Try again shortly.`);
+  const body = await r.json().catch(() => null);
+  if (!body) throw new Error('The chain sent something unreadable.');
   if (body.error) throw new Error(body.error.message || 'The chain did not answer');
   return body.result;
 }
@@ -228,7 +254,7 @@ const coinCard = (c) => {
   const s = stats.get(c.token) || {};
   const ch = change24(c);
   const k = content.get(c.token);
-  return `<a class="j-card" href="/coin/${c.token}" data-coin="${c.token}">
+  return `<a class="j-card" href="${withNet(`/coin/${c.token}`)}" data-coin="${c.token}">
       ${thumb(c)}
       <div class="j-card-body">
         <h3>${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></h3>
@@ -293,7 +319,7 @@ function drawChart() {
   if (!currentCoin) return;
   ensureChart();
   const factor = unit === 'usd' && usd ? usd : 1;
-  const pts = history.filter((p) => isInt(p.price));
+  const pts = historyOf(currentCoin.token).filter((p) => isInt(p.price));
   const buckets = new Map();
   let prev = null;
   for (const p of pts) {
@@ -317,7 +343,8 @@ function drawChart() {
 }
 
 function renderFills() {
-  const moves = history.filter((p) => p.delta_lots !== 0 || (p.delta_zec && p.delta_zec !== '0')).slice(-60).reverse();
+  if (!currentCoin) return;
+  const moves = historyOf(currentCoin.token).filter((p) => p.delta_lots !== 0 || (p.delta_zec && p.delta_zec !== '0')).slice(-60).reverse();
   $('#fills').innerHTML = moves.length ? moves.map((p) => {
     const buy = p.venue === 'curve' ? p.delta_lots > 0 : BigInt(p.delta_zec) > 0n;
     const tokens = p.venue === 'curve' ? (BigInt(Math.abs(p.delta_lots)) * CURVE.lotTokens).toLocaleString('en-US') : '—';
@@ -330,16 +357,31 @@ async function renderCoin(token, fresh = false) {
   if (!c) {
     currentCoin = null;
     $('#coin-title').textContent = curves.length ? 'Coin not found' : 'Reading the yard…';
+    // Nothing of the last coin stays on screen under this one's address.
+    for (const id of ['coin-crumb', 'coin-symbol', 'coin-age', 'coin-mcap', 'coin-change', 'coin-price', 'coin-liquidity', 'coin-pot', 'coin-fee', 'coin-holders', 'curve-pct', 'curve-text', 'trade-output', 'trade-fee', 'trade-min', 'trade-balance']) { const el = $(`#${id}`); if (el) el.textContent = '—'; }
+    $('#coin-description').textContent = curves.length
+      ? `No coin priced in ZEC.zy has this address on ${NETWORK}.${NETWORK === 'mainnet' ? ' A testnet coin? Add ?network=testnet to the address.' : ''}`
+      : '';
+    $('#fills').innerHTML = '';
+    $('#trade-status').textContent = '';
     return;
   }
   const first = currentCoin?.token !== token;
   currentCoin = c;
+  if (first) {
+    // A new coin starts with a clean form, and its own last order status.
+    tradeSide = 'buy';
+    $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === 'buy'));
+    $('#trade-input').value = '0.1';
+    $('#trade-status').textContent = orderStatus.get(token) || 'Everyone buying in an epoch pays one price, and everyone selling another; nobody can get in ahead of you.';
+  }
   const s = stats.get(token) || {};
   $('#coin-crumb').textContent = c.name;
   $('#coin-title').textContent = c.name;
   $('#coin-symbol').textContent = c.symbol;
   $('#coin-age').textContent = s.created_time ? `made ${ago(s.created_time)}` : `made in epoch ${c.created_at}`;
   $('#coin-copy').textContent = short(c.token);
+  $('#coin-description').textContent ||= 'No description.';
   $('#coin-stage').textContent = c.graduated ? 'GRADUATED · TRADING IN ITS LOCKED POOL' : 'ON ITS BONDING CURVE';
   $('#coin-mcap').textContent = capBoth(mcap(c));
   const ch = change24(c);
@@ -363,8 +405,8 @@ async function renderCoin(token, fresh = false) {
   if (currentCoin?.token !== token) return;
   $('#coin-thumb').innerHTML = thumbInner(c);
   $('#coin-description').textContent = k && k !== 'loading' && k.description ? k.description : 'No description.';
-  if (first || fresh) {
-    try { history = await rpc('zyn_history', { token }); } catch { history = []; }
+  if (first || fresh || !histories.has(token)) {
+    try { histories.set(token, await rpc('zyn_history', { token })); } catch { if (!histories.has(token)) histories.set(token, []); }
     if (currentCoin?.token !== token) return;
   }
   drawChart();
@@ -396,7 +438,9 @@ function configureTrade() {
   $$('[data-preset]').forEach((b) => b.addEventListener('click', () => { $('#trade-input').value = b.dataset.preset; quote(); }));
   $$('[data-pct]').forEach((b) => b.addEventListener('click', () => {
     const lotsHeld = heldOf(c.token) / LOT;
-    const lots = c.graduated ? heldOf(c.token) * BigInt(b.dataset.pct) / 100n : (lotsHeld * BigInt(b.dataset.pct)) / 100n * LOT;
+    let lots = c.graduated ? heldOf(c.token) * BigInt(b.dataset.pct) / 100n : (lotsHeld * BigInt(b.dataset.pct)) / 100n * LOT;
+    // A share of a few lots can round to none: then the smallest sale there is.
+    if (!c.graduated && lots === 0n && lotsHeld > 0n) lots = LOT;
     $('#trade-input').value = decimal(lots);
     quote();
   }));
@@ -411,41 +455,56 @@ function quote() {
   const c = currentCoin;
   const out = $('#trade-output'), fee = $('#trade-fee'), min = $('#trade-min');
   out.textContent = fee.textContent = min.textContent = '—';
-  $('#trade-status').textContent = '';
+  // What is wrong with the amount goes here; the last order's status keeps
+  // its own line, which a refresh never wipes.
+  const hint = $('#trade-hint');
+  hint.textContent = '';
+  const submit = $('.trade-submit');
   if (!c) return null;
+  if (wallet) submit.disabled = true;
   const slip = BigInt($('#trade-slip').value);
   try {
     const value = parseDecimal($('#trade-input').value);
+    if (value <= 0n) throw new Error('Enter an amount above zero');
+    if (tradeSide === 'buy' && mine && value > mine.zec) throw new Error(`You have ${full(mine.zec)} ZEC.zy`);
     if (c.graduated) {
       const p = poolOf(c);
       if (!p) throw new Error('Its pool is not visible yet');
       const sellA = tradeSide === 'buy' ? p.a === XZEC : p.a === c.token;
+      if (tradeSide === 'sell' && mine && value > heldOf(c.token)) throw new Error(`You hold ${full(heldOf(c.token))}`);
       const q = poolQuote(p, sellA, value);
-      out.textContent = `${wad(q, tradeSide === 'buy' ? 0 : 6)} ${tradeSide === 'buy' ? c.symbol : 'ZEC.zy'}`;
+      if (q <= 0n) throw new Error('Too small to trade');
+      out.textContent = `${full(q)} ${tradeSide === 'buy' ? c.symbol : 'ZEC.zy'}`;
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
-      min.textContent = `${wad((q * (BPS - slip)) / BPS, tradeSide === 'buy' ? 0 : 6)}`;
+      min.textContent = `${full((q * (BPS - slip)) / BPS)}`;
+      if (wallet) submit.disabled = false;
       return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip) };
     }
     if (tradeSide === 'buy') {
       if (value < 100_000n * ZAT) throw new Error('A buy is at least 0.001 ZEC.zy');
       const q = previewBuy(c.sold, value, c.fee_bps);
       if (!q.lots) throw new Error('That buys less than one lot of 12,500');
-      const minTokens = ((BigInt(q.lots) * (BPS - slip)) / BPS) * LOT;
+      // At least one lot: a floor of none would be no floor, and Nap refuses it.
+      const floorLots = (BigInt(q.lots) * (BPS - slip)) / BPS;
+      const minTokens = (floorLots > 0n ? floorLots : 1n) * LOT;
       out.textContent = `${wad(q.tokens, 0)} ${c.symbol}`;
-      fee.textContent = c.fee_bps ? `${wad(q.fee, 8)} ZEC.zy` : 'none';
+      fee.textContent = c.fee_bps ? `${full(q.fee)} ZEC.zy` : 'none';
       min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
+      if (wallet) submit.disabled = false;
       return { kind: 'buy', amount: value, minTokens };
     }
     if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
     if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
     const q = previewSell(c.sold, Number(value / LOT), c.fee_bps);
     const minZec = (q.net * (BPS - slip)) / BPS;
-    out.textContent = `${wad(q.net, 8)} ZEC.zy`;
-    fee.textContent = c.fee_bps ? `${wad(q.fee, 8)} ZEC.zy` : 'none';
-    min.textContent = `${wad(minZec, 8)} ZEC.zy`;
+    if (minZec <= 0n) throw new Error('Too small to sell');
+    out.textContent = `${full(q.net)} ZEC.zy`;
+    fee.textContent = c.fee_bps ? `${full(q.fee)} ZEC.zy` : 'none';
+    min.textContent = `${full(minZec)} ZEC.zy`;
+    if (wallet) submit.disabled = false;
     return { kind: 'sell', tokens: value, minZec };
   } catch (e) {
-    $('#trade-status').textContent = e.message;
+    hint.textContent = e.message;
     return null;
   }
 }
@@ -462,25 +521,32 @@ $('#trade-slip').addEventListener('change', quote);
 /// After an order: wait for its epoch to seal, collect what it was paid, and
 /// say what arrived. Collecting needs no approval — it only moves what the
 /// ledger owes this wallet into it.
-async function settle(placedEpoch, token) {
+async function settle(placedEpoch, token, side, symbol) {
   const before = heldOf(token);
-  for (let i = 0; i < 120; i++) {
+  let sealed = false;
+  for (let i = 0; i < 120 && !sealed; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     let epoch;
     try { epoch = (await rpc('zyn_status')).epoch; } catch { continue; }
-    if (epoch > placedEpoch) break;
-    $('#trade-status').textContent = `Placed. Settling when epoch ${placedEpoch} seals…`;
+    if (epoch > placedEpoch) sealed = true;
+  }
+  if (!sealed) {
+    setOrder(token, `Still waiting for epoch ${placedEpoch} to seal. Your order is safe; it settles when it does.`);
+    return;
   }
   try {
     if (wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen())) {
       await ask('zyn_collect', {});
       await loadMine();
       const got = heldOf(token) - before;
-      $('#trade-status').textContent = got > 0n ? `Filled: +${wad(got, 0)} ${currentCoin?.symbol || ''}. It is in your wallet.` : got < 0n ? 'Filled: sold. The ZEC.zy is in your wallet.' : 'Settled. Nothing filled — your ZEC.zy came back.';
+      setOrder(token, got > 0n ? `Filled: +${wad(got, 0)} ${symbol}. It is in your wallet.`
+        : got < 0n ? 'Filled: sold. The ZEC.zy is in your wallet.'
+          : side === 'buy' ? 'Not filled — the price moved past your floor, so your ZEC.zy came back to your wallet.'
+            : `Not filled — the price moved past your floor, so your ${symbol} came back to your wallet.`);
     } else {
-      $('#trade-status').textContent = "Settled. Open Nap's window to collect it.";
+      setOrder(token, "Settled. Open Nap's window to collect it.");
     }
-  } catch (e) { $('#trade-status').textContent = e.message; }
+  } catch (e) { setOrder(token, e.message); }
   await loadMarket();
 }
 
@@ -492,6 +558,7 @@ $('.trade-submit').addEventListener('click', async () => {
   if (!q) return;
   const button = $('.trade-submit');
   button.disabled = true;
+  const side = tradeSide, symbol = c.symbol;
   try {
     // Asked before anything is awaited: Nap may need to open its window.
     const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
@@ -499,12 +566,14 @@ $('.trade-submit').addEventListener('click', async () => {
         : ask('zyn_curveSell', { token: c.token, tokens: decimal(q.tokens), minZec: decimal(q.minZec) });
     await pending;
     const epoch = (await rpc('zyn_status')).epoch;
-    $('#trade-status').textContent = `Placed. Settling when epoch ${epoch} seals…`;
-    settle(epoch, c.token);
+    setOrder(c.token, `Placed. Settling when epoch ${epoch} seals…`);
+    settle(epoch, c.token, side, symbol);
   } catch (e) {
-    $('#trade-status').textContent = e.message;
+    // 4001 is Nap's "no"; anything else says what happened in its own words.
+    setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message);
   } finally {
     button.disabled = false;
+    quote();
   }
 });
 
@@ -517,19 +586,27 @@ async function pickWallet() {
   const body = dialog.querySelector('.jade-wallet-body');
   if (wallet) {
     body.innerHTML = `<p>Connected: <b>${esc(wallet.info.name)}</b></p><p class="mono">${esc(short(wallet.session.account, 8))}</p><button type="button" class="jade-wallet-off">Disconnect</button>`;
-    body.querySelector('.jade-wallet-off').onclick = () => { wallet = null; mine = null; render(); dialog.close(); };
+    body.querySelector('.jade-wallet-off').onclick = () => {
+      // Nap forgets this site too, so connecting again asks again.
+      const was = wallet;
+      wallet = null; mine = null;
+      if (!was.provider.isNapWeb || was.provider.isOpen()) was.provider.request({ method: 'nap_disconnect' }).catch(() => {});
+      render(); dialog.close();
+    };
     return;
   }
   body.innerHTML = '<p>Looking for Nap…</p>';
   const list = await discover({ web: NAP });
   body.innerHTML = list.map((w, i) => `<button type="button" class="jade-wallet-option" data-i="${i}"><b>${esc(w.info.name)}</b><small>${esc(w.info.detail || '')}</small></button>`).join('')
-    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shows this page your Zyn account — not your balances or keys. Every trade is approved in Nap; settled trades are collected into your wallet automatically.</p>';
+    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shares your Zyn account and a Zcash address with this page, and lets it read what you hold of these coins — never your keys. Every trade is approved in Nap; settled trades are collected into your wallet automatically.</p>';
   body.querySelectorAll('[data-i]').forEach((b) => {
     b.onclick = async () => {
       const status = body.querySelector('.jade-wallet-status');
       status.textContent = list[b.dataset.i].provider.isNapWeb ? "Nap's window is open — unlock it there and approve." : 'Approve in Nap.';
       try {
-        wallet = await connect(list[b.dataset.i], { network: NETWORK });
+        const got = await connect(list[b.dataset.i], { network: NETWORK });
+        if (got.session?.network !== NETWORK) throw new Error(`Nap answered on ${got.session?.network || 'another network'}, and this page is on ${NETWORK}. Connect again.`);
+        wallet = got;
         wallet.provider.on?.('disconnect', () => { wallet = null; mine = null; render(); });
         dialog.close();
         await loadMine();
@@ -543,7 +620,9 @@ async function pickWallet() {
 /// open its window, and only a click may.
 function ask(method, p) {
   if (!wallet) { pickWallet(); return Promise.reject(new Error('Connect a wallet first.')); }
-  return wallet.provider.request({ method, params: p });
+  // The network rides every request, so Nap refuses one answered on the
+  // wrong chain instead of answering it.
+  return wallet.provider.request({ method, params: { ...(p || {}), network: NETWORK } });
 }
 
 async function loadMine() {
@@ -569,7 +648,7 @@ function renderWallet() {
 
 function renderPortfolio() {
   if (!wallet || !mine) {
-    $('#portfolio-status').textContent = wallet ? "Open Nap's window (press the wallet button) to read your holdings." : 'Connect a wallet to see what you hold and what you made.';
+    $('#portfolio-status').textContent = wallet ? "Nap's window is closed. Connect again with the wallet button to read your holdings." : 'Connect a wallet to see what you hold and what you made.';
     $('#held').innerHTML = '';
     $('#made').innerHTML = '';
     $('#held-total').textContent = '—';
@@ -582,7 +661,7 @@ function renderPortfolio() {
     if (!c) return '';
     const worth = num((price(c) * amount) / WAD);
     total += worth;
-    return `<tr><td><a href="/coin/${token}">${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></a></td><td>${wad(amount, 0)}</td><td>${esc(capText(worth))}</td><td><a href="/coin/${token}">Trade →</a></td></tr>`;
+    return `<tr><td><a href="${withNet(`/coin/${token}`)}">${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></a></td><td>${wad(amount, 0)}</td><td>${esc(capText(worth))}</td><td><a href="${withNet(`/coin/${token}`)}">Trade →</a></td></tr>`;
   });
   $('#held').innerHTML = rows.join('') || '<tr><td colspan="4" class="j-muted">Nothing yet.</td></tr>';
   $('#held-total').textContent = `worth ~${capText(total)}`;
@@ -626,53 +705,93 @@ imageInput.addEventListener('change', async () => {
   const f = imageInput.files?.[0];
   imageData = '';
   if (f) {
-    try { imageData = await shrink(f); } catch (e) { $('#stone-status').textContent = e.message; }
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
+      imageInput.value = '';
+      $('#stone-status').textContent = 'A picture is a PNG, JPEG, WebP or GIF.';
+    } else if (f.size > 15 * 1024 * 1024) {
+      imageInput.value = '';
+      $('#stone-status').textContent = 'That picture is over 15 MB; choose a smaller one.';
+    } else {
+      try { imageData = await shrink(f); } catch (e) { imageInput.value = ''; $('#stone-status').textContent = e.message === 'That picture will not shrink under 300 KB' ? e.message : 'That file could not be read as a picture.'; }
+    }
   }
   renderPreview();
 });
 
 function renderPreview() {
-  const symbol = symbolInput.value.trim().toUpperCase() || 'STONE';
-  const ok = validSymbol(symbol) && validName(nameInput.value);
+  const typed = symbolInput.value.trim().toUpperCase();
+  const symbol = typed || 'STONE';
+  // The placeholder shows in the preview; it is not a ticker anyone chose.
+  const ok = validSymbol(typed) && validName(nameInput.value);
   $('#preview-name').textContent = nameInput.value.trim() || 'Unnamed stone';
   $('#preview-symbol').textContent = symbol;
   $('#preview-description').textContent = descInput.value.trim() || 'No description.';
   $('#preview-thumb').innerHTML = imageData ? `<img src="${esc(imageData)}" alt="" />` : `<span id="preview-letter">${esc(symbol[0] || '?')}</span>`;
-  launchButton.disabled = !ok;
+  launchButton.disabled = !ok || creating;
   const bond = BigInt(terms.bond || '0');
   $('#stone-terms').textContent = terms.set
-    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy, returned at graduation.` : 'No bond.'}`
+    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
+  if (creating) return;
   if (!ok) $('#stone-status').textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
-  else if (!/Created|refused|picture|Picture/.test($('#stone-status').textContent)) $('#stone-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
+  else if (!/Created|refused|picture|Picture|attach/.test($('#stone-status').textContent)) $('#stone-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
 }
 
 form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', renderPreview));
+/// Attach a coin's picture and description with the proof Nap made once.
+/// Kept for this tab until it succeeds, so a failed upload can be retried.
+async function attach(token, pending) {
+  const up = await fetch(`/api/content/${token}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(pending),
+  });
+  if (up.ok || up.status === 409) { try { sessionStorage.removeItem(`jade.attach.${token}`); } catch { /* none kept */ } content.delete(token); return null; }
+  return (await up.json().catch(() => ({}))).error || `HTTP ${up.status}`;
+}
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (creating) return;
   const symbol = symbolInput.value.trim().toUpperCase();
   if (!validSymbol(symbol) || !validName(nameInput.value)) return renderPreview();
+  creating = true;
   launchButton.disabled = true;
+  const status = $('#stone-status');
+  let token = null;
   try {
     const description = descInput.value.trim();
+    status.textContent = 'Approve it in Nap.';
     const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim(), description, image: imageData });
     if (!isHex(r?.token)) throw new Error('Nap did not say which coin it made');
-    let note = 'Created. It opens for trading when this epoch seals.';
-    if (r.content?.proof) {
-      const up = await fetch(`/api/content/${r.token}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content: { description, image: imageData }, proof: r.content.proof }),
-      });
-      note += up.ok ? ' Picture and description attached.' : ` The picture was not attached (${(await up.json().catch(() => ({}))).error || up.status}).`;
-      content.delete(r.token);
+    token = r.token;
+    // The coin exists from here on, whatever happens to the picture.
+    let note = `Created ${symbol} (${short(token)}). It can be traded right away.`;
+    if (r.content?.proof && (description || imageData)) {
+      const pending = { content: { description, image: imageData }, proof: r.content.proof };
+      try { sessionStorage.setItem(`jade.attach.${token}`, JSON.stringify(pending)); } catch { /* this call only */ }
+      let err;
+      try { err = await attach(token, pending); } catch { err = 'the upload did not go through'; }
+      note += err ? ` The picture and description were not attached yet (${err}). ` : ' Picture and description attached.';
+      if (err) {
+        status.innerHTML = `${esc(note)}<button type="button" class="j-link" id="attach-again">Attach again</button>`;
+        $('#attach-again').onclick = async () => {
+          const again = await attach(token, pending).catch(() => 'the upload did not go through');
+          status.textContent = again ? `Still not attached (${again}). Try again in a moment.` : 'Picture and description attached.';
+        };
+        return;
+      }
     }
-    $('#stone-status').textContent = note;
-    setTimeout(async () => { await loadMarket(); navigate(`/coin/${r.token}`); }, 4000);
+    status.textContent = note;
+    form.reset(); imageData = '';
+    setTimeout(async () => { await loadMarket(); navigate(`/coin/${token}`); }, 4000);
   } catch (e) {
-    $('#stone-status').textContent = e.message;
+    status.textContent = e.code === 4001 ? 'Not created. Nothing left your wallet.' : e.message;
   } finally {
-    launchButton.disabled = false;
+    creating = false;
+    // The button stays off once a coin is made from this form; it was reset.
+    renderPreview();
+    if (token) launchButton.disabled = true;
   }
 });
 
@@ -730,7 +849,11 @@ setInterval(async () => {
   const route = pathRoute();
   if (route.view !== 'coin') return;
   await loadMarket();
-  try { history = await rpc('zyn_history', { token: route.token }); } catch { /* keep */ }
+  try {
+    const h = await rpc('zyn_history', { token: route.token });
+    histories.set(route.token, h);
+  } catch { /* keep */ }
+  if (currentCoin?.token !== route.token || pathRoute().token !== route.token) return;
   drawChart();
   renderFills();
 }, 5_000);

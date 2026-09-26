@@ -118,7 +118,7 @@
                 <div class="j-tf" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
               </div>
               <div class="j-chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
-              <p class="j-note" id="chart-note">Candles are market cap per epoch batch — every trade in an epoch shares one price.</p>
+              <p class="j-note" id="chart-note">Candles are market cap per epoch batch — in each epoch every buyer pays one price and every seller gets one.</p>
             </section>
 
             <section class="j-panel j-progress" aria-label="Bonding curve">
@@ -146,7 +146,8 @@
                 <div><dt>At least</dt><dd id="trade-min">—</dd></div>
               </dl>
               <button class="j-primary trade-submit" type="button">Connect wallet</button>
-              <p id="trade-status" class="j-status" aria-live="polite">Everyone trading in an epoch pays one price; nobody can get in ahead of you.</p>
+              <p id="trade-hint" class="j-hint" role="status" aria-live="polite"></p>
+              <p id="trade-status" class="j-status" aria-live="polite">Everyone buying in an epoch pays one price, and everyone selling another; nobody can get in ahead of you.</p>
             </section>
 
             <section class="j-panel j-about" aria-labelledby="about-title">
@@ -158,7 +159,7 @@
                 <div><dt>ZEC set in it</dt><dd id="coin-liquidity">—</dd></div>
                 <div><dt>Graduation pot</dt><dd id="coin-pot">—</dd></div>
                 <div><dt>Fee</dt><dd id="coin-fee">—</dd></div>
-                <div><dt>Creator</dt><dd>private</dd></div>
+                <div><dt>Creator</dt><dd>not shown here</dd></div>
                 <div><dt>Holders</dt><dd id="coin-holders">private — only the curve's share is public</dd></div>
               </dl>
               <details class="j-curve-mini"><summary>The curve</summary>
