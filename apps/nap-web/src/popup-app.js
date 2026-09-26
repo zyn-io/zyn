@@ -68,6 +68,12 @@ function wadText(v, places = 6) {
   const frac = (v % WAD).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : whole;
 }
+/// A tiny amount stays readable: more places until a digit shows.
+function amtText(v) {
+  if (v === 0n) return '0';
+  for (const places of [6, 10, 14, 18]) { const t = wadText(v, places); if (/[1-9]/.test(t)) return t; }
+  return wadText(v, 18);
+}
 function zatOf(text) {
   if (!/^\d+(\.\d{1,8})?$/.test(text)) throw new Error('Enter an amount in ZEC, up to eight decimals');
   const [w, f = ''] = text.split('.');
@@ -617,6 +623,7 @@ function receive(which = identity.zec ? 'zcash' : 'zyn') {
 // menu; this is the everyday trade.
 
 let swapPrefs = { pay: null, get: null, slip: 100 };
+let swapping = false;
 
 function swap() {
   if (!pocket) { toast('Still reading your balances…'); return; }
@@ -638,12 +645,14 @@ function swap() {
     <div class="leg"><div class="leg-top"><span>You pay</span><button type="button" class="bal" id="w-max"></button></div>
       <div class="leg-row"><input id="w-amt" inputmode="decimal" autocomplete="off" placeholder="0"><button type="button" class="chip" id="w-pay"></button></div></div>
     <button type="button" class="flip" id="w-flip" aria-label="Flip">${ICON.swap}</button>
-    <div class="leg"><div class="leg-top"><span>You receive</span><span id="w-impact"></span></div>
+    <div class="leg"><div class="leg-top"><span>You receive, if alone in the batch</span><span id="w-impact"></span></div>
       <div class="leg-row"><output id="w-out">0</output><button type="button" class="chip" id="w-get"></button></div></div>
     <div class="facts" id="w-facts"></div>
+    <p class="hint">Every swap in an epoch fills at one price. If it is worse than your minimum, everything you put in comes back.</p>
     <p class="hint" id="w-err" role="alert"></p>`,
     '<button class="btn" id="w-go" disabled>Swap</button>');
   const amt = $('#w-amt', s);
+  let confirmed = '';
   const chip = (el, a) => { el.innerHTML = `<span class="tok" data-sym="${esc(name(a))}">${esc(name(a).slice(0, 1))}</span>${esc(name(a))}<i>▾</i>`; tokenDisc($('.tok', el), name(a)); };
   const readAmount = () => { try { return amt.value.trim() ? parseAmount(amt.value.trim().replace(/,/g, '')) : 0n; } catch { return -1n; } };
   const draw = () => {
@@ -654,20 +663,22 @@ function swap() {
     const go = $('#w-go', s), err = $('#w-err', s);
     err.textContent = ''; err.classList.remove('bad');
     const q = pool && raw > 0n ? quoteSwap(pool, pool.a === pay, raw, swapPrefs.slip) : null;
-    $('#w-out', s).textContent = q ? wadText(q.out) : '0';
-    $('#w-impact', s).textContent = q && q.impactBps >= 50 ? `${(q.impactBps / 100).toFixed(2)}% impact` : '';
+    $('#w-out', s).textContent = q ? amtText(q.out) : '0';
+    $('#w-impact', s).textContent = q && q.impactBps >= 50 ? `${(q.impactBps / 100).toFixed(2)}% below spot` : '';
     $('#w-impact', s).classList.toggle('bad', !!q && q.impactBps >= 500);
+    confirmed = '';
     const x = BigInt(pool.reserve_a), y = BigInt(pool.reserve_b);
     const rate = pool.a === pay ? (y * WAD) / x : (x * WAD) / y;
-    $('#w-facts', s).innerHTML = `<span>Rate</span><b>1 ${esc(name(pay))} ≈ ${esc(wadText(rate))} ${esc(name(get))}</b>
-      ${q ? `<span>Minimum</span><b>${esc(wadText(q.min))} ${esc(name(get))}</b>` : ''}
+    $('#w-facts', s).innerHTML = `<span>Rate</span><b>1 ${esc(name(pay))} ≈ ${esc(amtText(rate))} ${esc(name(get))}</b>
+      ${q ? `<span>Minimum</span><b>${esc(amtText(q.min))} ${esc(name(get))}</b>` : ''}
       <span>Slippage</span><b class="slips">${[50, 100, 300].map((b) => `<button type="button" data-slip="${b}" class="${swapPrefs.slip === b ? 'on' : ''}">${b / 100}%</button>`).join('')}</b>
       <span>Pool fee</span><b>${(pool.fee_bps / 100).toFixed(2)}%</b>`;
     s.querySelectorAll('[data-slip]').forEach((b) => { b.onclick = () => { swapPrefs.slip = Number(b.dataset.slip); draw(); }; });
     if (raw < 0n) { err.textContent = 'Enter a number'; err.classList.add('bad'); }
     else if (raw > bal(pay)) { err.textContent = `You have ${wadText(bal(pay))} ${name(pay)}`; err.classList.add('bad'); }
-    go.disabled = !(q && q.min > 0n && raw <= bal(pay));
+    go.disabled = swapping || !(q && q.min > 0n && raw <= bal(pay));
     go.textContent = raw > 0n ? `Swap ${name(pay)} for ${name(get)}` : 'Enter an amount';
+    if (q && q.min <= 0n && raw > 0n) { err.textContent = 'Too small to trade in this pool'; err.classList.add('bad'); }
   };
   const pick = (which) => {
     const list = which === 'pay' ? tokens : partners(pay);
@@ -690,20 +701,32 @@ function swap() {
   $('#w-go', s).onclick = async () => {
     const go = $('#w-go', s), err = $('#w-err', s);
     const pool = poolOf(pay, get), raw = readAmount();
+    const q0 = quoteSwap(pool, pool.a === pay, raw, swapPrefs.slip);
+    // A swap that moves the pool a lot is asked twice.
+    if (q0.impactBps >= 1500 && confirmed !== amt.value) {
+      confirmed = amt.value;
+      go.textContent = `Confirm: ${(q0.impactBps / 100).toFixed(1)}% below spot`;
+      err.textContent = 'This is a large share of the pool, so it fills far below its price. Press again to swap anyway.';
+      err.classList.add('bad');
+      return;
+    }
     go.disabled = true; go.textContent = 'Signing…';
+    swapping = true;
     const g = generation;
     try {
       const q = quoteSwap(pool, pool.a === pay, raw, swapPrefs.slip);
       await placeSwap(config, identity, pocket.held, pool, pool.a === pay, raw, swapPrefs.slip);
       if (g !== generation) return;
-      logActivity(config, identity, { kind: 'out', title: `Swapped ${name(pay)} → ${name(get)}`, symbol: name(get), amount: `≈ ${wadText(q.out)} ${name(get)}` });
+      logActivity(config, identity, { kind: 'out', title: `Swap placed: ${name(pay)} → ${name(get)}`, symbol: name(get), amount: `≈ ${amtText(q.out)} ${name(get)}` });
       s.remove();
       const secs = pocket.epochSeconds || 0;
       toast(secs ? `Swap placed — fills in about ${secs}s` : 'Swap placed — fills at the end of this batch');
       setTimeout(refresh, (secs + 4) * 1000);
-      refresh();
+      // No second swap from notes this one just spent: wait for the refresh.
+      refresh().finally(() => { swapping = false; });
     } catch (x) {
       if (g !== generation) return;
+      swapping = false;
       err.textContent = x.message; err.classList.add('bad'); go.disabled = false; go.textContent = 'Try again';
     }
   };
@@ -788,7 +811,14 @@ function bridgeOutForm(b, st) {
     <p class="hint" id="bo-err" role="alert">${fee ? `A ${Number(fee) / 100}% bridge fee is added on top. ` : ''}${b.key === 'sol' ? 'The 0.000005 SOL network fee comes out of the amount.' : b.key === 'btc' ? 'The Bitcoin network fee comes out of the amount.' : b.capWei ? 'Paid once two of the vault Safe’s owners approve it — this can take hours.' : 'Paid once Ethereum finalizes it.'}</p>`,
     '<button class="btn" id="bo-go">Review</button>');
   const err = $('#bo-err', s);
-  $('#bo-max', s).onclick = () => { $('#bo-amt', s).value = wadText((b.have * 10_000n) / (10_000n + fee), 18).replace(/,/g, ''); };
+  $('#bo-max', s).onclick = () => {
+    // Whole lamports or satoshi: swap outputs carry 18-decimal dust the chain
+    // there cannot pay.
+    const unit = b.key === 'sol' ? 1_000_000_000n : b.key === 'btc' ? 10_000_000_000n : 1n;
+    let v = (b.have * 10_000n) / (10_000n + fee);
+    v -= v % unit;
+    $('#bo-amt', s).value = wadText(v, 18).replace(/,/g, '');
+  };
   let armed = null;
   $('#bo-go', s).onclick = async () => {
     const go = $('#bo-go', s);

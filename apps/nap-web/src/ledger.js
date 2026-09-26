@@ -122,15 +122,39 @@ export async function recoverNonces(config, identity, { gap = RECOVERY_GAP } = {
   return count;
 }
 
+/// What each claim id a nonce can produce is, for the Owed view: a swap that
+/// filled is not a swap that came back.
+const CLAIM_KINDS = [
+  ['order', ['Swap filled', 'Swap refunded — the batch price was worse than your floor', 'Swap']],
+  ['liquidity', ['Pool shares', 'Liquidity returned', 'Liquidity returned']],
+  ['commit', ['Launch commitment', 'Launch refund', 'Launch']],
+  ['launch', ['Your launch', 'Your launch', 'Your launch']],
+  ['listing', ['Sale proceeds', 'Listing', 'Listing']],
+  ['curve-order', ['Curve trade filled', 'Curve trade refunded — the price moved past your floor', 'Curve trade']],
+  ['curve', ['Creator payout', 'Creator payout', 'Creator payout']],
+];
+function claimKinds(identity, limit, from = 0) {
+  const kinds = new Map();
+  const me = identity.account;
+  for (let n = from; n < limit; n++) {
+    const nonce = mk.marketNonce(identity.secretKey, n);
+    const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce)];
+    sources.forEach((source, i) => mk.claimIds(source).forEach((id, k) => kinds.set(hex(id), CLAIM_KINDS[i][1][k])));
+  }
+  return kinds;
+}
+
 export async function loadOwed(config, identity) {
   await ensureNonces(config, identity);
-  const ids = claimSources(identity, nonceCount(config, identity) + LOOKAHEAD);
+  const kinds = claimKinds(identity, nonceCount(config, identity) + LOOKAHEAD);
+  const ids = [...kinds.keys()];
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
     const part = await call(config, 'zyn_claims', { ids: ids.slice(i, i + 240).join(',') });
     if (Array.isArray(part)) rows.push(...part);
   }
-  return rows.filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount));
+  return rows.filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount))
+    .map((r) => ({ ...r, kind: kinds.get(r.id) || 'Owed' }));
 }
 
 /// Wait until notes a write spent are gone from this holder's view, so the

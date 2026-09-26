@@ -229,19 +229,20 @@ export function liquidityPreview(pool, amountA, amountB) {
   return { shares, usedA: ceil(shares * x, s), usedB: ceil(shares * y, s) };
 }
 
-/// `floor(√(a·b))` in WAD — the shares a new pool opens with.
+/// `floor(√(a·b))` in WAD — the shares a new pool opens with. Newton from
+/// above (a power of two past the root), so it only ever walks down and takes
+/// a handful of steps for any size — starting from a float estimate below the
+/// root used to walk up one by one and could freeze the page.
 export function geometricMean(a, b) {
   const n = a * b;
   if (n <= 0n) return 0n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  // Newton from the float estimate; exact on BigInt.
+  let x = 1n << BigInt((n.toString(2).length >> 1) + 1);
   for (;;) {
     const y = (x + n / x) >> 1n;
     if (y >= x) break;
     x = y;
   }
   while (x * x > n) x -= 1n;
-  while ((x + 1n) * (x + 1n) <= n) x += 1n;
   return x;
 }
 

@@ -153,3 +153,7 @@ a.mk-act { color: var(--ink); text-decoration: none; display: inline-flex; align
   .mk-card { padding: 20px; }
   .mk-empty { padding: 28px 20px; }
 }
+
+/* A trade that moves the pool a lot is flagged in red, not left in grey. */
+.mk-warn { color: var(--bad); font-weight: 600; }
+.mk-link-btn { border: 0; background: none; padding: 0; color: var(--ink); font: inherit; text-decoration: underline; cursor: pointer; }

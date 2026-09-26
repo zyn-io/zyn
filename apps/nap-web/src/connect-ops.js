@@ -200,19 +200,20 @@ export const METHODS = {
       const content = description || image ? { description, image } : null;
       const { terms } = await curveBook(ctx);
       const bond = BigInt(terms.bond || '0');
+      if (bond > 0n) await mustHold(ctx, ctx.config.zecAsset, bond, 'ZEC.zy');
       return {
         title: `Create ${String(p.symbol).toUpperCase()}`,
         rows: [
           ['Name', String(p.name).trim()],
           ['Supply', '1,000,000,000 — all sold on the curve or put in its pool; none to you'],
           ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about 17 ZEC.zy raised), into a locked pool`],
-          ['Bond', bond ? `${wadText(bond)} ZEC.zy, returned when it graduates` : 'none'],
+          ['Bond', bond ? `${wadText(bond)} ZEC.zy — returned only if it graduates; otherwise it stays in the curve` : 'none'],
           ['Your share', terms.fee_bps ? `10% of its trading fees, paid when it graduates` : 'none (no fee is set)'],
           ...(description ? [['Description', description]] : []),
           ...(image ? [['Picture', 'shown above, stored by the site that asked; it proves you made the token']] : []),
         ],
         image: image || null,
-        note: 'Anyone can buy it from the next epoch. You own none unless you buy, at the same price as everybody.',
+        note: 'Anyone can buy it right away. You own none unless you buy, at the same price as everybody buying in that epoch.',
         run: async () => {
           let inputs = [], change = [];
           if (bond > 0n) {
@@ -242,14 +243,17 @@ export const METHODS = {
       const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps);
       if (q.lots === 0) throw bad('That buys less than one lot at the current price');
       const minLots = p.minTokens != null ? BigInt(amountOf(p.minTokens, 'minTokens')) / mk.LOT : 0n;
+      await mustHold(ctx, c.quote, amount, q$);
       return {
         title: `Buy ${c.symbol} with ${wadText(amount)} ${q$}`,
+        // No floor means filling at whatever price the batch clears: said, in red.
+        danger: !minLots,
         rows: [
           ['Token', `${c.name} (${c.symbol})`],
           ['If nobody else buys this epoch', `${tokenText(q.tokens)} tokens`],
           ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
           ['Unspent', `${wadText(q.refund)} ${q$} comes back`],
-          ...(minLots ? [['At least', `${tokenText(minLots * mk.LOT)} tokens, or the whole buy comes back`]] : []),
+          ['At least', minLots ? `${tokenText(minLots * mk.LOT)} tokens, or the whole buy comes back` : 'no floor — it fills at whatever price the batch clears'],
         ],
         note: 'Everyone buying this epoch pays one price, set when it closes; nobody can buy ahead of you. Collect the tokens once it settles.',
         run: async () => {
@@ -275,12 +279,14 @@ export const METHODS = {
       const lots = Number(tokens / mk.LOT);
       const q = mk.previewCurveSell(c.sold, lots, c.fee_bps);
       const minZec = p.minZec != null ? amountOf(p.minZec, 'minZec') : 0n;
+      await mustHold(ctx, c.token, tokens, c.symbol);
       return {
         title: `Sell ${tokenText(tokens)} ${c.symbol}`,
+        danger: !minZec,
         rows: [
           ['If nobody else sells this epoch', `${wadText(q.net)} ${q$}`],
           ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
-          ...(minZec ? [['At least', `${wadText(minZec)} ${q$}, or the tokens come back`]] : []),
+          ['At least', minZec ? `${wadText(minZec)} ${q$}, or the tokens come back` : 'no floor — it sells at whatever price the batch clears'],
         ],
         note: `Sellers this epoch share one price, set when it closes. Collect the ${q$} once it settles.`,
         run: async () => {
@@ -301,19 +307,39 @@ export const METHODS = {
       if (!isHex(p.pool)) throw bad('pool must be 64 hex characters');
       const market = await ledger.call(ctx.config, 'zyn_market');
       const pool = (market.pools || []).find((x) => x.id === p.pool);
-      if (!pool) throw bad('No such pool');
-      const sellA = !!p.sellA;
+      if (!pool || !['a', 'b', 'lp'].every((k) => isHex(pool[k])) || !isInt(pool.reserve_a) || !isInt(pool.reserve_b) || !Number.isSafeInteger(pool.fee_bps)
+        || BigInt(pool.reserve_a) === 0n || BigInt(pool.reserve_b) === 0n) throw bad('No such pool');
+      // A string "false" is true to JavaScript: the direction is a boolean or nothing.
+      if (typeof p.sellA !== 'boolean') throw bad('sellA must be true or false');
+      const sellA = p.sellA;
       const amountIn = amountOf(p.amount, 'amount');
       const quote = mk.quoteAlone(pool, sellA, amountIn);
+      if (quote <= 0n) throw bad('Too small to trade in this pool');
       const slippage = Number.isInteger(p.slippageBps) && p.slippageBps >= 0 && p.slippageBps <= 1000 ? p.slippageBps : 100;
       const minOut = mk.withSlippage(quote, slippage);
       const sold = sellA ? pool.a : pool.b;
+      const bought = sellA ? pool.b : pool.a;
       const name = await namer(ctx, market);
-      const [inName, outName] = [name(sold), name(sellA ? pool.b : pool.a)];
+      const [inName, outName] = [name(sold), name(bought)];
+      await mustHold(ctx, sold, amountIn, inName);
+      // How far below the pool's spot price this fills, if alone.
+      const x = BigInt(sellA ? pool.reserve_a : pool.reserve_b), y = BigInt(sellA ? pool.reserve_b : pool.reserve_a);
+      const spot = (amountIn * y) / x;
+      const impact = spot > 0n ? Number(((spot - quote) * 10_000n) / spot) / 100 : 0;
       return {
         title: `Swap ${inName} for ${outName}`,
-        rows: [['You put in', `${wadText(amountIn)} ${inName}`], ['If nobody else trades this epoch', `${wadText(quote)} ${outName}`], ['At least', `${wadText(minOut)} ${outName} (${slippage / 100}% slippage)`], ['Pool', `${p.pool.slice(0, 8)}…`]],
-        note: 'Swaps in one epoch clear together at one price.',
+        danger: impact >= 5,
+        rows: [
+          ['You put in', `${wadText(amountIn)} ${inName}`],
+          ['If nobody else trades this epoch', `${wadText(quote)} ${outName}`],
+          ['At least', `${wadText(minOut)} ${outName} (${slippage / 100}% slippage)`],
+          ['Below the pool price', `${impact.toFixed(2)}%${impact >= 5 ? ' — a large share of this pool' : ''}`],
+          ['Pool fee', `${pool.fee_bps / 100}%, kept by the pool`],
+          // Symbols can repeat; the addresses cannot.
+          ['Selling', `${inName} · ${sold.slice(0, 8)}…${sold.slice(-4)}`],
+          ['Buying', `${outName} · ${bought.slice(0, 8)}…${bought.slice(-4)}`],
+        ],
+        note: 'Swaps in one epoch clear together at one price. If that price is worse than your floor, everything you put in comes back.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(sold), amountIn);

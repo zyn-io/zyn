@@ -145,7 +145,9 @@ async function quietly() {
 
 function ask(method, p) {
   if (!current) { pick(); return Promise.reject(new Error('Connect Nap first.')); }
-  return current.provider.request({ method, params: p });
+  // The network rides every request, so Nap refuses one answered on the
+  // wrong chain instead of answering it.
+  return current.provider.request({ method, params: { ...(p || {}), network: NETWORK } });
 }
 
 function renderWalletButtons() {
