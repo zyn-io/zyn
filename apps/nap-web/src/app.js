@@ -8,7 +8,7 @@ import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import { endpoint, IN_APP, IN_EXTENSION, IN_POPUP, openPage } from './origin.js';
-import { endSession, loadSession, saveSession } from './session.js';
+import { endSession, hasSession, loadSession, saveSession } from './session.js';
 import './styles.css';
 
 const root = document.querySelector('#app');
@@ -52,6 +52,10 @@ const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || gif
 // query links immediately; deployments must also redact them from access logs.
 giftUrl.searchParams.delete('claim'); giftUrl.hash = '';
 history.replaceState(null, '', giftUrl.pathname + giftUrl.search);
+// In the phone app the compact wallet (popup.html) is home; this page is the
+// full view, opened for what only it does — an event tag's tap, a gift card —
+// or on request (`?full=1`).
+if (IN_APP && !tapLink && !claimCode && !new URLSearchParams(location.search).has('full')) location.replace('/popup.html');
 let generation = 0;
 let refreshId = 0;
 const artUrls = new Set();
@@ -1305,7 +1309,7 @@ try {
   config = await loadConfig();
   // Already unlocked in this browser session (the toolbar popup, or another
   // of Nap's tabs): open straight into the wallet.
-  const session = IN_EXTENSION && !setupMode ? await loadSession() : null;
+  const session = hasSession && !setupMode ? await loadSession() : null;
   if (session) {
     identity = session.identity;
     const named = knownCollections();

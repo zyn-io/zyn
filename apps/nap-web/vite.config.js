@@ -41,8 +41,8 @@ export default defineConfig(({ mode }) => ({
     // fails the build instead of the phone.
     target: ['safari16', 'chrome103', 'firefox114'],
     rollupOptions: {
-      // The toolbar popup exists only in the extension.
-      input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html', bridge: 'bridge.html', ...(mode === 'extension' ? { popup: 'popup.html' } : {}) },
+      // The compact wallet: the extension's toolbar popup and the phone app's home.
+      input: { wallet: 'index.html', market: 'market.html', connect: 'connect.html', bridge: 'bridge.html', ...(mode === 'extension' || mode === 'mobile' ? { popup: 'popup.html' } : {}) },
     },
   },
   // Local development only: `NAP_DEV_RPC=http://127.0.0.1:8399 npm run dev`

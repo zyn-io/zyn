@@ -540,8 +540,9 @@ function render() {
     root.textContent = e.message;
     return;
   }
-  frame();
-  render();
-  refresh(true);
+  // Unlocked already (the extension, the phone app): open straight in.
+  const held = await loadSession();
+  if (held?.identity.viewing) begin(held.identity);
+  else { frame(); render(); refresh(true); }
   setInterval(() => { if (identity && !busy) refresh(true, true); }, 30_000);
 })();

@@ -174,3 +174,39 @@ button.row:hover { background: var(--panel); }
 @keyframes rise { from { transform: translate(-50%, 8px); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+
+/* ---- the phone app ------------------------------------------------------
+   The same wallet as the toolbar's, full screen: it takes the device's size,
+   keeps clear of the notch and the home indicator, and gives thumbs bigger
+   targets. `html.in-app` is set by origin.js in the phone build. */
+html.in-app, html.in-app body { width: 100%; height: 100%; }
+html.in-app body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+html.in-app .pop { width: 100%; height: 100dvh; padding-top: env(safe-area-inset-top); }
+html.in-app .pop::before { inset: -80px -60px auto auto; }
+html.in-app .bar { height: 60px; padding: 0 14px; }
+html.in-app .body { padding-bottom: env(safe-area-inset-bottom); }
+html.in-app .hero { padding-top: 30px; }
+html.in-app .hero .amount { font-size: 46px; }
+html.in-app .actions { grid-template-columns: repeat(5, 1fr); padding: 20px 14px 22px; }
+html.in-app .act span { width: 52px; height: 52px; border-radius: 18px; }
+html.in-app .row { padding: 12px 8px; }
+html.in-app .screen { padding-top: env(safe-area-inset-top); }
+html.in-app .screen-foot { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+html.in-app .sheet { top: calc(56px + env(safe-area-inset-top)); }
+html.in-app .toast { bottom: calc(18px + env(safe-area-inset-bottom)); }
+html.in-app .gate { padding-bottom: calc(22px + env(safe-area-inset-bottom)); }
+html.in-app .qr canvas { width: 200px !important; height: 200px !important; }
+html.in-app .field input, html.in-app .field textarea { font-size: 16px; } /* iOS zooms into anything smaller */
+
+/* ---- setting up, in place (the phone has no tab to send it to) --------- */
+.words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--line); }
+.words span { padding: 8px 7px; background: var(--panel); font: 12.5px Mono; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.words i { font-style: normal; font-size: 9.5px; color: var(--amber); margin-right: 5px; }
+.check { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; font-size: 13px; color: var(--soft); }
+.check input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--amber); }
+.warn { padding: 11px 12px; border-radius: 11px; background: #e8a91614; border: 1px solid #e8a91640; font-size: 12.5px; color: var(--soft); }
+.warn b { color: var(--amber); }
+details.more summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more[open] summary { margin-bottom: 10px; }
+.two { display: grid; grid-template-columns: 1fr 96px; gap: 10px; }

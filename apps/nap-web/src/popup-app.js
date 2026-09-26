@@ -1,14 +1,18 @@
-// Nap in the toolbar: the extension's popup, a wallet in 360 × 600.
+// Nap in the toolbar — the extension's popup, a wallet in 360 × 600 — and
+// the phone app's home screen, the same wallet full screen.
 //
 // It opens on what matters — the balance, four actions, what is held — and
 // does the everyday things in place: receive, send, switch network, lock.
 // Setting a wallet up (24 words want room) and the market and bridge open in
 // a tab, the way other toolbar wallets do it. The unlocked keys live in the
 // browser's memory-only session store (session.js), so reopening the popup
-// does not ask for the password again until it has sat idle.
+// does not ask for the password again until it has sat idle. On the phone
+// there is no tab to hand setup to, so it happens here; Face ID or a
+// fingerprint can open the wallet (§151), and the Nap browser is one tap away.
 import QRCode from 'qrcode';
-import { forgetIdentity, openSealedWallet, parseAmount, WAD } from './core.js';
-import { stopZec, ZecAccount } from './zec/client.js';
+import { deriveCollectionAccount, deriveIdentity, forgetIdentity, newMnemonic, openSealedWallet, parseAmount, sealWallet, unhex, WAD } from './core.js';
+import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
+import { IN_APP } from './origin.js';
 import { parsePaymentRequest } from './zip321.js';
 import { activity, chooseNetwork, depositAddress, loadConfig, loadPocket, logActivity, payOnZyn, resolveRecipient, revealExits, withdrawZec } from './pocket.js';
 import { endSession, loadSession, saveSession } from './session.js';
@@ -17,6 +21,22 @@ import './popup.css';
 const pop = document.querySelector('#pop');
 const KEPT_KEY = 'nap.kept.v1';
 const keptWallet = () => { try { return JSON.parse(localStorage.getItem(KEPT_KEY) || 'null'); } catch { return null; } };
+const keepWallet = (blob) => { try { localStorage.setItem(KEPT_KEY, JSON.stringify(blob)); return true; } catch { return false; } };
+
+// The phone app's native side: biometric unlock (the `napvault` plugin keeps
+// the password behind Face ID / a fingerprint) and the Nap browser.
+const vault = IN_APP && window.__TAURI__?.core?.invoke
+  ? { call: (cmd, args = {}) => window.__TAURI__.core.invoke(`plugin:napvault|${cmd}`, args) }
+  : null;
+const vaultStatus = () => (vault ? vault.call('status').catch(() => null) : Promise.resolve(null));
+const bioName = (kind) => ({ faceId: 'Face ID', touchId: 'Touch ID', opticId: 'Optic ID' }[kind] || 'fingerprint');
+let napBrowser = null;
+if (IN_APP && window.__TAURI__?.core?.invoke) {
+  import('./nap-browser.js').then((m) => {
+    napBrowser = m;
+    return m.startBrowser(() => (identity && config ? { config, identity, zec } : null));
+  }).catch(() => { napBrowser = null; });
+}
 
 let config = null;
 let identity = null;
@@ -27,6 +47,7 @@ let zec = null; // ZecAccount
 let zecView = null;
 let zecState = ''; // a short status line
 let tab = 'tokens';
+let zecFresh = false; // a wallet made just now has nothing to scan back for
 let generation = 0;
 let timer = 0;
 
@@ -69,8 +90,10 @@ async function copy(text, what) {
   try { await navigator.clipboard.writeText(text); toast(`${what} copied`); } catch { toast('Could not copy', true); }
 }
 
-/// Open one of Nap's pages in a tab and close the popup behind it.
+/// Open one of Nap's pages in a tab and close the popup behind it — or, in
+/// the phone app, go to it.
 function openTab(path) {
+  if (IN_APP) { location.href = `/${path}`; return; }
   const url = globalThis.chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
   if (globalThis.chrome?.tabs?.create) chrome.tabs.create({ url }); else window.open(url, '_blank');
   window.close();
@@ -106,6 +129,7 @@ const ICON = {
   back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   menu: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+  browse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
   expand: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>',
 };
 
@@ -117,15 +141,94 @@ function welcome() {
     <img class="mark" src="/nap-mark.png" alt="">
     <h1>Nap <em>Wallet</em></h1>
     <p class="lead">Shielded ZEC, and Zyn tokens and items, in one private wallet.</p>
-    <ul class="facts"><li>Your keys are made and kept in this browser, sealed under your password.</li><li>No sign-up, no email. Your keys never leave this browser.</li><li>The same 24 words open Nap on the web and on your phone.</li></ul>
+    <ul class="facts"><li>Your keys are made and kept on this ${IN_APP ? 'phone' : 'browser'}, sealed under your password.</li><li>No sign-up, no email. Your keys never leave this ${IN_APP ? 'phone' : 'browser'}.</li><li>The same 24 words open Nap ${IN_APP ? 'on the web and in the browser extension' : 'on the web and on your phone'}.</li></ul>
     <div class="grow"></div>
     <div class="gate-actions" role="group">
       <button class="btn" id="create">Create a new wallet</button>
       <div class="foot"><button class="link" id="restore">I already have a recovery phrase</button></div>
     </div>
   </div>`;
-  $('#create').onclick = () => openTab('index.html?setup=create');
-  $('#restore').onclick = () => openTab('index.html?setup=restore');
+  $('#create').onclick = () => (IN_APP ? createWallet() : openTab('index.html?setup=create'));
+  $('#restore').onclick = () => (IN_APP ? restoreWallet() : openTab('index.html?setup=restore'));
+}
+
+// Setting up in place — the phone app only; the extension does it in a tab.
+
+const knownCollections = () => (config.collections || [])
+  .filter((c) => /^[0-9a-f]{64}$/i.test(String(c.id)))
+  .map((c) => ({ name: String(c.name || 'Collection'), id: unhex(String(c.id).toLowerCase(), 32) }));
+
+/// From words to a kept, open wallet: the Zyn keys, the Zcash keys, one
+/// receiving account per collection, sealed under the password. The phrase
+/// goes no further than this function.
+async function setUp(words, passphrase, index, password, fresh) {
+  if (String(password).length < 8) throw new Error('Choose a password of at least 8 characters');
+  const nextIdentity = deriveIdentity(words, passphrase, index);
+  try { nextIdentity.zec = await deriveZecKeys(words, passphrase, index); } catch { nextIdentity.zec = undefined; }
+  const nextReceiving = knownCollections().map((c) => ({ ...deriveCollectionAccount(words, passphrase, index, c.id), name: c.name }));
+  const sealed = await sealWallet(nextIdentity, nextReceiving, password, index);
+  if (!keepWallet(sealed)) throw new Error('This device would not store the wallet');
+  await saveSession(nextIdentity, nextReceiving);
+  zecFresh = fresh;
+  begin({ identity: nextIdentity, receiving: nextReceiving });
+  offerBiometrics(password);
+}
+
+function createWallet() {
+  const words = newMnemonic();
+  const s = screen('New wallet', `
+    <div class="warn"><b>Write these 24 words down</b>, in order, on paper. They are the wallet: anyone with them can take everything, and without them a lost phone loses it all. Nap never sees them again.</div>
+    <div class="words">${words.split(' ').map((w, i) => `<span><i>${i + 1}</i>${esc(w)}</span>`).join('')}</div>
+    <label class="check"><input type="checkbox" id="c-ack"><span>I wrote all 24 words down offline — not a screenshot, not a cloud note.</span></label>
+    <label class="field"><span>Password for this phone (8+ characters)</span><input id="c-pw" type="password" autocomplete="new-password" minlength="8"></label>
+    <p class="hint" id="c-err" role="alert">The password opens Nap on this phone. It is not the phrase, and it cannot restore the wallet anywhere else.</p>`,
+    '<button class="btn" id="c-go" disabled>Create wallet</button>');
+  const go = $('#c-go', s);
+  $('#c-ack', s).onchange = (e) => { go.disabled = !e.target.checked; };
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = 'Creating…';
+    try { await setUp(words, '', 0, $('#c-pw', s).value, true); }
+    catch (e) { $('#c-err', s).textContent = e.message; $('#c-err', s).classList.add('bad'); go.disabled = false; go.textContent = 'Create wallet'; }
+  };
+}
+
+function restoreWallet() {
+  const s = screen('Restore', `
+    <label class="field"><span>Recovery phrase (24 words)</span><textarea id="r-words" rows="5" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></textarea></label>
+    <details class="more"><summary>Passphrase or another account? ›</summary><div class="two">
+      <label class="field"><span>Passphrase</span><input id="r-pass" type="password" autocomplete="off" placeholder="if you used one"></label>
+      <label class="field"><span>Account</span><input id="r-index" type="number" min="0" value="0" inputmode="numeric"></label>
+    </div></details>
+    <label class="field"><span>Password for this phone (8+ characters)</span><input id="r-pw" type="password" autocomplete="new-password" minlength="8"></label>
+    <p class="hint" id="r-err" role="alert">Your phrase is used here to derive the keys, then dropped; only the keys are kept, sealed under the password.</p>`,
+    '<button class="btn" id="r-go">Restore wallet</button>');
+  const go = $('#r-go', s);
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = 'Restoring…';
+    try {
+      const words = $('#r-words', s).value;
+      await setUp(words, $('#r-pass', s).value, Number($('#r-index', s).value) || 0, $('#r-pw', s).value, false);
+    } catch (e) { $('#r-err', s).textContent = e.message; $('#r-err', s).classList.add('bad'); go.disabled = false; go.textContent = 'Restore wallet'; }
+  };
+}
+
+/// After a password opened (or set up) the wallet: offer Face ID, once.
+async function offerBiometrics(password) {
+  const st = await vaultStatus();
+  if (!st?.available || st.stored || !password) return;
+  const name = bioName(st.kind);
+  setTimeout(() => {
+    if (!identity) return;
+    sheet(`<button id="b-yes">Open Nap with ${esc(name)}<span>next time</span></button><button id="b-no">Not now</button>`, (el) => {
+      $('#b-no', el).onclick = () => { closeSheet(); password = ''; };
+      $('#b-yes', el).onclick = async () => {
+        closeSheet();
+        try { await vault.call('store', { secret: password }); toast(`${name} opens Nap from now on`); }
+        catch (e) { if (!/cancel/i.test(String(e))) toast(String(e).slice(0, 120), true); }
+        finally { password = ''; }
+      };
+    });
+  }, 900);
 }
 
 function lockScreen(error = '') {
@@ -141,16 +244,19 @@ function lockScreen(error = '') {
     </form>
     <div class="foot"><button class="link" id="phrase">Forgot it? Restore with your phrase</button></div>
   </div>`;
-  $('#pw').focus();
-  $('#phrase').onclick = () => openTab('index.html?setup=restore');
+  if (!IN_APP) $('#pw').focus();
+  $('#phrase').onclick = () => (IN_APP ? restoreWallet() : openTab('index.html?setup=restore'));
+  void biometricUnlock();
   $('#unlock').onsubmit = async (e) => {
     e.preventDefault();
     const button = $('#unlock .btn');
     button.disabled = true; button.textContent = 'Unlocking…';
     try {
-      const opened = await openSealedWallet(keptWallet(), $('#pw').value);
+      const password = $('#pw').value;
+      const opened = await openSealedWallet(keptWallet(), password);
       await saveSession(opened.identity, opened.receiving);
       begin(opened);
+      offerBiometrics(password);
     } catch (err) {
       $('#err').textContent = err.message;
       button.disabled = false; button.textContent = 'Unlock';
@@ -159,7 +265,34 @@ function lockScreen(error = '') {
   };
 }
 
+/// On the lock screen: Face ID / a fingerprint, asked for once, when this
+/// phone keeps the password behind it.
+async function biometricUnlock() {
+  const st = await vaultStatus();
+  const form = $('#unlock');
+  if (!st?.available || !st.stored || !form) return;
+  const name = bioName(st.kind);
+  form.insertAdjacentHTML('afterbegin', `<button type="button" class="btn" id="bio">Unlock with ${esc(name)}</button>`);
+  const go = async () => {
+    try {
+      const { secret } = await vault.call('unlock', { reason: 'Open your Nap wallet' });
+      try {
+        const opened = await openSealedWallet(keptWallet(), secret);
+        await saveSession(opened.identity, opened.receiving);
+        begin(opened);
+      } catch {
+        await vault.call('forget').catch(() => {});
+        $('#err').textContent = `${name} no longer matches this wallet; use your password.`;
+        $('#bio')?.remove();
+      }
+    } catch (e) { if (!/cancel/i.test(String(e))) $('#err').textContent = String(e).slice(0, 160); }
+  };
+  $('#bio').onclick = go;
+  go();
+}
+
 function lock() {
+  napBrowser?.closeBrowser();
   generation++;
   clearTimeout(timer);
   stopZec(); zec = null; zecView = null;
@@ -200,6 +333,7 @@ function home() {
         <button class="act" id="a-send"><span>${ICON.send}</span>Send</button>
         <button class="act" id="a-swap"><span>${ICON.swap}</span>Swap</button>
         <button class="act" id="a-bridge"><span>${ICON.bridge}</span>Bridge</button>
+        ${IN_APP ? `<button class="act" id="a-browse"><span>${ICON.browse}</span>Browser</button>` : ''}
       </nav>
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="tokens" aria-selected="${tab === 'tokens'}">Tokens</button>
@@ -216,6 +350,7 @@ function home() {
   $('#a-send').onclick = () => sendPick();
   $('#a-swap').onclick = () => openTab('market.html');
   $('#a-bridge').onclick = () => openTab('bridge.html');
+  $('#a-browse')?.addEventListener('click', () => (napBrowser ? napBrowser.openBrowser('').catch((e) => toast(String(e).slice(0, 120), true)) : toast('The browser is not available here', true)));
   pop.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { tab = b.dataset.tab; pop.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); renderPanel(); }; });
   renderZec();
   renderPanel();
@@ -313,7 +448,8 @@ async function startZec() {
     zecView = await account.peek(); // what this device already knows: instant
     if (g !== generation) return;
     zecState = 'catching up…'; renderZec(); if (tab !== 'items') renderPanel();
-    zecView = await account.open();
+    zecView = await account.open({ fresh: zecFresh });
+    zecFresh = false;
     zecView = await account.sync((s) => {
       if (g !== generation || !s.to) return;
       zecState = `scanning ${Number(s.at).toLocaleString('en-US')} / ${Number(s.to).toLocaleString('en-US')}`;
@@ -356,14 +492,14 @@ function networkMenu() {
 }
 
 function mainMenu() {
-  sheet(`<button data-go="index.html">Open full view ${ICON.expand}</button>
+  sheet(`<button data-go="${IN_APP ? 'index.html?full=1' : 'index.html'}">Open full view ${ICON.expand}</button>
     <button data-go="market.html">Market<span>swap · launch</span></button>
     <button data-go="bridge.html">Bridge<span>SOL · ETH · BTC</span></button>
     <hr>
     <button id="m-copy">Copy Zyn account id<span>${esc(short(identity.accountHex, 6, 4))}</span></button>
     <button id="m-recovery">Recovery<span>phrase</span></button>
     <hr>
-    <button id="m-lock">Lock<span>auto after 15 min</span></button>`, (el) => {
+    <button id="m-lock">Lock<span>${IN_APP ? 'this phone' : 'auto after 15 min'}</span></button>`, (el) => {
     el.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => openTab(b.dataset.go); });
     $('#m-copy', el).onclick = () => { closeSheet(); copy(identity.accountHex, 'Account id'); };
     $('#m-recovery', el).onclick = () => { closeSheet(); recovery(); };

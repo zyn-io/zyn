@@ -758,9 +758,10 @@ root.addEventListener('click', (e) => { if (e.target.closest('#refresh')) refres
 (async () => {
   try {
     config = await loadConfig();
-    frame();
-    render();
-    refresh(true);
+    // Unlocked already (the extension, the phone app): open straight in.
+    const held = await loadSession();
+    if (held?.identity.viewing) begin(held.identity);
+    else { frame(); render(); refresh(true); }
     timer = setInterval(() => { if (!document.hidden && !busy) refresh(true, true); }, 20000);
   } catch (e) {
     root.innerHTML = `<main class="fatal"><img src="/nap-mark.png" alt=""><h1>Market unavailable.</h1><p>${esc(e.message)}</p></main>`;
