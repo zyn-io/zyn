@@ -218,10 +218,17 @@ async function unlock(method) {
       show(`<p class="kicker">UNLOCK</p><h2>${siteName()} ${why}.</h2>
         <form id="unlock"><label>Password<input id="pw" type="password" autocomplete="current-password" autofocus></label>
         <button class="primary" type="submit">Unlock <span>→</span></button></form>
-        <p class="muted"><a href="" id="use-phrase">Use the recovery phrase instead</a></p>
+        <p class="muted"><a href="" id="use-phrase">Use the recovery phrase instead</a> · <a href="" id="new-wallet">Create a new wallet</a></p>
         <button class="quiet" id="deny">Not now</button><p class="error" id="err" role="alert"></p>`);
       root.querySelector('#deny').onclick = deny;
       root.querySelector('#use-phrase').onclick = (e) => { e.preventDefault(); askPhrase(); };
+      root.querySelector('#new-wallet').onclick = (e) => {
+        e.preventDefault();
+        // Replacing the saved wallet happens in a Nap tab, which warns first;
+        // this window picks the new one up when it is saved.
+        window.open('/index.html?setup=create', '_blank');
+        root.querySelector('#err').textContent = 'Finish in the Nap tab. It replaces the wallet saved in this browser; this window then asks for the new password.';
+      };
       root.querySelector('#unlock').onsubmit = async (e) => {
         e.preventDefault();
         try { const opened = await openSealedWallet(kept, root.querySelector('#pw').value); await saveSession(opened.identity, opened.receiving); done(opened.identity); }

@@ -191,7 +191,7 @@ function shell(content) {
 }
 
 function unlockForm() {
-  return `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><p class="muted">Your key is held here, sealed. It opens with the password you chose — not your recovery phrase.</p><div id="bio-slot"></div><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
+  return `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><p class="muted">Your key is held here, sealed. It opens with the password you chose — not your recovery phrase.</p><div id="bio-slot"></div><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="new-wallet">Create a new wallet</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
 }
 
 function bindKept() {
@@ -205,6 +205,7 @@ function bindKept() {
   };
   showBiometricUnlock();
   root.querySelector('#use-phrase').onclick = (e) => { e.preventDefault(); onboarding('restore'); };
+  root.querySelector('#new-wallet').onclick = (e) => { e.preventDefault(); onboarding('create'); };
   root.querySelector('#forget-kept').onclick = (e) => {
     e.preventDefault();
     forgetKept();
@@ -314,7 +315,7 @@ function restoreForm() {
 function createForm() {
   if (!generatedWords) generatedWords = newMnemonic();
   const numbered = generatedWords.split(' ').map((w, i) => `<span><i>${String(i + 1).padStart(2, '0')}</i>${w}</span>`).join('');
-  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p>${keptWallet() ? '<p class="error">Kept on this device, the new wallet replaces the one saved in this browser. Keep the old wallet\'s phrase: it is the only way back to it.</p>' : ''}<div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function bindRestore() {
   root.querySelector('#restore-form').onsubmit = async (event) => {

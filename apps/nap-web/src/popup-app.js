@@ -177,6 +177,7 @@ async function setUp(words, passphrase, index, password, fresh) {
 function createWallet() {
   const words = newMnemonic();
   const s = screen('New wallet', `
+    ${keptWallet() ? `<div class="warn"><b>This replaces the wallet saved on this phone.</b> Its own recovery phrase still restores it.</div>` : ''}
     <div class="warn"><b>Write these 24 words down</b>, in order, on paper. They are the wallet: anyone with them can take everything, and without them a lost phone loses it all. Nap never sees them again.</div>
     <div class="words">${words.split(' ').map((w, i) => `<span><i>${i + 1}</i>${esc(w)}</span>`).join('')}</div>
     <label class="check"><input type="checkbox" id="c-ack"><span>I wrote all 24 words down offline — not a screenshot, not a cloud note.</span></label>
@@ -242,10 +243,11 @@ function lockScreen(error = '') {
       <p class="hint bad" id="err" role="alert">${esc(error)}</p>
       <button class="btn" type="submit">Unlock</button>
     </form>
-    <div class="foot"><button class="link" id="phrase">Forgot it? Restore with your phrase</button></div>
+    <div class="foot"><button class="link" id="phrase">Forgot it? Restore with your phrase</button><button class="link" id="fresh">New wallet</button></div>
   </div>`;
   if (!IN_APP) $('#pw').focus();
   $('#phrase').onclick = () => (IN_APP ? restoreWallet() : openTab('index.html?setup=restore'));
+  $('#fresh').onclick = () => replaceWallet();
   void biometricUnlock();
   $('#unlock').onsubmit = async (e) => {
     e.preventDefault();
@@ -289,6 +291,14 @@ async function biometricUnlock() {
   };
   $('#bio').onclick = go;
   go();
+}
+
+/// A new wallet in place of the one saved here — after saying what that costs.
+function replaceWallet() {
+  const s = screen('New wallet', `<div class="warn"><b>This replaces the wallet saved on this ${IN_APP ? 'phone' : 'browser'}.</b> It is not deleted anywhere else, and its recovery phrase still restores it — but without that phrase, whatever it holds is gone for good.</div>`,
+    '<button class="btn" id="n-go">I have its phrase — create a new wallet</button><button class="btn ghost" id="n-no">Keep my wallet</button>');
+  $('#n-no', s).onclick = () => s.remove();
+  $('#n-go', s).onclick = () => { s.remove(); if (IN_APP) createWallet(); else openTab('index.html?setup=create'); };
 }
 
 function lock() {
