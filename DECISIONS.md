@@ -6563,3 +6563,20 @@ trust, and view keys that break its privacy model. Bitcoin has both.
 | 154.5 | **Exits pay segwit and Taproot addresses only** (the revealed destination is the output script, 22–42 bytes, never OP_RETURN); legacy addresses are refused in Nap before anything is burned. Whole satoshi, at least 0.0001 BTC | 🔒 |
 | 154.6 | **The network fee comes out of the payouts**, shared equally across the exits one transaction pays; an exit too small to carry its share waits. What leaves the vault is what Zyn burned. The signed transaction is written to `inflight.json` before it is broadcast, so a crash rebroadcasts rather than pays twice | 🔒 |
 | 154.7 | **Signet, not testnet3 or testnet4, and not mainnet.** `bitcoin-signet` is the registered network; `ZYN_BTC_NETWORK=testnet4` is supported but unused. Mainnet needs custodians on separate boxes first | ⏳ |
+
+## §155 — ETH.zy on mainnet: a capped pilot whose vault answers to the team's Safe (26 Sep 2026)
+
+"should we test the sol and eth bridge on zyn mainnet now" → "make it. Eth I
+have Safe" → "Safe: 0xEE74…b983, 2-3. Solana can wait, build eth now" → cap
+"0.01". This relaxes §146.10 and §69.1 for one asset, on purpose and within a
+cap: the ETH boundary opens on mainnet before Phase 2, as a pilot.
+
+| # | Decision | |
+|---|---|---|
+| 155.1 | **The vault's signer is the team's Safe** (`0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983`, Safe v1.4.1, 2 of 3 owners). `ZynVault` `0x235730d7738CC16d3b94d0e3D7097F9ddE22A459` on Ethereum mainnet, deployed block 26062420; asset 1 = native ETH; admin handed to the same Safe, so the deployer keeps no role. No bridge key can move funds | ✅ |
+| 155.2 | **`withdrawAsSigner`**: the signer may call the vault directly with the same payouts and nonce a signed `withdraw` would carry — how a Safe executes a payout. One nonce for both paths, so neither can replay the other | ✅ |
+| 155.3 | **The bridge only proposes.** In Safe mode `zyn-eth-bridge` holds a proposer key (`0x11C34dD3B2698a02975FDE9241A0E418b68ADC9B`, listed as a proposer on the Safe) and no gas money. Each batch (≤ 8 exits) is simulated from the Safe, hashed by the Safe's own `getTransactionHash`, recorded in `proposal.json`, then posted to the Safe transaction service. Two owners approve and execute in Safe{Wallet}; the bridge settles the exits once that execution is finalized. If the Safe spends the proposal's nonce on anything else, the bridge pays nothing and waits for the operator to delete the record. On chain 1 the bridge refuses to run without a Safe | ✅ |
+| 155.4 | **Capped at 0.01 ETH issued** (`ZYN_ETH_CAP_WEI`). A deposit that would pass the cap is not credited; it is appended to `over-cap.jsonl` (index, amount, sender, tx, commitment) for the Safe to refund by hand. Nap checks the room left before a deposit and says so | ✅ |
+| 155.5 | **Stated where users decide**: Nap's ETH card and the landing page say pilot, the cap, who holds the Safe, that its owners could move what the vault holds, that payouts wait on them, and that the contract is unaudited | ✅ |
+| 155.6 | **Rehearsed before mainnet** on an anvil fork of mainnet against the real Safe (owners impersonated): deposit, over-cap deposit, withdraw, proposal, `approveHash` × 2 + `execTransaction`, settle; and a rejected proposal re-proposed at the next nonce. The first mainnet run found what the mock did not: the Safe service refuses lowercase addresses (400/422); everything now goes out EIP-55 | ✅ |
+| 155.7 | **Not yet**: SOL on mainnet (a Squads multisig would play the Safe's part), an audit, a higher cap. Raising the cap is a new decision here, not an env edit | ⏳ |

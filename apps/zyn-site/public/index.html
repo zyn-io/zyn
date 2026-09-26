@@ -84,7 +84,7 @@
       <div class="showcase reveal">
         <ol class="tabs" role="tablist" aria-label="Apps">
           <li><button role="tab" aria-selected="true" data-shot="zynscan" data-url="zynscan.pages.dev" data-href="https://zynscan.pages.dev/?network=testnet"><b>ZynScan</b><span>Every transaction, replayed from the journal and checked against the node's root.</span></button></li>
-          <li><button role="tab" aria-selected="false" data-shot="bridge" data-url="nap.cavebro.win/bridge" data-href="https://nap.cavebro.win/bridge"><b>Nap Bridge</b><span>SOL, ETH and BTC in on testnet, each deposit under a one-time code.</span></button></li>
+          <li><button role="tab" aria-selected="false" data-shot="bridge" data-url="nap.cavebro.win/bridge" data-href="https://nap.cavebro.win/bridge"><b>Nap Bridge</b><span>ETH in on mainnet as a capped pilot; SOL, ETH and BTC on testnet. Each deposit under a one-time code.</span></button></li>
           <li><button role="tab" aria-selected="false" data-shot="jade" data-url="cave-jade.pages.dev" data-href="https://cave-jade.pages.dev/?network=testnet"><b>Jade</b><span>Coins on a bonding curve, one price per epoch.</span></button></li>
           <li><button role="tab" aria-selected="false" data-shot="collection" data-url="cavebro.win" data-href="https://cavebro.win/"><b>Collection Z</b><span>4,444 pixel creatures, sealed under one root.</span></button></li>
         </ol>
@@ -156,8 +156,8 @@
         <li class="tile reveal">
           <a class="tile-shot" href="https://nap.cavebro.win/bridge" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-bridge.webp" width="960" height="600" alt="" loading="lazy"></a>
           <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://nap.cavebro.win/bridge">Bridge</a></h3><span class="where">ZEC mainnet · others testnet</span></div>
-            <p>ZEC in and out through a 2-of-3 threshold vault. SOL, ETH and BTC on test networks (Solana devnet, Sepolia, Bitcoin signet), their test keys on a single machine.</p>
+            <div class="tile-top"><h3><a href="https://nap.cavebro.win/bridge">Bridge</a></h3><span class="where">ZEC mainnet · ETH pilot · others testnet</span></div>
+            <p>ZEC in and out through a 2-of-3 threshold vault. ETH on Ethereum mainnet as a pilot capped at 0.01 ETH, its vault held by a 2-of-3 Safe. SOL, ETH and BTC on test networks (Solana devnet, Sepolia, Bitcoin signet), their test keys on a single machine.</p>
             <a class="tile-go" href="https://nap.cavebro.win/bridge" aria-label="Open Bridge">nap.cavebro.win/bridge <span aria-hidden="true">→</span></a>
           </div>
         </li>
@@ -177,7 +177,7 @@
       <div class="disclose">
         <h2 data-cubes="section">What you are trusting</h2>
         <p><b>One operator orders transactions.</b> Zyn is operator-sequenced, with no fraud proofs and no validity proofs.</p>
-        <p><b>Withdrawals depend on our custodians.</b> Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault run by the Zyn team.</p>
+        <p><b>Withdrawals depend on our custodians.</b> Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault run by the Zyn team. Bridged ETH, a pilot capped at 0.01 ETH, sits in an unaudited contract that answers to the team's 2-of-3 Safe.</p>
         <p><b>Zcash keeps time; it does not check our work.</b> It records deposits, withdrawals and anchor commitments, but does not validate Zyn state transitions. Zyn does not inherit Zcash's security.</p>
         <p><b>Private from the public, visible to the operator.</b> Who holds and trades what is not published. The operator and authorised verifiers can see it today; we are working toward a version where they cannot.</p>
       </div>
@@ -234,7 +234,7 @@
           </details>
           <details class="qa">
             <summary>Are the SOL, ETH and BTC bridges live?</summary>
-            <p>On test networks only: Solana devnet, Ethereum Sepolia and Bitcoin signet, with their test keys on a single machine. They exist to show the design (a one-time deposit code instead of your account, an exit address only the paying bridge sees), not to hold real value.</p>
+            <p>ETH is live on Ethereum mainnet as a pilot: at most 0.01 ETH in total, and deposits past that are refunded by hand rather than credited. Its vault contract is unaudited and answers to a 2-of-3 Safe held by the Zyn team, whose owners approve every payout (so sending out can take hours) and could move what the vault holds. SOL, ETH and BTC also run on test networks (Solana devnet, Ethereum Sepolia, Bitcoin signet) with their test keys on a single machine, to show the design: a one-time deposit code instead of your account, and an exit address only the paying bridge sees.</p>
           </details>
           <details class="qa">
             <summary>Can I build my own app on Zyn?</summary>

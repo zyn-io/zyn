@@ -2664,6 +2664,21 @@ Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chro
 To fund a test wallet with TESTZ: take its deposit code (`zyn:<commitment>`, from Nap's bridge page or `ledger.bridgeMemo`), then from the operator's devnet wallet
 `spl-token transfer FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9 <amount> 7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA --url devnet --with-memo zyn:<commitment>` (the recipient resolves to the vault's token account; no `--commitment` flag); it waits under the code (0.5% fee) until the wallet collects.
 
+## 5f-undevicies. ETH.zy mainnet pilot, Safe mode (26 Sep 2026, DECISIONS §155)
+
+`ZynVault` `0x235730d7738CC16d3b94d0e3D7097F9ddE22A459` on Ethereum mainnet (block 26062420), signer **and** admin = the team's Safe `0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983` (2 of 3). `zyn-eth-bridge.service` on **Contabo**, env `/etc/zyn/zyn-eth-bridge.env` plus `/etc/zyn/zyn-object-mainnet.env` (node `127.0.0.1:8599`), proposer key `/etc/zyn/eth-keys/proposer.key` (0600; can only propose), state `/var/lib/zyn/eth-bridge-mainnet`, cap `ZYN_ETH_CAP_WEI=10000000000000000`. Status:
+
+```sh
+systemd-run --quiet --wait --pipe --collect -p EnvironmentFile=/etc/zyn/zyn-object-mainnet.env \
+  -p EnvironmentFile=/etc/zyn/zyn-eth-bridge.env /usr/local/bin/zyn-eth-bridge status
+```
+
+**Paying out.** Withdrawals appear in Safe{Wallet}'s queue as "Zyn bridge: pay out N ETH.zy withdrawal(s)" — a call to the vault's `withdrawAsSigner`. Two owners sign and execute (the executor pays gas). The bridge settles once the transaction is finalized (~15 min). To refuse a payout, reject it in Safe{Wallet} (a rejection spends the same nonce); the bridge then logs "rejected or replaced" and waits — delete `proposal.json` to propose those exits again.
+
+**Over the cap.** Deposits past the cap are not credited; each is a line in `/var/lib/zyn/eth-bridge-mainnet/over-cap.jsonl` with its sender and tx. Refund from the Safe by hand — the vault can only pay through `withdrawAsSigner`, so a refund is a Safe transaction calling it with the vault's current nonce — only while `status` shows no proposal, or it collides with the bridge's — or a plain transfer from the Safe's own ETH (the stuck deposit then stays in the vault as surplus over what is issued).
+
+**Upgrading** the binary: zigbuild `x86_64-unknown-linux-gnu`, copy to `/usr/local/bin/zyn-eth-bridge`, restart. Deployed from scratchpad `eth-mainnet/{deploy-vault,contabo,upgrade}.sh`. Nap: mainnet `bridges.eth` in `apps/nap-web/public/config.json` carries `capWei`, `custody` and `safe`.
+
 ## 5f-septendecies. SOL.zy and ETH.zy bridges, testnet (24 Sep 2026, DECISIONS §146)
 
 **SOL (Solana devnet ↔ testnet 212)** — `zyn-sol-bridge.service` on Hetzner, env `/etc/zyn/zyn-sol-bridge.env` plus the node's own env for the token. Vault `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` (FROST 2-of-3; public package `/var/zyn/solana-shares/public.bin`; custodians `127.0.0.1:8110/8111/8112`), durable nonce `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H`. SPL tokens (25 Sep): `ZYN_SOL_MINTS=<mint>:<decimals>,…` in the bridge env; `zyn-sol-bridge register` registers each (TESTZ is registered on testnet); deposits go to the vault's associated token account with the same memo, payouts are token transfers, and each token account keeps its own cursor `deposit-cursor-<ata>`. State in `/var/lib/zyn/sol-bridge` (`deposit-cursor`, `inflight.json` — a damaged `inflight.json` stops the bridge on purpose: it is the record that prevents paying twice). `zyn-sol-bridge status` shows the vault balance against what Zyn has issued. Top up the vault's lamports for rent/fees with a plain transfer (no memo = credits nobody).

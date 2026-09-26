@@ -27,7 +27,18 @@
       "lightdUrl": "/zec/mainnet",
       "zecBirthday": 3440000,
       "launchpadUrl": "https://cave-jade.pages.dev/",
-      "attendUrl": "/attend"
+      "attendUrl": "/attend",
+      "bridges": {
+        "eth": {
+          "chainId": 1,
+          "vault": "0x235730d7738CC16d3b94d0e3D7097F9ddE22A459",
+          "assetId": 1,
+          "explorer": "https://etherscan.io/tx/{tx}",
+          "capWei": "10000000000000000",
+          "custody": "2-of-3 Safe",
+          "safe": "0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983"
+        }
+      }
     },
     {
       "id": "testnet",
