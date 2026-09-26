@@ -158,7 +158,8 @@ export async function sealWallet(identity, receiving, password, accountIndex = 0
 /// record on purpose — AES-GCM fails authentication either way, and saying
 /// which would tell someone holding a stolen file that they are close.
 export async function openSealedWallet(blob, password) {
-  if (!blob || blob.v !== KEEP.version) throw new Error('This device holds no wallet this version can open');
+  if (!blob) throw new Error('No wallet is saved in this browser. Restore it from your recovery phrase.');
+  if (blob.v !== KEEP.version) throw new Error(`This wallet was saved by ${Number(blob.v) > KEEP.version ? 'a newer' : 'an older'} Nap and cannot be opened here. Restore it from your recovery phrase.`);
   const iterations = Number(blob.iterations);
   if (!Number.isSafeInteger(iterations) || iterations < 100_000) throw new Error('Stored wallet uses too weak a key derivation');
   const salt = unhex(blob.salt, 16);

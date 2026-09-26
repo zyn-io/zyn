@@ -63,7 +63,8 @@ test('a kept wallet will not be opened under weakened settings', async () => {
   // Someone editing the stored record down to a cheap KDF is trying to make a
   // later brute force affordable. Refused before the password is even tried.
   await assert.rejects(() => openSealedWallet({ ...blob, iterations: 1000 }, 'the right password'), /too weak/);
-  await assert.rejects(() => openSealedWallet({ ...blob, v: 99 }, 'the right password'), /no wallet this version can open/);
+  await assert.rejects(() => openSealedWallet({ ...blob, v: 99 }, 'the right password'), /saved by a newer Nap/);
+  await assert.rejects(() => openSealedWallet(null, 'the right password'), /No wallet is saved in this browser/);
 });
 
 test('a short password is refused when sealing, not when opening', async () => {
