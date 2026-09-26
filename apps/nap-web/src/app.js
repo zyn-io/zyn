@@ -8,6 +8,7 @@ import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import { endpoint, IN_APP, IN_EXTENSION, IN_POPUP, openPage } from './origin.js';
+import { endSession, loadSession, saveSession } from './session.js';
 import './styles.css';
 
 const root = document.querySelector('#app');
@@ -41,7 +42,11 @@ let tapLink = (() => {
   return /^[0-9a-f]{64}$/.test(e) && /^[0-9a-f]{32}$/.test(picc) && /^[0-9a-f]{16}$/.test(cmac) ? { event: e, picc, cmac } : null;
 })();
 if (/\/tap\/?$/.test(location.pathname)) history.replaceState(null, '', '/');
+// The toolbar popup sends setting up here (`?setup=create|restore`): 24 words
+// want more room than a popup has.
+const setupMode = ['create', 'restore'].includes(new URLSearchParams(location.search).get('setup')) ? new URLSearchParams(location.search).get('setup') : '';
 const giftUrl = new URL(location.href);
+giftUrl.searchParams.delete('setup');
 const claimCode = new URLSearchParams(giftUrl.hash.slice(1)).get('claim') || giftUrl.searchParams.get('claim') || '';
 // Fragment links keep the card secret out of HTTP access logs. Scrub legacy
 // query links immediately; deployments must also redact them from access logs.
@@ -290,13 +295,21 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
   if (mode === 'kept') bindKept(); else if (mode === 'create') bindCreate(); else bindRestore();
 }
 
+/// The extension keeps its wallet by definition — the toolbar opens it with
+/// this password — so there the field is required, not optional.
+function keepField() {
+  return IN_EXTENSION
+    ? '<label>Password for this browser <span class="muted">(8+ characters — the toolbar wallet opens with it)</span><input id="keep-password" type="password" autocomplete="new-password" required minlength="8"></label>'
+    : '<label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label>';
+}
+
 function restoreForm() {
-  return `<form id="restore-form"><p class="kicker">WELCOME BACK</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="word 1  word 2  word 3 …"></textarea></label><div class="split"><label>Optional passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Leave blank if unused"></label><label>Account<input id="account-index" type="number" min="0" max="2147483647" value="0"></label></div><label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label><button class="primary" type="submit">Restore on this device <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="restore-form"><p class="kicker">WELCOME BACK</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="word 1  word 2  word 3 …"></textarea></label><div class="split"><label>Optional passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Leave blank if unused"></label><label>Account<input id="account-index" type="number" min="0" max="2147483647" value="0"></label></div>${keepField()}<button class="primary" type="submit">Restore on this device <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function createForm() {
   if (!generatedWords) generatedWords = newMnemonic();
   const numbered = generatedWords.split(' ').map((w, i) => `<span><i>${String(i + 1).padStart(2, '0')}</i>${w}</span>`).join('');
-  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label><label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label><button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function bindRestore() {
   root.querySelector('#restore-form').onsubmit = async (event) => {
@@ -330,6 +343,7 @@ const knownCollections = () => (config.collections || [])
   .map((c) => ({ name: String(c.name || 'Collection'), id: unhex(c.id, 32) }));
 
 async function unlock(words, passphrase, index, keepPassword = '', fresh = false) {
+  if (IN_EXTENSION && !keepPassword) throw new Error('Choose a password for this browser (8+ characters)');
   const nextIdentity = deriveIdentity(words, passphrase, index);
   // The Zcash keys come from the same words, so this is the moment for them
   // too. If the Zcash code cannot load here, the Zyn wallet still opens and
@@ -353,8 +367,9 @@ async function unlock(words, passphrase, index, keepPassword = '', fresh = false
     } catch (e) { kept = null; throw e; }
   }
   clearSession(); identity = nextIdentity; receiving = nextReceiving; zecFresh = fresh;
+  if (kept) void saveSession(identity, receiving);
   root.querySelectorAll('textarea,input').forEach((el) => { if (el.type !== 'checkbox') el.value = ''; });
-  wallet(kept ? 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.' : '');
+  wallet(kept ? (IN_EXTENSION ? 'Your wallet is ready. Open it any time from the Nap icon in your toolbar (pin it from the puzzle-piece menu).' : 'Kept on this device. Your password opens it next time; your phrase still restores it anywhere.') : '');
   refresh();
   if (kept) offerBiometrics(keepPassword);
 }
@@ -363,6 +378,7 @@ async function unlock(words, passphrase, index, keepPassword = '', fresh = false
 async function openKept(password) {
   const opened = await openSealedWallet(keptWallet(), password);
   clearSession();
+  void saveSession(opened.identity, opened.receiving);
   identity = opened.identity;
   // Names are not sealed — they are deployment labels, not secrets — so they
   // are matched back from the current config.
@@ -422,7 +438,7 @@ function wallet(message = '') {
   root.querySelector('#recovery-dialog .x').onclick = () => root.querySelector('#recovery-dialog').close();
   // Locking returns to whatever this device can actually offer: a password if
   // the wallet is kept here, the phrase if it is not.
-  root.querySelector('#forget').onclick = () => { clearSession(); onboarding(keptWallet() ? 'kept' : 'restore'); };
+  root.querySelector('#forget').onclick = () => { clearSession(); void endSession(); onboarding(keptWallet() ? 'kept' : 'restore'); };
   root.querySelector('#refresh').onclick = () => { refresh(); zecSync(); };
   root.querySelector('#zec-link').onclick = () => root.querySelector('#zec').scrollIntoView({ behavior: 'smooth', block: 'start' });
   root.querySelector('#deposit-from-zec').onclick = () => {
@@ -1286,7 +1302,16 @@ try {
   if (!isSecureContext && !local) throw new Error('Nap Web requires HTTPS before it can create or restore an account');
   if (!crypto?.getRandomValues || !crypto?.randomUUID) throw new Error('This browser does not provide the secure randomness Nap requires');
   if (!crypto.subtle || !AbortSignal.timeout) throw new Error('This browser lacks the cryptography or request timeout support Nap requires');
-  config = await loadConfig(); onboarding();
+  config = await loadConfig();
+  // Already unlocked in this browser session (the toolbar popup, or another
+  // of Nap's tabs): open straight into the wallet.
+  const session = IN_EXTENSION && !setupMode ? await loadSession() : null;
+  if (session) {
+    identity = session.identity;
+    const named = knownCollections();
+    receiving = session.receiving.map((r) => ({ ...r, name: (named.find((c) => hex(c.id) === hex(r.collection)) || {}).name || 'Collection' }));
+    wallet(); refresh();
+  } else onboarding(setupMode || undefined);
 }
 catch (e) { root.innerHTML = `<main class="fatal"><img src="/nap-mark.png" alt=""><h1>Nap is not configured.</h1><p>${escapeHtml(e.message)}</p></main>`; }
 

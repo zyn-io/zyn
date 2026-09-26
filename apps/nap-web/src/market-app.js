@@ -9,6 +9,7 @@
 // from claim ids only this wallet can derive. The node learns what a sequencer
 // must — the intents — and the public learns pool reserves and sale totals.
 
+import { endSession, loadSession, saveSession } from './session.js';
 import { checkedEpoch, deriveIdentity, forgetIdentity, openSealedWallet, parseAmount } from './core.js';
 import { hex, nullifierOf, scan, unhex } from './object.js';
 import * as ledger from './ledger.js';
@@ -165,6 +166,7 @@ const keptWallet = () => { try { return JSON.parse(read(KEPT_KEY) || 'null'); } 
 function lock() {
   forgetIdentity(identity);
   identity = null;
+  void endSession();
   state = { ...state, held: [], balances: new Map(), owed: [] };
   frame();
   render();
@@ -316,6 +318,11 @@ function shell(content) {
 /// Opening the wallet, as a view inside the market rather than a gate in
 /// front of it.
 function renderWallet(error = '') {
+  // Unlocked already in this browser session (the extension): straight in.
+  if (!error && !renderWallet.asked) {
+    renderWallet.asked = true;
+    loadSession().then((held) => { if (held && !identity) begin(held.identity); });
+  }
   const kept = keptWallet();
   $('#view').innerHTML = `<div class="mk-grid mk-unlock">
     <section class="entry panel mk-entry">
@@ -334,6 +341,7 @@ function renderWallet(error = '') {
     e.preventDefault();
     try {
       const opened = await openSealedWallet(keptWallet(), $('#kept-password').value);
+      await saveSession(opened.identity, opened.receiving);
       begin(opened.identity);
     } catch (err) { $('#form-error').textContent = err.message; }
   });

@@ -10,6 +10,7 @@
 // carries where the money went; the address is then shown to the bridge that
 // pays it, and only to it.
 
+import { endSession, loadSession, saveSession } from './session.js';
 import { checkedEpoch, deriveIdentity, forgetIdentity, openSealedWallet, parseAmount } from './core.js';
 import { hex, scan, unhex, withdrawIntent } from './object.js';
 import * as ledger from './ledger.js';
@@ -336,7 +337,7 @@ function frame() {
       <div id="view"></div>
     </section>
   </main>`);
-  $('#lock')?.addEventListener('click', () => { forgetIdentity(identity); identity = null; frame(); render(); });
+  $('#lock')?.addEventListener('click', () => { forgetIdentity(identity); identity = null; void endSession(); frame(); render(); });
   $('#open-wallet')?.addEventListener('click', () => { if (view !== 'wallet') returnTo = view; view = 'wallet'; render(); });
   root.querySelectorAll('#tabs [data-view]').forEach((b) => { b.onclick = () => { view = b.dataset.view; render(); }; });
 }
@@ -485,6 +486,11 @@ function renderOut() {
 }
 
 function renderWallet(error = '') {
+  // Unlocked already in this browser session (the extension): straight in.
+  if (!error && !renderWallet.asked) {
+    renderWallet.asked = true;
+    loadSession().then((held) => { if (held && !identity) begin(held.identity); });
+  }
   const kept = keptWallet();
   $('#view').innerHTML = `<section class="entry panel mk-entry">
     ${kept ? '<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>' : ''}
@@ -494,7 +500,7 @@ function renderWallet(error = '') {
   $('#use-phrase')?.addEventListener('click', (e) => { e.preventDefault(); $('#phrase-form').hidden = false; $('#kept-form').hidden = true; });
   $('#kept-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { begin((await openSealedWallet(keptWallet(), $('#kept-password').value)).identity); } catch (err) { $('#form-error').textContent = err.message; }
+    try { const opened = await openSealedWallet(keptWallet(), $('#kept-password').value); await saveSession(opened.identity, opened.receiving); begin(opened.identity); } catch (err) { $('#form-error').textContent = err.message; }
   });
   $('#phrase-form').addEventListener('submit', (e) => {
     e.preventDefault();

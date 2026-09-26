@@ -31,7 +31,7 @@ The same recovery phrase opens Nap in the browser at nap.cavebro.win.
 
 **Graphic assets** (`apps/extension/store/`):
 - Icon: 128×128 is inside the package (`icons/128.png`)
-- Screenshots (1280×800): `screenshot-1-keys.png`, `screenshot-2-pocket.png`, `screenshot-3-approve.png`, `screenshot-4-market.png`
+- Screenshots (1280×800): `screenshot-0-popup.png` (the toolbar wallet — lead with it), `screenshot-1-keys.png`, `screenshot-2-pocket.png`, `screenshot-3-approve.png`, `screenshot-4-market.png`
 - Small promo tile (440×280): `promo-small-440x280.png`
 
 **Official URL / Homepage:** https://nap.cavebro.win

@@ -20,6 +20,7 @@
 // - What is remembered is which sites are connected, in localStorage. Never a
 //   key, never a balance.
 
+import { loadSession, saveSession } from './session.js';
 import { deriveIdentity, forgetIdentity, openSealedWallet } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
@@ -202,7 +203,11 @@ async function handle({ method, params }) {
 // ---------------------------------------------------------------------------
 // Unlocking.
 
-function unlock(method) {
+async function unlock(method) {
+  // Unlocked already in this browser session: the site's request is still
+  // shown and approved below, but the password is not asked again.
+  const held = await loadSession();
+  if (held) { identity = held.identity; return; }
   return new Promise((resolve, reject) => {
     const kept = keptWallet();
     const why = method === 'nap_connect' ? 'wants to connect to your Nap' : 'is asking your Nap';
@@ -219,7 +224,7 @@ function unlock(method) {
     if (kept) {
       form.onsubmit = async (e) => {
         e.preventDefault();
-        try { done((await openSealedWallet(kept, root.querySelector('#pw').value)).identity); }
+        try { const opened = await openSealedWallet(kept, root.querySelector('#pw').value); await saveSession(opened.identity, opened.receiving); done(opened.identity); }
         catch (err) { root.querySelector('#err').textContent = err.message; }
       };
     } else bindPhrase(done);

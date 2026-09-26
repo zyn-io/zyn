@@ -111,15 +111,10 @@ async function keyFrom(password, salt) {
   );
 }
 
-/// Seal the derived keys under a password. The phrase is never an input.
-///
-/// Both the identity key and one key per collection receiving account, because
-/// a bought item lands in the latter and the seed that derives them is not
-/// kept. A cracked record therefore costs these accounts — not the phrase, and
-/// not the Zcash wallet the same words also control.
-export async function sealWallet(identity, receiving, password, accountIndex = 0) {
-  if (typeof password !== 'string' || password.length < 8) throw new Error('Use at least 8 characters');
-  const bundle = te.encode(JSON.stringify({
+/// The derived keys as plain hex, the one shape both a sealed record and an
+/// unlocked extension session (session.js) hold.
+export function exportKeys(identity, receiving) {
+  return {
     i: hex(identity.secretKey),
     r: (receiving || []).map((r) => ({ c: hex(r.collection), k: hex(r.secretKey) })),
     // The object-ledger keys, which cannot be recovered from `i`: they come
@@ -132,7 +127,18 @@ export async function sealWallet(identity, receiving, password, accountIndex = 0
     // cracked record costs these too, which is why sealing is opt-in.
     zm: identity.zec?.mainnet ? hex(identity.zec.mainnet) : undefined,
     zt: identity.zec?.testnet ? hex(identity.zec.testnet) : undefined,
-  }));
+  };
+}
+
+/// Seal the derived keys under a password. The phrase is never an input.
+///
+/// Both the identity key and one key per collection receiving account, because
+/// a bought item lands in the latter and the seed that derives them is not
+/// kept. A cracked record therefore costs these accounts — not the phrase, and
+/// not the Zcash wallet the same words also control.
+export async function sealWallet(identity, receiving, password, accountIndex = 0) {
+  if (typeof password !== 'string' || password.length < 8) throw new Error('Use at least 8 characters');
+  const bundle = te.encode(JSON.stringify(exportKeys(identity, receiving)));
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await keyFrom(password, salt);
@@ -165,8 +171,12 @@ export async function openSealedWallet(blob, password) {
   } catch {
     throw new Error('That password does not open this wallet');
   }
-  const bundle = JSON.parse(new TextDecoder().decode(plain));
-  const identity = identityFromSecretKey(unhex(bundle.i, 32), blob.accountIndex);
+  return importKeys(JSON.parse(new TextDecoder().decode(plain)), blob.accountIndex);
+}
+
+/// Keys from `exportKeys` back into an identity and its receiving accounts.
+export function importKeys(bundle, accountIndex = 0) {
+  const identity = identityFromSecretKey(unhex(bundle.i, 32), accountIndex);
   // Carried forward when the blob has them. A wallet sealed before the object
   // ledger existed does not, and reads as holding nothing there rather than
   // failing to open -- which is the right way round: the Zyn account it does
@@ -177,7 +187,7 @@ export async function openSealedWallet(blob, password) {
   // opens without them, and the wallet asks for the phrase once to add them.
   if (bundle.zm && bundle.zt) identity.zec = { mainnet: unhex(bundle.zm, 32), testnet: unhex(bundle.zt, 32) };
   const receiving = (bundle.r || []).map((r) => ({
-    ...identityFromSecretKey(unhex(r.k, 32), blob.accountIndex),
+    ...identityFromSecretKey(unhex(r.k, 32), accountIndex),
     collection: unhex(r.c, 32),
   }));
   return { identity, receiving };

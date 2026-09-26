@@ -38,8 +38,8 @@ test('it asks for one host and no more than a wallet needs', () => {
 
 test('every page it ships is the wallet, talking only to Nap', () => {
   const m = json('dist/manifest.json');
-  assert.equal(m.action.default_popup, 'index.html?popup=1');
-  for (const page of ['index.html', 'connect.html', 'market.html', 'bridge.html']) {
+  assert.equal(m.action.default_popup, 'popup.html');
+  for (const page of ['popup.html', 'index.html', 'connect.html', 'market.html', 'bridge.html']) {
     const html = read(`dist/${page}`);
     const csp = html.match(/connect-src ([^;"]*)/)[1].split(/\s+/);
     assert.ok(csp.includes(API), `${page} can reach Nap`);
