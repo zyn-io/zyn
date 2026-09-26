@@ -26,7 +26,9 @@
       "icons/icon.ico"
     ],
     "iOS": {
-      "minimumSystemVersion": "16.0"
+      "minimumSystemVersion": "16.0",
+      "developmentTeam": "728D69ULX3",
+      "bundleVersion": "1"
     },
     "android": {
       "minSdkVersion": 24

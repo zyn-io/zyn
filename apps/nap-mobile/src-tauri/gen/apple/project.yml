@@ -32,7 +32,10 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
+      # Linked below (dependencies: libapp.a), never copied: the App Store
+      # refuses standalone libraries inside an app bundle.
       - path: Externals
+        buildPhase: none
       - path: nap-mobile_iOS
       - path: assets
         buildPhase: resources
