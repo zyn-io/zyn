@@ -1,6 +1,6 @@
 // Headings that come apart into cubes as their section leaves, and assemble
-// from cubes as the next one arrives. Scroll-linked, so scrolling back plays
-// it backwards. Each heading is rasterised once into a grid of cubes that
+// from cubes as the next one arrives. Scroll decides when; each plays on its
+// own clock (about 1.4 s apart, 1.6 s together), and scrolling back reverses it. Each heading is rasterised once into a grid of cubes that
 // carry its real colours (the brushed-jade words included); a fixed canvas
 // draws them only while a heading is in transition, and the real, crisp text
 // takes over the moment it has formed.
@@ -89,7 +89,7 @@
     return cubes;
   }
 
-  const items = els.map((el) => ({ el, mode: el.dataset.cubes, section: el.closest('section, footer') || el, cubes: null, key: '' }));
+  const items = els.map((el) => ({ el, mode: el.dataset.cubes, section: el.closest('section, footer') || el, cubes: null, key: '', shown: null, base: null }));
 
   function size() {
     dpr = Math.min(devicePixelRatio || 1, 2);
@@ -98,42 +98,56 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  // How far each heading is from being whole: 0 formed, 1 fully scattered.
-  // The sign says which way: arriving from below (+) or leaving (-). A heading
-  // leaves only once its section has begun to scroll away above the screen,
-  // so a section settled at its edge always shows its heading whole.
+  // Where each heading should be: 0 whole, -1 come apart (its section has
+  // begun to leave above the screen), +1 not yet formed (still low on the
+  // screen, arriving). Scroll only decides this; the animation towards it
+  // runs on its own clock, so a quick glide between sections does not rush it.
   const LEAVE_AT = 0.04;
-  function progress(item, r) {
+  function goal(item, r) {
     if (item.mode === 'giant') {
       const toBottom = document.documentElement.scrollHeight - innerHeight - scrollY;
-      return clamp(toBottom / (H * 0.55));
+      return toBottom < H * 0.2 ? 0 : 1;
     }
     const s = item.section.getBoundingClientRect().top;
-    const leave = clamp((-s - H * LEAVE_AT) / (H * 0.42));
-    if (leave > 0) return -leave;
+    if (-s > H * LEAVE_AT) return -1;
     if (item.mode === 'hero') return 0;
-    return clamp((r.top - H * 0.64) / (H * 0.28));
+    return r.top > H * 0.64 ? 1 : 0;
   }
+  const APART = 1 / 1.4; // seconds to come apart
+  const TOGETHER = 1 / 1.6; // seconds to form
 
-  let queued = false;
-  function frame() {
-    queued = false;
+  let last = 0;
+  let running = false;
+  function frame(now) {
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    last = now;
     ctx.clearRect(0, 0, W, H);
+    let moving = false;
     for (const item of items) {
       const r = item.el.getBoundingClientRect();
-      if (item.mode !== 'giant' && (item.section.getBoundingClientRect().bottom < 0 || r.top > H * 1.4)) { item.el.style.opacity = ''; continue; }
-      const p = progress(item, r);
+      const g = goal(item, r);
+      if (item.shown === null) item.shown = g; // no animation for where the page opens
+      if (item.shown !== g) {
+        const rate = Math.abs(g) > Math.abs(item.shown) ? APART : TOGETHER;
+        const step = rate * dt;
+        item.shown = Math.abs(g - item.shown) <= step ? g : item.shown + Math.sign(g - item.shown) * step;
+        moving = true;
+      }
+      const p = item.shown;
       const t = Math.abs(p);
-      if (t < 0.002) { item.el.style.opacity = ''; continue; }
+      if (t < 0.002) { item.el.style.opacity = ''; item.base = null; continue; }
+      const offscreen = item.mode !== 'giant' && (item.section.getBoundingClientRect().bottom < -H * 0.5 || r.top > H * 1.4);
+      if (offscreen && t > 0.999) { item.el.style.opacity = '0'; continue; }
       const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
       if (!item.cubes || item.key !== key) { item.cubes = rasterise(item.el); item.key = key; }
       // a short crossfade where the pixels hand over to the crisp text
       const hand = clamp(t / 0.06);
       item.el.style.opacity = String(1 - hand);
       const up = p < 0;
-      // Leaving, the cubes break off where the heading stood when its section
-      // began to go, and crumble there while the page moves on beneath them.
-      const baseY = up ? r.top - item.section.getBoundingClientRect().top - H * LEAVE_AT : r.top;
+      // Coming apart, the cubes stay where the heading stood when it began to
+      // go and crumble there while the page moves on; forming, they follow it.
+      if (up && g < 0) { if (item.base === null) item.base = r.top; } else item.base = null;
+      const baseY = item.base ?? r.top;
       for (const c of item.cubes) {
         const lt = ease(clamp(t * 1.55 - c.delay * 0.55));
         const a = (1 - lt * lt) * hand;
@@ -156,8 +170,10 @@
       }
     }
     ctx.globalAlpha = 1;
+    if (moving) requestAnimationFrame(frame);
+    else { running = false; last = 0; }
   }
-  const request = () => { if (!queued) { queued = true; requestAnimationFrame(frame); } };
+  const request = () => { if (!running) { running = true; last = 0; requestAnimationFrame(frame); } };
 
   size();
   addEventListener('scroll', request, { passive: true });
