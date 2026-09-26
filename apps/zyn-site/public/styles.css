@@ -64,14 +64,14 @@ h1, h2, p { margin: 0; }
 @keyframes sweep { 0% { background-position: 160% 0; } 40%, 100% { background-position: -60% 0; } }
 
 .hero-copy { position: relative; z-index: 2; align-self: end; width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter) clamp(28px, 5vh, 56px); display: grid; gap: 26px; }
-.hero h1 { font: 800 clamp(44px, 5.8vw, 100px)/0.9 var(--display); font-stretch: 125%; letter-spacing: -0.035em; max-width: 11ch; color: #fbfaf5; text-rendering: geometricPrecision; }
+.hero h1 { font: 800 clamp(44px, 5.8vw, 100px)/0.9 var(--display); font-stretch: 125%; letter-spacing: -0.035em; max-width: 9ch; color: #fbfaf5; text-rendering: geometricPrecision; }
 .hero h1 .line { display: inline-block; animation: rise 1s cubic-bezier(.2, .7, .1, 1) both; }
 .hero h1 .line:nth-child(2) { animation-delay: .08s; }
 .hero h1 .line:nth-child(3) { animation-delay: .16s; }
 .hero h1 .line:nth-child(4) { animation-delay: .24s; }
 .jade { background: var(--brushed-text); background-size: 180% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
 @keyframes rise { from { opacity: 0; transform: translateY(0.35em); } }
-.lede { max-width: 48ch; font-size: clamp(17px, 1.4vw, 19px); color: #c3c9c2; animation: rise 1s .34s both; }
+.lede { max-width: 40ch; font-size: clamp(18px, 1.6vw, 22px); line-height: 1.5; color: #c3c9c2; animation: rise 1s .34s both; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 30px; animation: rise 1s .42s both; }
 .button { display: inline-block; padding: 16px 26px; background: var(--mineral); color: var(--ink); text-decoration: none; font: 700 15px/1 var(--display); font-stretch: 112%; letter-spacing: 0.04em; text-transform: uppercase; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%); transition: background .2s; }
 .button:hover { background: var(--jade-3); }
