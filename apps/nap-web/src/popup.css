@@ -231,3 +231,8 @@ details.more[open] summary { margin-bottom: 10px; }
 .slips button { border: 1px solid var(--line-strong); border-radius: 7px; background: none; padding: 1px 7px; font: 11px Mono; color: var(--muted); }
 .slips button.on { border-color: var(--amber); color: var(--amber); }
 .sheet button.on { color: var(--amber); }
+
+/* ---- bridge ------------------------------------------------------------- */
+.seg.two-seg { grid-template-columns: 1fr 1fr; }
+button.row:disabled { opacity: .45; cursor: default; }
+button.row:disabled:hover { background: none; }

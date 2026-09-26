@@ -26,6 +26,20 @@ import './market.css';
 import './bridge.css';
 
 const root = document.querySelector('#app');
+/// A deposit handed over by Nap's compact wallet (the toolbar popup, the
+/// phone app), where MetaMask and Phantom cannot reach: `#deposit=eth|sol&
+/// code=<commitment>&net=<id>`. The code is that wallet's one-time deposit
+/// commitment — not its account — and rides in the fragment, which never
+/// reaches the server. This page then needs no wallet of its own: it only
+/// asks MetaMask or Phantom to send, with the code attached.
+const handoff = (() => {
+  const q = new URLSearchParams(location.hash.slice(1));
+  const code = String(q.get('code') || '');
+  const key = String(q.get('deposit') || '');
+  if (!/^[0-9a-f]{64}$/.test(code) || !['eth', 'sol'].includes(key)) return null;
+  history.replaceState(null, '', location.pathname);
+  return { code, key, net: String(q.get('net') || '') };
+})();
 const KEPT_KEY = 'nap.kept.v1';
 const NETWORK_KEY = 'nap.network';
 let config;
@@ -82,7 +96,7 @@ async function loadConfig() {
   if (!response.ok) throw new Error('Deployment is missing config.json');
   const value = await response.json();
   const networks = Array.isArray(value.networks) && value.networks.length ? value.networks : [{ id: 'default', ...value }];
-  const wanted = read(NETWORK_KEY);
+  const wanted = handoff?.net || read(NETWORK_KEY);
   const chosen = networks.find((n) => n.id === wanted) || networks[0];
   return checkedNetwork(chosen, networks);
 }
@@ -215,7 +229,7 @@ async function solanaBlockhash(b) {
 async function depositSol(b, amountText, say) {
   const wad = parseAmount(amountText);
   if (wad % LAMPORT !== 0n) throw new Error('SOL has nine decimal places');
-  const { memo } = await ledger.bridgeMemo(config, identity);
+  const { memo } = handoff ? { memo: `zyn:${handoff.code}` } : await ledger.bridgeMemo(config, identity);
   const wallets = sol.solanaWallets();
   await new Promise((r) => setTimeout(r, 300));
   if (!wallets.length) throw new Error('No Solana wallet in this browser. Install one (Phantom, Solflare, Backpack), switch it to devnet, and reload.');
@@ -253,7 +267,7 @@ async function depositEth(b, amountText, say) {
   // bridge lists anything over it for a refund rather than crediting it.
   const room = capRoom(b);
   if (room !== null && wei > room) throw new Error(room > 0n ? `The pilot takes at most ${fmt(room, 18)} ETH more right now.` : 'The pilot is full for now — nothing more can come in.');
-  const { commitment } = await ledger.bridgeMemo(config, identity);
+  const { commitment } = handoff ? { commitment: handoff.code } : await ledger.bridgeMemo(config, identity);
   const [from] = await eth.request({ method: 'eth_requestAccounts' });
   const chainHex = `0x${b.chainId.toString(16)}`;
   if ((await eth.request({ method: 'eth_chainId' })) !== chainHex) {
@@ -328,8 +342,8 @@ function shell(content) {
 function frame() {
   shell(`<main class="wallet mk">
     <aside class="rail">
-      <div>${identity ? `<p class="kicker">BRIDGING AS</p><b class="mk-account">${short(identity.accountHex)}</b>` : '<p class="kicker">NOT OPEN</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
-      <nav id="tabs">${[['in', 'Bring in'], ['out', 'Send out']].map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('')}</nav>
+      <div>${handoff ? `<p class="kicker">ONE-TIME CODE</p><b class="mk-account">${short(handoff.code)}</b>` : identity ? `<p class="kicker">BRIDGING AS</p><b class="mk-account">${short(identity.accountHex)}</b>` : '<p class="kicker">NOT OPEN</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
+      <nav id="tabs"${handoff ? ' hidden' : ''}>${[['in', 'Bring in'], ['out', 'Send out']].map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('')}</nav>
       ${identity ? '<button class="quiet" id="lock">Lock</button>' : ''}
     </aside>
     <section class="content">
@@ -374,17 +388,20 @@ function renderNone() {
 
 function renderIn() {
   if (!config.bridges.length) { renderNone(); return; }
-  $('#view').innerHTML = `${heading('BRING IN', `${config.bridges.map((b) => b.symbol).join(', ').replace(/, ([^,]*)$/, ' and $1')}, private on Zyn.`, 'Send from your own wallet on the other chain. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
-    <div class="br-cards">${config.bridges.map((b) => `<section class="mk-card br-card" data-bridge="${b.key}">
+  const shown = handoff ? config.bridges.filter((b) => b.key === handoff.key) : config.bridges;
+  $('#view').innerHTML = `${handoff
+    ? heading('DEPOSIT', `${shown[0]?.symbol || ''} into your Nap wallet.`, `Your Nap wallet made this one-time code. Send from ${handoff.key === 'eth' ? 'MetaMask, Rabby or another Ethereum wallet' : 'Phantom or another Solana wallet'} here; it arrives in Nap once final, and Nap claims it on its own.`)
+    : heading('BRING IN', `${config.bridges.map((b) => b.symbol).join(', ').replace(/, ([^,]*)$/, ' and $1')}, private on Zyn.`, 'Send from your own wallet on the other chain. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
+    <div class="br-cards">${shown.map((b) => `<section class="mk-card br-card" data-bridge="${b.key}">
       <p class="eyebrow">${esc(b.symbol)} · ${esc(b.network)}</p>
       <h3>${esc(b.zy)} <span>${identity ? `you hold ${fmt(balanceOf(b), b.decimals)}` : ''}</span></h3>
       ${b.live === false ? '<p class="br-say error">This network has not registered it yet.</p>' : ''}
       ${b.key === 'btc' ? btcCard(b) : `<label class="mk-field"><span>Amount of ${esc(b.symbol)}</span><input class="amt" inputmode="decimal" autocomplete="off" placeholder="0.05"></label>
-      ${identity
+      ${identity || handoff
     ? `<button class="primary go" ${b.live ? '' : 'disabled'}>Deposit from a${b.key === 'eth' ? 'n Ethereum' : ' Solana'} wallet <span>→</span></button>`
     : '<button class="primary open-first" type="button">Open your wallet to deposit <span>→</span></button>'}
       <p class="br-say say" role="status"></p>
-      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and this page claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>${b.key === 'eth' ? pilotNote(b) : ''}`}
+      <p class="mk-fine">Into the vault <code>${esc(b.key === 'sol' ? b.vault : b.vault.toLowerCase())}</code>. Arrives once ${b.key === 'sol' ? 'Solana' : 'Ethereum'} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ' (under a minute)'}, and ${handoff ? 'your Nap wallet' : 'this page'} claims it for you.${state.bps ? ` Bridge fee ${Number(state.bps) / 100}%.` : ''}</p>${b.key === 'eth' ? pilotNote(b) : ''}`}
     </section>`).join('')}</div>`;
   root.querySelectorAll('[data-bridge]').forEach((card) => {
     const b = config.bridges.find((x) => x.key === card.dataset.bridge);
@@ -393,14 +410,16 @@ function renderIn() {
     if (b.key === 'btc') { bindBtcCard(b, card, say); return; }
     if (!card.querySelector('.go')) return;
     card.querySelector('.go').onclick = async () => {
-      if (busy || !identity) return;
+      if (busy || !(identity || handoff)) return;
       busy = true;
       try {
         const id = b.key === 'sol' ? await depositSol(b, card.querySelector('.amt').value, say) : await depositEth(b, card.querySelector('.amt').value, say);
         const link = (b.explorer || '').replace('{tx}', id);
-        say(`Sent. It arrives here once final${link ? '' : ''} — ${String(id).slice(0, 14)}…`);
+        say(handoff
+          ? `Sent — ${String(id).slice(0, 14)}…. You can close this page; it arrives in your Nap wallet once final.`
+          : `Sent. It arrives here once final — ${String(id).slice(0, 14)}…`);
         if (link) card.querySelector('.say').insertAdjacentHTML('beforeend', ` <a href="${esc(link)}" target="_blank" rel="noreferrer">view</a>`);
-        for (const wait of [20_000, 45_000, 90_000, 240_000, 600_000, 1_000_000]) setTimeout(() => refresh(true), wait);
+        if (!handoff) for (const wait of [20_000, 45_000, 90_000, 240_000, 600_000, 1_000_000]) setTimeout(() => refresh(true), wait);
       } catch (e) {
         say(e.code === 4001 || /reject|declin|cancel/i.test(e.message) ? 'Not sent. Nothing left your wallet.' : e.message, true);
       } finally { busy = false; }
@@ -541,7 +560,7 @@ function render() {
     return;
   }
   // Unlocked already (the extension, the phone app): open straight in.
-  const held = await loadSession();
+  const held = handoff ? null : await loadSession();
   if (held?.identity.viewing) begin(held.identity);
   else { frame(); render(); refresh(true); }
   setInterval(() => { if (identity && !busy) refresh(true, true); }, 30_000);

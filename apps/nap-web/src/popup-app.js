@@ -12,9 +12,9 @@
 import QRCode from 'qrcode';
 import { deriveCollectionAccount, deriveIdentity, forgetIdentity, newMnemonic, openSealedWallet, parseAmount, sealWallet, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
-import { IN_APP } from './origin.js';
+import { API_ORIGIN, IN_APP } from './origin.js';
 import { parsePaymentRequest } from './zip321.js';
-import { activity, chooseNetwork, collectOwed, depositAddress, loadConfig, loadPocket, logActivity, payOnZyn, placeSwap, quoteSwap, resolveRecipient, revealExits, withdrawZec } from './pocket.js';
+import { activity, bridgeOut, bridgesOf, bridgeState, btcDepositAddress, checkBridgeOut, chooseNetwork, claimDeposits, collectOwed, depositAddress, depositCode, loadConfig, loadPocket, logActivity, payOnZyn, placeSwap, quoteSwap, resolveRecipient, revealBridgeExits, revealExits, withdrawZec } from './pocket.js';
 import { endSession, loadSession, saveSession } from './session.js';
 import './popup.css';
 
@@ -349,7 +349,7 @@ function home() {
   $('#a-receive').onclick = () => receive();
   $('#a-send').onclick = () => sendPick();
   $('#a-swap').onclick = () => swap();
-  $('#a-bridge').onclick = () => openTab('bridge.html');
+  $('#a-bridge').onclick = () => bridge();
   $('#a-browse')?.addEventListener('click', () => (napBrowser ? napBrowser.openBrowser('').catch((e) => toast(String(e).slice(0, 120), true)) : toast('The browser is not available here', true)));
   pop.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { tab = b.dataset.tab; pop.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); renderPanel(); }; });
   renderZec();
@@ -431,6 +431,8 @@ async function refresh() {
     pocket = next; pocketError = '';
     void revealExits(config, identity);
     if (next.owed?.length && !collecting) void collect(next);
+    if (bridgesOf(config).length && !collecting) void claimArrived();
+    void revealBridgeExits(config);
   } catch (e) {
     if (g !== generation) return;
     pocketError = e.message === 'Failed to fetch' ? 'Check your connection; your keys are safe.' : e.message;
@@ -450,6 +452,20 @@ async function collect(p) {
     const byAsset = new Map();
     for (const o of p.owed) byAsset.set(o.asset, (byAsset.get(o.asset) || 0n) + BigInt(o.amount));
     toast(`Received ${[...byAsset].map(([a, v]) => `${wadText(v)} ${p.nameOf(a)}`).join(', ')}`);
+    setTimeout(refresh, 1500);
+  } catch { /* tried again on the next pass */ } finally { collecting = false; }
+}
+
+// Bridge deposits land as claims under this wallet's one-time codes; the
+// wallet claims them itself.
+async function claimArrived() {
+  const g = generation;
+  collecting = true;
+  try {
+    const got = await claimDeposits(config, identity);
+    if (g !== generation || !got.length) return;
+    const zy = Object.fromEntries(bridgesOf(config).map((b) => [b.asset, b.zy]));
+    toast(`Arrived: ${got.map((w) => `${wadText(w.amount)} ${zy[w.asset] || 'coin'}`).join(', ')}`);
     setTimeout(refresh, 1500);
   } catch { /* tried again on the next pass */ } finally { collecting = false; }
 }
@@ -498,13 +514,17 @@ function networkMenu() {
       b.onclick = () => {
         closeSheet();
         if (b.dataset.net === config.id) return;
-        config = chooseNetwork(config, b.dataset.net);
-        generation++; clearTimeout(timer); stopZec(); zec = null; zecView = null; zecState = ''; pocket = null; pocketError = '';
-        home(); refresh(); startZec();
-        toast(`Switched to ${config.network}`);
+        switchTo(b.dataset.net);
       };
     });
   });
+}
+
+function switchTo(id) {
+  config = chooseNetwork(config, id);
+  generation++; clearTimeout(timer); stopZec(); zec = null; zecView = null; zecState = ''; pocket = null; pocketError = '';
+  home(); refresh(); startZec();
+  toast(`Switched to ${config.network}`);
 }
 
 function mainMenu() {
@@ -523,10 +543,11 @@ function mainMenu() {
   });
 }
 
+/// A screen over the wallet. Screens stack: Back closes this one and shows
+/// the one it was opened from.
 function screen(title, body, foot = '') {
-  pop.querySelector('.screen')?.remove();
   pop.insertAdjacentHTML('beforeend', `<section class="screen"><header class="screen-head"><button class="icon-btn" id="s-back" aria-label="Back">${ICON.back}</button><h1>${esc(title)}</h1><span></span></header><div class="screen-body">${body}</div>${foot ? `<div class="screen-foot">${foot}</div>` : ''}</section>`);
-  const s = pop.querySelector('.screen');
+  const s = [...pop.querySelectorAll('.screen')].pop();
   $('#s-back', s).onclick = () => s.remove();
   return s;
 }
@@ -676,6 +697,114 @@ function swap() {
   };
   draw();
   amt.focus();
+}
+
+// ---------------------------------------------------------------------------
+// Bridge: SOL, ETH and BTC in and out. Out, and BTC in, happen here. ETH
+// and SOL come in from MetaMask or Phantom, which do not reach extension
+// pages or this app — so that one step goes to Nap's bridge page with this
+// wallet's one-time code filled in, and what arrives is claimed here.
+
+let bridgeTab = 'in';
+
+async function bridge() {
+  if (!bridgesOf(config).length) {
+    const there = config.networks.find((n) => n.id !== config.id && bridgesOf(n).length);
+    const s = screen('Bridge', `<div class="empty"><img src="/nap-mark.png" alt=""><b>No bridges on ${esc(config.network)}.</b>${there ? `${esc(there.network)} bridges ${esc(bridgesOf(there).map((b) => b.symbol).join(', '))}.` : ''}</div>`,
+      there ? `<button class="btn ghost" id="b-switch">Switch to ${esc(there.network)}</button>` : '');
+    $('#b-switch', s)?.addEventListener('click', () => { s.remove(); switchTo(there.id); });
+    return;
+  }
+  const s = screen('Bridge', '<div class="skeleton"></div><div class="skeleton"></div>');
+  let st;
+  try { st = await bridgeState(config); } catch (e) { $('.screen-body', s).innerHTML = `<div class="empty"><b>Zyn is not answering.</b>${esc(e.message)}</div>`; return; }
+  const draw = () => {
+    $('.screen-body', s).innerHTML = `<div class="seg two-seg" role="group"><button data-bt="in">Bring in</button><button data-bt="out">Send out</button></div><div id="b-panel"></div>`;
+    s.querySelectorAll('[data-bt]').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.bt === bridgeTab)); b.onclick = () => { bridgeTab = b.dataset.bt; draw(); }; });
+    const panel = $('#b-panel', s);
+    if (bridgeTab === 'in') {
+      panel.innerHTML = `<div class="pick">${st.bridges.map((b) => `<button class="row" data-in="${b.key}" ${b.live ? '' : 'disabled'}><span class="tok" data-sym="${esc(b.symbol)}">${esc(b.symbol.slice(0, 1))}</span><span class="who"><b>${esc(b.symbol)} → ${esc(b.zy)}</b><span>from ${esc(b.chainName)}${b.capWei ? ' · pilot' : ''}</span></span><span class="val"><span class="${b.live ? 'teal' : ''}">${b.live ? ({ btc: 'any wallet', eth: 'MetaMask', sol: 'Phantom' })[b.key] : 'not yet'}</span></span></button>`).join('')}</div>
+        <p class="hint">Each deposit carries a one-time code from this wallet, not your account, and arrives as a private note. Nap claims it for you.</p>`;
+      panel.querySelectorAll('.tok[data-sym]').forEach((el) => tokenDisc(el, el.dataset.sym));
+      panel.querySelectorAll('[data-in]').forEach((b) => { b.onclick = () => bridgeIn(st.bridges.find((x) => x.key === b.dataset.in), st); });
+    } else {
+      const out = st.bridges.filter((b) => b.live).map((b) => ({ ...b, have: pocket?.coins.find((c) => c.asset === b.asset)?.amount || 0n }));
+      panel.innerHTML = `<div class="pick">${out.map((b) => `<button class="row" data-out="${b.key}" ${b.have > 0n ? '' : 'disabled'}><span class="tok" data-sym="${esc(b.zy)}">${esc(b.symbol.slice(0, 1))}</span><span class="who"><b>${esc(b.zy)} → ${esc(b.symbol)}</b><span>to ${esc(b.chainName)}</span></span><span class="val"><b>${esc(wadText(b.have))}</b></span></button>`).join('')}</div>
+        ${out.some((b) => b.have > 0n) ? '' : '<p class="hint">Nothing bridged to send back yet.</p>'}`;
+      panel.querySelectorAll('.tok[data-sym]').forEach((el) => tokenDisc(el, el.dataset.sym));
+      panel.querySelectorAll('[data-out]').forEach((b) => { b.onclick = () => bridgeOutForm(out.find((x) => x.key === b.dataset.out), st); });
+    }
+  };
+  draw();
+}
+
+async function bridgeIn(b, st) {
+  if (b.key === 'btc') {
+    const s = screen(`Deposit ${b.symbol}`, `<div class="qr"><canvas></canvas></div><div class="address" id="bi-addr">Deriving your address…</div>
+      <p class="hint" id="bi-hint">Send any amount of ${esc(b.chainName)} BTC from any Bitcoin wallet. It is credited after ${Number(b.confirmations) || 2} confirmations and arrives as ${esc(b.zy)}; Nap claims it.</p>`, '<button class="btn" id="bi-copy" disabled>Copy address</button>');
+    try {
+      const address = await btcDepositAddress(config, identity, b);
+      $('#bi-addr', s).textContent = address;
+      await QRCode.toCanvas($('canvas', s), address, { width: 336, margin: 1, color: { dark: '#15181b', light: '#f8f2e4' } });
+      const c = $('#bi-copy', s); c.disabled = false; c.onclick = () => copy(address, 'Address');
+    } catch (e) { $('#bi-hint', s).textContent = e.message; $('#bi-hint', s).classList.add('bad'); $('#bi-addr', s).textContent = 'Unavailable'; }
+    return;
+  }
+  const app = b.key === 'eth' ? 'MetaMask' : 'Phantom';
+  const s = screen(`Deposit ${b.symbol}`, `<div class="big-amount"><b>${esc(app)}</b><span>finishes this deposit</span></div>
+    <p class="hint">${esc(app)} can't reach ${IN_APP ? 'this app' : 'a browser extension'}, so the deposit is made on Nap's bridge page with your one-time code already filled in. What you send arrives here as ${esc(b.zy)} once ${esc(b.chainName)} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ''}.</p>
+    ${b.capWei ? `<div class="warn"><b>Pilot.</b> At most ${esc(wadText(BigInt(b.capWei)))} ETH in total${b.issued !== null ? ` (${esc(wadText(BigInt(b.capWei) > b.issued ? BigInt(b.capWei) - b.issued : 0n))} left)` : ''}. The vault is held by a ${esc(b.custody || 'multisig')}, whose owners approve every payout; the contract is not audited.</div>` : ''}
+    ${IN_APP ? `<p class="hint">Open the link in ${esc(app)}'s own browser (its browse tab), or on a computer with ${esc(app)} installed.</p><div class="address" id="bi-link">…</div>` : ''}
+    <p class="hint" id="bi-err" role="alert"></p>`,
+    IN_APP ? '<button class="btn" id="bi-copy" disabled>Copy link</button>' : `<button class="btn" id="bi-open" disabled>Open deposit page</button><button class="btn ghost" id="bi-copy" disabled>Copy link</button>`);
+  try {
+    const code = await depositCode(config, identity);
+    const url = `${API_ORIGIN}/bridge.html#deposit=${b.key}&code=${code}&net=${encodeURIComponent(config.id)}`;
+    if ($('#bi-link', s)) $('#bi-link', s).textContent = url;
+    const c = $('#bi-copy', s); c.disabled = false; c.onclick = () => copy(url, 'Link');
+    const o = $('#bi-open', s);
+    if (o) { o.disabled = false; o.onclick = () => { if (globalThis.chrome?.tabs?.create) { chrome.tabs.create({ url }); window.close(); } else window.open(url, '_blank', 'noopener'); }; }
+  } catch (e) { $('#bi-err', s).textContent = e.message; $('#bi-err', s).classList.add('bad'); }
+}
+
+function bridgeOutForm(b, st) {
+  const fee = st.bps;
+  const s = screen(`Send ${b.zy} out`, `
+    <div class="big-amount"><b>${esc(wadText(b.have))}</b><span>${esc(b.zy)} available</span></div>
+    <label class="field"><span>To (${esc(b.chainName)})</span><textarea id="bo-to" rows="2" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${b.key === 'eth' ? '0x…' : b.key === 'btc' ? (b.chain === 'bitcoin' ? 'bc1…' : 'tb1…') : 'Solana address'}"></textarea></label>
+    <label class="field"><span>Amount</span><span class="inline"><input id="bo-amt" inputmode="decimal" autocomplete="off" placeholder="0.0"><button type="button" id="bo-max">MAX</button></span></label>
+    <p class="hint" id="bo-err" role="alert">${fee ? `A ${Number(fee) / 100}% bridge fee is added on top. ` : ''}${b.key === 'sol' ? 'The 0.000005 SOL network fee comes out of the amount.' : b.key === 'btc' ? 'The Bitcoin network fee comes out of the amount.' : b.capWei ? 'Paid once two of the vault Safe’s owners approve it — this can take hours.' : 'Paid once Ethereum finalizes it.'}</p>`,
+    '<button class="btn" id="bo-go">Review</button>');
+  const err = $('#bo-err', s);
+  $('#bo-max', s).onclick = () => { $('#bo-amt', s).value = wadText((b.have * 10_000n) / (10_000n + fee), 18).replace(/,/g, ''); };
+  let armed = null;
+  $('#bo-go', s).onclick = async () => {
+    const go = $('#bo-go', s);
+    err.classList.remove('bad');
+    try {
+      const to = $('#bo-to', s).value.trim();
+      const raw = parseAmount($('#bo-amt', s).value.trim().replace(/,/g, ''));
+      checkBridgeOut(b, to, raw);
+      const total = raw + (raw * fee) / 10_000n;
+      if (total > b.have) throw new Error(`That needs ${wadText(total)} ${b.zy} with the fee; you have ${wadText(b.have)}`);
+      const key = `${to}|${raw}`;
+      if (armed !== key) {
+        armed = key;
+        s.querySelectorAll('textarea,input').forEach((el) => { el.readOnly = true; });
+        go.textContent = `Confirm: send ${wadText(raw)} ${b.symbol} to ${short(to, 8, 6)}`;
+        err.textContent = 'Check the address: a payment on another chain cannot be undone. Go back to edit.';
+        return;
+      }
+      go.disabled = true; go.textContent = 'Signing…';
+      const g = generation;
+      await bridgeOut(config, identity, pocket.held, b, to, raw, fee);
+      if (g !== generation) return;
+      logActivity(config, identity, { kind: 'out', title: `Sent ${b.symbol} to ${b.chainName}`, symbol: b.zy, amount: `−${wadText(raw)}`, to });
+      pop.querySelectorAll('.screen').forEach((x) => x.remove());
+      toast(`Sent out — the bridge pays once ${b.chainName} confirms`);
+      refresh();
+    } catch (x) { err.textContent = x.message; err.classList.add('bad'); go.disabled = false; if (!armed) go.textContent = 'Review'; }
+  };
 }
 
 // ---------------------------------------------------------------------------

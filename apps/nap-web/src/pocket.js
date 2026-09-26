@@ -5,8 +5,10 @@
 // rules as the full wallet (app.js), which stays the reference for each.
 import { x25519 } from '@noble/curves/ed25519.js';
 import { checkedEpoch, hex, parseAmount, unhex } from './core.js';
-import { claimIntent, decodeMeta, fund, quoteAlone, redeem, swapIntent, withSlippage } from './market.js';
-import { bridgedName, call, loadBridged, loadOwed, PER_CLAIM, submitFresh, submitIntent } from './ledger.js';
+import { bridgedAsset, claimIntent, decodeMeta, exitCommitment, fund, quoteAlone, redeem, swapIntent, withSlippage } from './market.js';
+import { bridgeMemo, bridgedName, call, claimWaiting, loadBridged, loadOwed, loadWaiting, PER_CLAIM, submitFresh, submitIntent } from './ledger.js';
+import * as btc from './bitcoin.js';
+import { solanaKey } from './solana.js';
 import { objectCall, PROGRAM, registerIntent, scan, sealNote, spendIntent, withdrawIntent } from './object.js';
 import { endpoint } from './origin.js';
 
@@ -232,4 +234,104 @@ const logKey = (config, identity) => `nap.activity.${config.chain}.${identity.ac
 export const activity = (config, identity) => { try { return JSON.parse(read(logKey(config, identity)) || '[]'); } catch { return []; } };
 export function logActivity(config, identity, entry) {
   write(logKey(config, identity), JSON.stringify([{ at: Date.now(), ...entry }, ...activity(config, identity)].slice(0, 50)));
+}
+
+// ---------------------------------------------------------------------------
+// The bridges (§146, §154, §155): SOL, ETH and BTC in and out as SOL.zy,
+// ETH.zy and BTC.zy — the same rules as bridge.html.
+
+/// The bridges a network's config declares, as bridge.html reads them.
+export function bridgesOf(net) {
+  const b = net.bridges || {};
+  const out = [];
+  if (b.sol && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(b.sol.vault || '')) {
+    out.push({ ...b.sol, key: 'sol', symbol: 'SOL', zy: 'SOL.zy', chainName: /devnet/.test(b.sol.network) ? 'Solana devnet' : /testnet/.test(b.sol.network) ? 'Solana testnet' : 'Solana', decimals: 9, network: b.sol.network, asset: hex(bridgedAsset(b.sol.network)) });
+  }
+  if (b.eth && /^0x[0-9a-fA-F]{40}$/.test(b.eth.vault || '') && Number.isSafeInteger(b.eth.chainId)) {
+    out.push({ ...b.eth, key: 'eth', symbol: 'ETH', zy: 'ETH.zy', chainName: b.eth.chainId === 1 ? 'Ethereum' : 'Sepolia', decimals: 18, network: `eip155:${b.eth.chainId}`, asset: hex(bridgedAsset(`eip155:${b.eth.chainId}`)) });
+  }
+  if (b.btc && /^[0-9a-f]{64}$/.test(b.btc.internal || '')) {
+    const chain = ['bitcoin', 'testnet4'].includes(b.btc.network) ? b.btc.network : 'signet';
+    const network = { bitcoin: 'bitcoin', testnet4: 'bitcoin-test', signet: 'bitcoin-signet' }[chain];
+    out.push({ ...b.btc, key: 'btc', symbol: 'BTC', zy: 'BTC.zy', chainName: chain === 'bitcoin' ? 'Bitcoin' : `Bitcoin ${chain}`, decimals: 8, chain, network, asset: hex(bridgedAsset(network)) });
+  }
+  return out;
+}
+
+/// Which bridges this chain has registered, what each has issued, and the fee.
+export async function bridgeState(config) {
+  const [bridged, market] = await Promise.all([loadBridged(config), objectCall(config.rpcUrl, 'zyn_market').catch(() => ({}))]);
+  const bridges = bridgesOf(config).map((b) => {
+    const row = bridged.find((x) => x.asset === b.asset);
+    return { ...b, live: !!row, issued: /^\d+$/.test(String(row?.issued ?? '')) ? BigInt(row.issued) : null };
+  });
+  return { bridges, bps: BigInt(Number(market?.fees?.bridge_bps) || 0) };
+}
+
+/// Deposits that arrived for this wallet's codes, claimed into it. Returns them.
+export async function claimDeposits(config, identity) {
+  const waiting = await loadWaiting(config, identity).catch(() => []);
+  if (waiting.length) await claimWaiting(config, identity);
+  return waiting;
+}
+
+/// This wallet's one-time deposit code, for a deposit made elsewhere.
+export const depositCode = async (config, identity) => (await bridgeMemo(config, identity)).commitment;
+
+/// A Bitcoin deposit address: the vault key tweaked by this wallet's code,
+/// derived here, with the bridge asked to watch it.
+export async function btcDepositAddress(config, identity, b) {
+  const commitment = await depositCode(config, identity);
+  await call(config, 'zyn_depositWatch', { network: b.network, commitment });
+  return btc.depositAddress(b.internal, unhex(commitment, 32), b.chain);
+}
+
+const LAMPORT = 1_000_000_000n; // one lamport in WAD
+const SAT = 10_000_000_000n; // one satoshi in WAD
+
+function destinationBytes(b, text) {
+  const t = String(text).trim();
+  if (b.key === 'sol') return solanaKey(t);
+  if (b.key === 'btc') {
+    const script = btc.scriptOf(t, b.chain);
+    if (!script) throw new Error(`That is not a ${b.chain === 'bitcoin' ? 'bc1' : 'tb1'}… address (segwit or Taproot)`);
+    return script;
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(t)) throw new Error('That is not an Ethereum address');
+  return unhex(t.slice(2).toLowerCase(), 20);
+}
+
+// Exits waiting to be revealed — the record bridge.html keeps, shared.
+const bridgeExitsKey = (config) => `nap.bridge.exits.${config.chain}`;
+const bridgeExits = (config) => { try { return JSON.parse(read(bridgeExitsKey(config)) || '[]'); } catch { return []; } };
+
+export async function revealBridgeExits(config) {
+  const left = [];
+  for (const x of bridgeExits(config)) {
+    try { await call(config, 'zyn_bridgeReveal', { asset: x.asset, address: x.address, salt: x.salt }); }
+    catch (e) { if (!/no unpaid exit/.test(e.message)) left.push(x); }
+  }
+  write(bridgeExitsKey(config), JSON.stringify(left));
+}
+
+/// Check an exit before anything is signed: the address and the amount's
+/// precision and floor for that chain.
+export function checkBridgeOut(b, to, raw) {
+  if (b.key === 'sol' && raw % LAMPORT !== 0n) throw new Error('SOL has nine decimal places');
+  if (b.key === 'sol' && raw <= 5_000n * LAMPORT) throw new Error('Send more than the 0.000005 SOL network fee');
+  if (b.key === 'btc' && raw % SAT !== 0n) throw new Error('BTC has eight decimal places');
+  if (b.key === 'btc' && raw < 10_000n * SAT) throw new Error('Send at least 0.0001 BTC; the Bitcoin fee comes out of it');
+  return destinationBytes(b, to);
+}
+
+/// SOL.zy / ETH.zy / BTC.zy back to their chain: commit to the address,
+/// burn, then show the address to the bridge that pays it.
+export async function bridgeOut(config, identity, held, b, to, raw, bps) {
+  const address = checkBridgeOut(b, to, raw);
+  const salt = crypto.getRandomValues(new Uint8Array(32));
+  const fee = (raw * bps) / 10_000n;
+  const { inputs, change } = fund(identity, held, unhex(b.asset, 32), raw + fee);
+  write(bridgeExitsKey(config), JSON.stringify([...bridgeExits(config), { asset: b.asset, address: hex(address), salt: hex(salt) }]));
+  await submitIntent(config, identity, withdrawIntent({ holder: identity.account, inputs, asset: unhex(b.asset, 32), amount: raw, destination: exitCommitment(address, salt), outputs: change }));
+  await revealBridgeExits(config);
 }
