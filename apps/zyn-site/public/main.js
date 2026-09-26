@@ -138,42 +138,78 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObse
   });
 }
 
-// Soft section lock. When scrolling has come to rest near a section edge,
-// the page settles onto that edge instead of stopping across two sections; in
-// the middle of a long section it is left alone. Done here rather than with
-// CSS scroll-snap, whose "proximity" mode behaves differently in every
-// browser. Any new wheel, touch or key input wins over a settle in progress.
+// Section lock. The page never comes to rest across two sections: when
+// scrolling stops with a section boundary inside the screen, it finishes the
+// move in the direction you were going (down: the next section fills the
+// screen; up: back to the previous one, its start if it fits, else its end).
+// Inside a section taller than the screen nothing happens until its edge.
+// The glide is its own eased animation, identical in every browser, and any
+// new wheel, touch or key input stops it at once.
 if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  const REACH = 0.3; // settle when within 30% of a screen of an edge
-  const STILL = 260; // ms without scrolling before it counts as at rest
-  const edges = () => {
-    const tops = [...document.querySelectorAll('.hero, .strata, .product, .api, .index, .trust-wrap')].map((el) => el.getBoundingClientRect().top + scrollY);
-    tops.push(document.documentElement.scrollHeight - innerHeight);
-    return tops.map(Math.round);
-  };
-  let target = null; // where a settle is heading, while it runs
+  const SECTIONS = '.hero, .strata, .product, .api, .index, .trust-wrap';
+  const maxY = () => document.documentElement.scrollHeight - innerHeight;
+  const tops = () => [...document.querySelectorAll(SECTIONS)].map((el) => Math.round(el.getBoundingClientRect().top + scrollY));
+  let lastY = scrollY;
+  let dir = 1;
+  let gliding = false;
+  let glideDir = 0;
+  let touching = false;
   let timer = 0;
-  let held = false; // a finger is on the screen
-  const settle = () => {
-    if (held || target !== null) return;
-    const y = scrollY;
-    let best = null;
-    for (const e of edges()) if (best === null || Math.abs(e - y) < Math.abs(best - y)) best = e;
-    const d = best - y;
-    if (Math.abs(d) > 2 && Math.abs(d) < innerHeight * REACH) {
-      target = best;
-      scrollTo({ top: best, behavior: 'smooth' });
-    }
-  };
+
+  function target(y) {
+    const H = innerHeight;
+    const t = tops();
+    const inside = t.filter((e) => e > y + 2 && e < y + H - 2);
+    if (!inside.length) return null;
+    if (dir > 0) return Math.min(inside[0], maxY());
+    const e = inside[inside.length - 1];
+    const prev = t.filter((x) => x < e).pop() ?? 0;
+    // a section not much taller than the screen is entered at its start
+    return e - prev <= H * 1.25 ? prev : e - H;
+  }
+
+  function glide(to) {
+    const from = scrollY;
+    const d = to - from;
+    if (Math.abs(d) < 2) return;
+    const dur = Math.min(720, 320 + Math.abs(d) * 0.5);
+    const t0 = performance.now();
+    gliding = true;
+    glideDir = Math.sign(d);
+    const step = (now) => {
+      if (!gliding) return;
+      const k = Math.min(1, (now - t0) / dur);
+      const e = 1 - (1 - k) ** 3;
+      scrollTo({ top: from + d * e, behavior: 'instant' });
+      if (k < 1) requestAnimationFrame(step);
+      else { gliding = false; lastY = scrollY; }
+    };
+    requestAnimationFrame(step);
+  }
+
+  function rest() {
+    if (gliding || touching) return;
+    const to = target(scrollY);
+    if (to !== null) glide(to);
+  }
+
   addEventListener('scroll', () => {
-    if (target !== null) { if (Math.abs(scrollY - target) < 2) target = null; return; }
+    if (gliding) return;
+    const y = scrollY;
+    if (y !== lastY) dir = y > lastY ? 1 : -1;
+    lastY = y;
     clearTimeout(timer);
-    timer = setTimeout(settle, STILL);
+    // scrollend arrives after momentum has finished; the timer covers browsers without it
+    timer = setTimeout(rest, 'onscrollend' in window ? 400 : 140);
   }, { passive: true });
-  const userInput = () => { target = null; clearTimeout(timer); };
-  addEventListener('wheel', userInput, { passive: true });
-  addEventListener('touchstart', () => { held = true; userInput(); }, { passive: true });
-  addEventListener('touchend', () => { held = false; clearTimeout(timer); timer = setTimeout(settle, STILL); }, { passive: true });
-  addEventListener('keydown', () => { userInput(); target = -1; setTimeout(() => { if (target === -1) target = null; }, 900); });
-  document.addEventListener('click', (e) => { if (e.target.closest('a[href^="#"]')) { userInput(); target = -1; setTimeout(() => { if (target === -1) target = null; }, 1200); } });
+  if ('onscrollend' in window) addEventListener('scrollend', () => { clearTimeout(timer); timer = setTimeout(rest, 140); });
+  const stop = () => { gliding = false; clearTimeout(timer); };
+  // More wheel the same way while gliding belongs to the same move: one
+  // gesture, one section. The other way stops the glide at once.
+  addEventListener('wheel', (e) => { if (gliding && Math.sign(e.deltaY) === glideDir) return; stop(); }, { passive: true });
+  addEventListener('touchstart', () => { touching = true; stop(); }, { passive: true });
+  addEventListener('touchend', () => { touching = false; }, { passive: true });
+  addEventListener('keydown', stop);
+  // an in-page link lands where it points, and is not moved on from there
+  document.addEventListener('click', (e) => { if (e.target.closest('a[href^="#"]')) { stop(); dir = 1; } });
 }
