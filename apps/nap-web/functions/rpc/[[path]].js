@@ -20,6 +20,21 @@
 /// for "the testnet", and the testnet is 212.
 const ROUTES = { '': '', testnet: 'object' };
 
+// Who is asking, for the gateway's rate limit. Every request from here
+// reaches the gateway from a few Cloudflare addresses, so a limit keyed on
+// the connection is one budget shared by every Nap user. The visitor's own
+// address goes along instead, with ZYN_RELAY_KEY so the gateway can tell this
+// relay from anyone setting the header. It is used for the limit only, and not logged.
+function relayHeaders(request, env, contentType) {
+  const headers = { 'content-type': contentType };
+  const client = request.headers.get('cf-connecting-ip');
+  if (env.ZYN_RELAY_KEY && client) {
+    headers['x-zyn-relay-key'] = env.ZYN_RELAY_KEY;
+    headers['x-zyn-client'] = client;
+  }
+  return headers;
+}
+
 export async function onRequest({ request, env, params }) {
   const base = env.ZYN_RPC_URL;
   if (!base) return json({ error: 'no chain endpoint configured' }, 503);
@@ -39,7 +54,7 @@ export async function onRequest({ request, env, params }) {
   try {
     response = await fetch(base.replace(/\/$/, '') + '/' + upstream, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: relayHeaders(request, env, 'application/json'),
       body: await request.text(),
       signal: AbortSignal.timeout(15_000),
     });
