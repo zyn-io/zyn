@@ -798,7 +798,7 @@ mod tests {
         assert_eq!(tip, 3_498_276);
         assert_eq!(u32::from(env.branch), 0x37a5_165b);
 
-        let e = node_answering(info(Some("77190ad8")), 1).envelope(main).unwrap_err();
+        let e = node_answering(info(Some("77190ad9")), 1).envelope(main).unwrap_err();
         assert!(e.contains("NU7"), "{}", e);
 
         let e = node_answering(info(None), 1).envelope(main).unwrap_err();

@@ -4424,7 +4424,7 @@ Zebra must be on Contabo before then whatever happens.
   against the one this build would sign for, and refuse on a mismatch. If a
   host shows this in its journal, it is running a build that predates an
   upgrade (or its Zebra is behind): *"the chain's next block (height …) is
-  under consensus branch 77190ad8 … That is NU7: this build predates it"*.
+  under consensus branch 77190ad9 … That is NU7: this build predates it"*.
   Nothing was signed; update, and it resumes.
 - See what the chain says now:
   `curl -s -X POST 127.0.0.1:8232 -d '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo","params":[]}' | jq .result.consensus`

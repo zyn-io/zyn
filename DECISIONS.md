@@ -6585,7 +6585,7 @@ cap: the ETH boundary opens on mainnet before Phase 2, as a pilot.
 
 "Zcash is upgrading NU7 soon, check if we need to change anything" → "make our
 infra NU7 compatible". NU7 activates on testnet 6 Oct 2026; the mainnet target
-is 5 Nov (go/no-go 20 Oct). It brings a new consensus branch (`0x77190AD8`),
+is 5 Nov (go/no-go 20 Oct). It brings a new consensus branch (`0x77190AD9`, ZIP 259),
 25-second blocks (ZIP 218), no v4 transactions (ZIP 2003) and the NSM. The
 libraries we build on (zcash_protocol 0.10.6 the newest) do not know NU7's
 branch or heights yet, so the switch itself waits for them. What can be done
@@ -6598,5 +6598,6 @@ now is below; §156.6 is the switch.
 | 156.3 | **Waits keep their length in time.** Expiry is 40 blocks before NU7 and 120 after it (both about 50 minutes, ZIP 218). The wallets' scan depth of 3 blocks becomes 9 when the next block is NU7 (`blocks_per_old_block`). The object nodes' and replica's `ZYN_CONFIRMATIONS` go ×3 at the switch (6→18, 10→30) — an env change made with the switch's deploy, erring towards waiting longer | ✅ / at the switch |
 | 156.4 | **Custodians need no NU7 rebuild.** They sign a bare sighash with re-randomized FROST, which NU7 does not change; the coordinator builds the transaction. The Hetzner, Air and Windows shares stay as they are | ✅ |
 | 156.5 | **Zebra to 6.4.2 now** (`ops/zebra-upgrade.sh`, both hosts): the security fix for malformed v6 transactions. It moves Zebra's own end of support to about 2 Nov 2026, so the NU7 Zebra release must be in before then on mainnet, and before 6 Oct on testnet | the user runs it |
-| 156.6 | **The switch**, when librustzcash and Zebra ship NU7: bump the crates (workspace and `zec-core`), check `BranchId::Nu7` is `0x77190AD8` and `Envelope::next` accepts it, upgrade Zebra, redeploy `zyn-object-node` and `zyn-lightd` on both hosts with confirmations ×3, rebuild the wasm and deploy Nap web, resubmit the extension and phone apps early (reviews take days). RUNBOOK "NU7" | ⏳ |
+| 156.6 | **The switch**, when librustzcash and Zebra ship NU7: bump the crates (workspace and `zec-core`), check `BranchId::Nu7` is `0x77190AD9` and `Envelope::next` accepts it, upgrade Zebra, redeploy `zyn-object-node` and `zyn-lightd` on both hosts with confirmations ×3, rebuild the wasm and deploy Nap web, resubmit the extension and phone apps early (reviews take days). RUNBOOK "NU7" | ⏳ |
+| 156.8 | **The branch id is ZIP 259's `0x77190AD9`** (found 28 Sep while reading Zakura). ZIP 254 (`0x77190AD8`) was withdrawn; ZIP 259 (draft, 15 Sep 2026) replaces it and sets the heights on 5 Oct (testnet) and 20 Oct (mainnet). The check in 156.1 was never affected — it compares the libraries' branch with Zebra's — but the constant turns on the 120-block expiry, the ×3 wallet depth and the "That is NU7" message after the switch. Corrected in source and in Nap web's wasm; the hosts pick it up with the switch's redeploy | ✅ |
 | 156.7 | **Not decided here**: Collection Z's sale terms count blocks (claim window 16,128, notice 1,152). After NU7 they would last a third as long. Keeping their length in time means republishing the terms ×3 before the sale opens — the user's call | open |

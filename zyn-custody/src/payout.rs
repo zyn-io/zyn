@@ -413,10 +413,11 @@ pub const EXPIRY_DELTA: u32 = 40;
 /// The same fifty minutes once NU7 brings blocks every 25 seconds (ZIP 218).
 pub const EXPIRY_DELTA_NU7: u32 = 120;
 
-/// NU7's consensus branch id. Known here by number because the libraries do
-/// not know it yet; when they do, [`BranchId::for_height`] starts returning it
-/// and everything keyed on it below takes effect.
-pub const NU7_BRANCH_ID: u32 = 0x7719_0AD8;
+/// NU7's consensus branch id, from ZIP 259 (which replaced the withdrawn
+/// ZIP 254 and its `0x77190AD8`). Known here by number because the libraries
+/// do not know it yet; when they do, [`BranchId::for_height`] starts returning
+/// it and everything keyed on it below takes effect.
+pub const NU7_BRANCH_ID: u32 = 0x7719_0AD9;
 
 /// How many blocks now make the time one block made before NU7: 1, or 3 once
 /// the next block is under NU7's 25-second spacing. For the waits counted in
