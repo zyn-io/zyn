@@ -4468,3 +4468,24 @@ pinned `zfnd/zebra:<version>`, rebuilt from the old container's own settings
 Not in this list: Collection Z's sale terms count blocks (claim 16,128,
 notice 1,152). They are a third as long after NU7 unless republished ×3 —
 decided separately (§156.7).
+
+## Zakura beside Zebra on Contabo (28 Sep 2026)
+
+A second mainnet node, for a second opinion rather than a second host: if
+Contabo goes down, both go. Nothing reads from it yet.
+
+- `ops/zakura-setup.sh` (`LIMIT=25M` to download faster) starts the transient
+  unit `zakura-bootstrap` on Contabo: the latest archive snapshot from
+  `https://zakura.valargroup.dev/mainnet/latest.json` (≈272 GB, capped at
+  15 MB/s, resumable, SHA-256 checked before unpacking), unpacked into
+  `/var/lib/zyn/zakura`, then the container `zakura-mainnet` pinned to the
+  version that made the snapshot, then a check that it gives the same block
+  hash and Orchard root as Zebra. Watch: `journalctl -u zakura-bootstrap -f`.
+  Re-running skips whatever is already done.
+- RPC `127.0.0.1:8242` (no cookie auth, loopback only, like Zebra's 8232). P2P
+  outbound only — no port published.
+- **Zakura releases halt themselves ~3 weeks after release** (v1.4.0 at block
+  3,504,731, ~3 Oct). `getdeprecationinfo` on 8242 says when; upgrade by
+  pulling the new `zakuracore/zakura:<version>` and recreating the container
+  with the same arguments.
+- Disk: ~270 GB, beside Zebra's 262 GB, on the 968 GB disk.
