@@ -9,6 +9,13 @@ mode=${1:-install}
 printf '%s' "$KEY" | grep -Eq '^[0-9a-f]{64}$' || { echo "the relay key is not 64 hex digits" >&2; exit 1; }
 
 ZONES="conf.d/zyn-rpc-limits.conf conf.d/zec-rpc-map.conf conf.d/zyn-zec-limits.conf"
+# The chain RPC's per-visitor burst. Opening a wallet reads about eighty
+# things at once (measured 28 Sep: 79); 20 turned most of them away. Per
+# visitor now, so a larger burst no longer lets one client spend everyone's.
+SITE=sites-available/zyn-rpc
+BURST=100
+# Every file this touches, for putting back.
+TOUCHED="$ZONES $SITE conf.d/00-zyn-client.conf zyn-relay-key.map"
 
 render() {  # $1 = an nginx root: /etc/nginx, or a copy of it
   local root=$1 v4 v6
@@ -38,6 +45,7 @@ render() {  # $1 = an nginx root: /etc/nginx, or a copy of it
   for z in $ZONES; do
     sed -i -E 's/^(limit_(req|conn)_zone) \$binary_remote_addr /\1 $zyn_client /' "$root/$z"
   done
+  sed -i -E "s/limit_req zone=zynrpc burst=[0-9]+/limit_req zone=zynrpc burst=$BURST/" "$root/$SITE"
 }
 
 case $mode in
@@ -46,16 +54,22 @@ case $mode in
     ;;
   install)
     backup=/root/nginx-before-client-limits-$(date +%Y%m%d%H%M%S)
-    mkdir -p "$backup/conf.d"
-    for z in $ZONES; do cp -p "/etc/nginx/$z" "$backup/$z"; done
+    mkdir -p "$backup/conf.d" "$backup/sites-available"
+    # Each file as it was — or a note that it did not exist, so a re-run that
+    # fails puts back the working setup it started from, not the original.
+    for f in $TOUCHED; do
+      if [ -e "/etc/nginx/$f" ]; then cp -p "/etc/nginx/$f" "$backup/$f"; else touch "$backup/$f.absent"; fi
+    done
     restore() {
-      for z in $ZONES; do cp -p "$backup/$z" "/etc/nginx/$z"; done
-      rm -f /etc/nginx/conf.d/00-zyn-client.conf /etc/nginx/zyn-relay-key.map
+      for f in $TOUCHED; do
+        if [ -e "$backup/$f.absent" ]; then rm -f "/etc/nginx/$f"; else cp -p "$backup/$f" "/etc/nginx/$f"; fi
+      done
     }
     render /etc/nginx
     if nginx -t 2>&1 | tail -2; then
       systemctl reload nginx
       grep -h "limit_req_zone\|limit_conn_zone" /etc/nginx/conf.d/*.conf | sed 's/^/   /'
+      grep -h "limit_req zone=zynrpc" "/etc/nginx/$SITE" | sort | uniq -c | sed 's/^/   /'
       echo "   reloaded. The files as they were: $backup"
     else
       restore

@@ -6,7 +6,7 @@
 // wallet can no longer find — so there is one.
 
 import { checkedEpoch } from './core.js';
-import { hex, scan, signedFrame, submitSigned, unhex } from './object.js';
+import { hex, rpcPost, scan, signedFrame, submitSigned, unhex } from './object.js';
 import * as mk from './market.js';
 import { b58decode } from './solana.js';
 
@@ -24,13 +24,7 @@ const write = (key, v) => { try { localStorage.setItem(key, v); } catch { /* thi
 
 export async function call(config, method, fields = {}) {
   const id = crypto.randomUUID();
-  const response = await fetch(config.rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
-    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await rpcPost(config.rpcUrl, { jsonrpc: '2.0', id, method, params: [], ...fields });
   if (!response.ok) throw new Error(`The chain answered HTTP ${response.status}`);
   const body = await response.json();
   if (body.id !== id) throw new Error('The chain answered a different question');

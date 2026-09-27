@@ -285,13 +285,34 @@ export async function signedFrame(secretKey, chain, validUntilEpoch, intentBytes
   );
 }
 
+/// POST one JSON-RPC payload, waiting out the gateway's rate limit.
+///
+/// A 429 or 503 is the gateway turning the request away before the chain sees
+/// it, so it is sent again after a short, growing, jittered wait — even a
+/// submission: what was refused never arrived. Opening a wallet reads some
+/// eighty things at once; without this, the first refusal was shown to the
+/// holder as "The chain answered HTTP 503" and the page stopped.
+const BUSY = new Set([429, 503]);
+export async function rpcPost(url, payload, { timeout = 15000, attempts = 6 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!BUSY.has(response.status) || attempt >= attempts) return response;
+    const after = Number(response.headers.get('retry-after'));
+    const wait = after > 0 ? after * 1000 : Math.min(4000, 250 * 2 ** (attempt - 1)) * (0.5 + Math.random());
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+}
+
 /// Submit a signed frame through the holders' door.
 export async function submitSigned(rpcUrl, frame) {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'zyn_submitSigned', frame: hex(frame) }),
-  });
+  const response = await rpcPost(rpcUrl, { jsonrpc: '2.0', id: 1, method: 'zyn_submitSigned', frame: hex(frame) });
+  if (!response.ok) throw new Error(`The chain answered HTTP ${response.status}`);
   const body = await response.json();
   if (body.error) throw new Error(body.error.message || 'the chain refused the intent');
   return body.result;
@@ -392,13 +413,7 @@ export function withdrawIntent({ holder, inputs, asset, amount, destination, out
 /// to be the answer to this question.
 export async function objectCall(rpcUrl, method, fields = {}) {
   const id = crypto.randomUUID();
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
-    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
-    signal: AbortSignal.timeout(15000),
-  });
+  const response = await rpcPost(rpcUrl, { jsonrpc: '2.0', id, method, params: [], ...fields });
   if (!response.ok) throw new Error(`The chain answered HTTP ${response.status}`);
   const body = await response.json();
   if (body.id !== id) throw new Error('The chain answered a different question');
