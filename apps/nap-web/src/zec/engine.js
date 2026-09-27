@@ -12,7 +12,8 @@
 export const BATCH = 100;
 
 /// How far behind the tip a block must be before it is scanned — the core's
-/// figure, repeated here only to compute the target height.
+/// figure, repeated here only to compute the target height. In pre-NU7
+/// blocks: the server's INFO says how many blocks make one of those now.
 const CONFIRMATIONS = 3;
 
 export function engine(zec, post) {
@@ -78,12 +79,12 @@ export function engine(zec, post) {
       return { ...summary(i.tip), state: w.state() };
     },
 
-    /// Scan to three blocks behind the tip. `onStep` hears each batch: the
+    /// Scan to three (pre-NU7) blocks behind the tip. `onStep` hears each batch: the
     /// height reached, what happened, and the state to keep.
     async sync(onStep = () => {}) {
       const w = need();
       const i = await info();
-      const to = i.tip - CONFIRMATIONS;
+      const to = i.tip - CONFIRMATIONS * (i.blocksPerOldBlock || 1);
       while (w.nextHeight() <= to) {
         const from = w.nextHeight();
         const count = Math.min(BATCH, to - from + 1);
@@ -105,7 +106,9 @@ export function engine(zec, post) {
       await this.sync(onStep);
       const i = await info();
       onStep({ proving: true });
-      const raw = w.buildPayment(to, zatoshi, memo || '', i.tip);
+      // Signed only for the branch the server says the next block is under;
+      // the core refuses a network upgrade this build does not know.
+      const raw = w.buildPayment(to, zatoshi, memo || '', i.tip, i.branch);
       const txid = zec.decodeSent(await call(zec.sendRequest(raw)));
       w.confirmSent();
       return { ...summary(i.tip), txid, state: w.state() };

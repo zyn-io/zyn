@@ -640,7 +640,7 @@ use zcash_protocol::consensus::Network;
 use zcash_transparent::address::TransparentAddress;
 use zyn_custody::ceremony::{Identifier as ZcashId, VaultKeys as ZcashKeys};
 
-use zyn_custody::payout::{self, Envelope, Payment};
+use zyn_custody::payout::{self, Payment};
 use zyn_custody::shielded::PoolStores;
 use zyn_custody::zebra::Zebra;
 
@@ -939,8 +939,9 @@ impl ZcashSettler {
         // burned on Zyn. Otherwise the vault drifts below its issuance and the
         // next attestation refuses.
 
-        let tip = self.zebra.block_count().map_err(|e| e.to_string())?;
-        let env = Envelope::at(self.network, tip as u32);
+        // Checked against the branch the node says the next block is under:
+        // across a network upgrade this build does not know, it stops here.
+        let (_, env) = self.zebra.envelope(self.network)?;
         let change_to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
 

@@ -43,7 +43,9 @@ pub fn info_request() -> Vec<u8> {
     request::info()
 }
 
-/// `{network: "mainnet"|"testnet", tip, estimated}` from an INFO body.
+/// `{network: "mainnet"|"testnet", tip, estimated, branch, blocksPerOldBlock}`
+/// from an INFO body. `branch` is the one the server says the next block is
+/// under; pass it to `buildPayment`.
 #[wasm_bindgen(js_name = decodeInfo)]
 pub fn decode_info(body: &[u8]) -> Result<String, JsError> {
     let i = zyn_custody::lightd::decode::info(body).map_err(|e| err(e.to_string()))?;
@@ -52,7 +54,15 @@ pub fn decode_info(body: &[u8]) -> Result<String, JsError> {
         zyn_custody::lightd::NET_TESTNET => "testnet",
         _ => "unknown",
     };
-    Ok(serde_json::json!({"network": network, "tip": i.tip, "estimated": i.estimated}).to_string())
+    Ok(serde_json::json!({
+        "network": network,
+        "tip": i.tip,
+        "estimated": i.estimated,
+        "branch": i.branch,
+        // Blocks that make the time one block made before NU7 (ZIP 218).
+        "blocksPerOldBlock": zyn_custody::payout::blocks_per_old_block(i.branch),
+    })
+    .to_string())
 }
 
 #[wasm_bindgen(js_name = blocksRequest)]
@@ -184,9 +194,10 @@ impl ZecWallet {
         zatoshi: f64,
         memo: &str,
         tip: f64,
+        branch: u32,
     ) -> Result<Vec<u8>, JsError> {
         self.0
-            .build_payment(to, whole(zatoshi, "amount")?, memo, whole(tip, "height")?)
+            .build_payment(to, whole(zatoshi, "amount")?, memo, whole(tip, "height")?, branch)
             .map_err(err)
     }
 

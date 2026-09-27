@@ -154,7 +154,7 @@ use std::path::{Path, PathBuf};
 
 use orchard::keys::{FullViewingKey, Scope};
 use orchard::ValuePool;
-use zyn_custody::payout::{self, Envelope, Payment};
+use zyn_custody::payout::{self, Payment};
 use zyn_custody::shielded::PoolStores;
 use orchard::bundle::BundleVersion;
 use zcash_protocol::consensus::Network;
@@ -347,8 +347,9 @@ impl ExitSettler {
             return Ok(());
         }
 
-        let tip = self.zebra.block_count().map_err(|e| e.to_string())?;
-        let env = Envelope::at(self.network, tip as u32);
+        // Checked against the branch the node says the next block is under:
+        // across a network upgrade this build does not know, it stops here.
+        let (_, env) = self.zebra.envelope(self.network)?;
         let change_to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
 

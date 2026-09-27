@@ -225,6 +225,7 @@ fn run(federated: bool) {
                 zcash: None,
                 solana: Some(zyn_custody::custodian::solana::Participant::new(k.clone())),
                 treasury: None,
+                bitcoin: None,
             }));
             std::thread::spawn(move || zyn_custody::custody_net::serve(c, listener, now_secs));
         }

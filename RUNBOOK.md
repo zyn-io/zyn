@@ -4410,3 +4410,61 @@ first-claimant, retry, other-wallet refusal, one-per-account, forged tap,
 door replay and cap, and the wallet flow (tap link → new wallet → collect →
 certificate named by its event).
 
+
+## NU7 (27 Sep 2026, DECISIONS §156)
+
+Testnet activates **6 Oct 2026**; the mainnet target is **5 Nov** (go/no-go and
+height decided 20 Oct). Zebra 6.4.2 stops itself around **2 Nov**, so the NU7
+Zebra must be on Contabo before then whatever happens.
+
+### What already holds
+
+- **Nothing signs for the wrong branch.** Exits, anchors and both Nap wallets
+  check the branch Zebra names for the next block (`consensus.nextblock`)
+  against the one this build would sign for, and refuse on a mismatch. If a
+  host shows this in its journal, it is running a build that predates an
+  upgrade (or its Zebra is behind): *"the chain's next block (height …) is
+  under consensus branch 77190ad8 … That is NU7: this build predates it"*.
+  Nothing was signed; update, and it resumes.
+- See what the chain says now:
+  `curl -s -X POST 127.0.0.1:8232 -d '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo","params":[]}' | jq .result.consensus`
+  (testnet: port 18232 on Hetzner). NU6.3 is `37a5165b`.
+- Expiry and the wallets' scan depth follow the branch on their own (40→120,
+  3→9 blocks). Custodians sign a sighash and need no NU7 build.
+
+### Zebra
+
+`ops/zebra-upgrade.sh contabo|hetzner <version>` swaps the container for a
+pinned `zfnd/zebra:<version>`, rebuilt from the old container's own settings
+(env, mounts, ports, network). The old one is kept, stopped, as
+`<name>-<old version>`; the script prints the three commands to go back.
+6.4.2 now; the NU7 release when it is out (testnet box first).
+
+### The switch, when librustzcash ships NU7
+
+1. **Crates.** Bump `zcash_protocol`, `zcash_primitives`, `orchard`,
+   `zcash_transparent`, `zcash_address`, `sapling-crypto` to the NU7 releases
+   in the workspace and in `apps/nap-web/zec-core`. No `zcash_unstable` flag:
+   use only a release where NU7 has its real branch id and heights.
+2. **Check.** `cargo test -p zyn-custody envelope_tests zebra::tests` and add
+   the case that now must pass:
+   `Envelope::next(TestNetwork, <NU7 height − 1>, NU7_BRANCH_ID)` is `Ok`,
+   with expiry `+ 120`; and `u32::from(BranchId::Nu7) == NU7_BRANCH_ID`.
+   Then the full `cargo test -p zyn-custody -p zynzapd`.
+3. **Zebra** to the NU7 release on the host first (above).
+4. **Hosts.** Build `zyn-object-node` and `zyn-lightd` for
+   `aarch64-unknown-linux-gnu` (Hetzner) and `x86_64-unknown-linux-gnu`
+   (Contabo); install; in the same step set `ZYN_CONFIRMATIONS` ×3 —
+   Hetzner `/etc/zyn/zyn-object.env` 6→18, Contabo `zyn-object-mainnet` 6→18
+   and `zyn-object-replica` 10→30. Restart. Deploying before activation is
+   fine: the new build signs NU6.3 until the NU7 height.
+5. **Nap.** `apps/nap-web/zec-core/build.sh`, `node --test tests/*.test.mjs`,
+   deploy nap-web; rebuild the extension and the phone apps and submit them
+   the same day — store review takes days, and a Nap that predates NU7 can
+   still sync but refuses to send.
+6. **Watch the first blocks.** `journalctl -u zyn-object-node -f` (Hetzner)
+   for the first exit/anchor after activation; a browser send on testnet.
+
+Not in this list: Collection Z's sale terms count blocks (claim 16,128,
+notice 1,152). They are a third as long after NU7 unless republished ×3 —
+decided separately (§156.7).

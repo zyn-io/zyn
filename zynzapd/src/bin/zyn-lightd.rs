@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use zcash_primitives::block::Block;
-use zcash_protocol::consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters};
+use zcash_protocol::consensus::{Network, NetworkUpgrade, Parameters};
 use zyn_custody::compact::CompactBlock;
 use zyn_custody::lightd::*;
 use zyn_custody::zebra::{Network as ZebraNet, Zebra};
@@ -211,10 +211,11 @@ fn dispatch(s: &Server, req: &[u8]) -> Vec<u8> {
                 Ok(c) => c,
                 Err(e) => return reply::err(&e.to_string()),
             };
-            let branch = u32::from(BranchId::for_height(
-                &s.network,
-                BlockHeight::from_u32(ci.blocks as u32),
-            ));
+            // The branch the node will validate the next block under, as the
+            // node says — not this build's schedule, which is exactly what a
+            // wallet checks it against before signing. 0 when the node did
+            // not say; a wallet refuses that.
+            let branch = ci.next_branch.unwrap_or(0);
             reply::info(Info {
                 network: if s.network == Network::MainNetwork {
                     NET_MAINNET

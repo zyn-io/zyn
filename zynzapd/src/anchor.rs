@@ -33,7 +33,7 @@ use zyn::anchor::Anchor;
 use zyn::node::ConfirmError;
 use zyn_custody::ceremony::{Identifier as ZcashId, VaultKeys as ZcashKeys};
 use zyn_custody::memo::MEMO_FIELD;
-use zyn_custody::payout::{self, Destination, Envelope, Payment};
+use zyn_custody::payout::{self, Destination, Payment};
 use zyn_custody::shielded::PoolStores;
 use zyn_custody::zebra::Zebra;
 
@@ -293,8 +293,10 @@ impl ZcashBuilder {
 }
 
 impl Builder for ZcashBuilder {
-    fn build(&mut self, anchor: &Anchor, tip: u64) -> Result<Built, String> {
-        let env = Envelope::at(self.network, tip as u32);
+    fn build(&mut self, anchor: &Anchor, _tip: u64) -> Result<Built, String> {
+        // From the node, not the caller's tip: checked against the branch the
+        // node says the next block is under, from the same reply.
+        let (_, env) = self.zebra.envelope(self.network)?;
         let to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         let payment = Payment {

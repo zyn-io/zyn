@@ -131,6 +131,11 @@ pub struct ChainInfo {
     /// authority on which chain this actually is — everything else is what we
     /// were configured to believe.
     pub chain: String,
+    /// The consensus branch the node will validate the next block under
+    /// (`consensus.nextblock`). The one authority on which network upgrade a
+    /// transaction built now must be signed for; `None` if the node did not
+    /// say.
+    pub next_branch: Option<u32>,
 }
 
 pub struct Zebra {
@@ -312,11 +317,34 @@ impl Zebra {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        let next_branch = v
+            .get("consensus")
+            .and_then(|c| c.get("nextblock"))
+            .and_then(Value::as_str)
+            .and_then(|h| u32::from_str_radix(h, 16).ok());
         Ok(ChainInfo {
             blocks,
             estimated,
             chain,
+            next_branch,
         })
+    }
+
+    /// The tip, and the envelope for a transaction built on it — checked
+    /// against the branch the node says the next block is under, from the
+    /// same reply, so the two cannot straddle an upgrade. Refuses when the
+    /// node does not say, or says a branch this build would not sign for
+    /// (see [`crate::payout::Envelope::next`]).
+    pub fn envelope(
+        &self,
+        network: zcash_protocol::consensus::Network,
+    ) -> Result<(u64, crate::payout::Envelope), String> {
+        let ci = self.chain_info().map_err(|e| e.to_string())?;
+        let branch = ci.next_branch.ok_or(
+            "the node did not say which consensus branch its next block is under; nothing is signed without it",
+        )?;
+        let env = crate::payout::Envelope::next(network, ci.blocks, branch).map_err(|e| e.to_string())?;
+        Ok((ci.blocks, env))
     }
 
     fn address_txids(
@@ -735,6 +763,47 @@ pub(crate) fn base64(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A node that answers every request with `result`, once per connection.
+    fn node_answering(result: Value, replies: usize) -> Zebra {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for _ in 0..replies {
+                let (mut s, _) = l.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let body = serde_json::json!({"result": result, "error": null, "id": "zyn"}).to_string();
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+            }
+        });
+        Zebra::connect("127.0.0.1", port, None, Network::Mainnet).unwrap()
+    }
+
+    fn info(next: Option<&str>) -> Value {
+        let mut v = serde_json::json!({"chain": "main", "blocks": 3_498_276u64, "estimatedheight": 3_498_276u64});
+        if let Some(n) = next {
+            v["consensus"] = serde_json::json!({"chaintip": "37a5165b", "nextblock": n});
+        }
+        v
+    }
+
+    /// What `getblockchaininfo` said on mainnet, 27 Sep 2026.
+    #[test]
+    fn the_envelope_follows_the_branch_the_node_names_for_the_next_block() {
+        let main = zcash_protocol::consensus::Network::MainNetwork;
+        let z = node_answering(info(Some("37a5165b")), 2);
+        assert_eq!(z.chain_info().unwrap().next_branch, Some(0x37a5_165b));
+        let (tip, env) = z.envelope(main).unwrap();
+        assert_eq!(tip, 3_498_276);
+        assert_eq!(u32::from(env.branch), 0x37a5_165b);
+
+        let e = node_answering(info(Some("77190ad8")), 1).envelope(main).unwrap_err();
+        assert!(e.contains("NU7"), "{}", e);
+
+        let e = node_answering(info(None), 1).envelope(main).unwrap_err();
+        assert!(e.contains("did not say"), "{}", e);
+    }
 
     fn dep(h: u64, n: u8, zat: i64) -> ObservedDeposit {
         ObservedDeposit {

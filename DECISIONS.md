@@ -6580,3 +6580,23 @@ cap: the ETH boundary opens on mainnet before Phase 2, as a pilot.
 | 155.5 | **Stated where users decide**: Nap's ETH card and the landing page say pilot, the cap, who holds the Safe, that its owners could move what the vault holds, that payouts wait on them, and that the contract is unaudited | ✅ |
 | 155.6 | **Rehearsed before mainnet** on an anvil fork of mainnet against the real Safe (owners impersonated): deposit, over-cap deposit, withdraw, proposal, `approveHash` × 2 + `execTransaction`, settle; and a rejected proposal re-proposed at the next nonce. The first mainnet run found what the mock did not: the Safe service refuses lowercase addresses (400/422); everything now goes out EIP-55 | ✅ |
 | 155.7 | **Not yet**: SOL on mainnet (a Squads multisig would play the Safe's part), an audit, a higher cap. Raising the cap is a new decision here, not an env edit | ⏳ |
+
+## §156 — NU7: nothing signs for an upgrade this build does not know (27 Sep 2026)
+
+"Zcash is upgrading NU7 soon, check if we need to change anything" → "make our
+infra NU7 compatible". NU7 activates on testnet 6 Oct 2026; the mainnet target
+is 5 Nov (go/no-go 20 Oct). It brings a new consensus branch (`0x77190AD8`),
+25-second blocks (ZIP 218), no v4 transactions (ZIP 2003) and the NSM. The
+libraries we build on (zcash_protocol 0.10.6 the newest) do not know NU7's
+branch or heights yet, so the switch itself waits for them. What can be done
+now is below; §156.6 is the switch.
+
+| # | Decision | |
+|---|---|---|
+| 156.1 | **Fail closed on the branch.** Every Zcash transaction we sign — vault exits (`object_exit`, `settle`), anchors, desktop Nap, browser Nap — is built with `Envelope::next(network, tip, branch)`, where `branch` is what Zebra says the *next* block is under (`getblockchaininfo` → `consensus.nextblock`). If this build would sign for any other branch, it refuses and says so ("That is NU7: this build predates it…"). A transaction signed under the wrong branch never lands, so a stale build would otherwise leave exits in flight until they expire and ask the custodians again and again for nothing. The browser and desktop wallets get the branch through `zyn-lightd`'s INFO, which now passes on Zebra's answer instead of computing its own | ✅ |
+| 156.2 | **Signed for the next block, not the tip.** The envelope used the tip's branch; at an upgrade's first block that was off by one. Now height = tip + 1 | ✅ |
+| 156.3 | **Waits keep their length in time.** Expiry is 40 blocks before NU7 and 120 after it (both about 50 minutes, ZIP 218). The wallets' scan depth of 3 blocks becomes 9 when the next block is NU7 (`blocks_per_old_block`). The object nodes' and replica's `ZYN_CONFIRMATIONS` go ×3 at the switch (6→18, 10→30) — an env change made with the switch's deploy, erring towards waiting longer | ✅ / at the switch |
+| 156.4 | **Custodians need no NU7 rebuild.** They sign a bare sighash with re-randomized FROST, which NU7 does not change; the coordinator builds the transaction. The Hetzner, Air and Windows shares stay as they are | ✅ |
+| 156.5 | **Zebra to 6.4.2 now** (`ops/zebra-upgrade.sh`, both hosts): the security fix for malformed v6 transactions. It moves Zebra's own end of support to about 2 Nov 2026, so the NU7 Zebra release must be in before then on mainnet, and before 6 Oct on testnet | the user runs it |
+| 156.6 | **The switch**, when librustzcash and Zebra ship NU7: bump the crates (workspace and `zec-core`), check `BranchId::Nu7` is `0x77190AD8` and `Envelope::next` accepts it, upgrade Zebra, redeploy `zyn-object-node` and `zyn-lightd` on both hosts with confirmations ×3, rebuild the wasm and deploy Nap web, resubmit the extension and phone apps early (reviews take days). RUNBOOK "NU7" | ⏳ |
+| 156.7 | **Not decided here**: Collection Z's sale terms count blocks (claim window 16,128, notice 1,152). After NU7 they would last a third as long. Keeping their length in time means republishing the terms ×3 before the sale opens — the user's call | open |

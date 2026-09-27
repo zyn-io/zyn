@@ -76,14 +76,15 @@ export class ZecWallet {
      * @param {number} zatoshi
      * @param {string} memo
      * @param {number} tip
+     * @param {number} branch
      * @returns {Uint8Array}
      */
-    buildPayment(to, zatoshi, memo, tip) {
+    buildPayment(to, zatoshi, memo, tip, branch) {
         const ptr0 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(memo, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.zecwallet_buildPayment(this.__wbg_ptr, ptr0, len0, zatoshi, ptr1, len1, tip);
+        const ret = wasm.zecwallet_buildPayment(this.__wbg_ptr, ptr0, len0, zatoshi, ptr1, len1, tip, branch);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -251,7 +252,9 @@ export function blocksRequest(from, count) {
 }
 
 /**
- * `{network: "mainnet"|"testnet", tip, estimated}` from an INFO body.
+ * `{network: "mainnet"|"testnet", tip, estimated, branch, blocksPerOldBlock}`
+ * from an INFO body. `branch` is the one the server says the next block is
+ * under; pass it to `buildPayment`.
  * @param {Uint8Array} body
  * @returns {string}
  */

@@ -401,15 +401,18 @@ impl Wallet {
         &self.proving.last().expect("just pushed").1
     }
 
-    /// Build, prove and sign one payment at chain height `tip`. Returns the
-    /// raw transaction; nothing is spent in the store until
-    /// [`Self::confirm_sent`] says the server took it.
+    /// Build, prove and sign one payment on a chain whose tip is `tip`, where
+    /// the server says the next block is under consensus branch `branch`.
+    /// Refuses when this build would sign for another branch — a network
+    /// upgrade it predates. Returns the raw transaction; nothing is spent in
+    /// the store until [`Self::confirm_sent`] says the server took it.
     pub fn build_payment(
         &mut self,
         to: &str,
         zatoshi: u64,
         memo: &str,
         tip: u64,
+        branch: u32,
     ) -> Result<Vec<u8>, String> {
         let to = payout::parse_destination(to.trim(), self.network).ok_or_else(|| {
             format!(
@@ -430,7 +433,7 @@ impl Wallet {
         }
         let mut payment = Payment::new(to, zatoshi);
         payment.memo = field;
-        let env = Envelope::at(self.network, tip as u32);
+        let env = Envelope::next(self.network, tip, branch).map_err(|e| e.to_string())?;
         let change_to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         let mut built = None;
@@ -657,10 +660,26 @@ mod tests {
         let main = Wallet::new(spending_key_from_phrase(WORDS, "", Network::MainNetwork, 0).unwrap(), Network::MainNetwork)
             .unwrap()
             .address();
-        assert!(w.build_payment(&main, 1000, "", 4_380_100).unwrap_err().contains("testnet"));
+        const NU6_3: u32 = 0x37a5_165b;
+        assert!(w.build_payment(&main, 1000, "", 4_380_100, NU6_3).unwrap_err().contains("testnet"));
         let own = w.address();
-        assert!(w.build_payment(&own, 0, "", 4_380_100).unwrap_err().contains("zero"));
-        assert!(w.build_payment(&own, 1000, "", 4_380_100).unwrap_err().contains("no pool can cover"));
+        assert!(w.build_payment(&own, 0, "", 4_380_100, NU6_3).unwrap_err().contains("zero"));
+        assert!(w.build_payment(&own, 1000, "", 4_380_100, NU6_3).unwrap_err().contains("no pool can cover"));
+        assert!(w.confirm_sent().is_err());
+    }
+
+    #[test]
+    fn a_payment_is_not_signed_for_an_upgrade_this_build_does_not_know() {
+        let sk = spending_key_from_phrase(WORDS, "", Network::TestNetwork, 0).unwrap();
+        let mut w = Wallet::new(sk, Network::TestNetwork).unwrap();
+        let mut empty = vec![0u8; 32];
+        empty.extend_from_slice(&0u32.to_le_bytes());
+        w.seed(4_380_000, &empty, &empty).unwrap();
+        let own = w.address();
+        let nu7 = w.build_payment(&own, 1000, "", 4_380_100, payout::NU7_BRANCH_ID).unwrap_err();
+        assert!(nu7.contains("NU7") && nu7.contains("Nothing was signed"), "{}", nu7);
+        let silent = w.build_payment(&own, 1000, "", 4_380_100, 0).unwrap_err();
+        assert!(silent.contains("did not say"), "{}", silent);
         assert!(w.confirm_sent().is_err());
     }
 }

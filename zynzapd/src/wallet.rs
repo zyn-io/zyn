@@ -676,6 +676,9 @@ pub struct Wallet {
     client: Client,
     /// The tip the server reported when the wallet was opened.
     pub tip: u64,
+    /// The consensus branch the server said the next block is under, with
+    /// that tip. What a send is checked against before it signs.
+    pub branch: u32,
 }
 
 impl Wallet {
@@ -803,6 +806,7 @@ impl Wallet {
             state,
             client,
             tip: info.tip,
+            branch: info.branch,
         })
     }
 
@@ -1070,7 +1074,7 @@ impl Wallet {
             return Err("nothing on the transparent address to shield".into());
         }
         self.sync(&mut on)?;
-        let env = Envelope::at(self.state.network, self.tip as u32);
+        let env = Envelope::next(self.state.network, self.tip, self.branch).map_err(|e| e.to_string())?;
         let to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         // Ironwood first, like `send_with_memo`: it is the pool a shielded
@@ -1164,6 +1168,7 @@ impl Wallet {
     pub fn sync(&mut self, mut on: impl FnMut(Event)) -> Result<u64, String> {
         let info = self.client.info().map_err(light)?;
         self.tip = info.tip;
+        self.branch = info.branch;
         let keys = VaultKeys::from_full_viewing_key(self.fvk.clone());
         let ivk = PreparedIncomingViewingKey::new(&self.fvk.to_ivk(Scope::External));
         let from = self
@@ -1172,7 +1177,10 @@ impl Wallet {
             .synced_to()
             .map(|h| h + 1)
             .unwrap_or(self.state.birthday);
-        let to = self.tip.saturating_sub(CONFIRMATIONS);
+        // The same wait in time once NU7 makes blocks three times as often.
+        let to = self
+            .tip
+            .saturating_sub(CONFIRMATIONS * zyn_custody::payout::blocks_per_old_block(self.branch));
         if from > to {
             return Ok(self
                 .state
@@ -1329,7 +1337,7 @@ impl Wallet {
         let mut payment = Payment::new(to, zatoshi);
         payment.memo = memo;
         self.sync(&mut on)?;
-        let env = Envelope::at(network, self.tip as u32);
+        let env = Envelope::next(network, self.tip, self.branch).map_err(|e| e.to_string())?;
         let change_to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         let mut built = None;
