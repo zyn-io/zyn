@@ -31,7 +31,7 @@ else
   say "snapshot $file: height $height, $((size / 1000000000)) GB, made by Zakura $version"
 
   if [ ! -d "$STATE/state" ]; then
-    have=0; [ -f "$DL/$file" ] && have=$(stat -c %s "$DL/$file")
+    have=0; [ -f "$DL/$file" ] && have=$(du -B1 "$DL/$file" | cut -f1)   # blocks written, not the sparse length
     need=$(( (size - have) + size + 30000000000 ))   # the rest of the download, the unpacked state, 30 GB spare
     free=$(( $(df --output=avail -B1 /var/lib/zyn | tail -1) ))
     if [ "$free" -lt "$need" ]; then
