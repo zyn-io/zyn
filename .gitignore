@@ -1,6 +1,8 @@
 target/
 node_modules/
 .venv/
+__pycache__/
+*.pyc
 .DS_Store
 *.key
 *.env
@@ -29,8 +31,8 @@ apps/*/dist/
 apps/*/.wrangler/
 apps/*/.mf/
 .wrangler/
-# A vendored copy of Blender.app — 500 MB of someone else's application, with a
-# single 167 MB binary GitHub would refuse anyway.
+# A vendored copy of Blender.app (814 MB, one 167 MB binary GitHub would
+# refuse anyway), and rendered video. Tools and output, not source.
 examples/**/tools/
 **/*.app/
 
@@ -41,7 +43,3 @@ examples/**/tools/
 # be public.
 sslkey
 
-# A checked-in Blender.app (814 MB) and rendered video (63 MB). Tools and
-# output, not source.
-examples/zcash-pixel-nft/tools/
-videos/
