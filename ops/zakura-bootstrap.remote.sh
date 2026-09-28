@@ -39,10 +39,26 @@ else
     fi
     command -v aria2c >/dev/null || { say "installing aria2"; DEBIAN_FRONTEND=noninteractive apt-get install -y -q aria2 >/dev/null; }
     mkdir -p "$DL"
+    # A partial download of an older snapshot is dead weight once latest.json
+    # has moved on: 272 GB of it.
+    for old in "$DL"/*.tar.zst; do
+      [ -e "$old" ] && [ "$(basename "$old")" != "$file" ] && { say "removing an older partial download, $(basename "$old")"; rm -f "$old" "$old.aria2"; }
+    done
     say "downloading at up to $LIMIT/s (resumes where it stopped)"
-    aria2c -c -x8 -s8 --max-overall-download-limit="$LIMIT" --summary-interval=600 \
-      --console-log-level=warn --file-allocation=none \
-      --checksum=sha-256="$sha" -d "$DL" -o "$file" "$url"
+    # One dropped connection ended the first attempt (28 Sep, 10 GB in). Each
+    # connection now retries for ever, and if aria2 gives up anyway the loop
+    # resumes it from its control file.
+    for attempt in $(seq 1 50); do
+      if aria2c -c -x8 -s8 --max-overall-download-limit="$LIMIT" --summary-interval=600 \
+        --console-log-level=warn --file-allocation=none \
+        --max-tries=0 --retry-wait=20 --timeout=60 --connect-timeout=30 \
+        --checksum=sha-256="$sha" -d "$DL" -o "$file" "$url"; then
+        break
+      fi
+      [ "$attempt" -eq 50 ] && { say "the download failed 50 times; giving up"; exit 1; }
+      say "the download stopped (attempt $attempt); resuming in a minute"
+      sleep 60
+    done
     say "downloaded and matches its SHA-256; unpacking"
     rm -rf "$STATE.partial"; mkdir -p "$STATE.partial"
     zstd -dc "$DL/$file" | tar -x -C "$STATE.partial"
