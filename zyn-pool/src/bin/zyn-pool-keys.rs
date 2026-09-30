@@ -2,7 +2,8 @@
 //!
 //!   cargo run --release -p zyn-pool --bin zyn-pool-keys -- <out dir>
 //!
-//! Writes `spend.pk` and `spend.vk` (arkworks, compressed), `vk.rs` (the
+//! Writes `spend.pk` and `spend.vk` (arkworks, compressed), `spend.pk.raw`
+//! (uncompressed, for the browser), `vk.rs` (the
 //! Solana program's verifying key) and `zeros.rs` (empty-subtree roots).
 //!
 //! The setup is ONE PARTY with a PUBLIC seed: anyone can forge proofs under
@@ -21,6 +22,11 @@ fn main() {
     let mut b = Vec::new();
     pk.serialize_compressed(&mut b).expect("pk");
     std::fs::write(out.join("spend.pk"), &b).expect("write pk");
+    // The same key uncompressed, for the browser: loading it skips
+    // decompressing every point (`nap-pool`'s `load_key`).
+    let mut b = Vec::new();
+    pk.serialize_uncompressed(&mut b).expect("pk raw");
+    std::fs::write(out.join("spend.pk.raw"), &b).expect("write pk raw");
     let mut b = Vec::new();
     vk.serialize_compressed(&mut b).expect("vk");
     std::fs::write(out.join("spend.vk"), &b).expect("write vk");

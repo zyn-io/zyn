@@ -198,3 +198,146 @@ mod tests {
         assert_eq!(fixed_of(1_000_000_000), Fixed::whole(1), "one SOL is one SOL.zy");
     }
 }
+
+// ---------------------------------------------------------------------------
+// The private channel's pools (DECISIONS §158): one program account per size,
+// whose log events say what happened — `deposit`, `exit`, `to_zyn`,
+// `to_address`, `authority` — as `sol_log_data` fields.
+
+/// The pool account for `lamports`, under the pool program.
+pub fn pool_address(program: &[u8; 32], lamports: u64) -> [u8; 32] {
+    zyn_bridge::solana::find_program_address(&[b"pool", &lamports.to_le_bytes()], program).0
+}
+
+pub fn base64(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let s = s.trim_end_matches('=').as_bytes();
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for &c in s {
+        acc = (acc << 6) | val(c)?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// The pool program's events in a transaction: only `Program data:` lines
+/// logged while the pool program itself was running (another program's data
+/// lines are not the pool's). Each event is its fields, the first its name.
+pub fn pool_events(tx: &Value, program: &str) -> Vec<Vec<Vec<u8>>> {
+    let mut out = Vec::new();
+    if !tx["meta"]["err"].is_null() {
+        return out;
+    }
+    let mut stack: Vec<bool> = Vec::new();
+    for l in tx["meta"]["logMessages"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        if let Some(rest) = l.strip_prefix("Program ") {
+            if rest.contains(" invoke [") {
+                stack.push(rest.starts_with(program));
+                continue;
+            }
+            if rest.ends_with(" success") || rest.contains(" failed") {
+                stack.pop();
+                continue;
+            }
+        }
+        if let Some(data) = l.strip_prefix("Program data: ") {
+            if stack.last() == Some(&true) {
+                if let Some(fields) = data.split(' ').map(base64).collect::<Option<Vec<_>>>() {
+                    out.push(fields);
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+
+    #[test]
+    fn the_pool_addresses_are_the_ones_devnet_made() {
+        let program = zyn_custody::solana::pubkey("E23vFbDLbmv8Dq4SoHJNYHHmZBVtf3dqNpxT9WT6HX9Q").unwrap();
+        let b58 = |k: [u8; 32]| zyn_custody::solana::base58_encode(&k);
+        assert_eq!(b58(pool_address(&program, 100_000_000)), "69mZekEFSECzXh18YpgjqcNsAJUCrqHTAYN6WrjDJetz");
+        assert_eq!(b58(pool_address(&program, 1_000_000_000)), "DfdoPispyMfDuwRQuDetjkFHQ5brgPDaZBjLu3qeA9QE");
+        assert_eq!(b58(pool_address(&program, 10_000_000_000)), "DBmc6B4CyGzcXGretAFuFvo3W4iebFncqzJ1PGxzDa1S");
+    }
+
+    #[test]
+    fn only_the_pool_programs_own_data_lines_count() {
+        let p = "E23vFbDLbmv8Dq4SoHJNYHHmZBVtf3dqNpxT9WT6HX9Q";
+        let tx = serde_json::json!({ "meta": { "err": null, "logMessages": [
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program Other1111111111111111111111111111111111111 invoke [1]",
+            "Program data: dG9fenlu AAEC",
+            "Program Other1111111111111111111111111111111111111 success",
+            format!("Program {p} invoke [1]"),
+            "Program 11111111111111111111111111111111 invoke [2]",
+            "Program 11111111111111111111111111111111 success",
+            "Program data: dG9fenlu AAEC AwQF",
+            format!("Program {p} consumed 105088 of 400000 compute units"),
+            format!("Program {p} success"),
+        ]}});
+        let ev = pool_events(&tx, p);
+        assert_eq!(ev.len(), 1, "the other program's data line is not the pool's");
+        assert_eq!(ev[0][0], b"to_zyn");
+        assert_eq!(ev[0][1], vec![0, 1, 2]);
+        assert_eq!(ev[0][2], vec![3, 4, 5]);
+        let failed = serde_json::json!({ "meta": { "err": {"InstructionError": [0, "x"]}, "logMessages": [format!("Program {p} invoke [1]"), "Program data: dG9fenlu"] }});
+        assert!(pool_events(&failed, p).is_empty(), "a failed transaction says nothing");
+    }
+}
+
+/// A private exit's destination (§158.4): not an address but a note for a
+/// pool — `"zyn-pool" ‖ size (u64 LE) ‖ commitment`, 48 bytes. Revealed like
+/// an address; the bridge inserts the note instead of paying anyone, and the
+/// holder spends it to an address of their choice later.
+pub const POOL_DESTINATION: &[u8; 8] = b"zyn-pool";
+
+pub fn pool_destination(lamports: u64, commitment: &[u8; 32]) -> [u8; 48] {
+    let mut out = [0u8; 48];
+    out[..8].copy_from_slice(POOL_DESTINATION);
+    out[8..16].copy_from_slice(&lamports.to_le_bytes());
+    out[16..].copy_from_slice(commitment);
+    out
+}
+
+/// A revealed destination read as a pool note, if it is one.
+pub fn as_pool_destination(address: &[u8]) -> Option<(u64, [u8; 32])> {
+    if address.len() != 48 || &address[..8] != POOL_DESTINATION {
+        return None;
+    }
+    Some((u64::from_le_bytes(address[8..16].try_into().ok()?), address[16..].try_into().ok()?))
+}
+
+#[cfg(test)]
+mod pool_destination_tests {
+    use super::*;
+
+    #[test]
+    fn a_pool_destination_reads_back_and_nothing_else_passes_for_one() {
+        let c = [7u8; 32];
+        let d = pool_destination(1_000_000_000, &c);
+        assert_eq!(as_pool_destination(&d), Some((1_000_000_000, c)));
+        assert_eq!(as_pool_destination(&[1u8; 32]), None, "an ordinary address");
+        let mut forged = d;
+        forged[0] = b'Z';
+        assert_eq!(as_pool_destination(&forged), None);
+    }
+}

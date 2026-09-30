@@ -1087,6 +1087,25 @@ fn handle(
         // `keccak(address ‖ salt)` must be what their withdrawal committed
         // to, for an unpaid exit of that asset, or nothing is written. The
         // bridge for that chain reads these through `zyn_bridgeExits`.
+        // The private channel's relayer (§158.6), run by the SOL bridge on
+        // this host: the pools' notes (public: they are on Solana), and a
+        // spend relayed so no wallet of the holder's pays for it. Forwarded
+        // as it came; the relayer checks everything it signs.
+        "zyn_poolInfo" | "zyn_poolLeaves" | "zyn_poolRelay" => {
+            let url = std::env::var("ZYN_POOL_RELAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8497".into());
+            let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(90)).build();
+            match agent.post(&url).set("content-type", "application/json").send_string(body) {
+                Ok(r) => match r.into_string() {
+                    Ok(t) if serde_json::from_str::<serde_json::Value>(&t).is_ok() => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{t}}}"),
+                    _ => err("the pool relayer answered something that is not JSON"),
+                },
+                Err(ureq::Error::Status(_, r)) => {
+                    let why = r.into_string().unwrap_or_default();
+                    err(why.chars().take(240).collect::<String>().as_str())
+                }
+                Err(_) => err("the pool relayer is not running"),
+            }
+        }
         "zyn_bridgeReveal" => {
             let (Some(asset), Some(address), Some(salt)) = (
                 field(body, "asset").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),
@@ -1106,8 +1125,12 @@ fn handle(
                 // standard kind, 22–42 bytes, never an OP_RETURN.
                 let ok = if o.network.starts_with(b"bitcoin") {
                     (22..=42).contains(&address.len()) && address[0] != 0x6a
+                } else if o.network.starts_with(b"eip155:") {
+                    address.len() == 20
                 } else {
-                    address.len() == if o.network.starts_with(b"eip155:") { 20 } else { 32 }
+                    // Solana: an address, or a note for the private channel's
+                    // pool (§158.4), which the bridge inserts instead of paying.
+                    address.len() == 32 || zynzapd::sol_bridge::as_pool_destination(&address).is_some()
                 };
                 if !ok {
                     return err("that address is the wrong length for its chain");
