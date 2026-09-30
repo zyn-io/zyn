@@ -109,7 +109,9 @@ struct Chain {
     finality: String,
     state: std::path::PathBuf,
     agent: ureq::Agent,
-    sending: Mutex<()>,
+    /// The next nonce this process will use: a public RPC behind a load
+    /// balancer can answer "pending" without the transaction just sent.
+    sending: Mutex<Option<u64>>,
 }
 
 fn chain() -> Result<Chain, String> {
@@ -154,7 +156,7 @@ fn chain() -> Result<Chain, String> {
         finality: env("ZYN_EVM_POOL_FINALITY", "finalized"),
         state,
         agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build(),
-        sending: Mutex::new(()),
+        sending: Mutex::new(None),
     })
 }
 
@@ -234,15 +236,28 @@ impl Chain {
     /// Estimate, sign and send one call from the service key; the estimate
     /// is the preflight: a call the contract would refuse is never sent.
     fn send(&self, to: &Address20, data: Vec<u8>) -> Result<String, String> {
-        let _turn = self.sending.lock().unwrap_or_else(|p| p.into_inner());
+        let mut next = self.sending.lock().unwrap_or_else(|p| p.into_inner());
         let from = format!("0x{}", hex(&self.me));
         let gas = qty(&self.eth("eth_estimateGas", json!([{ "from": from, "to": format!("0x{}", hex(to)), "data": format!("0x{}", hex(&data)) }]))?).ok_or("no gas estimate")?;
         let price = qty(&self.eth("eth_gasPrice", json!([]))?).ok_or("no gas price")?;
-        let nonce = qty(&self.eth("eth_getTransactionCount", json!([from, "pending"]))?).ok_or("no account nonce")?;
+        let seen = qty(&self.eth("eth_getTransactionCount", json!([from, "pending"]))?).ok_or("no account nonce")? as u64;
+        let nonce = next.map_or(seen, |n| n.max(seen)) as u128;
         let raw = Tx { nonce: nonce as u64, gas_price: (price * 12 / 10).max(1), gas: (gas * 13 / 10) as u64, to: *to, value: 0, data, chain_id: self.chain_id }.signed(&self.key)?;
         let hash = format!("0x{}", hex(&zyn_vm::eip712::keccak(&[&raw])));
-        self.eth("eth_sendRawTransaction", json!([format!("0x{}", hex(&raw))]))?;
-        Ok(hash)
+        match self.eth("eth_sendRawTransaction", json!([format!("0x{}", hex(&raw))])) {
+            Ok(_) => {
+                *next = Some(nonce as u64 + 1);
+                Ok(hash)
+            }
+            Err(e) => {
+                // Our count is off (a transaction dropped, or sent elsewhere):
+                // take the chain's next time.
+                if e.contains("nonce") || e.contains("underpriced") {
+                    *next = None;
+                }
+                Err(e)
+            }
+        }
     }
 
     fn pool(&self, size: Option<u128>) -> Result<(u128, Address20), String> {

@@ -153,13 +153,24 @@ export async function notes(config, identity) {
   return (await scan(config, identity)).notes;
 }
 
+/// A pool's notes, asked up to three times: a public RPC behind a relayer
+/// can refuse one call and answer the next.
+async function readPool(config, c, size) {
+  for (let t = 0; ; t++) {
+    try { return await pools(config, c, size); } catch (e) {
+      if (t === 2) throw e;
+      await new Promise((z) => setTimeout(z, 1500 * (t + 1)));
+    }
+  }
+}
+
 async function scan(config, identity) {
   const b = book(config, identity);
   const seen = [];
   let complete = true;
   for (const c of channels(config)) {
     for (const size of c.sizes) {
-      const r = await pools(config, c, size).catch(() => { complete = false; return { leaves: [], spent: [] }; });
+      const r = await readPool(config, c, size).catch(() => { complete = false; return { leaves: [], spent: [] }; });
       seen.push({ c, size: String(size), leaves: new Set(r.leaves), spent: new Set(r.spent || []) });
     }
   }
