@@ -382,12 +382,15 @@ export const claimDepositIntent = (o) => concatBytes(
 // auction fills, refunds — is a claim under `lendSource(owner, nonce)` (k 0,
 // and k 1 for a refund), collected like any other. A position's id is the
 // source of the intent that opened it; what a liquidation leaves is claimable
-// under `lotSource(position)`.
+// under `leftoverSource(position)`, and bidders see only `lotSource(position)`.
 
 /// The receipt asset for lending `underlying`: lZEC, lETH, lSOL.
 export const lendAsset = (underlying) => id('objectvm.lend.v1', underlying);
 export const lendSource = (owner, nonce) => id('objectvm.lend-src.v1', owner, nonce);
 export const lotSource = (position) => id('objectvm.lend-lot.v1', position);
+// A liquidation's leftovers: not the lot's public id, so nobody can watch the
+// owner collect them.
+export const leftoverSource = (position) => id('objectvm.lend-left.v1', position);
 
 export const lendSupplyIntent = (o) => concatBytes(
   new Uint8Array([TAG.lendSupply]), o.lender, prog('lendSupply'), o.asset, i128Bytes(o.amount), o.nonce, inputs(o.inputs), outputs(o.change),

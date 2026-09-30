@@ -204,6 +204,7 @@ test('Zyn Lend: programs, ids and every holder intent match the ledger byte for 
   const position = m.lendSource(OWNER, NONCE);
   assert.equal(hex(position), v.lend_source);
   assert.equal(hex(m.lotSource(position)), v.lot_source);
+  assert.equal(hex(m.leftoverSource(position)), v.leftover_source);
   const common = { nonce: NONCE, inputs, change };
   assert.equal(hex(m.lendSupplyIntent({ lender: OWNER, asset: ZEC, amount: W(3), ...common })), v.lend_supply);
   assert.equal(hex(m.lendWithdrawIntent({ lender: OWNER, asset: ZEC, shares: W(3), ...common })), v.lend_withdraw);

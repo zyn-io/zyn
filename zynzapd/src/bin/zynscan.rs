@@ -59,6 +59,17 @@ fn now() -> u64 {
 // ---------------------------------------------------------------------------
 // What the public may see of one intent.
 
+/// Holder lending is shown as "Lending" and nothing more: a refusal's reason
+/// ("over its maximum") or the note counts (removing collateral spends none)
+/// would say what was done.
+fn redact(kind: &str, operator: bool, refusal: Option<String>, created: usize, spent: usize) -> (Option<String>, Option<usize>, Option<usize>) {
+    if kind == "Lending" && !operator {
+        (refusal.map(|_| "refused".to_string()), None, None)
+    } else {
+        (refusal, Some(created), Some(spent))
+    }
+}
+
 struct Tx {
     seq: u64,
     epoch: u64,
@@ -66,8 +77,10 @@ struct Tx {
     operator: bool,
     ok: bool,
     refusal: Option<String>,
-    created: usize,
-    spent: usize,
+    /// Notes created and spent; `None` where the counts would tell what
+    /// kind of intent it was (holder lending).
+    created: Option<usize>,
+    spent: Option<usize>,
     detail: Value,
 }
 
@@ -283,6 +296,7 @@ impl Index {
                     Receipt::Refused(why) => Some(why.to_string()),
                     _ => None,
                 });
+                let (refusal, created, spent) = redact(kind, operator, refusal, op.created().len(), op.retired().len());
                 self.txs.insert(*seq, Tx {
                     seq: *seq,
                     epoch: epoch_n,
@@ -290,8 +304,8 @@ impl Index {
                     operator,
                     ok: refusal.is_none(),
                     refusal,
-                    created: op.created().len(),
-                    spent: op.retired().len(),
+                    created,
+                    spent,
                     detail,
                 });
                 self.applied_in_open += 1;
@@ -559,6 +573,26 @@ mod tests {
         assert!(!text.contains(&hex(&[0xA1; 32])), "the trader must not appear: {text}");
         assert!(!text.contains("3000000000000000000"), "the amount must not appear: {text}");
         assert!(text.contains(&hex(&[0x77; 32])), "the public token does");
+    }
+
+    /// Holder lending shows as "Lending" and nothing else: a refusal's reason
+    /// or the note counts would say what was attempted.
+    #[test]
+    fn holder_lending_shows_no_reason_and_no_note_counts() {
+        let op = Op::LendRemoveCollateral {
+            borrower: [0xB0; 32],
+            program: zyn_vm::program::lend_collateral(),
+            position: [0x55; 32],
+            amount: zyn_vm::Fixed::whole(1),
+            nonce: [3; 32],
+        };
+        let (kind, operator, detail) = describe(&op, &[]);
+        assert_eq!((kind, operator, detail), ("Lending", false, Value::Null));
+        let why = Some("that would leave the position over its maximum".to_string());
+        assert_eq!(redact(kind, operator, why.clone(), 0, 0), (Some("refused".into()), None, None));
+        assert_eq!(redact(kind, operator, None, 1, 1), (None, None, None));
+        // Everything else keeps its reason and counts.
+        assert_eq!(redact("Swap", false, why.clone(), 1, 2), (why, Some(1), Some(2)));
     }
 
     #[test]

@@ -273,12 +273,14 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
         })
         .collect();
     // What the chain charges and what it has kept — public, like every
-    // keyless pot, so anyone can check the fee against the pot.
+    // keyless pot, so anyone can check the fee against the pot. To three
+    // significant figures: lending's reserve lands here as interest accrues,
+    // and the exact figure would give the pools' exact debt away (§157.16).
     let pot: Vec<String> = vm
         .market
         .pol
         .iter()
-        .map(|(a, v)| format!("{{\"asset\":\"{}\",\"amount\":\"{}\"}}", hex(a), v.0))
+        .map(|(a, v)| format!("{{\"asset\":\"{}\",\"amount\":\"{}\"}}", hex(a), quantize(v.0, sig_step(v.0, 3))))
         .collect();
     let collections: Vec<String> = vm
         .market
@@ -1491,6 +1493,15 @@ fn unknown_method(method: &str) -> String {
 }
 
 /// Round `v` to the nearest `step` (both in ledger units).
+/// The step that keeps `digits` significant figures of `v`.
+fn sig_step(v: i128, digits: u32) -> i128 {
+    let mut step: i128 = 1;
+    while v / step >= 10i128.pow(digits) {
+        step *= 10;
+    }
+    step
+}
+
 fn quantize(v: i128, step: i128) -> i128 {
     if step <= 1 {
         return v;
@@ -1514,19 +1525,22 @@ fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
         .map(|(a, x)| {
             let p = &x.pool;
             let supplied = p.value().unwrap_or(0);
-            // Three significant figures of the pool's size.
-            let mut step: i128 = 1;
-            while supplied / step >= 1_000 {
-                step *= 10;
-            }
+            // Two significant figures of the pool's size, and borrowed and
+            // cash to the same step: one supply or loan moves the published
+            // figures only when it is a real share of the pool.
+            let step = sig_step(supplied, 2);
             let (sq, bq, cq) = (quantize(supplied, step), quantize(p.debt().unwrap_or(0), step), quantize(p.cash, step));
             let util = if sq > 0 { objectvm::zyn_lend::math::mul_div(bq, WAD, sq).unwrap_or(0).min(WAD) } else { 0 };
-            // Utilization to the nearest tenth of a percent, then the curve.
-            let util = quantize(util, WAD / 1000);
+            // Utilization to the nearest percent, then the curve.
+            let util = quantize(util, WAD / 100);
             let borrow_rate = CURVE.rate(util).unwrap_or(0);
             let gross = objectvm::zyn_lend::math::wmul(borrow_rate, util).unwrap_or(0);
             let supply_rate = gross - objectvm::zyn_lend::math::bps(gross, CURVE.reserve_bps).unwrap_or(0);
+            // A share's price and the borrow index move with exact interest,
+            // which gives exact utilization away; to six decimals they move
+            // only as interest adds up.
             let share_price = if p.supply_shares > 0 { objectvm::zyn_lend::math::mul_div(supplied, WAD, p.supply_shares).unwrap_or(WAD) } else { WAD };
+            let share_price = quantize(share_price, WAD / 1_000_000);
             let limits = l.limits.get(a);
             serde_json::json!({
                 "asset": hex(a),
@@ -1535,7 +1549,7 @@ fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
                 "borrowed": bq.to_string(),
                 "supplied": sq.to_string(),
                 "share_price": share_price.to_string(),
-                "borrow_index": p.borrow_index.to_string(),
+                "borrow_index": quantize(p.borrow_index, WAD / 1_000_000).to_string(),
                 "utilization": util.to_string(),
                 "borrow_rate": borrow_rate.to_string(),
                 "supply_rate": supply_rate.to_string(),
@@ -3494,6 +3508,23 @@ mod signed_door {
             sync: Arc::new(Mutex::new(SyncProgress::default())),
             dir: dir.to_string_lossy().to_string(),
         }
+    }
+
+    /// Public lending figures keep two significant figures of the pool, and
+    /// borrowed goes to the same step: a loan small next to the pool leaves
+    /// no trace in them.
+    #[test]
+    fn public_lending_figures_hide_a_small_loan() {
+        const W: i128 = 1_000_000_000_000_000_000;
+        let supplied = 2_600_000_000_000_000_000; // 2.6
+        let step = sig_step(supplied, 2);
+        assert_eq!(step, W / 10);
+        let before = quantize(70_000_000_000_000_000, step); // 0.07 borrowed
+        let after = quantize(90_000_000_000_000_000, step); // then a 0.02 loan
+        assert_eq!(before, after, "the 0.02 loan does not show");
+        assert_eq!(quantize(supplied + 20_000_000_000_000_000, step), quantize(supplied, step));
+        assert_eq!(sig_step(999, 3), 1);
+        assert_eq!(quantize(123_456, sig_step(123_456, 3)), 123_000);
     }
 
     /// 30 Sep: a restart while an anchor was in flight lost the epochs it

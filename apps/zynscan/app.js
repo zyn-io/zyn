@@ -104,7 +104,7 @@ const txRow = (t) => `<tr>
   <td class="kind">${kindChip(t)}</td>
   <td class="epoch"><a href="/epoch/${t.epoch}" data-link class="mono">${num(t.epoch)}</a></td>
   <td class="status">${status(t)}</td>
-  <td class="notes mono dim">${t.created}↑ ${t.spent}↓</td>
+  <td class="notes mono dim">${t.created == null ? '—' : `${t.created}↑ ${t.spent}↓`}</td>
   <td class="detail">${detail(t)}</td>
 </tr>`;
 const txTable = (rows, empty) => rows.length
@@ -190,7 +190,7 @@ async function txPage(n) {
         <div><dt>Kind</dt><dd>${kindChip(t)} ${t.operator ? '<span class="dim">operator</span>' : '<span class="dim">holder</span>'}</dd></div>
         <div><dt>Status</dt><dd>${status(t)}${t.refusal ? ` — ${esc(t.refusal)}` : ''}</dd></div>
         <div><dt>Epoch</dt><dd><a href="/epoch/${t.epoch}" data-link>${num(t.epoch)}</a></dd></div>
-        <div><dt>Notes</dt><dd>${t.created} created · ${t.spent} spent</dd></div>
+        <div><dt>Notes</dt><dd>${t.created == null ? 'not shown for lending' : `${t.created} created · ${t.spent} spent`}</dd></div>
         <div><dt>Public detail</dt><dd>${detail(t) || '<span class="dim">none — who and how much stay private</span>'}</dd></div>
         <div><dt>Settled</dt><dd>${anchorBadge(t.anchor)}</dd></div>
       </dl>

@@ -112,10 +112,18 @@ pub fn lend_source(owner: &AccountId, nonce: &Hash) -> Hash {
     id(b"objectvm.lend-src.v1", &[owner, nonce])
 }
 
-/// Where a liquidation's leftovers are claimable: from the position, which
-/// only its owner knew.
+/// A liquidation lot's public id: bidders name it, and it never gives away
+/// the position it came from.
 pub fn lot_source(position: &Hash) -> Hash {
     id(b"objectvm.lend-lot.v1", &[position])
+}
+
+/// Where a liquidation's leftovers are claimable: from the position, which
+/// only its owner knew. Not the lot's public id — if it were, anyone could
+/// watch the claim and see when it is collected, and which other lots' claims
+/// vanish in the same collection, tying one owner's positions together.
+pub fn leftover_source(position: &Hash) -> Hash {
+    id(b"objectvm.lend-left.v1", &[position])
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1016,7 +1024,7 @@ impl ObjectVm {
             }
             left -= to_insurance;
             self.market.lend.listed.get_mut(&lot.borrow_asset).expect("listed").pool = pool;
-            let src = lot_source(&pos);
+            let src = leftover_source(&pos);
             self.market.pay(&src, 0, lot.owner, lot.borrow_asset, Fixed(left));
             self.market.pay(&src, 1, lot.owner, lot.collateral_asset, lot.collateral);
             self.market.lend.lots.remove(&pos);

@@ -7,7 +7,7 @@
 //! that paid the right people in one test and leaked a coin in the next would
 //! fail here on the step it leaked.
 
-use objectvm::lend::{lend_asset, lend_source, lot_source, Lend};
+use objectvm::lend::{leftover_source, lend_asset, lend_source, lot_source, Lend};
 use objectvm::market;
 use objectvm::{Limits, ObjectVm, Op, Output, Receipt};
 use zyn_vm::commit::Hash;
@@ -299,8 +299,12 @@ fn a_position_past_its_line_is_auctioned_and_the_lenders_are_whole() {
     c.claim(CAROL, &[lend_source(&CAROL, &nonce)]);
     let carol_zec = c.balance(CAROL, ZEC) - 1_000 * WAD;
     assert!(carol_zec > 0 && carol_zec < 100 * WAD, "Carol bought part of the lot: {carol_zec}");
+    // Nothing is claimable under the lot's public id: the leftovers sit under
+    // an id only Bob can derive, so nobody can watch him collect them.
+    let public = lot_source(&pos);
+    assert!((0..2).all(|k| !c.vm.market.claims.contains_key(&objectvm::market::claim_id(&public, k))));
     // Bob gets the collateral that was not needed.
-    c.claim(BOB, &[lot_source(&pos)]);
+    c.claim(BOB, &[leftover_source(&pos)]);
     assert_eq!(c.balance(BOB, ZEC), 900 * WAD + (100 * WAD - carol_zec), "every ZEC is Carol's or Bob's");
     // And Alice's pool now holds more than she lent: interest, plus the penalty.
     let value = c.pool(SOL).value().unwrap();
@@ -480,7 +484,7 @@ fn guarded_an_auction_nobody_fills_is_sold_through_the_pool_batch_with_a_floor()
     assert_eq!(c.pool(SOL).debt_shares, 0, "the pool is repaid");
     assert!(c.vm.market.claims.values().all(|cl| cl.owner != objectvm::lend::BACKSTOP_OWNER), "no backstop claim is left behind");
     // Bob gets whatever the sale left over.
-    c.claim(BOB, &[lot_source(&pos)]);
+    c.claim(BOB, &[leftover_source(&pos)]);
 }
 
 #[test]

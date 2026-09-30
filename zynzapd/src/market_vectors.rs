@@ -264,7 +264,7 @@ pub fn vectors() -> Vec<(&'static str, String)> {
 
 /// Zyn Lend: its programs, derived ids and the seven intents a holder signs.
 fn lend_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
-    use objectvm::lend::{lend_asset, lend_source, lot_source};
+    use objectvm::lend::{leftover_source, lend_asset, lend_source, lot_source};
     let enc = |op: &Op| hex(&ObjectVm::encode_intent(op));
     let position = lend_source(&OWNER, &NONCE);
     vec![
@@ -277,6 +277,7 @@ fn lend_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
         ("lend_asset", hex(&lend_asset(&ZEC))),
         ("lend_source", hex(&position)),
         ("lot_source", hex(&lot_source(&position))),
+        ("leftover_source", hex(&leftover_source(&position))),
         (
             "lend_supply",
             enc(&Op::LendSupply { lender: OWNER, program: program::lend_supply(), asset: ZEC, amount: Fixed::whole(3), nonce: NONCE, inputs: input.to_vec(), change: vec![change()] }),

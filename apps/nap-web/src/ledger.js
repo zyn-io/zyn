@@ -49,7 +49,7 @@ export function claimSources(identity, limit, from = 0) {
   for (let n = from; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
     const lend = mk.lendSource(me, nonce);
-    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.lotSource(lend)]) {
+    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.leftoverSource(lend)]) {
       out.push(...mk.claimIds(source).map(hex));
     }
   }
@@ -138,7 +138,7 @@ function claimKinds(identity, limit, from = 0) {
   for (let n = from; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
     const lend = mk.lendSource(me, nonce);
-    const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.lotSource(lend)];
+    const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.leftoverSource(lend)];
     sources.forEach((source, i) => mk.claimIds(source).forEach((id, k) => kinds.set(hex(id), CLAIM_KINDS[i][1][k])));
   }
   return kinds;
