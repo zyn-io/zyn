@@ -28,6 +28,14 @@ export class ProviderError extends Error {
 }
 const bad = (m) => new ProviderError(ERR.PARAMS, m);
 
+/// The private channel a request names (SOL when it names none).
+function channelOf(ctx, p) {
+  try { return pool.channel(ctx.config, String(p?.channel || 'sol')); } catch (e) { throw bad(e.message); }
+}
+function sizeIn(c, size) {
+  try { return pool.sizeOf(c, size); } catch (e) { throw bad(e.message); }
+}
+
 const ZAT = 100_000_000n;
 const zecText = (zat) => { const v = BigInt(zat); const f = (v % ZAT).toString().padStart(8, '0').replace(/0+$/, ''); return `${v / ZAT}${f ? `.${f}` : ''}`; };
 /// A ledger amount in full: an approval shows exactly what is signed, never
@@ -756,13 +764,20 @@ export const METHODS = {
   },
 
   // -------------------------------------------------------- private channel
-  // SOL through the pools (§158): fixed sizes, a zero-knowledge proof each
-  // way, spends submitted by the relayer. The site talks to Phantom for the
-  // deposit itself; Nap makes the notes and the proofs.
+  // Through the pools (§158): SOL on Solana, ETH on Sepolia, BTC on Mezo as
+  // mzBTC.zy. Fixed sizes, a zero-knowledge proof each way, spends submitted
+  // by the relayer. The site talks to Phantom or MetaMask for the deposit
+  // itself; Nap makes the notes and the proofs. `channel`: sol, eth or mzbtc.
 
   zyn_poolInfo: {
     kind: 'public',
-    async run(ctx) { return { ...(await pool.info(ctx.config)), sizes: pool.SIZES }; },
+    async run(ctx, p) {
+      if (p?.channel) {
+        const c = pool.channel(ctx.config, String(p.channel));
+        return { ...(await pool.info(ctx.config, c)), channel: c.key, sizes: c.sizes.map(String) };
+      }
+      return { channels: pool.channels(ctx.config).map((c) => ({ channel: c.key, chain: c.chain, symbol: c.symbol, asset: c.zy, sizes: c.sizes.map(String) })) };
+    },
   },
 
   zyn_poolNotes: {
@@ -770,16 +785,17 @@ export const METHODS = {
     async run(ctx) { return { notes: await pool.notes(ctx.config, ctx.identity) }; },
   },
 
-  /// A fresh note to deposit into the `size` pool from any Solana wallet.
+  /// A fresh note to deposit into the `size` pool from any wallet on its chain.
   zyn_poolDeposit: {
     kind: 'read',
     async run(ctx, p) {
-      const size = Number(p?.size);
-      const i = await pool.info(ctx.config);
-      const address = (i.pools || []).find((x) => Number(x.size) === size)?.address;
-      if (!address) throw bad('Pools take 0.1, 1 or 10 SOL');
-      const note = await pool.newNote(ctx.config, ctx.identity, size, 'in');
-      return { commitment: note.commitment, size, program: i.program, pool: address };
+      const c = channelOf(ctx, p);
+      const size = sizeIn(c, p?.size);
+      const i = await pool.info(ctx.config, c);
+      const address = (i.pools || []).find((x) => String(x.size) === String(size))?.address;
+      if (!address) throw bad(`No ${pool.sizeText(c, size)} pool`);
+      const note = await pool.newNote(ctx.config, ctx.identity, c, size, 'in');
+      return { channel: c.key, commitment: note.commitment, size: String(size), program: i.program, pool: address, chain: c.chain };
     },
   },
 
@@ -790,11 +806,12 @@ export const METHODS = {
       const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment);
       if (!n) throw bad('No such note in this wallet');
       if (n.state !== 'in pool') throw bad(['to zyn', 'sent', 'spent'].includes(n.state) ? 'That note is already spent' : 'That note is not in its pool yet; try again once it is confirmed');
-      const sol = n.size / 1e9;
+      const c = pool.channel(ctx.config, n.ch);
+      const amount = pool.sizeText(c, n.size);
       return {
-        title: `Move ${sol} SOL into Zyn`,
+        title: `Move ${amount} into Zyn`,
         danger: false,
-        rows: [['From', `a ${sol} SOL note in the pool`], ['Arrives as', `${sol} SOL.zy, less the bridge fee`]],
+        rows: [['From', `a ${amount} note in the ${c.chainName} pool`], ['Arrives as', `${amount.split(' ')[0]} ${c.zy}, less the bridge fee`]],
         note: 'Nap proves the note is one of the pool\'s without saying which; the relayer submits it, so no wallet of yours appears.',
         run: async () => pool.toZyn(ctx.config, ctx.identity, p.commitment),
       };
@@ -804,24 +821,24 @@ export const METHODS = {
   zyn_poolWithdraw: {
     kind: 'write',
     async prepare(ctx, p) {
-      const size = Number(p?.size);
-      if (!pool.SIZES.includes(size)) throw bad('Pools take 0.1, 1 or 10 SOL');
+      const c = channelOf(ctx, p);
+      const size = sizeIn(c, p?.size);
       const st = await bridges.bridgeState(ctx.config);
-      const b = st.bridges.find((x) => x.key === 'sol');
-      if (!b?.live) throw bad('No SOL bridge on this network');
-      const raw = BigInt(size) * 1_000_000_000n;
+      const registered = (await ledger.loadBridged(ctx.config)).some((x) => x.asset === c.asset);
+      if (!registered) throw bad(`${c.zy} is not bridged on this network`);
+      const raw = pool.wadOf(c, size);
       const fee = (raw * st.bps) / 10_000n;
-      await mustHold(ctx, b.asset, raw + fee, 'SOL.zy');
-      const sol = size / 1e9;
+      await mustHold(ctx, c.asset, raw + fee, c.zy);
+      const amount = pool.sizeText(c, size);
       return {
-        title: `Withdraw ${sol} SOL privately`,
+        title: `Withdraw ${amount} privately`,
         danger: true,
-        rows: [['You send', `${wadText(raw)} SOL.zy`], ['Bridge fee', `${wadText(fee)} SOL.zy`], ['Becomes', `a ${sol} SOL note in the pool`]],
-        note: 'The bridge puts the note into the pool; then send it to any Solana address. Nobody, the operator included, learns that address.',
+        rows: [['You send', `${wadText(raw)} ${c.zy}`], ['Bridge fee', `${wadText(fee)} ${c.zy}`], ['Becomes', `a ${amount} note in the ${c.chainName} pool`]],
+        note: `The bridge puts the note into the pool; then send it to any ${c.chainName} address. Nobody, the operator included, learns that address.`,
         run: async () => {
           const h = await holdings(ctx);
-          const note = await pool.withdraw(ctx.config, ctx.identity, h.held, size, st.bps);
-          return { commitment: note.commitment, size };
+          const note = await pool.withdraw(ctx.config, ctx.identity, h.held, c, size, st.bps);
+          return { channel: c.key, commitment: note.commitment, size: String(size) };
         },
       };
     },
@@ -831,18 +848,19 @@ export const METHODS = {
     kind: 'write',
     async prepare(ctx, p) {
       if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
-      const to = String(p?.to || '').trim();
-      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to)) throw bad('That is not a Solana address');
       const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment);
       if (!n) throw bad('No such note in this wallet');
       if (n.state !== 'in pool') throw bad(['to zyn', 'sent', 'spent'].includes(n.state) ? 'That note is already spent' : 'That note is not in its pool yet');
-      const i = await pool.info(ctx.config);
-      const sol = n.size / 1e9;
+      const c = pool.channel(ctx.config, n.ch);
+      const to = String(p?.to || '').trim();
+      try { pool.recipientOf(c, to); } catch (e) { throw bad(e.message); }
+      const i = await pool.info(ctx.config, c);
+      const fee = BigInt(i.fee);
       return {
-        title: `Send ${sol} SOL to an address`,
+        title: `Send ${pool.sizeText(c, n.size)} to an address`,
         danger: true,
-        rows: [['To', to], ['Relayer fee', `${Number(i.fee) / 1e9} SOL`], ['Arrives', `${(n.size - Number(i.fee)) / 1e9} SOL`]],
-        note: 'Solana shows the address receiving from the pool, not from you. Use an address never linked to the one you deposited from.',
+        rows: [['To', to], ['Relayer fee', pool.sizeText(c, fee)], ['Arrives', pool.sizeText(c, BigInt(n.size) - fee)]],
+        note: `${c.chainName} shows the address receiving from the pool, not from you. Use an address never linked to the one you deposited from.`,
         run: async () => pool.sendOut(ctx.config, ctx.identity, p.commitment, to),
       };
     },

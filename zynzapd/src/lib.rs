@@ -39,6 +39,7 @@ pub mod tap;
 pub mod burn_watch;
 pub mod sale_draw;
 pub mod eth_bridge;
+pub mod evm_pool;
 pub mod sol_bridge;
 pub mod sol_pool;
 pub mod tickets;

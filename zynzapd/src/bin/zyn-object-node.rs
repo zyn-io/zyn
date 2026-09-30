@@ -1087,12 +1087,23 @@ fn handle(
         // `keccak(address ‖ salt)` must be what their withdrawal committed
         // to, for an unpaid exit of that asset, or nothing is written. The
         // bridge for that chain reads these through `zyn_bridgeExits`.
-        // The private channel's relayer (§158.6), run by the SOL bridge on
-        // this host: the pools' notes (public: they are on Solana), and a
-        // spend relayed so no wallet of the holder's pays for it. Forwarded
-        // as it came; the relayer checks everything it signs.
+        // The private channel's relayers (§158.6): the pools' notes (public:
+        // they are on their chains), and a spend relayed so no wallet of the
+        // holder's pays for it. Solana's runs in the SOL bridge; each EVM
+        // chain's in its `zyn-evm-pool`, chosen by `chain` ("eip155:<id>",
+        // listed in ZYN_POOL_RELAYS as chain=url,…). Forwarded as it came;
+        // the relayer checks everything it signs.
         "zyn_poolInfo" | "zyn_poolLeaves" | "zyn_poolRelay" => {
-            let url = std::env::var("ZYN_POOL_RELAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8497".into());
+            let url = match field(body, "chain").filter(|c| !c.is_empty() && c != "solana") {
+                None => std::env::var("ZYN_POOL_RELAY_URL").unwrap_or_else(|_| "http://127.0.0.1:8497".into()),
+                Some(c) => {
+                    let relays = std::env::var("ZYN_POOL_RELAYS").unwrap_or_default();
+                    match relays.split(',').filter_map(|kv| kv.split_once('=')).find(|(k, _)| k.trim() == c) {
+                        Some((_, u)) => u.trim().to_string(),
+                        None => return err("no private channel for that chain here"),
+                    }
+                }
+            };
             let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(90)).build();
             match agent.post(&url).set("content-type", "application/json").send_string(body) {
                 Ok(r) => match r.into_string() {
@@ -1126,7 +1137,8 @@ fn handle(
                 let ok = if o.network.starts_with(b"bitcoin") {
                     (22..=42).contains(&address.len()) && address[0] != 0x6a
                 } else if o.network.starts_with(b"eip155:") {
-                    address.len() == 20
+                    // An address, or a note for that chain's pool (§158.4).
+                    address.len() == 20 || zynzapd::sol_bridge::as_pool_destination(&address).is_some()
                 } else {
                     // Solana: an address, or a note for the private channel's
                     // pool (§158.4), which the bridge inserts instead of paying.

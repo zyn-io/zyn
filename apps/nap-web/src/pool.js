@@ -1,4 +1,5 @@
-// The private bridge channel in Nap (DECISIONS §158).
+// The private bridge channel in Nap (DECISIONS §158): SOL through the
+// Solana pools, ETH through Sepolia's, BTC through Mezo's as mzBTC.zy.
 //
 // A note is two secrets derived from this wallet's key and an index — so any
 // Nap holding the same phrase can find its notes again — whose commitment
@@ -14,11 +15,53 @@ import { hex, unhex } from './core.js';
 import * as ledger from './ledger.js';
 import * as bridges from './bridges.js';
 import { b58decode } from './solana.js';
+import { bridgedAsset } from './market.js';
 
 const DOMAIN = new TextEncoder().encode('zyn-pool.note.v1');
-const LAMPORT = 1_000_000_000n; // one lamport in WAD
-/// The pools' sizes, in lamports: 0.1, 1 and 10 SOL.
-export const SIZES = [100_000_000, 1_000_000_000, 10_000_000_000];
+const pow10 = (n) => 10n ** BigInt(n);
+
+/// The private channels: one set of pools per chain, three sizes each, in
+/// the chain's smallest unit. `chain` is what the node routes the relayer
+/// calls by. ETH shares ETH.zy with the transparent bridge; BTC through Mezo
+/// is its own asset, mzBTC.zy.
+const ALL = {
+  sol: { key: 'sol', chain: 'solana', symbol: 'SOL', zy: 'SOL.zy', decimals: 9, sizes: [100_000_000n, 1_000_000_000n, 10_000_000_000n], address: 'solana' },
+  eth: { key: 'eth', chain: 'eip155:11155111', symbol: 'ETH', zy: 'ETH.zy', decimals: 18, sizes: [pow10(16), pow10(17), pow10(18)], address: 'evm', chainName: 'Sepolia', chainId: 11155111 },
+  mzbtc: { key: 'mzbtc', chain: 'eip155:31611', symbol: 'BTC', zy: 'mzBTC.zy', decimals: 18, sizes: [pow10(15), pow10(16), pow10(17)], address: 'evm', chainName: 'Mezo testnet', chainId: 31611 },
+};
+
+/// The channels this network has: testnet only until the keys come from a
+/// ceremony (§158.8).
+export function channels(config) {
+  const b = config.bridges || {};
+  const out = [];
+  if (b.sol && /devnet|testnet/.test(b.sol.network || '')) out.push({ ...ALL.sol, chainName: 'Solana devnet' });
+  if (b.eth?.chainId === ALL.eth.chainId) out.push(ALL.eth);
+  if (b.mezo?.chainId === ALL.mzbtc.chainId) out.push(ALL.mzbtc);
+  return out.map((c) => ({ ...c, network: c.key === 'sol' ? b.sol.network : c.chain, asset: hex(bridgedAsset(c.key === 'sol' ? b.sol.network : c.chain)) }));
+}
+
+export function channel(config, key = 'sol') {
+  const c = channels(config).find((x) => x.key === key);
+  if (!c) throw new Error('No such private channel on this network');
+  return c;
+}
+
+/// A size in the chain's unit, as the text a person reads: "0.1 SOL".
+export const sizeText = (c, size) => {
+  const v = BigInt(size);
+  const whole = v / pow10(c.decimals);
+  const frac = (v % pow10(c.decimals)).toString().padStart(c.decimals, '0').replace(/0+$/, '');
+  return `${whole}${frac ? `.${frac}` : ''} ${c.symbol}`;
+};
+
+/// One size of `c`, or a refusal naming the sizes it takes.
+export function sizeOf(c, size) {
+  let v;
+  try { v = BigInt(String(size)); } catch { v = -1n; }
+  if (!c.sizes.includes(v)) throw new Error(`Pools take ${c.sizes.map((x) => sizeText(c, x)).join(', ')}`);
+  return v;
+}
 
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
@@ -65,17 +108,17 @@ async function secrets(config, identity, i) {
   return JSON.parse((await core()).note(hex(seed)));
 }
 
-/// A fresh note of `size` lamports for this wallet: `in` (to deposit into a
-/// pool) or `out` (a private exit's destination).
-export async function newNote(config, identity, size, kind) {
-  if (!SIZES.includes(Number(size))) throw new Error('Pools take 0.1, 1 or 10 SOL');
+/// A fresh note of `size` (in the chain's unit) for channel `c`: `in` (to
+/// deposit into a pool) or `out` (a private exit's destination).
+export async function newNote(config, identity, c, size, kind) {
+  const v = sizeOf(c, size);
   const b = book(config, identity);
   const i = b.next;
   const n = await secrets(config, identity, i);
   b.next = i + 1;
-  b.notes.push({ i, size: Number(size), kind, commitment: n.commitment, state: 'new', at: Date.now() });
+  b.notes.push({ i, ch: c.key, size: String(v), kind, commitment: n.commitment, state: 'new', at: Date.now() });
   save(config, identity, b);
-  return { i, size: Number(size), commitment: n.commitment };
+  return { i, ch: c.key, size: String(v), commitment: n.commitment };
 }
 
 function mark(config, identity, commitment, state, extra = {}) {
@@ -85,34 +128,39 @@ function mark(config, identity, commitment, state, extra = {}) {
   save(config, identity, b);
 }
 
-export const info = (config) => ledger.call(config, 'zyn_poolInfo');
-const pools = async (config, size) => ledger.call(config, 'zyn_poolLeaves', { size: String(size) });
-const leaves = async (config, size) => (await pools(config, size)).leaves;
+/// Notes written before there was more than one channel are SOL notes.
+const chOf = (n) => n.ch || 'sol';
+
+export const info = (config, c) => ledger.call(config, 'zyn_poolInfo', { chain: c.chain });
+const pools = async (config, c, size) => ledger.call(config, 'zyn_poolLeaves', { chain: c.chain, size: String(size) });
+const leaves = async (config, c, size) => (await pools(config, c, size)).leaves;
 const SPENT = new Set(['to zyn', 'sent', 'spent']);
 /// How far past the last note found a restored wallet keeps looking.
 const GAP = 20;
 
-/// This wallet's notes, each with where it stands: `new` or `burned` (not in
-/// its pool yet), `in pool` (unspent: into Zyn or to an address), or spent.
-/// Found again from the phrase alone: every index is tried against every
-/// pool's notes, and a note whose nullifier hash a spend published is spent.
+/// This wallet's notes on every channel, each with where it stands: `new` or
+/// `burned` (not in its pool yet), `in pool` (unspent: into Zyn or to an
+/// address), or spent. Found again from the phrase alone: every index is
+/// tried against every pool's notes, and a note whose nullifier hash a spend
+/// published is spent.
 export async function notes(config, identity) {
   const b = book(config, identity);
-  const seen = new Map();
-  for (const size of SIZES) {
-    const r = await pools(config, size).catch(() => ({ leaves: [], spent: [] }));
-    seen.set(size, { leaves: new Set(r.leaves), spent: new Set(r.spent || []) });
+  const seen = [];
+  for (const c of channels(config)) {
+    for (const size of c.sizes) {
+      const r = await pools(config, c, size).catch(() => ({ leaves: [], spent: [] }));
+      seen.push({ c, size: String(size), leaves: new Set(r.leaves), spent: new Set(r.spent || []) });
+    }
   }
   let last = b.next - 1;
   for (let i = 0; i <= Math.max(b.next, last + 1) + GAP; i++) {
     const n = await secrets(config, identity, i);
-    for (const size of SIZES) {
-      const p = seen.get(size);
+    for (const p of seen) {
       if (!p.leaves.has(n.commitment)) continue;
       last = Math.max(last, i);
       let note = b.notes.find((x) => x.commitment === n.commitment);
       if (!note) {
-        note = { i, size, kind: 'note', commitment: n.commitment, state: 'in pool', at: null };
+        note = { i, ch: p.c.key, size: p.size, kind: 'note', commitment: n.commitment, state: 'in pool', at: null };
         b.notes.push(note);
       }
       if (p.spent.has(n.nullifier_hash)) {
@@ -123,11 +171,14 @@ export async function notes(config, identity) {
   b.next = Math.max(b.next, last + 1);
   b.notes.sort((x, y) => x.i - y.i);
   save(config, identity, b);
-  return b.notes.map(({ i, size, kind, commitment, state, at, signature }) => ({ i, size, kind, commitment, state, at, signature }));
+  const known = new Set(channels(config).map((c) => c.key));
+  return b.notes
+    .filter((n) => known.has(chOf(n)))
+    .map(({ i, size, kind, commitment, state, at, signature, ...n }) => ({ i, ch: chOf(n), size: String(size), kind, commitment, state, at, signature }));
 }
 
-async function proveFor(config, identity, note, binding) {
-  const ls = await leaves(config, note.size);
+async function proveFor(config, identity, c, note, binding) {
+  const ls = await leaves(config, c, note.size);
   if (!ls.includes(note.commitment)) throw new Error('That note is not in its pool yet; try again once its deposit or exit is confirmed');
   const s = await secrets(config, identity, note.i);
   const m = await core();
@@ -135,52 +186,74 @@ async function proveFor(config, identity, note, binding) {
 }
 
 /// A note of this wallet's that can still be spent — whichever way: a note
-/// deposited on Solana can go to an address, and an exit note into Zyn.
-function own(config, identity, commitment) {
+/// deposited on its chain can go to an address, and an exit note into Zyn.
+export function own(config, identity, commitment) {
   const n = book(config, identity).notes.find((x) => x.commitment === commitment);
   if (!n) throw new Error('No such note in this wallet');
   if (SPENT.has(n.state)) throw new Error('That note is already spent');
-  return n;
+  return { ...n, ch: chOf(n), size: String(n.size), c: channel(config, chOf(n)) };
 }
 
 /// A deposited note, into Zyn: a proof bound to this wallet's deposit code,
-/// submitted by the relayer. Arrives as SOL.zy of the note's size.
+/// submitted by the relayer. Arrives as the channel's asset, the note's size.
 export async function toZyn(config, identity, commitment) {
   const note = own(config, identity, commitment);
   const code = await bridges.depositCode(config, identity);
   const m = await core();
-  const { p } = await proveFor(config, identity, note, m.binding_to_zyn(code));
-  const r = await ledger.call(config, 'zyn_poolRelay', { size: String(note.size), kind: 'to_zyn', proof: p.proof, root: p.root, nullifier_hash: p.nullifier_hash, code });
+  const { p } = await proveFor(config, identity, note.c, note, m.binding_to_zyn(code));
+  const r = await ledger.call(config, 'zyn_poolRelay', { chain: note.c.chain, size: note.size, kind: 'to_zyn', proof: p.proof, root: p.root, nullifier_hash: p.nullifier_hash, code });
   mark(config, identity, commitment, 'to zyn', { signature: r.signature });
   return r;
 }
 
-/// SOL.zy out privately: burn one size on Zyn with a fresh note as the
-/// destination; the bridge puts the note into the pool.
-export async function withdraw(config, identity, held, size, bps) {
-  const b = bridges.bridgesOf(config).find((x) => x.key === 'sol');
-  if (!b) throw new Error('No SOL bridge on this network');
-  const note = await newNote(config, identity, size, 'out');
+/// A private exit's destination, as the bridges read it
+/// (`sol_bridge::as_pool_destination`): "zyn-pool" ‖ size (u64 LE) ‖ commitment.
+export function destination(size, commitment) {
   const address = new Uint8Array(48);
   address.set(new TextEncoder().encode('zyn-pool'), 0);
   new DataView(address.buffer).setBigUint64(8, BigInt(size), true);
-  address.set(unhex(note.commitment, 32), 16);
-  await bridges.bridgeOutTo(config, identity, held, b, address, BigInt(size) * LAMPORT, bps);
+  address.set(unhex(commitment, 32), 16);
+  return address;
+}
+
+/// One size in WAD, as Zyn holds every asset.
+export const wadOf = (c, size) => BigInt(size) * pow10(18 - c.decimals);
+
+/// Out privately: burn one size on Zyn with a fresh note as the destination;
+/// the bridge puts the note into the pool.
+export async function withdraw(config, identity, held, c, size, bps) {
+  const v = sizeOf(c, size);
+  const note = await newNote(config, identity, c, v, 'out');
+  await bridges.bridgeOutTo(config, identity, held, { asset: c.asset }, destination(v, note.commitment), wadOf(c, v), bps);
   mark(config, identity, note.commitment, 'burned');
   return note;
 }
 
-/// An exit note, to any Solana address, through the relayer (which takes its
-/// fee from the note).
+/// The address bytes of `to` on `c`'s chain, or a refusal.
+export function recipientOf(c, to) {
+  const t = String(to || '').trim();
+  if (c.address === 'evm') {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(t)) throw new Error(`That is not a ${c.chainName} address`);
+    return unhex(t.slice(2), 20);
+  }
+  let b;
+  try { b = b58decode(t); } catch { b = new Uint8Array(0); }
+  if (b.length !== 32) throw new Error('That is not a Solana address');
+  return b;
+}
+
+/// An exit note, to any address on its chain, through the relayer (which
+/// takes its fee from the note).
 export async function sendOut(config, identity, commitment, to) {
   const note = own(config, identity, commitment);
-  const recipient = b58decode(String(to).trim());
-  if (recipient.length !== 32) throw new Error('That is not a Solana address');
-  const i = await info(config);
+  const c = note.c;
+  const recipient = recipientOf(c, to);
+  const i = await info(config, c);
+  const relayer = c.address === 'evm' ? unhex(String(i.relayer).slice(2), 20) : b58decode(i.relayer);
   const m = await core();
-  const binding = m.binding_to_address(hex(recipient), hex(b58decode(i.relayer)), BigInt(i.fee));
-  const { p } = await proveFor(config, identity, note, binding);
-  const r = await ledger.call(config, 'zyn_poolRelay', { size: String(note.size), kind: 'to_address', proof: p.proof, root: p.root, nullifier_hash: p.nullifier_hash, recipient: String(to).trim(), fee: String(i.fee) });
+  const binding = m.binding_to_address(hex(recipient), hex(relayer), BigInt(i.fee));
+  const { p } = await proveFor(config, identity, c, note, binding);
+  const r = await ledger.call(config, 'zyn_poolRelay', { chain: c.chain, size: note.size, kind: 'to_address', proof: p.proof, root: p.root, nullifier_hash: p.nullifier_hash, recipient: String(to).trim(), fee: String(i.fee) });
   mark(config, identity, commitment, 'sent', { signature: r.signature });
-  return { ...r, fee: i.fee };
+  return { ...r, fee: String(i.fee) };
 }

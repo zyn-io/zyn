@@ -86,7 +86,7 @@ export async function loadPocket(config, identity) {
     }
     for (const b of await loadBridged(config)) {
       names.set(b.asset, bridgedName(config, b));
-      origin.set(b.asset, ({ 'eip155:1': 'Ethereum', 'eip155:11155111': 'Sepolia', 'solana-devnet': 'Solana devnet', 'bitcoin-signet': 'Bitcoin signet', bitcoin: 'Bitcoin' })[b.network] || b.network);
+      origin.set(b.asset, ({ 'eip155:1': 'Ethereum', 'eip155:11155111': 'Sepolia', 'eip155:31611': 'Mezo testnet', 'solana-devnet': 'Solana devnet', 'bitcoin-signet': 'Bitcoin signet', bitcoin: 'Bitcoin' })[b.network] || b.network);
     }
     const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
     for (const p of market.pools || []) {
