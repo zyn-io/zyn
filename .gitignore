@@ -43,3 +43,6 @@ examples/**/tools/
 # be public.
 sslkey
 
+
+# Solana program builds (solana/*): the keypair fixes the program id; kept in ~/.zyn/solana
+solana/*/target/

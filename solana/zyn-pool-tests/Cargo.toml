@@ -1,0 +1,28 @@
+[package]
+name = "zyn-pool-program-tests"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.93"
+publish = false
+description = "The Solana pool program, run in LiteSVM with real proofs"
+
+# Its own workspace: host-side tests for the SBF program, built with the
+# normal toolchain (the program itself keeps to the platform toolchain).
+[workspace]
+
+[dependencies]
+
+[dev-dependencies]
+litesvm = "0.16"
+solana-address = "~2.6.1"
+solana-instruction = "~3.4.0"
+solana-keypair = "3.1.2"
+solana-message = "4.2.4"
+solana-signer = "3.0.1"
+solana-system-interface = "3.2.0"
+solana-transaction = "4.1.5"
+solana-compute-budget-interface = "3"
+ark-groth16 = "0.5"
+zyn-pool = { path = "../../zyn-pool" }
+ark-bn254 = "0.5"
+base64 = "0.22"

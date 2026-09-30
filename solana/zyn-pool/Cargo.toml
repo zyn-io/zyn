@@ -1,0 +1,27 @@
+[package]
+name = "zyn-pool-program"
+version = "0.1.0"
+edition = "2021"
+# The Solana platform toolchain (platform-tools v1.51) is rustc 1.84: the
+# lockfile keeps to crates that build with it (see .cargo/config.toml).
+rust-version = "1.84"
+description = "The private bridge channel's pool on Solana (DECISIONS §158)"
+license = "MIT OR Apache-2.0"
+
+# Its own workspace: an SBF program, built with cargo-build-sbf, kept apart
+# from the node's dependency graph.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+solana-program = "2.3"
+solana-poseidon = "2"
+groth16-solana = "0.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(feature, values("custom-heap", "custom-panic"))'] }

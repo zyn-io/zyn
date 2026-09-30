@@ -11,6 +11,14 @@ use ark_snark::SNARK;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
+/// The public seed of the testnet setup. Anyone can forge proofs under keys
+/// made from it — which is what makes it honest to publish: they are for
+/// testnet only (DECISIONS §158.8).
+pub fn testnet_seed() -> [u8; 32] {
+    use sha3::{Digest, Keccak256};
+    Keccak256::digest(b"zyn-pool testnet one-party setup v1 - NOT FOR MAINNET").into()
+}
+
 /// Keys for the spend circuit from a single party's `seed`. TESTNET ONLY.
 pub fn setup(seed: [u8; 32]) -> (ProvingKey<Bn254>, VerifyingKey<Bn254>) {
     let mut rng = ChaCha20Rng::from_seed(seed);
