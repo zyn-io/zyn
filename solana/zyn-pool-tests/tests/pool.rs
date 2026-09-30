@@ -25,6 +25,7 @@ const IX_DEPOSIT: u8 = 1;
 const IX_SPEND_TO_ZYN: u8 = 2;
 const IX_SPEND_TO_ADDRESS: u8 = 3;
 const IX_INSERT_EXIT: u8 = 4;
+const IX_SET_AUTHORITY: u8 = 5;
 
 fn pool_address(program: &Pubkey, denomination: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"pool", &denomination.to_le_bytes()], program)
@@ -266,4 +267,32 @@ fn exits_come_from_the_custodians_and_never_outrun_the_pool() {
     let (proof, root, nh) = p.proof(&exit, at, binding_to_address(fresh.as_ref(), relayer.pubkey().as_ref(), 0));
     p.spend_to_address(&relayer, &fresh, &proof, root, nh, 0).expect("the exit is paid");
     assert_eq!(p.balance(&fresh), DENOM);
+}
+
+#[test]
+fn the_authority_hands_itself_on_and_only_it_can() {
+    let mut p = Pool::new();
+    let next = Keypair::new();
+    p.svm.airdrop(&next.pubkey(), SOL).unwrap();
+    let rotate = |p: &mut Pool, signer: &Keypair, to: &Pubkey| {
+        let ix = Instruction::new_with_bytes(
+            p.program,
+            &[&[IX_SET_AUTHORITY][..], to.as_ref()].concat(),
+            vec![AccountMeta::new_readonly(signer.pubkey(), true), AccountMeta::new(p.pool, false)],
+        );
+        let payer = p.payer.insecure_clone();
+        p.send(&[ix], &[&payer, signer])
+    };
+    let stranger = Keypair::new();
+    p.svm.airdrop(&stranger.pubkey(), SOL).unwrap();
+    let err = rotate(&mut p, &stranger, &stranger.pubkey()).unwrap_err();
+    assert!(err.contains("Custom(6)"), "a stranger cannot take the pool: {err}");
+    let old = p.authority.insecure_clone();
+    rotate(&mut p, &old, &next.pubkey()).expect("the authority hands on");
+    // The old key no longer inserts exits (it is refused as not the
+    // authority before any funding check); the new one does, once funded.
+    let err = p.insert_exit(&old, &note(30)).unwrap_err();
+    assert!(err.contains("Custom(6)"), "the old key is out: {err}");
+    let err = p.insert_exit(&next, &note(31)).unwrap_err();
+    assert!(err.contains("Custom(7)"), "the new key is in (and the pool has nothing to back an exit yet): {err}");
 }

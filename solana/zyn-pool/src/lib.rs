@@ -10,8 +10,10 @@
 //!   a Zyn deposit code. The SOL stays; the bridge credits SOL.zy on Zyn.
 //! - `SpendToAddress`: the same proof, bound to a recipient, a relayer and
 //!   the relayer's fee. The pool pays out.
-//! - `InsertExit`: the custodians' key adds a note for a private withdrawal
+//! - `InsertExit`: the pool's authority adds a note for a private withdrawal
 //!   from Zyn, only while the pool holds enough for every note outstanding.
+//! - `SetAuthority`: the authority hands itself on (testnet starts with the
+//!   bridge's key; the custodians' 2-of-3 key takes over — §158.4).
 //!
 //! Proofs are Groth16 over the `zyn-pool` circuit; the tree uses Solana's
 //! Poseidon syscall, which is the circuit's Poseidon.
@@ -86,6 +88,7 @@ pub const IX_DEPOSIT: u8 = 1;
 pub const IX_SPEND_TO_ZYN: u8 = 2;
 pub const IX_SPEND_TO_ADDRESS: u8 = 3;
 pub const IX_INSERT_EXIT: u8 = 4;
+pub const IX_SET_AUTHORITY: u8 = 5;
 
 #[derive(Debug)]
 #[repr(u32)]
@@ -115,6 +118,7 @@ pub fn process(program: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Progr
         IX_SPEND_TO_ZYN => spend_to_zyn(program, accounts, rest),
         IX_SPEND_TO_ADDRESS => spend_to_address(program, accounts, rest),
         IX_INSERT_EXIT => insert_exit(program, accounts, rest),
+        IX_SET_AUTHORITY => set_authority(program, accounts, rest),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -348,5 +352,21 @@ fn insert_exit(program: &Pubkey, accounts: &[AccountInfo], d: &[u8]) -> ProgramR
     let (index, root) = insert(&mut s, commitment)?;
     add_live(&mut s, 1);
     sol_log_data(&[b"exit", &commitment, &index.to_le_bytes(), &root]);
+    Ok(())
+}
+
+/// `[new authority 32]`. Accounts: authority (signer), pool.
+fn set_authority(program: &Pubkey, accounts: &[AccountInfo], d: &[u8]) -> ProgramResult {
+    let it = &mut accounts.iter();
+    let authority = next_account_info(it)?;
+    let pool = next_account_info(it)?;
+    pool_of(program, pool)?;
+    let next: [u8; 32] = arg(d, 0)?;
+    let mut s = pool.data.borrow_mut();
+    if !authority.is_signer || rd32(&s, O_AUTHORITY) != authority.key.to_bytes() {
+        return Err(PoolError::NotAuthority.into());
+    }
+    s[O_AUTHORITY..O_AUTHORITY + 32].copy_from_slice(&next);
+    sol_log_data(&[b"authority", &next]);
     Ok(())
 }
