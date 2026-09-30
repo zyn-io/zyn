@@ -74,11 +74,20 @@ pub fn binding_to_zyn(code_hex: &str) -> Result<String, JsError> {
     Ok(hex(&fr_be(zyn_pool::binding_to_zyn(&bytes::<32>(code_hex)?))))
 }
 
-/// The binding for a spend to `recipient`, relayed by `relayer` for `fee`
-/// (both 32-byte Solana keys here, as hex).
+fn address(s: &str) -> Result<Vec<u8>, JsError> {
+    let s = s.trim_start_matches("0x");
+    match s.len() {
+        40 => Ok(bytes::<20>(s)?.to_vec()),
+        64 => Ok(bytes::<32>(s)?.to_vec()),
+        _ => Err(JsError::new("an address is 20 bytes (EVM) or 32 (Solana), as hex")),
+    }
+}
+
+/// The binding for a spend to `recipient`, relayed by `relayer` for `fee`:
+/// 32-byte Solana keys or 20-byte EVM addresses, as hex.
 #[wasm_bindgen]
 pub fn binding_to_address(recipient_hex: &str, relayer_hex: &str, fee: u64) -> Result<String, JsError> {
-    Ok(hex(&fr_be(zyn_pool::binding_to_address(&bytes::<32>(recipient_hex)?, &bytes::<32>(relayer_hex)?, fee))))
+    Ok(hex(&fr_be(zyn_pool::binding_to_address(&address(recipient_hex)?, &address(relayer_hex)?, fee))))
 }
 
 /// The proving key, once: arkworks, uncompressed (`spend.pk.raw`).

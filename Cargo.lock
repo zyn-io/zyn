@@ -6913,6 +6913,7 @@ dependencies = [
  "groth16-solana",
  "light-poseidon",
  "rand_chacha",
+ "serde_json",
  "sha3",
 ]
 

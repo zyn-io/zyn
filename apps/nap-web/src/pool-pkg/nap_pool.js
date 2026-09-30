@@ -1,6 +1,6 @@
 /**
- * The binding for a spend to `recipient`, relayed by `relayer` for `fee`
- * (both 32-byte Solana keys here, as hex).
+ * The binding for a spend to `recipient`, relayed by `relayer` for `fee`:
+ * 32-byte Solana keys or 20-byte EVM addresses, as hex.
  * @param {string} recipient_hex
  * @param {string} relayer_hex
  * @param {bigint} fee
