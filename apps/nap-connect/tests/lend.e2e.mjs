@@ -36,6 +36,18 @@ const solCore = await page.textContent('.core:nth-child(3) .core-stats');
 ok(/Supplied\s*[1-9]/.test(solCore.replace(/\s+/g, ' ')), `SOL.zy pool has lenders: ${solCore.replace(/\s+/g, ' ').trim().slice(0, 80)}`);
 await page.screenshot({ path: `${S}/lend-markets.png`, fullPage: true });
 
+// The liquidation replay: every step loads, the lot is public and nameless,
+// and the last step says who got what.
+await page.goto(`${APP}/#/demo`);
+await page.waitForSelector('#demo-ticks button');
+const ticks = (await page.$$('#demo-ticks button')).length;
+await page.click(`#demo-ticks button[data-i="7"]`);
+const lotShown = /SOL per ETH/.test(await page.textContent('#demo-public'));
+await page.click(`#demo-ticks button[data-i="${ticks - 1}"]`);
+const outcome = (await page.textContent('#demo-outcome')).replace(/\s+/g, ' ');
+ok(ticks === 11 && lotShown && /Result/.test(outcome) && await page.isVisible('#demo-outcome'), `the liquidation replay plays: ${ticks} steps, lot public ${lotShown}`);
+
+await page.goto(`${APP}/#/markets`);
 // Connect Nap in the browser.
 await page.click('#connect');
 await page.waitForSelector('#wallet-list button');
