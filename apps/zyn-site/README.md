@@ -1,7 +1,9 @@
 # zyn-site
 
 Zyn's landing page: plain HTML, CSS and one script, no build step. Live at
-https://zyn-site.pages.dev (Cloudflare Pages project `zyn-site`).
+https://zyn-network.com (and www.; Cloudflare Pages project `zyn-site`, also
+zyn-site.pages.dev). The lending app is https://lend.zyn-network.com (project
+`zyn-lend`, repo zyn-io/zyn-lend).
 
     /opt/homebrew/bin/wrangler pages deploy public --project-name zyn-site --branch main
 
@@ -13,4 +15,4 @@ https://zyn-site.pages.dev (Cloudflare Pages project `zyn-site`).
 - Concept: jade is a stone, and so is the ledger. Epochs are drawn as strata, anchored ones pinned to Zcash bedrock; the verifiable checks are hallmarks. `assets/shots/` are real captures of the live apps (re-capture when they change).
 - Motion: `cubes.js` breaks each `[data-cubes]` heading into cubes as its section scrolls away and assembles the next from cubes; scroll decides when, each plays on its own clock (1.4 s apart, 1.6 s together) so the section glide does not rush it; the footer ZYN forms at the bottom. `main.js` has the section lock: the page never rests across two sections; it finishes the move in the direction of travel (sections not much taller than a screen are entered at their start), leaves tall sections free inside, and absorbs same-direction wheel during a glide (one gesture, one section). Both are off under reduced motion.
 - The CSP allows no inline style attributes: anything dynamic sets styles through the CSSOM (`el.style`).
-- When the domain is bought: attach it to the Pages project and update the `og:image` URL in `index.html`.
+- The domain (bought 30 Sep at Cloudflare Registrar) is attached to the Pages projects as custom domains; `og:image` points at it.

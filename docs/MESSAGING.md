@@ -49,6 +49,7 @@ The hierarchy, which keeps getting flattened:
 | who traded, provided liquidity or committed to a sale is **not shown to the public** | private trading; anonymous launches | the operator sees every intent at tier 2; say so in the same breath (§137) |
 | a launch sells **at one price to everyone**, and its pool's liquidity is locked | fair launch; rug-proof | "fair" and "rug-proof" are judgements about the creator; the mechanism is one price and locked pool shares, which is what to state |
 | the market is **built and enabled** | people are trading / launching on Zyn | built and enabled is not in use — until something has traded, describe the mechanism only |
+| who lends, who borrows and how much are **not shown to the public**; rates and rounded pool totals are | private lending; anonymous loans | the operator sees every position at tier 2 (§157.5); public totals are rounded snapshots (§157.14), which blunts inference, it does not make it impossible |
 
 ## The privacy sentence
 

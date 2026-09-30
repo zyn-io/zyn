@@ -1,4 +1,4 @@
-// Zyn Lend, as a holder uses it: the app at zyn-lend.pages.dev, Nap in the
+// Zyn Lend, as a holder uses it: the app at lend.zyn-network.com, Nap in the
 // browser in its own window, testnet 212. Lend SOL.zy, borrow SOL.zy against
 // ETH.zy, collect, and find the position under Positions — every step
 // approved in Nap, which shows the numbers the chain will use.
@@ -11,7 +11,7 @@ import { chromium } from 'playwright-core';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { unlockNap } from './unlock.mjs';
 
-const APP = process.env.APP || 'https://zyn-lend.pages.dev';
+const APP = process.env.APP || 'https://lend.zyn-network.com';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const S = process.env.SHOTS || '/tmp/lend-e2e';
 mkdirSync(S, { recursive: true });
