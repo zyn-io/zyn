@@ -16,6 +16,8 @@ import { forgetIdentity, parseAmount, WAD } from './core.js';
 import { contentHash, contentProof, hex, nullifierOf, unhex } from './object.js';
 import * as mk from './market.js';
 import * as ledger from './ledger.js';
+import * as bridges from './bridges.js';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
 
 /// EIP-1193's error codes, so a site handles Nap the way it handles any wallet.
@@ -72,7 +74,9 @@ async function holdings(ctx) {
 async function mustHold(ctx, asset, amount, name) {
   const h = await holdings(ctx);
   const have = h.held.filter((x) => x.asset === asset).reduce((a, x) => a + BigInt(x.amount), 0n);
-  if (have < amount) throw bad(`That needs ${wadText(amount)} ${name}; this wallet holds ${wadText(have)}`);
+  // The refusal reaches the site, so it says what was asked, never what this
+  // wallet holds: the connect card promises the site the account ID only.
+  if (have < amount) throw bad(`This wallet does not hold enough ${name} (that needs ${wadText(amount)})`);
 }
 
 /// What an approval calls the coin a payment is made in.
@@ -657,6 +661,94 @@ export const METHODS = {
           const account = await ctx.zecReady();
           const v = await account.send(req.address, req.zatoshi, req.memo, onStep);
           return { txid: v.txid };
+        },
+      };
+    },
+  },
+
+  // -------------------------------------------------------------- bridges
+  // A site's bridge page (Zyn Lend's) talks to Phantom or MetaMask itself;
+  // Nap makes what only this wallet can — the one-time deposit code, and the
+  // withdrawal — and says plainly that the other chain sees both.
+
+  zyn_bridges: {
+    kind: 'public',
+    async run(ctx) {
+      const st = await bridges.bridgeState(ctx.config);
+      return {
+        bps: Number(st.bps),
+        zec: { asset: ctx.config.zecAsset, zcash: ctx.config.zcash },
+        bridges: st.bridges.map((b) => ({
+          key: b.key, symbol: b.symbol, zy: b.zy, chainName: b.chainName, decimals: b.decimals, network: b.network, asset: b.asset,
+          live: b.live, issued: b.issued === null ? null : String(b.issued),
+          vault: b.vault || null, rpc: b.rpc || null, cluster: b.cluster || null, chainId: b.chainId || null, explorer: b.explorer || null,
+          capWei: b.capWei || null, custody: b.custody || null, safe: b.safe || null, chain: b.chain || null,
+        })),
+      };
+    },
+  },
+
+  /// What to send, for a deposit into this wallet: SOL a memo, ETH the
+  /// calldata, BTC an address (watched from now), ZEC this account's
+  /// deposit address. The code names nobody; the other chain sees the sender.
+  zyn_bridgeDeposit: {
+    kind: 'read',
+    async run(ctx, p) {
+      const key = String(p?.key || '');
+      if (key === 'zec') {
+        const r = await ledger.call(ctx.config, 'zyn_depositAddress', { account: ctx.identity.accountHex });
+        if (typeof r?.address !== 'string') throw bad('The node has no deposit address for this account yet');
+        return { key, address: r.address };
+      }
+      const b = bridges.bridgesOf(ctx.config).find((x) => x.key === key);
+      if (!b) throw bad(`No ${key.toUpperCase() || 'such'} bridge on this network`);
+      if (key === 'btc') return { key, address: await bridges.btcDepositAddress(ctx.config, ctx.identity, b) };
+      const code = await bridges.depositCode(ctx.config, ctx.identity);
+      if (key === 'sol') return { key, memo: `zyn:${code}`, vault: b.vault, rpc: b.rpc, cluster: b.cluster };
+      const asset = new Uint8Array(32);
+      new DataView(asset.buffer).setUint32(28, Number(b.assetId || 1));
+      const selector = hex(keccak_256(new TextEncoder().encode('depositNative(bytes32,uint32)')).slice(0, 4));
+      return { key, to: b.vault, chainId: b.chainId, data: `0x${selector}${code}${hex(asset)}`, capWei: b.capWei || null };
+    },
+  },
+
+  /// SOL.zy / ETH.zy / BTC.zy / ZEC.zy back to their chain.
+  zyn_bridgeWithdraw: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const key = String(p?.key || '');
+      const to = String(p?.to || '').trim();
+      const amount = amountOf(p?.amount, 'amount');
+      const st = await bridges.bridgeState(ctx.config);
+      const fee = (amount * st.bps) / 10_000n;
+      if (key === 'zec') {
+        if (!to.startsWith(ctx.config.zcashPrefix) && !/^t[mu]?[1-9A-HJ-NP-Za-km-z]{30,40}$/.test(to)) throw bad('That is not a Zcash address for this network');
+        await mustHold(ctx, ctx.config.zecAsset, amount + fee, 'ZEC.zy');
+        return {
+          title: 'Withdraw ZEC',
+          danger: true,
+          rows: [['You send', `${wadText(amount)} ZEC.zy`], ['Bridge fee', `${wadText(fee)} ZEC.zy`], ['To', to]],
+          note: 'Paid from the vault once two custodians sign; the Zcash network fee comes out of the amount. A shielded address keeps the payout private.',
+          run: async () => {
+            const h = await holdings(ctx);
+            await bridges.withdrawZec(ctx.config, ctx.identity, h.held, to, wadText(amount));
+            return { ok: true };
+          },
+        };
+      }
+      const b = st.bridges.find((x) => x.key === key);
+      if (!b || !b.live) throw bad(`No ${key.toUpperCase() || 'such'} bridge on this network`);
+      try { bridges.checkBridgeOut(b, to, amount); } catch (e) { throw bad(e.message); }
+      await mustHold(ctx, b.asset, amount + fee, b.zy);
+      return {
+        title: `Withdraw ${b.symbol}`,
+        danger: true,
+        rows: [['You send', `${wadText(amount)} ${b.zy}`], ['Bridge fee', `${wadText(fee)} ${b.zy}`], ['To', to], ['On', b.chainName]],
+        note: `${b.chainName} will show this address receiving the amount from the vault${b.safe ? '; the Safe owners approve each payout, which can take hours' : ''}.`,
+        run: async () => {
+          const h = await holdings(ctx);
+          await bridges.bridgeOut(ctx.config, ctx.identity, h.held, b, to, amount, st.bps);
+          return { ok: true };
         },
       };
     },

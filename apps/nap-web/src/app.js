@@ -3,6 +3,7 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
 import { decodeMeta, fund as fundFrom, lendAsset } from './market.js';
 import { bridgedName, loadBridged } from './ledger.js';
+import { bridgePage } from './bridges.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
@@ -472,7 +473,7 @@ function wallet(message = '') {
   root.querySelector('#receive-link').onclick = () => root.querySelector('.account-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Same origin, same kept key: the market opens it with the same password.
   root.querySelector('#market-link').onclick = () => openPage('/market.html');
-  root.querySelector('#bridge-link').onclick = () => openPage('/bridge.html');
+  root.querySelector('#bridge-link').onclick = () => (bridgePage(config) ? window.open(bridgePage(config), '_blank', 'noopener') : openPage('/bridge.html'));
   root.querySelector('#recovery-link').onclick = () => root.querySelector('#recovery-dialog').showModal();
   root.querySelector('#browser-link')?.addEventListener('click', () => napBrowser.openBrowser('').catch((e) => note(String(e).slice(0, 160), true)));
   root.querySelector('#recovery-dialog .x').onclick = () => root.querySelector('#recovery-dialog').close();

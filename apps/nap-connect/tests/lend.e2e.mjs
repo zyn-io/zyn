@@ -128,6 +128,32 @@ if (found) {
   ok(gone, 'the closed position is gone and its collateral collected');
 }
 
+// The bridge, moved here from Nap's own page: deposit addresses come from
+// Nap, Phantom/MetaMask are talked to by this page, withdrawals are signed
+// in Nap. OUT_TO: a Solana devnet address the 0.01 SOL.zy withdrawal pays.
+await page.goto(`${APP}/#/bridge`);
+await page.waitForSelector('#br-asset input[value="zec"]');
+await page.waitForFunction(() => /^utest1/.test(document.querySelector('#br-addr')?.textContent || ''), null, { timeout: 60000 });
+ok(true, `ZEC deposit address from Nap: ${(await page.textContent('#br-addr')).slice(0, 20)}…`);
+await page.check('#br-asset input[value="btc"]');
+await page.waitForFunction(() => /^tb1p/.test(document.querySelector('#br-addr')?.textContent || ''), null, { timeout: 60000 });
+ok(true, `BTC deposit address from Nap: ${(await page.textContent('#br-addr')).slice(0, 20)}…`);
+await page.check('#br-asset input[value="sol"]');
+await page.fill('#br-amount', '0.1');
+await page.click('#br-go');
+await page.waitForFunction(() => /Solana wallet/.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
+ok(/No Solana wallet/.test(await page.textContent('#br-note')), `without Phantom the page says so: ${await page.textContent('#br-note')}`);
+const OUT_TO = process.env.OUT_TO || 'HBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy';
+await page.check('input[name="br-mode"][value="out"]');
+await page.check('#br-asset input[value="sol"]');
+await page.fill('#br-to', OUT_TO);
+await page.fill('#br-amount', '0.01');
+await page.click('#br-go');
+await approve('withdraw', (t) => /Withdraw SOL/.test(t) && t.includes(OUT_TO) && /Solana devnet will show this address/.test(t));
+await page.waitForFunction(() => /Withdrawal recorded|refused|error/i.test(document.querySelector('#toast').textContent), null, { timeout: 90000 }).catch(() => {});
+ok(/Withdrawal recorded/.test(await toast()), `withdraw: ${await toast()}`);
+await page.screenshot({ path: `${S}/lend-bridge.png`, fullPage: true });
+
 await b.close();
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

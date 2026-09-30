@@ -22,6 +22,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import { endpoint } from './origin.js';
 import { installTips, tip } from './tip.js';
+import { bridgePage, handoffUrl } from './bridges.js';
 import './styles.css';
 import './market.css';
 import './bridge.css';
@@ -561,6 +562,11 @@ function render() {
     config = await loadConfig();
   } catch (e) {
     root.textContent = e.message;
+    return;
+  }
+  // Testnet bridging moved to the lending app's Bridge tab.
+  if (bridgePage(config)) {
+    location.replace(handoff ? handoffUrl(config, handoff.key, handoff.code) : bridgePage(config));
     return;
   }
   // Unlocked already (the extension, the phone app): open straight in.

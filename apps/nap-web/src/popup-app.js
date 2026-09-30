@@ -14,6 +14,7 @@ import { deriveCollectionAccount, deriveIdentity, forgetIdentity, newMnemonic, o
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { API_ORIGIN, IN_APP } from './origin.js';
 import { parsePaymentRequest } from './zip321.js';
+import { bridgePage, handoffUrl } from './bridges.js';
 import { activity, bridgeOut, bridgesOf, bridgeState, btcDepositAddress, checkBridgeOut, chooseNetwork, claimDeposits, collectOwed, depositAddress, depositCode, loadConfig, loadPocket, logActivity, payOnZyn, placeSwap, quoteSwap, resolveRecipient, revealBridgeExits, revealExits, withdrawZec } from './pocket.js';
 import { endSession, loadSession, saveSession } from './session.js';
 import './popup.css';
@@ -98,6 +99,12 @@ async function copy(text, what) {
 
 /// Open one of Nap's pages in a tab and close the popup behind it — or, in
 /// the phone app, go to it.
+/// A page on another site (the lending app's Bridge tab).
+function openUrl(url) {
+  if (globalThis.chrome?.tabs?.create) chrome.tabs.create({ url }); else window.open(url, '_blank', 'noopener');
+  if (!IN_APP) window.close();
+}
+
 function openTab(path) {
   if (IN_APP) { location.href = `/${path}`; return; }
   const url = globalThis.chrome?.runtime?.getURL ? chrome.runtime.getURL(path) : path;
@@ -548,13 +555,14 @@ function switchTo(id) {
 function mainMenu() {
   sheet(`<button data-go="${IN_APP ? 'index.html?full=1' : 'index.html'}">Open full view ${ICON.expand}</button>
     <button data-go="market.html">Market<span>swap · launch</span></button>
-    <button data-go="bridge.html">Bridge<span>SOL · ETH · BTC</span></button>
+    ${bridgePage(config) ? `<button data-url="${esc(bridgePage(config))}">Bridge<span>SOL · ETH · BTC · ZEC</span></button>` : '<button data-go="bridge.html">Bridge<span>SOL · ETH · BTC</span></button>'}
     <hr>
     <button id="m-copy">Copy Zyn account id<span>${esc(short(identity.accountHex, 6, 4))}</span></button>
     <button id="m-recovery">Recovery<span>phrase</span></button>
     <hr>
     <button id="m-lock">Lock<span>${IN_APP ? 'this phone' : 'auto after 15 min'}</span></button>`, (el) => {
     el.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => openTab(b.dataset.go); });
+    el.querySelectorAll('[data-url]').forEach((b) => { b.onclick = () => openUrl(b.dataset.url); });
     $('#m-copy', el).onclick = () => { closeSheet(); copy(identity.accountHex, 'Account id'); };
     $('#m-recovery', el).onclick = () => { closeSheet(); recovery(); };
     $('#m-lock', el).onclick = () => { closeSheet(); lock(); };
@@ -794,7 +802,7 @@ async function bridgeIn(b, st) {
     IN_APP ? '<button class="btn" id="bi-copy" disabled>Copy link</button>' : `<button class="btn" id="bi-open" disabled>Open deposit page</button><button class="btn ghost" id="bi-copy" disabled>Copy link</button>`);
   try {
     const code = await depositCode(config, identity);
-    const url = `${API_ORIGIN}/bridge.html#deposit=${b.key}&code=${code}&net=${encodeURIComponent(config.id)}`;
+    const url = handoffUrl(config, b.key, code, `${API_ORIGIN}/bridge.html#deposit=${b.key}&code=${code}&net=${encodeURIComponent(config.id)}`);
     if ($('#bi-link', s)) $('#bi-link', s).textContent = url;
     const c = $('#bi-copy', s); c.disabled = false; c.onclick = () => copy(url, 'Link');
     const o = $('#bi-open', s);
