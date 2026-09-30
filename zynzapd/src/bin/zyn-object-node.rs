@@ -557,6 +557,9 @@ fn unjudged_zat(notes: &zyn_custody::shielded::PoolStores, judged: u64) -> u64 {
 /// Launchpad price history for charts (`zynzapd::market_history`): derived
 /// from this node's own state after each epoch, kept in the data dir.
 static HISTORY: std::sync::OnceLock<Mutex<zynzapd::market_history::History>> = std::sync::OnceLock::new();
+/// Zyn Lend's public figures as of the last seal, not live: actions inside
+/// an epoch mix before anyone sees a total move (`lend_markets_json`).
+static LEND_SNAPSHOT: Mutex<Option<(u64, serde_json::Value)>> = Mutex::new(None);
 
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -867,8 +870,9 @@ fn handle(
         // Zyn Lend, public: pools, rates, posted prices and open auction lots
         // (a lot never names whose position it was).
         "zyn_lendMarkets" => {
-            let n = node.lock().unwrap();
-            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", lend_markets_json(n.state()))
+            let snap = LEND_SNAPSHOT.lock().unwrap().as_ref().map(|(_, v)| v.clone());
+            let v = snap.unwrap_or_else(|| lend_markets_json(node.lock().unwrap().state()));
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", v)
         }
         // Positions by id. An id is `lend_source(owner, nonce)`, which only
         // its owner can derive, so asking reveals nothing to anyone else.
@@ -1419,29 +1423,63 @@ fn unknown_method(method: &str) -> String {
     )
 }
 
-/// A pool's public figures for the lending app.
+/// Round `v` to the nearest `step` (both in ledger units).
+fn quantize(v: i128, step: i128) -> i128 {
+    if step <= 1 {
+        return v;
+    }
+    ((v + step / 2) / step) * step
+}
+
+/// A pool's public figures for the lending app — quantized, so one action
+/// cannot be read off a total. Amounts round to 1% of the pool's size (three
+/// figures of what is supplied); utilization and the rates come from the
+/// rounded figures, not the exact ones, so they cannot be used to undo the
+/// rounding. The share count is replaced by the share price, which shows
+/// interest and nothing about amounts. No count of positions is published.
 fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
     use objectvm::lend::{lend_asset, lot_source, Lend};
+    use objectvm::zyn_lend::{CURVE, WAD};
     let l = &s.market.lend;
     let pools: Vec<serde_json::Value> = l
         .listed
         .iter()
         .map(|(a, x)| {
             let p = &x.pool;
+            let supplied = p.value().unwrap_or(0);
+            // Three significant figures of the pool's size.
+            let mut step: i128 = 1;
+            while supplied / step >= 1_000 {
+                step *= 10;
+            }
+            let (sq, bq, cq) = (quantize(supplied, step), quantize(p.debt().unwrap_or(0), step), quantize(p.cash, step));
+            let util = if sq > 0 { objectvm::zyn_lend::math::mul_div(bq, WAD, sq).unwrap_or(0).min(WAD) } else { 0 };
+            // Utilization to the nearest tenth of a percent, then the curve.
+            let util = quantize(util, WAD / 1000);
+            let borrow_rate = CURVE.rate(util).unwrap_or(0);
+            let gross = objectvm::zyn_lend::math::wmul(borrow_rate, util).unwrap_or(0);
+            let supply_rate = gross - objectvm::zyn_lend::math::bps(gross, CURVE.reserve_bps).unwrap_or(0);
+            let share_price = if p.supply_shares > 0 { objectvm::zyn_lend::math::mul_div(supplied, WAD, p.supply_shares).unwrap_or(WAD) } else { WAD };
+            let limits = l.limits.get(a);
             serde_json::json!({
                 "asset": hex(a),
                 "receipt": hex(&lend_asset(a)),
-                "cash": p.cash.to_string(),
-                "borrowed": p.debt().unwrap_or(0).to_string(),
-                "supplied": p.value().unwrap_or(0).to_string(),
-                "shares": p.supply_shares.to_string(),
+                "cash": cq.to_string(),
+                "borrowed": bq.to_string(),
+                "supplied": sq.to_string(),
+                "share_price": share_price.to_string(),
                 "borrow_index": p.borrow_index.to_string(),
-                "utilization": p.utilization().unwrap_or(0).to_string(),
-                "borrow_rate": p.borrow_rate(&objectvm::zyn_lend::CURVE).unwrap_or(0).to_string(),
-                "supply_rate": p.supply_rate(&objectvm::zyn_lend::CURVE).unwrap_or(0).to_string(),
+                "utilization": util.to_string(),
+                "borrow_rate": borrow_rate.to_string(),
+                "supply_rate": supply_rate.to_string(),
                 "max_ltv_bps": x.risk.max_ltv_bps,
                 "liquidation_bps": x.risk.liquidation_bps,
                 "penalty_bps": x.risk.penalty_bps,
+                "collateral_cap": limits.map(|x| x.collateral_cap.0.to_string()),
+                "borrow_cap": limits.map(|x| x.borrow_cap.0.to_string()),
+                "min_borrow_usd": limits.map(|x| x.min_borrow_usd.0.to_string()),
+                "insurance": l.insurance.get(a).map(|x| quantize(x.0, step).to_string()).unwrap_or_else(|| "0".into()),
+                "price_held": l.pending.contains_key(a),
             })
         })
         .collect();
@@ -1468,9 +1506,10 @@ fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
         "epoch": s.epoch,
         "time": l.time,
         "prices": prices,
+        "prices_fresh": !l.guarded || s.epoch <= l.priced_epoch + objectvm::lend::MAX_PRICE_AGE_EPOCHS,
+        "guarded": l.guarded,
         "pools": pools,
         "lots": lots,
-        "positions": l.positions.len(),
     })
 }
 
@@ -2636,6 +2675,34 @@ fn main() {
                 }
             }
         }
+        // Caps and the smallest loan per asset (guarded lending). The first
+        // set turns guarded mode on for good; a set equal to the chain's is
+        // not sent again.
+        //   ZYN_LEND_LIMITS  SOL=<collateral cap>:<borrow cap>:<min loan $>,…
+        if let Ok(spec) = std::env::var("ZYN_LEND_LIMITS") {
+            let whole = |v: &str| v.trim().parse::<f64>().ok().filter(|x| *x >= 0.0).and_then(|x| zynzapd::feeds::to_fixed(x.max(1e-18)));
+            for kv in spec.split(',') {
+                let Some((sym, rest)) = kv.split_once('=') else { continue };
+                let parts: Vec<&str> = rest.split(':').collect();
+                let (Some(asset), [c, b, m]) = (assets.iter().find(|(s, _)| s == &sym.trim().to_uppercase()).map(|(_, a)| *a), parts.as_slice()) else {
+                    eprintln!("zyn-object-node: ZYN_LEND_LIMITS entry {kv:?} not understood");
+                    continue;
+                };
+                let (Some(c), Some(b), Some(m)) = (whole(c), whole(b), whole(m)) else { continue };
+                let want = objectvm::lend::Limits { collateral_cap: c, borrow_cap: b, min_borrow_usd: m };
+                let have = node.lock().ok().and_then(|n| n.state().market.lend.limits.get(&asset).copied());
+                if have == Some(want) {
+                    continue;
+                }
+                let op = Op::LendLimits { program: zyn_vm::program::lend_list(), asset, collateral_cap: c, borrow_cap: b, min_borrow_usd: m };
+                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                    match r {
+                        objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending limits for {sym} refused: {why}"),
+                        _ => eprintln!("zyn-object-node: lending limits set for {sym} (guarded)"),
+                    }
+                }
+            }
+        }
         let every: u64 = std::env::var("ZYN_LEND_PRICE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(5);
         eprintln!("zyn-object-node: lending prices every {every}s for {}", assets.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(", "));
         let node = Arc::clone(&node);
@@ -2707,10 +2774,23 @@ fn main() {
                 .launches
                 .values()
                 .any(|l| l.state == objectvm::market::LaunchState::Open);
-            // Likewise a lending auction: its price steps down per epoch.
-            let auction_open = !n.state().market.lend.lots.is_empty();
+            // Likewise lending: auction prices step down per epoch, and a
+            // price counts as stale after so many epochs, so while anything
+            // is listed epochs have to keep counting time when nobody trades.
+            let lending = !n.state().market.lend.listed.is_empty();
             let sealed = n.seal_if_due(now_secs()).is_some()
-                || ((sale_open || auction_open) && n.seal_on_clock(now_secs()).is_some());
+                || ((sale_open || lending) && n.seal_on_clock(now_secs()).is_some());
+            // The public lending figures move only at a seal: taken when an
+            // epoch has just been sealed and nothing has arrived in the next.
+            {
+                let st = n.state();
+                if !st.market.lend.listed.is_empty() && st.epoch_intents == 0 {
+                    let mut snap = LEND_SNAPSHOT.lock().unwrap();
+                    if snap.as_ref().map(|(e, _)| *e) != Some(st.epoch) {
+                        *snap = Some((st.epoch, lend_markets_json(st)));
+                    }
+                }
+            }
             if sealed {
                 // A sealed epoch is a root worth carrying. Proposing is free
                 // and idempotent — `propose_anchor` refuses while one is in

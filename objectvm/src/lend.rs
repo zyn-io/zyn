@@ -56,6 +56,51 @@ pub const AUCTION_FLOOR_BPS: i128 = 8_500;
 /// Bids on one lot in one epoch.
 pub const MAX_BIDS_PER_LOT: usize = 64;
 
+// ---- Guarded mode (on from the first `LendLimits`) --------------------------
+//
+// Everything below applies only once the operator has set limits. Intents
+// applied before that replay exactly as they did, so every root a chain has
+// already committed still reproduces; the state-root section only grows once
+// guarded mode is on.
+
+/// Prices older than this many epochs are stale: no borrowing, no taking
+/// collateral out, and no liquidation on them. The node seals on its clock
+/// while lending is listed, so epochs keep counting time when nobody trades.
+pub const MAX_PRICE_AGE_EPOCHS: u64 = 12;
+/// A posted price this far from the last confirmed one is held, not used,
+/// until the next post confirms it…
+pub const PRICE_JUMP_BPS: i128 = 1_500;
+/// …by landing within this of the held one.
+pub const PRICE_CONFIRM_BPS: i128 = 200;
+/// A lot unsold this many epochs after it opened (it reached its floor at
+/// epoch 17) goes to Zyn's pool batch…
+pub const BACKSTOP_AFTER_EPOCHS: u64 = 37;
+/// …but never for less than this share of its opening rate.
+pub const BACKSTOP_MIN_BPS: i128 = 7_000;
+/// The reserve share of interest fills an asset's insurance to this share of
+/// its pool's debt before any of it goes to the ZYN pot.
+pub const INSURANCE_TARGET_BPS: i128 = 500;
+
+/// What the operator allows per asset.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Limits {
+    /// Most of this asset held as collateral, across every position and lot.
+    pub collateral_cap: Fixed,
+    /// Most of this asset's pool that may be borrowed.
+    pub borrow_cap: Fixed,
+    /// The smallest loan of this asset, in WAD dollars: a lot too small to be
+    /// worth bidding on is bad debt waiting to happen.
+    pub min_borrow_usd: Fixed,
+}
+
+/// Who owns a backstop order while it is in the batch: nobody. Its claims are
+/// swept back into the lot in the same seal, so none is ever left for anyone.
+pub const BACKSTOP_OWNER: AccountId = [0u8; 32];
+
+pub fn backstop_order(position: &Hash, epoch: u64) -> Hash {
+    id(b"objectvm.lend-backstop.v1", &[position, &epoch.to_be_bytes()])
+}
+
 /// The receipt asset for lending `underlying`: lZEC, lETH, lSOL.
 pub fn lend_asset(underlying: &Address) -> Address {
     id(b"objectvm.lend.v1", &[underlying])
@@ -102,6 +147,13 @@ pub struct Lot {
     pub opened: u64,
     /// What bids have paid so far, in the borrowed asset.
     pub proceeds: Fixed,
+    /// Guarded mode: debt written off when the lot opened, because even its
+    /// floor price would not cover it, and paid from insurance. Recovered
+    /// first if the auction does better — lenders, then the insurance.
+    pub written_off: Fixed,
+    pub insured: Fixed,
+    /// A backstop order of this lot's collateral in the current batch.
+    pub backstop: Option<Hash>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -120,11 +172,37 @@ pub struct Lend {
     pub positions: BTreeMap<Hash, Position>,
     pub lots: BTreeMap<Hash, Lot>,
     pub bids: Vec<Bid>,
+    /// On from the first `LendLimits`; see the constants above.
+    pub guarded: bool,
+    /// The epoch the last prices were posted in.
+    pub priced_epoch: u64,
+    /// Posted prices held back by the circuit breaker, awaiting confirmation.
+    pub pending: BTreeMap<Address, Fixed>,
+    pub limits: BTreeMap<Address, Limits>,
+    /// Per asset: what covers bad debt before lenders do.
+    pub insurance: BTreeMap<Address, Fixed>,
 }
 
 impl Lend {
     pub fn is_empty(&self) -> bool {
-        self.listed.is_empty() && self.positions.is_empty() && self.lots.is_empty() && self.bids.is_empty()
+        self.listed.is_empty() && self.positions.is_empty() && self.lots.is_empty() && self.bids.is_empty() && !self.guarded
+    }
+
+    /// Whether `asset`'s price may be acted on this epoch: posted, not held
+    /// by the circuit breaker, not stale. Before guarded mode, any posted
+    /// price will do, as it always did.
+    pub fn fresh(&self, asset: &Address, epoch: u64) -> bool {
+        if !self.prices.contains_key(asset) {
+            return false;
+        }
+        !self.guarded || (!self.pending.contains_key(asset) && epoch <= self.priced_epoch + MAX_PRICE_AGE_EPOCHS)
+    }
+
+    /// Collateral of `asset` held across every position and lot.
+    pub fn collateral_held(&self, asset: &Address) -> i128 {
+        let p: i128 = self.positions.values().filter(|p| &p.collateral_asset == asset).map(|p| p.collateral.0).sum();
+        let l: i128 = self.lots.values().filter(|l| &l.collateral_asset == asset).map(|l| l.collateral.0).sum();
+        p + l
     }
 
     /// What lending holds of `asset` for somebody: pool cash, collateral in
@@ -151,6 +229,9 @@ impl Lend {
             if &self.lots.get(&b.lot)?.borrow_asset == asset {
                 t = t.checked_add(b.pay.0)?;
             }
+        }
+        if let Some(i) = self.insurance.get(asset) {
+            t = t.checked_add(i.0)?;
         }
         Some(t)
     }
@@ -223,6 +304,36 @@ pub(crate) fn section(e: &mut Encoder, l: &Lend) {
     let positions: Vec<Hash> = l.positions.iter().map(|(i, p)| position_leaf(i, p)).collect();
     let bids: Vec<Hash> = l.bids.iter().map(bid_leaf).collect();
     e.u32(positions.len() as u32).bytes(&merkle_root(&positions)).u32(bids.len() as u32).bytes(&merkle_root(&bids));
+    // Joined only in guarded mode, so every root sealed before it keeps.
+    if l.guarded {
+        e.bytes(b"objectvm.lend.v2");
+        put_guarded(e, l, true);
+    }
+}
+
+/// Guarded mode's state. In the root, a lot is named by its public id, as
+/// above; in the saved state, by its position.
+fn put_guarded(e: &mut Encoder, l: &Lend, public: bool) {
+    e.u64(l.priced_epoch).u32(l.pending.len() as u32);
+    for (a, p) in &l.pending {
+        e.bytes(a).fixed(*p);
+    }
+    e.u32(l.limits.len() as u32);
+    for (a, x) in &l.limits {
+        e.bytes(a).fixed(x.collateral_cap).fixed(x.borrow_cap).fixed(x.min_borrow_usd);
+    }
+    e.u32(l.insurance.len() as u32);
+    for (a, v) in &l.insurance {
+        e.bytes(a).fixed(*v);
+    }
+    e.u32(l.lots.len() as u32);
+    for (i, lot) in &l.lots {
+        e.bytes(&if public { lot_source(i) } else { *i }).fixed(lot.written_off).fixed(lot.insured);
+        match lot.backstop {
+            Some(o) => e.bool(true).bytes(&o),
+            None => e.bool(false),
+        };
+    }
 }
 
 pub(crate) fn encode(e: &mut Encoder, l: &Lend) {
@@ -256,6 +367,8 @@ pub(crate) fn encode(e: &mut Encoder, l: &Lend) {
     for b in &l.bids {
         e.bytes(&b.id).bytes(&b.owner).bytes(&b.lot).fixed(b.pay);
     }
+    e.bool(l.guarded);
+    put_guarded(e, l, false);
 }
 
 fn get_pool(d: &mut Decoder) -> Option<Pool> {
@@ -273,7 +386,7 @@ fn get_risk(d: &mut Decoder) -> Option<Risk> {
     Some(Risk { max_ltv_bps: d.u32().ok()?, liquidation_bps: d.u32().ok()?, penalty_bps: d.u32().ok()? })
 }
 
-pub(crate) fn decode(d: &mut Decoder) -> Option<Lend> {
+pub(crate) fn decode(d: &mut Decoder, v9: bool) -> Option<Lend> {
     let mut l = Lend::default();
     for _ in 0..d.u32().ok()? {
         let a = d.hash().ok()?;
@@ -310,11 +423,38 @@ pub(crate) fn decode(d: &mut Decoder) -> Option<Lend> {
                 rate: d.fixed().ok()?,
                 opened: d.u64().ok()?,
                 proceeds: d.fixed().ok()?,
+                written_off: Fixed::ZERO,
+                insured: Fixed::ZERO,
+                backstop: None,
             },
         );
     }
     for _ in 0..d.u32().ok()? {
         l.bids.push(Bid { id: d.hash().ok()?, owner: d.account().ok()?, lot: d.hash().ok()?, pay: d.fixed().ok()? });
+    }
+    // MARKET08 predates guarded mode and reads as not guarded.
+    if v9 {
+        l.guarded = d.u8().ok()? == 1;
+        l.priced_epoch = d.u64().ok()?;
+        for _ in 0..d.u32().ok()? {
+            l.pending.insert(d.hash().ok()?, d.fixed().ok()?);
+        }
+        for _ in 0..d.u32().ok()? {
+            let a = d.hash().ok()?;
+            l.limits.insert(a, Limits { collateral_cap: d.fixed().ok()?, borrow_cap: d.fixed().ok()?, min_borrow_usd: d.fixed().ok()? });
+        }
+        for _ in 0..d.u32().ok()? {
+            l.insurance.insert(d.hash().ok()?, d.fixed().ok()?);
+        }
+        for _ in 0..d.u32().ok()? {
+            let i = d.hash().ok()?;
+            let (w, ins) = (d.fixed().ok()?, d.fixed().ok()?);
+            let backstop = if d.u8().ok()? == 1 { Some(d.hash().ok()?) } else { None };
+            let lot = l.lots.get_mut(&i)?;
+            lot.written_off = w;
+            lot.insured = ins;
+            lot.backstop = backstop;
+        }
     }
     Some(l)
 }
@@ -385,6 +525,24 @@ impl ObjectVm {
         Ok(Receipt::Lent { id: lend_asset(asset) })
     }
 
+    /// Set an asset's caps and minimum loan. The first one turns guarded mode
+    /// on for good.
+    pub(crate) fn apply_lend_limits(&mut self, asset: &Address, limits: Limits) -> Result<Receipt, &'static str> {
+        if !self.market.lend.listed.contains_key(asset) {
+            return Err("limits for an asset that is not lent here");
+        }
+        if limits.collateral_cap.0 < 0 || limits.borrow_cap.0 < 0 || limits.min_borrow_usd.0 < 0 {
+            return Err("a limit below nothing");
+        }
+        if !self.market.lend.guarded {
+            self.market.lend.guarded = true;
+            // Guarded mode counts price age from here.
+            self.market.lend.priced_epoch = self.epoch;
+        }
+        self.market.lend.limits.insert(*asset, limits);
+        Ok(Receipt::Lent { id: lend_asset(asset) })
+    }
+
     pub(crate) fn apply_lend_prices(&mut self, at: u64, prices: &[(Address, Fixed)]) -> Result<Receipt, &'static str> {
         if at < self.market.lend.time {
             return Err("prices older than the last ones");
@@ -402,9 +560,30 @@ impl ObjectVm {
             pool_err(l.pool.accrue(at, &CURVE))?;
         }
         self.market.lend.time = at;
-        for (a, p) in prices {
-            self.market.lend.prices.insert(*a, *p);
+        if !self.market.lend.guarded {
+            for (a, p) in prices {
+                self.market.lend.prices.insert(*a, *p);
+            }
+            return Ok(Receipt::Lent { id: [0u8; 32] });
         }
+        // The circuit breaker: a jump is held until the next post confirms it.
+        let within = |a: i128, b: i128, bps: i128| (a - b).abs().checked_mul(zyn_lend::BPS).map(|x| x <= b.checked_mul(bps).unwrap_or(i128::MAX)).unwrap_or(false);
+        for (a, p) in prices {
+            let l = &mut self.market.lend;
+            let accept = match (l.prices.get(a), l.pending.get(a)) {
+                (None, _) => true,
+                (Some(c), _) if within(p.0, c.0, PRICE_JUMP_BPS) => true,
+                (_, Some(h)) if within(p.0, h.0, PRICE_CONFIRM_BPS) => true,
+                _ => false,
+            };
+            if accept {
+                l.prices.insert(*a, *p);
+                l.pending.remove(a);
+            } else {
+                l.pending.insert(*a, *p);
+            }
+        }
+        self.market.lend.priced_epoch = self.epoch;
         Ok(Receipt::Lent { id: [0u8; 32] })
     }
 
@@ -478,6 +657,9 @@ impl ObjectVm {
             return Err("that collateral is not accepted here");
         }
         let risk = self.market.lend.listed[collateral_asset].risk;
+        if !self.market.lend.fresh(collateral_asset, self.epoch) || !self.market.lend.fresh(borrow_asset, self.epoch) {
+            return Err("prices are stale or still moving; borrowing waits for the next confirmed price");
+        }
         let (pc, pb) = (self.lend_price(collateral_asset)?, self.lend_price(borrow_asset)?);
         // Borrowing pauses in a pair whose pool disagrees with the posted price.
         if !math(rules::prices_agree(pc, pb, self.pool_ratio(collateral_asset, borrow_asset)?))? {
@@ -490,6 +672,22 @@ impl ObjectVm {
         let dv = math(rules::debt_value(owed, pb))?;
         if !math(rules::within_limit(cv, dv, &risk))? {
             return Err("that is over the most this collateral may borrow");
+        }
+        if self.market.lend.guarded {
+            let (lc, lb) = match (self.market.lend.limits.get(collateral_asset), self.market.lend.limits.get(borrow_asset)) {
+                (Some(c), Some(b)) => (*c, *b),
+                _ => return Err("borrowing in this pair is not open"),
+            };
+            if dv < lb.min_borrow_usd.0 {
+                return Err("that loan is below the smallest this pool makes");
+            }
+            let held = self.market.lend.collateral_held(collateral_asset).checked_add(collateral.0).ok_or("collateral overflow")?;
+            if held > lc.collateral_cap.0 {
+                return Err("this collateral is at its cap");
+            }
+            if math(pool.debt())? > lb.borrow_cap.0 {
+                return Err("this pool is at its borrowing cap");
+            }
         }
         let f = self.plan_funding(borrower, inputs, change, &[(*collateral_asset, collateral)])?;
         self.apply_funding(borrower, inputs, f);
@@ -560,6 +758,9 @@ impl ObjectVm {
         }
         p.collateral = Fixed(p.collateral.0 - amount.0);
         if p.debt_shares.0 > 0 {
+            if !self.market.lend.fresh(&p.collateral_asset, self.epoch) || !self.market.lend.fresh(&p.borrow_asset, self.epoch) {
+                return Err("prices are stale or still moving; taking collateral out waits for the next confirmed price");
+            }
             let risk = self.market.lend.listed.get(&p.collateral_asset).ok_or("that collateral is not accepted here")?.risk;
             let (cv, dv) = self.position_values(&p)?;
             if !math(rules::within_limit(cv, dv, &risk))? {
@@ -625,10 +826,72 @@ impl ObjectVm {
         self.clear_bids();
         self.settle_lots();
         self.open_lots();
+        if self.market.lend.guarded {
+            self.start_backstops();
+        }
         let assets: Vec<Address> = self.market.lend.listed.keys().copied().collect();
         for a in assets {
-            let take = self.market.lend.listed.get_mut(&a).expect("listed").pool.take_reserves();
-            let _ = self.market.to_pol(a, Fixed(take));
+            let pool = &mut self.market.lend.listed.get_mut(&a).expect("listed").pool;
+            let take = pool.take_reserves();
+            let debt = pool.debt().unwrap_or(0);
+            if take == 0 {
+                continue;
+            }
+            // Guarded: the reserve fills insurance before the ZYN pot.
+            let to_insurance = if self.market.lend.guarded {
+                let target = zyn_lend::math::bps(debt, INSURANCE_TARGET_BPS as u32).unwrap_or(0);
+                let have = self.market.lend.insurance.get(&a).map(|x| x.0).unwrap_or(0);
+                (target - have).clamp(0, take)
+            } else {
+                0
+            };
+            if to_insurance > 0 {
+                let i = self.market.lend.insurance.entry(a).or_insert(Fixed::ZERO);
+                i.0 += to_insurance;
+            }
+            let _ = self.market.to_pol(a, Fixed(take - to_insurance));
+        }
+    }
+
+    /// A lot long past its floor goes to Zyn's pool batch, not below a
+    /// minimum; `sweep_backstops` brings the result back after the batch.
+    fn start_backstops(&mut self) {
+        let lots: Vec<(Hash, Lot)> = self.market.lend.lots.iter().map(|(p, l)| (*p, *l)).collect();
+        for (pos, lot) in lots {
+            if lot.backstop.is_some() || lot.collateral.0 <= 0 || self.epoch < lot.opened + BACKSTOP_AFTER_EPOCHS {
+                continue;
+            }
+            let pid = pool_id(&lot.collateral_asset, &lot.borrow_asset);
+            let Some(p) = self.market.pools.get(&pid).copied() else { continue };
+            let Some(min_rate) = zyn_lend::math::mul_div(lot.rate.0, BACKSTOP_MIN_BPS, zyn_lend::BPS).ok() else { continue };
+            let Some(min_out) = zyn_lend::math::mul_div(lot.collateral.0, min_rate, WAD).ok() else { continue };
+            let oid = backstop_order(&pos, self.epoch);
+            self.market.orders.push(crate::market::Order {
+                id: oid,
+                owner: BACKSTOP_OWNER,
+                pool: pid,
+                sell_a: p.a == lot.collateral_asset,
+                amount_in: lot.collateral,
+                min_out: Fixed(min_out),
+            });
+            let l = self.market.lend.lots.get_mut(&pos).expect("lot");
+            l.collateral = Fixed::ZERO;
+            l.backstop = Some(oid);
+        }
+    }
+
+    /// After the batch: a backstop's proceeds join the lot's, or its
+    /// collateral comes back to wait for the next epoch.
+    pub(crate) fn sweep_backstops(&mut self) {
+        let lots: Vec<(Hash, Lot)> = self.market.lend.lots.iter().filter(|(_, l)| l.backstop.is_some()).map(|(p, l)| (*p, *l)).collect();
+        for (pos, lot) in lots {
+            let oid = lot.backstop.expect("filtered");
+            let filled = self.market.claims.remove(&claim_id(&oid, 0)).map(|c| c.amount.0).unwrap_or(0);
+            let refunded = self.market.claims.remove(&claim_id(&oid, 1)).map(|c| c.amount.0).unwrap_or(0);
+            let l = self.market.lend.lots.get_mut(&pos).expect("lot");
+            l.proceeds = Fixed(l.proceeds.0 + filled);
+            l.collateral = Fixed(l.collateral.0 + refunded);
+            l.backstop = None;
         }
     }
 
@@ -689,7 +952,10 @@ impl ObjectVm {
         let listed = self.market.lend.listed.get(&lot.borrow_asset)?;
         let risk = self.market.lend.listed.get(&lot.collateral_asset)?.risk;
         let owed = listed.pool.owed(lot.debt_shares.0).ok()?;
-        let target = owed.checked_add(zyn_lend::math::bps(owed, risk.penalty_bps).ok()?)?;
+        let target = owed
+            .checked_add(zyn_lend::math::bps(owed, risk.penalty_bps).ok()?)?
+            .checked_add(lot.written_off.0)?
+            .checked_add(lot.insured.0)?;
         let short = (target - lot.proceeds.0).max(0);
         let coll = zyn_lend::math::mul_div_up(short, WAD, price).ok()?;
         Some(coll.min(lot.collateral.0))
@@ -700,10 +966,15 @@ impl ObjectVm {
     fn settle_lots(&mut self) {
         let lots: Vec<(Hash, Lot)> = self.market.lend.lots.iter().map(|(p, l)| (*p, *l)).collect();
         for (pos, lot) in lots {
+            // A backstop still in the batch is settled after it comes back.
+            if lot.backstop.is_some() {
+                continue;
+            }
             let Some(listed) = self.market.lend.listed.get(&lot.borrow_asset).copied() else { continue };
             let Some(risk) = self.market.lend.listed.get(&lot.collateral_asset).map(|l| l.risk) else { continue };
             let Ok(owed) = listed.pool.owed(lot.debt_shares.0) else { continue };
-            let covered = zyn_lend::math::bps(owed, risk.penalty_bps).map(|p| lot.proceeds.0 >= owed + p).unwrap_or(false);
+            let target = zyn_lend::math::bps(owed, risk.penalty_bps).map(|p| owed + p + lot.written_off.0 + lot.insured.0);
+            let covered = target.map(|t| lot.proceeds.0 >= t).unwrap_or(false);
             if !(covered || lot.collateral.0 == 0) {
                 continue;
             }
@@ -715,14 +986,38 @@ impl ObjectVm {
                     shares -= burned;
                 }
             }
-            // What the proceeds could not cover is bad debt: the lenders'.
+            // What the proceeds could not cover is bad debt. Guarded: the
+            // insurance pays first, the lenders only for what is left.
+            if shares > 0 && self.market.lend.guarded {
+                let have = self.market.lend.insurance.get(&lot.borrow_asset).map(|x| x.0).unwrap_or(0);
+                let need = pool.owed(shares).unwrap_or(0);
+                let pay = have.min(need);
+                if pay > 0 {
+                    if let Ok((burned, used)) = pool.repay(pay, shares) {
+                        shares -= burned;
+                        self.market.lend.insurance.get_mut(&lot.borrow_asset).expect("had insurance").0 -= used;
+                    }
+                }
+            }
             if shares > 0 {
                 let _ = pool.write_off(shares);
             }
             let _ = pool.credit(s.penalty);
+            // Anything above debt and penalty recovers, in order, what was
+            // written off (the lenders), then what insurance paid, then goes
+            // to the owner.
+            let mut left = s.to_owner;
+            let to_lenders = left.min(lot.written_off.0);
+            let _ = pool.credit(to_lenders);
+            left -= to_lenders;
+            let to_insurance = left.min(lot.insured.0);
+            if to_insurance > 0 {
+                self.market.lend.insurance.entry(lot.borrow_asset).or_insert(Fixed::ZERO).0 += to_insurance;
+            }
+            left -= to_insurance;
             self.market.lend.listed.get_mut(&lot.borrow_asset).expect("listed").pool = pool;
             let src = lot_source(&pos);
-            self.market.pay(&src, 0, lot.owner, lot.borrow_asset, Fixed(s.to_owner));
+            self.market.pay(&src, 0, lot.owner, lot.borrow_asset, Fixed(left));
             self.market.pay(&src, 1, lot.owner, lot.collateral_asset, lot.collateral);
             self.market.lend.lots.remove(&pos);
         }
@@ -730,9 +1025,14 @@ impl ObjectVm {
 
     /// Positions past their line become lots.
     fn open_lots(&mut self) {
+        let guarded = self.market.lend.guarded;
         let positions: Vec<(Hash, Position)> = self.market.lend.positions.iter().map(|(i, p)| (*i, *p)).collect();
         for (id, p) in positions {
             if p.debt_shares.0 == 0 {
+                continue;
+            }
+            // Guarded: never on a stale price, or one the breaker is holding.
+            if guarded && !(self.market.lend.fresh(&p.collateral_asset, self.epoch) && self.market.lend.fresh(&p.borrow_asset, self.epoch)) {
                 continue;
             }
             let Some(risk) = self.market.lend.listed.get(&p.collateral_asset).map(|l| l.risk) else { continue };
@@ -744,20 +1044,58 @@ impl ObjectVm {
             let (Ok(pc), Ok(pb)) = (self.lend_price(&p.collateral_asset), self.lend_price(&p.borrow_asset)) else { continue };
             let Ok(rate) = zyn_lend::math::mul_div(pc, WAD, pb) else { continue };
             self.market.lend.positions.remove(&id);
-            self.market.lend.lots.insert(
-                id,
-                Lot {
-                    owner: p.owner,
-                    collateral_asset: p.collateral_asset,
-                    collateral: p.collateral,
-                    borrow_asset: p.borrow_asset,
-                    debt_shares: p.debt_shares,
-                    rate: Fixed(rate),
-                    opened: self.epoch + 1,
-                    proceeds: Fixed::ZERO,
-                },
-            );
+            let mut lot = Lot {
+                owner: p.owner,
+                collateral_asset: p.collateral_asset,
+                collateral: p.collateral,
+                borrow_asset: p.borrow_asset,
+                debt_shares: p.debt_shares,
+                rate: Fixed(rate),
+                opened: self.epoch + 1,
+                proceeds: Fixed::ZERO,
+                written_off: Fixed::ZERO,
+                insured: Fixed::ZERO,
+                backstop: None,
+            };
+            if guarded {
+                self.book_expected_shortfall(&mut lot);
+            }
+            self.market.lend.lots.insert(id, lot);
         }
+    }
+
+    /// What even the floor price would not cover is booked now — paid from
+    /// insurance, then written off — so no lender can leave before a loss
+    /// everyone else then carries. The auction recovers it if it does better.
+    fn book_expected_shortfall(&mut self, lot: &mut Lot) {
+        let Some(listed) = self.market.lend.listed.get(&lot.borrow_asset).copied() else { return };
+        let mut pool = listed.pool;
+        let Ok(owed) = pool.owed(lot.debt_shares.0) else { return };
+        let Ok(floor_rate) = zyn_lend::math::mul_div(lot.rate.0, AUCTION_FLOOR_BPS, zyn_lend::BPS) else { return };
+        let Ok(at_floor) = zyn_lend::math::mul_div(lot.collateral.0, floor_rate, WAD) else { return };
+        if at_floor >= owed {
+            return;
+        }
+        let mut shares = lot.debt_shares.0;
+        let have = self.market.lend.insurance.get(&lot.borrow_asset).map(|x| x.0).unwrap_or(0);
+        let pay = have.min(owed - at_floor);
+        if pay > 0 {
+            if let Ok((burned, used)) = pool.repay(pay, shares) {
+                shares -= burned;
+                self.market.lend.insurance.get_mut(&lot.borrow_asset).expect("had insurance").0 -= used;
+                lot.insured = Fixed(used);
+            }
+        }
+        let still = pool.owed(shares).unwrap_or(0) - at_floor;
+        if still > 0 {
+            let off = zyn_lend::math::mul_div(still, WAD, pool.borrow_index).unwrap_or(0).min(shares);
+            if off > 0 && pool.write_off(off).is_ok() {
+                shares -= off;
+                lot.written_off = Fixed(zyn_lend::math::wmul(off, pool.borrow_index).unwrap_or(0));
+            }
+        }
+        lot.debt_shares = Fixed(shares);
+        self.market.lend.listed.get_mut(&lot.borrow_asset).expect("listed").pool = pool;
     }
 }
 

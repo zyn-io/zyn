@@ -353,3 +353,147 @@ fn two_bidders_in_one_epoch_pay_the_same_price() {
     assert!(carol > 0 && (carol - dave).abs() <= 1, "equal bids, equal fills: {carol} vs {dave}");
     assert!(!c.vm.market.lend.lots.contains_key(&pos));
 }
+
+// ---------------------------------------------------------------- guarded mode
+
+fn limits(c: &mut Chain, asset: [u8; 32], collateral_cap: i64, borrow_cap: i64, min_usd: i128) {
+    c.ok(Op::LendLimits {
+        program: program::lend_list(),
+        asset,
+        collateral_cap: Fixed::whole(collateral_cap),
+        borrow_cap: Fixed::whole(borrow_cap),
+        min_borrow_usd: usd(min_usd),
+    });
+}
+
+/// `market()`, then guarded: caps generous unless a test tightens them.
+fn guarded() -> Chain {
+    let mut c = market();
+    limits(&mut c, ZEC, 10_000, 10_000, 1);
+    limits(&mut c, SOL, 10_000, 10_000, 1);
+    assert!(c.vm.market.lend.guarded);
+    c
+}
+
+#[test]
+fn guarded_caps_and_the_smallest_loan_are_enforced() {
+    let mut c = guarded();
+    limits(&mut c, SOL, 10_000, 20, 10);
+    limits(&mut c, ZEC, 150, 10_000, 1);
+    // Below $10: 0.05 SOL is $7.50.
+    assert_eq!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed(WAD / 20)), Err("that loan is below the smallest this pool makes"));
+    assert!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(15)).is_ok());
+    // ZEC collateral is capped at 150; 100 is already in.
+    assert_eq!(c.open(CAROL, ZEC, Fixed::whole(100), SOL, Fixed::whole(1)), Err("this collateral is at its cap"));
+    // SOL borrowing is capped at 20; 15 is out.
+    assert_eq!(c.open(CAROL, ZEC, Fixed::whole(40), SOL, Fixed::whole(6)), Err("this pool is at its borrowing cap"));
+    // An asset without limits, in guarded mode, does not lend at all.
+    c.mint(DAVE, [0x77; 32], 10);
+    c.ok(Op::LendList { program: program::lend_list(), asset: [0x77; 32], max_ltv_bps: 5_000, liquidation_bps: 6_000, penalty_bps: 500 });
+    assert_eq!(c.refused(Op::LendLimits { program: program::lend_list(), asset: [0x78; 32], collateral_cap: Fixed::whole(1), borrow_cap: Fixed::whole(1), min_borrow_usd: usd(1) }), "limits for an asset that is not lent here");
+}
+
+#[test]
+fn guarded_stale_prices_stop_borrowing_until_new_ones_arrive() {
+    let mut c = guarded();
+    for _ in 0..13 {
+        c.seal();
+    }
+    assert_eq!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(10)), Err("prices are stale or still moving; borrowing waits for the next confirmed price"));
+    c.prices(5_000, 50, 150);
+    assert!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(10)).is_ok());
+}
+
+#[test]
+fn guarded_a_price_jump_waits_for_confirmation_before_it_can_liquidate() {
+    let mut c = guarded();
+    let pos = c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(15)).unwrap();
+    // ZEC "falls" 40% in one post: held, not used.
+    c.prices(2_000, 30, 150);
+    assert_eq!(c.vm.market.lend.prices[&ZEC], usd(50), "the confirmed price stands");
+    assert!(c.vm.market.lend.pending.contains_key(&ZEC));
+    c.seal();
+    assert!(c.vm.market.lend.positions.contains_key(&pos), "no liquidation on an unconfirmed jump");
+    // Nor borrowing against a price in doubt.
+    assert_eq!(c.open(CAROL, ZEC, Fixed::whole(10), SOL, Fixed::whole(1)), Err("prices are stale or still moving; borrowing waits for the next confirmed price"));
+    // A second post agrees within 2%: now it counts, and the position goes to auction.
+    c.prices(2_030, 30, 150);
+    assert_eq!(c.vm.market.lend.prices[&ZEC].0, 30 * WAD);
+    c.seal();
+    assert!(c.vm.market.lend.lots.contains_key(&pos), "liquidated once the price was confirmed");
+}
+
+#[test]
+fn guarded_a_loss_the_floor_cannot_cover_is_booked_when_the_lot_opens_and_recovered_after() {
+    let mut c = guarded();
+    let pos = c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(15)).unwrap();
+    // ZEC to $20, confirmed: 100 ZEC is $2,000, at the 85% floor $1,700 —
+    // 11.33 SOL against 15 owed. The gap is booked at once.
+    c.prices(2_000, 20, 150);
+    c.prices(2_010, 20, 150);
+    let before = c.pool(SOL).value().unwrap();
+    c.seal();
+    let lot = c.vm.market.lend.lots[&pos];
+    assert!(lot.written_off.0 + lot.insured.0 > 0, "the expected shortfall is booked");
+    let after = c.pool(SOL).value().unwrap();
+    assert!(after < before, "lenders see the loss now, not after the auction: {before} -> {after}");
+    // A bidder pays the full first-epoch price for everything: the lot
+    // recovers what was written off, lenders first.
+    let price = Lend::lot_price(&lot, c.vm.epoch).unwrap();
+    let pay = Fixed(zyn_lend::math::wmul_up(lot.collateral.0, price).unwrap());
+    let (inputs, change) = c.fund(CAROL, SOL, pay);
+    let nonce = c.fresh();
+    c.ok(Op::LendBid { bidder: CAROL, program: program::lend_bid(), lot: lot_source(&pos), pay, nonce, inputs, change });
+    c.seal();
+    assert!(!c.vm.market.lend.lots.contains_key(&pos), "the lot settled");
+    let recovered = c.pool(SOL).value().unwrap();
+    assert!(recovered > after, "the auction's surplus went back to lenders: {after} -> {recovered}");
+}
+
+#[test]
+fn guarded_an_auction_nobody_fills_is_sold_through_the_pool_batch_with_a_floor() {
+    let mut c = guarded();
+    let pos = c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(15)).unwrap();
+    // A 30% drop: held by the breaker until a second post confirms it.
+    c.prices(2_000, 35, 150);
+    c.prices(2_010, 35, 150);
+    c.seal();
+    assert!(c.vm.market.lend.lots.contains_key(&pos));
+    // Keep prices fresh while nobody bids, until the backstop.
+    let opened = c.vm.market.lend.lots[&pos].opened;
+    let mut backstopped = None;
+    for i in 0..60 {
+        if i % 10 == 0 {
+            c.prices(3_000 + i, 35, 150);
+        }
+        c.seal();
+        if backstopped.is_none() && c.vm.market.lend.lots.get(&pos).map_or(true, |l| l.proceeds.0 > 0) {
+            backstopped = Some(c.vm.epoch);
+        }
+        if !c.vm.market.lend.lots.contains_key(&pos) {
+            break;
+        }
+    }
+    let at = backstopped.expect("the backstop sold");
+    assert!(at >= opened + objectvm::lend::BACKSTOP_AFTER_EPOCHS, "not before its time: opened {opened}, sold at {at}");
+    assert!(!c.vm.market.lend.lots.contains_key(&pos), "the backstop sold it and the lot settled");
+    assert_eq!(c.pool(SOL).debt_shares, 0, "the pool is repaid");
+    assert!(c.vm.market.claims.values().all(|cl| cl.owner != objectvm::lend::BACKSTOP_OWNER), "no backstop claim is left behind");
+    // Bob gets whatever the sale left over.
+    c.claim(BOB, &[lot_source(&pos)]);
+}
+
+#[test]
+fn guarded_interest_fills_insurance_before_the_zyn_pot() {
+    let mut c = guarded();
+    c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(15)).unwrap();
+    c.prices(1_000 + 31_536_000, 50, 150);
+    c.seal();
+    let insurance = c.vm.market.lend.insurance.get(&SOL).map(|x| x.0).unwrap_or(0);
+    let pot = c.vm.market.pol.get(&SOL).map(|x| x.0).unwrap_or(0);
+    let debt = c.pool(SOL).debt().unwrap();
+    assert!(insurance > 0, "insurance filled first");
+    assert!(insurance <= debt * 500 / 10_000 + 1, "up to 5% of the debt");
+    // A year at ~1.3% on 15 SOL is less than 5% of 15: all of it went to insurance.
+    assert_eq!(pot, 0, "nothing to the pot until insurance is full");
+}

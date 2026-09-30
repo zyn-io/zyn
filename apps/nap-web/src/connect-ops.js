@@ -141,7 +141,7 @@ const pctText = (wadRate) => `${(Number(BigInt(wadRate) * 10_000n / WAD) / 100).
 async function lendBook(ctx) {
   const m = await ledger.call(ctx.config, 'zyn_lendMarkets');
   const pools = (m.pools || []).filter((x) => isHex(x.asset) && isHex(x.receipt)
-    && ['cash', 'borrowed', 'supplied', 'shares', 'borrow_rate', 'supply_rate', 'utilization'].every((k) => isInt(x[k]))
+    && ['cash', 'borrowed', 'supplied', 'share_price', 'borrow_rate', 'supply_rate', 'utilization'].every((k) => isInt(x[k]))
     && [x.max_ltv_bps, x.liquidation_bps, x.penalty_bps].every(Number.isSafeInteger));
   const prices = Object.fromEntries(Object.entries(m.prices || {}).filter(([a, v]) => isHex(a) && isInt(v)).map(([a, v]) => [a, BigInt(v)]));
   const name = await namer(ctx, await ledger.call(ctx.config, 'zyn_market'));
@@ -444,8 +444,9 @@ export const METHODS = {
       const shares = amountOf(p.shares, 'shares');
       const name = book.name(pool.asset);
       await mustHold(ctx, pool.receipt, shares, `l${name}`);
-      const worth = BigInt(pool.shares) > 0n ? (shares * BigInt(pool.supplied)) / BigInt(pool.shares) : 0n;
-      if (worth > BigInt(pool.cash)) throw bad(`Only ${wadText(pool.cash)} ${name} is free in the pool right now; the rest is lent out`);
+      // The chain publishes a share's price, not how many shares exist.
+      const worth = (shares * BigInt(pool.share_price)) / WAD;
+      if (worth > BigInt(pool.cash)) throw bad(`About ${wadText(pool.cash)} ${name} is free in the pool right now; the rest is lent out`);
       return {
         title: `Withdraw ${name}`,
         danger: false,
@@ -472,7 +473,11 @@ export const METHODS = {
       const amount = amountOf(p.amount, 'amount');
       const [cn, bn] = [book.name(coll.asset), book.name(borrow.asset)];
       await mustHold(ctx, coll.asset, collAmount, cn);
-      if (amount > BigInt(borrow.cash)) throw bad(`The ${bn} pool has ${wadText(borrow.cash)} free to borrow`);
+      if (amount > BigInt(borrow.cash)) throw bad(`The ${bn} pool has about ${wadText(borrow.cash)} free to borrow`);
+      if (coll.price_held || borrow.price_held || book.m.prices_fresh === false) throw bad('Prices are stale or still moving; borrowing waits for the next confirmed price');
+      if (borrow.min_borrow_usd != null && isInt(borrow.min_borrow_usd) && book.prices[borrow.asset] && usdOf(amount, book.prices[borrow.asset]) < BigInt(borrow.min_borrow_usd)) {
+        throw bad(`The smallest ${bn} loan is ${usdText(BigInt(borrow.min_borrow_usd))}`);
+      }
       const v = lendPreview(book, coll, collAmount, borrow, amount);
       if (v.health == null) throw bad('No price is posted for this pair yet; borrowing opens once one is');
       if (!v.allowed) throw bad(`That is over the ${coll.max_ltv_bps / 100}% most ${cn} collateral may borrow`);

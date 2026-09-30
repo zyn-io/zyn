@@ -551,6 +551,16 @@ pub enum Op {
         amount: Fixed,
         nonce: Hash,
     },
+    /// Caps and the smallest loan for an asset. The first one turns guarded
+    /// lending on for good (`lend::MAX_PRICE_AGE_EPOCHS` and the rest).
+    /// Operator only.
+    LendLimits {
+        program: ProgramId,
+        asset: Address,
+        collateral_cap: Fixed,
+        borrow_cap: Fixed,
+        min_borrow_usd: Fixed,
+    },
     /// Bid `pay` of the borrowed asset for a liquidation lot's collateral at
     /// this epoch's auction price.
     LendBid {
@@ -2142,6 +2152,11 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_lend_remove_collateral(borrower, position, *amount, nonce)
             }),
+            Op::LendLimits { program, asset, collateral_cap, borrow_cap, min_borrow_usd } => one(if *program != program::lend_list() {
+                Err("wrong program for lending limits")
+            } else {
+                self.apply_lend_limits(asset, lend::Limits { collateral_cap: *collateral_cap, borrow_cap: *borrow_cap, min_borrow_usd: *min_borrow_usd })
+            }),
             Op::LendBid { bidder, program, lot, pay, nonce, inputs, change } => one(if *program != program::lend_bid() {
                 Err("wrong program for a bid")
             } else {
@@ -2739,6 +2754,9 @@ impl MicrochainVm for ObjectVm {
             Op::LendRemoveCollateral { borrower, program, position, amount, nonce } => {
                 e.u8(46).bytes(borrower).bytes(&program.0).bytes(position).fixed(*amount).bytes(nonce);
             }
+            Op::LendLimits { program, asset, collateral_cap, borrow_cap, min_borrow_usd } => {
+                e.u8(48).bytes(&program.0).bytes(asset).fixed(*collateral_cap).fixed(*borrow_cap).fixed(*min_borrow_usd);
+            }
             Op::LendBid { bidder, program, lot, pay, nonce, inputs, change } => {
                 e.u8(47).bytes(bidder).bytes(&program.0).bytes(lot).fixed(*pay).bytes(nonce);
                 wire::inputs(&mut e, inputs);
@@ -3275,6 +3293,13 @@ impl MicrochainVm for ObjectVm {
                 position: d.hash().ok()?,
                 amount: d.fixed().ok()?,
                 nonce: d.hash().ok()?,
+            }),
+            48 => Some(Op::LendLimits {
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                collateral_cap: d.fixed().ok()?,
+                borrow_cap: d.fixed().ok()?,
+                min_borrow_usd: d.fixed().ok()?,
             }),
             47 => Some(Op::LendBid {
                 bidder: d.account().ok()?,

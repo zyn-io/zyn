@@ -596,7 +596,7 @@ impl Market {
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET08").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET09").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -681,14 +681,16 @@ impl Market {
         // v5 predates burn tickets (§145): its sales have no cap and no burns.
         // v6 predates bridged assets beside ZEC (§146) and reads as none.
         // v7 predates lending (Zyn Lend) and reads as a market with none.
-        let (v3, v4, v5, v6, v7, v8) = match d.take_bytes(8).ok()? {
-            b"MARKET08" => (true, true, true, true, true, true),
-            b"MARKET07" => (true, true, true, true, true, false),
-            b"MARKET06" => (true, true, true, true, false, false),
-            b"MARKET05" => (true, true, true, false, false, false),
-            b"MARKET04" => (true, true, false, false, false, false),
-            b"MARKET03" => (true, false, false, false, false, false),
-            b"MARKET02" => (false, false, false, false, false, false),
+        // v8 predates guarded lending and reads as not guarded.
+        let (v3, v4, v5, v6, v7, v8, v9) = match d.take_bytes(8).ok()? {
+            b"MARKET09" => (true, true, true, true, true, true, true),
+            b"MARKET08" => (true, true, true, true, true, true, false),
+            b"MARKET07" => (true, true, true, true, true, false, false),
+            b"MARKET06" => (true, true, true, true, false, false, false),
+            b"MARKET05" => (true, true, true, false, false, false, false),
+            b"MARKET04" => (true, true, false, false, false, false, false),
+            b"MARKET03" => (true, false, false, false, false, false, false),
+            b"MARKET02" => (false, false, false, false, false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -817,7 +819,7 @@ impl Market {
             m.waiting = waiting;
         }
         if v8 {
-            m.lend = crate::lend::decode(d)?;
+            m.lend = crate::lend::decode(d, v9)?;
         }
         Some(m)
     }
@@ -1616,6 +1618,9 @@ impl ObjectVm {
                 },
             );
         }
+        // Lending's backstop orders were in these batches; their results go
+        // back to their lots before the root is taken.
+        self.sweep_backstops();
         let due: Vec<Address> = self
             .market
             .launches

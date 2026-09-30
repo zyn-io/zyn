@@ -179,11 +179,19 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
             true,
             json!({ "at": at, "prices": prices.iter().map(|(a, p)| json!({ "asset": hex(a), "usd": p.0.to_string() })).collect::<Vec<_>>() }),
         ),
-        Op::LendSupply { asset, .. } => ("Lent", false, json!({ "asset": hex(asset) })),
-        Op::LendWithdraw { asset, .. } => ("Lending withdrawn", false, json!({ "asset": hex(asset) })),
-        Op::LendOpen { collateral_asset, borrow_asset, .. } => ("Borrowed", false, json!({ "collateral": hex(collateral_asset), "borrowed": hex(borrow_asset) })),
-        Op::LendRepay { .. } => ("Loan repaid", false, Value::Null),
-        Op::LendAddCollateral { .. } | Op::LendRemoveCollateral { .. } => ("Collateral changed", false, Value::Null),
+        Op::LendLimits { asset, collateral_cap, borrow_cap, min_borrow_usd, .. } => (
+            "Lending limits set",
+            true,
+            json!({ "asset": hex(asset), "collateral_cap": collateral_cap.0.to_string(), "borrow_cap": borrow_cap.0.to_string(), "min_borrow_usd": min_borrow_usd.0.to_string() }),
+        ),
+        // A holder's lending shows only that it happened: not which pool,
+        // not which pair, not how much, not whose.
+        Op::LendSupply { .. }
+        | Op::LendWithdraw { .. }
+        | Op::LendOpen { .. }
+        | Op::LendRepay { .. }
+        | Op::LendAddCollateral { .. }
+        | Op::LendRemoveCollateral { .. } => ("Lending", false, Value::Null),
         // A lot is public (it has to be, to be bid on); its owner is not.
         Op::LendBid { lot, .. } => ("Auction bid", false, json!({ "lot": hex(lot) })),
         Op::Seal => ("Seal", true, Value::Null),
