@@ -21,11 +21,13 @@ import QRCode from 'qrcode';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import { endpoint } from './origin.js';
+import { installTips, tip } from './tip.js';
 import './styles.css';
 import './market.css';
 import './bridge.css';
 
 const root = document.querySelector('#app');
+installTips();
 /// A deposit handed over by Nap's compact wallet (the toolbar popup, the
 /// phone app), where MetaMask and Phantom cannot reach: `#deposit=eth|sol&
 /// code=<commitment>&net=<id>`. The code is that wallet's one-time deposit
@@ -343,7 +345,7 @@ function frame() {
   shell(`<main class="wallet mk">
     <aside class="rail">
       <div>${handoff ? `<p class="kicker">ONE-TIME CODE</p><b class="mk-account">${short(handoff.code)}</b>` : identity ? `<p class="kicker">BRIDGING AS</p><b class="mk-account">${short(identity.accountHex)}</b>` : '<p class="kicker">NOT OPEN</p><button class="mk-act mk-open" id="open-wallet">Open wallet</button>'}<p class="mk-epoch" id="epoch">epoch —</p></div>
-      <nav id="tabs"${handoff ? ' hidden' : ''}>${[['in', 'Bring in'], ['out', 'Send out']].map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('')}</nav>
+      <nav id="tabs"${handoff ? ' hidden' : ''}>${[['in', 'Deposit'], ['out', 'Withdraw']].map(([k, t]) => `<button data-view="${k}">${t}</button>`).join('')}</nav>
       ${identity ? '<button class="quiet" id="lock">Lock</button>' : ''}
     </aside>
     <section class="content">
@@ -364,8 +366,10 @@ function notice(text, bad = false) {
   el.classList.toggle('bad', bad);
 }
 
-function heading(eyebrow, title, lede) {
-  return `<div class="topline"><div><p class="eyebrow">${esc(eyebrow)}</p><h1 class="mk-h1">${esc(title)}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>${lede ? `<p class="br-lede">${esc(lede)}</p>` : ''}`;
+/// A page's heading: its name, an "i" when something needs explaining, and
+/// at most one short line under it.
+function heading(title, explain = '', lede = '') {
+  return `<div class="topline"><div><h1 class="mk-h1">${esc(title)}${explain ? tip(explain) : ''}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>${lede ? `<p class="br-lede">${esc(lede)}</p>` : ''}`;
 }
 
 function bindRefresh() {
@@ -379,10 +383,10 @@ function balanceOf(b) {
 /// No bridge on this network: say where there is one, and go there in one tap.
 function renderNone() {
   const there = bridgingNetwork();
-  $('#view').innerHTML = `${heading('BRIDGES', 'Not on this network yet.', there
-    ? `${bridgesOf(there).map((b) => b.symbol).join(', ')} bridge on ${there.network} today (${bridgesOf(there).map((b) => ({ sol: 'Solana devnet', eth: 'Ethereum Sepolia', btc: `Bitcoin ${b.chain}` })[b.key]).join(', ')}). Testnet coins are for trying it out; they are worth nothing.`
-    : 'No network on this deployment bridges another chain yet.')}
-    ${there ? `<div class="br-none"><button class="primary mk-act" id="switch-bridge" data-network="${esc(there.id)}">Switch to ${esc(there.network)} <span>→</span></button><p class="mk-fine">The wallet follows: it opens on ${esc(there.network)} too, and you can switch back from the header.</p></div>` : ''}`;
+  $('#view').innerHTML = `${heading('Bridge', there ? 'Testnet coins are for trying it out; they are worth nothing.' : '', there
+    ? `Not on this network. ${bridgesOf(there).map((b) => b.symbol).join(', ')} bridge on ${there.network} (${bridgesOf(there).map((b) => ({ sol: 'Solana devnet', eth: 'Ethereum Sepolia', btc: `Bitcoin ${b.chain}` })[b.key]).join(', ')}).`
+    : 'No network here bridges another chain yet.')}
+    ${there ? `<div class="br-none"><button class="primary mk-act" id="switch-bridge" data-network="${esc(there.id)}">Switch to ${esc(there.network)} <span>→</span></button><p class="mk-fine">The wallet switches too; switch back from the header.</p></div>` : ''}`;
   $('#switch-bridge')?.addEventListener('click', (e) => switchNetwork(e.currentTarget.dataset.network));
 }
 
@@ -390,8 +394,8 @@ function renderIn() {
   if (!config.bridges.length) { renderNone(); return; }
   const shown = handoff ? config.bridges.filter((b) => b.key === handoff.key) : config.bridges;
   $('#view').innerHTML = `${handoff
-    ? heading('DEPOSIT', `${shown[0]?.symbol || ''} into your Nap wallet.`, `Your Nap wallet made this one-time code. Send from ${handoff.key === 'eth' ? 'MetaMask, Rabby or another Ethereum wallet' : 'Phantom or another Solana wallet'} here; it arrives in Nap once final, and Nap claims it on its own.`)
-    : heading('BRING IN', `${config.bridges.map((b) => b.symbol).join(', ').replace(/, ([^,]*)$/, ' and $1')}, private on Zyn.`, 'Send from your own wallet on the other chain. The deposit carries a one-time code from this wallet — not your account — and arrives here as a note only you can see. A new code every deposit, so two deposits are not linked by it.')}
+    ? heading(`Deposit ${shown[0]?.symbol || ''}`, 'Your Nap wallet made this one-time code. It arrives in Nap once final, and Nap claims it on its own.', `Send from ${handoff.key === 'eth' ? 'MetaMask, Rabby or another Ethereum wallet' : 'Phantom or another Solana wallet'}.`)
+    : heading('Deposit', 'The deposit carries a one-time code from this wallet, not your account, and arrives as a note only you can see. Every deposit gets a new code, so two deposits are not linked by it.', `${config.bridges.map((b) => b.symbol).join(', ').replace(/, ([^,]*)$/, ' and $1')} from your wallet on the other chain.`)}
     <div class="br-cards">${shown.map((b) => `<section class="mk-card br-card" data-bridge="${b.key}">
       <p class="eyebrow">${esc(b.symbol)} · ${esc(b.network)}</p>
       <h3>${esc(b.zy)} <span>${identity ? `you hold ${fmt(balanceOf(b), b.decimals)}` : ''}</span></h3>
@@ -479,11 +483,11 @@ function renderOut() {
   const live = config.bridges.filter((b) => b.live);
   if (!config.bridges.length) { renderNone(); return; }
   if (!identity) {
-    $('#view').innerHTML = `${heading('SEND OUT', 'Open your wallet to send out.', `Sending ${config.bridges.map((b) => b.zy).join(' or ')} back spends notes only your key can open.`)}<div class="br-none"><button class="primary mk-act" id="out-open" type="button">Open wallet <span>→</span></button></div>`;
+    $('#view').innerHTML = `${heading('Withdraw', `Withdrawing ${config.bridges.map((b) => b.zy).join(' or ')} spends notes only your key can open.`, 'Open your wallet to withdraw.')}<div class="br-none"><button class="primary mk-act" id="out-open" type="button">Open wallet <span>→</span></button></div>`;
     $('#out-open').onclick = () => { returnTo = 'out'; view = 'wallet'; render(); };
     return;
   }
-  $('#view').innerHTML = `${heading('SEND OUT', `Back to ${config.bridges.map((b) => ({ sol: 'Solana', eth: 'Ethereum', btc: 'Bitcoin' })[b.key]).join(', ').replace(/, ([^,]*)$/, ' or $1')}.`, 'The chain records only a commitment to where it goes. The address is then shown to the bridge that pays it, and to nobody else.')}
+  $('#view').innerHTML = `${heading('Withdraw', 'The chain records only a commitment to the destination. The address is shown to the bridge that pays it, and to nobody else.', `To ${config.bridges.map((b) => ({ sol: 'Solana', eth: 'Ethereum', btc: 'Bitcoin' })[b.key]).join(', ').replace(/, ([^,]*)$/, ' or $1')}.`)}
     <section class="mk-card"><form id="out-form" class="br-out">
       <label class="mk-field"><span>From</span><select id="out-asset">${live.map((b) => `<option value="${b.key}">${esc(b.zy)} — you hold ${fmt(balanceOf(b), b.decimals)}</option>`).join('')}</select></label>
       <label class="mk-field"><span>To address</span><input id="out-to" autocomplete="off" spellcheck="false" placeholder="${esc(live.map((b) => ({ sol: 'a Solana address', eth: '0x… on Ethereum', btc: `${b.chain === 'bitcoin' ? 'bc1' : 'tb1'}… on Bitcoin` })[b.key]).join(', ') || 'an address')}"></label>
@@ -512,8 +516,8 @@ function renderWallet(error = '') {
   }
   const kept = keptWallet();
   $('#view').innerHTML = `<section class="entry panel mk-entry">
-    ${kept ? '<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>' : ''}
-    <form id="phrase-form" ${kept ? 'hidden' : ''}><p class="kicker">RECOVERY PHRASE</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="4" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label><div class="split"><label>Passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account<input id="account-index" type="number" min="0" value="0"></label></div><button class="primary" type="submit">Open <span>→</span></button></form>
+    ${kept ? '<form id="kept-form"><h2>Unlock</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>' : ''}
+    <form id="phrase-form" ${kept ? 'hidden' : ''}><h2>Restore wallet</h2><label>24-word recovery phrase<textarea id="words" rows="4" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label><div class="split"><label>Passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account<input id="account-index" type="number" min="0" value="0"></label></div><button class="primary" type="submit">Open <span>→</span></button></form>
     <p class="error" id="form-error" role="alert">${esc(error)}</p>
   </section>`;
   $('#use-phrase')?.addEventListener('click', (e) => { e.preventDefault(); $('#phrase-form').hidden = false; $('#kept-form').hidden = true; });

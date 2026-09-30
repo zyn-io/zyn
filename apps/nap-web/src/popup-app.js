@@ -146,8 +146,8 @@ function welcome() {
   pop.innerHTML = `<div class="gate">
     <img class="mark" src="/nap-mark.png" alt="">
     <h1>Nap <em>Wallet</em></h1>
-    <p class="lead">Shielded ZEC, and Zyn tokens and items, in one private wallet.</p>
-    <ul class="facts"><li>Your keys are made and kept on this ${IN_APP ? 'phone' : 'browser'}, sealed under your password.</li><li>No sign-up, no email. Your keys never leave this ${IN_APP ? 'phone' : 'browser'}.</li><li>The same 24 words open Nap ${IN_APP ? 'on the web and in the browser extension' : 'on the web and on your phone'}.</li></ul>
+    <p class="lead">Shielded ZEC and Zyn assets. Self-custodial.</p>
+    <ul class="facts"><li>Keys stay on this ${IN_APP ? 'phone' : 'browser'}, sealed under your password.</li><li>No sign-up, no email.</li><li>The same 24 words open Nap ${IN_APP ? 'on the web and in the browser extension' : 'on the web and on your phone'}.</li></ul>
     <div class="grow"></div>
     <div class="gate-actions" role="group">
       <button class="btn" id="create">Create a new wallet</button>
@@ -243,7 +243,7 @@ async function offerBiometrics(password) {
 function lockScreen(error = '') {
   pop.innerHTML = `<div class="gate">
     <img class="mark" src="/nap-mark.png" alt="">
-    <h1>Welcome back</h1>
+    <h1>Unlock</h1>
     <p class="lead">Your wallet is sealed on this device.</p>
     <div class="grow"></div>
     <form id="unlock">

@@ -145,3 +145,43 @@ html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; heigh
 /* Biometric unlock (the phone app, §151). */
 .bio{margin-top:8px}.bio-or{text-align:center;margin:12px 0 0;font-size:13px}
 .bio-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}.bio-actions .quiet{color:#3d3000;padding:6px 0}
+
+/* An "i" for anything that needs explaining; the heading stays short. It
+   takes the colour of whatever it sits in, light panel or dark. */
+.tip {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin: 0 0 0 6px;
+  padding: 0;
+  vertical-align: 1px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  font: italic 700 10.5px/1 Georgia, serif;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.tip:hover, .tip[aria-expanded='true'] { opacity: 1; }
+.tip:focus-visible { outline: 2px solid #e8a916; outline-offset: 2px; opacity: 1; }
+.tip-bubble {
+  position: absolute;
+  z-index: 100;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #121618;
+  color: #f8f2e4;
+  font: 13px/1.5 Plex, system-ui, sans-serif;
+  box-shadow: 0 0 0 1px #ffffff1f, 0 14px 40px #0006;
+  animation: tip-in .12s ease-out;
+}
+@keyframes tip-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .tip-bubble { animation: none; } }
+/* The two facts are one line each now; phones show them too. */
+@media (max-width: 800px) {
+  .onboard .promise { display: flex; }
+  .onboard .lede { margin-bottom: 28px; }
+}

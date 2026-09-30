@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerIntent, sealNote, signedFrame as objectFrame, spendIntent, submitSigned, withdrawIntent } from './object.js';
-import { decodeMeta, fund as fundFrom } from './market.js';
+import { decodeMeta, fund as fundFrom, lendAsset } from './market.js';
 import { bridgedName, loadBridged } from './ledger.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
@@ -9,7 +9,10 @@ import { parsePaymentRequest } from './zip321.js';
 import { boundedBytes, MAX_IMAGE, MAX_MANIFEST, parseManifest, safeRaster } from './media.js';
 import { endpoint, IN_APP, IN_EXTENSION, IN_POPUP, openPage } from './origin.js';
 import { endSession, hasSession, loadSession, saveSession } from './session.js';
+import { installTips, tip } from './tip.js';
 import './styles.css';
+
+installTips();
 
 const root = document.querySelector('#app');
 let config;
@@ -201,7 +204,7 @@ function shell(content) {
 }
 
 function unlockForm() {
-  return `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><p class="muted">Your key is held here, sealed. It opens with the password you chose — not your recovery phrase.</p><div id="bio-slot"></div><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="new-wallet">Create a new wallet</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
+  return `<form id="kept-form"><h2>Unlock</h2><div id="bio-slot"></div><label>Password${tip('Your key is stored on this device, sealed. It opens with the password you set here, not your recovery phrase.')}<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button><p class="error" id="form-error" role="alert"></p><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a> · <a href="" id="new-wallet">Create a new wallet</a> · <a href="" id="forget-kept">Forget this device</a></p></form>`;
 }
 
 function bindKept() {
@@ -274,7 +277,7 @@ async function offerBiometrics(password) {
   const at = root.querySelector('#notice');
   if (!at) return;
   const name = bioName(st.kind);
-  at.insertAdjacentHTML('afterend', `<section class="claim bio-offer"><div><p class="kicker">FASTER NEXT TIME</p><h2>Open Nap with ${name}.</h2><p>Your password is kept in this phone's secure storage and released only to your ${name === 'fingerprint' ? 'fingerprint' : 'face'}. Nothing leaves the phone.</p></div><div class="bio-actions"><button id="bio-yes">Use ${name} <span>→</span></button><button class="quiet" id="bio-no">Not now</button></div></section>`);
+  at.insertAdjacentHTML('afterend', `<section class="claim bio-offer"><div><h2>Unlock with ${name}?${tip(`Your password is kept in this phone's secure storage and released only to your ${name === 'fingerprint' ? 'fingerprint' : 'face'}. Nothing leaves the phone.`)}</h2></div><div class="bio-actions"><button id="bio-yes">Use ${name} <span>→</span></button><button class="quiet" id="bio-no">Not now</button></div></section>`);
   const card = root.querySelector('.bio-offer');
   root.querySelector('#bio-no').onclick = () => { card.remove(); password = ''; };
   root.querySelector('#bio-yes').onclick = async () => {
@@ -285,27 +288,26 @@ async function offerBiometrics(password) {
 }
 
 // Where this Nap is: the words the welcome uses for it.
-const WHERE = IN_APP ? { eyebrow: 'NAP WALLET / ON YOUR PHONE', closing: 'Closing the app' }
-  : IN_EXTENSION ? { eyebrow: 'NAP WALLET / IN YOUR TOOLBAR', closing: 'Closing Nap' }
-  : { eyebrow: 'BROWSER WALLET / NO INSTALL', closing: 'Closing this tab' };
+const WHERE = IN_APP ? { closing: 'Closing the app' }
+  : IN_EXTENSION ? { closing: 'Closing Nap' }
+  : { closing: 'Closing this tab' };
 
 function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'restore')) {
   if (mode !== 'create') generatedWords = '';
   shell(`<main class="onboard">
     <section class="intro">
-      <p class="eyebrow">${WHERE.eyebrow}</p>
-      <h1>Your pocket,<br><em>between blocks.</em></h1>
-      <p class="lede">Receive the Nap Mole in person, then open the same account wherever Nap runs with one recovery phrase.</p>
-      ${tapLink ? '<div class="tap-note"><b>You tapped an event tag.</b> Open or create your wallet and the certificate goes straight into it.</div>' : ''}
-      <div class="promise"><span>01</span><p><b>No account server.</b><br>Your key is derived and used on this device.</p></div>
+      <h1>Nap Wallet</h1>
+      <p class="lede">Shielded ZEC and Zyn assets. Self-custodial.</p>
+      ${tapLink ? '<div class="tap-note"><b>Event tag tapped.</b> Open or create your wallet to receive the certificate.</div>' : ''}
+      <div class="promise"><span>01</span><p><b>Keys stay on this device.</b>${tip('Your key is derived from your recovery phrase and used only here. There is no account server.')}</p></div>
       ${IN_EXTENSION || setupMode
-    ? '<div class="promise"><span>02</span><p><b>Kept here, sealed.</b><br>Only the key is stored, sealed under your password — never your phrase.</p></div>'
-    : `<div class="promise"><span>02</span><p><b>Nothing kept unless you say so.</b><br>${WHERE.closing} forgets the key. Keep it here and only the sealed key is stored — never your phrase.</p></div>`}
+    ? `<div class="promise"><span>02</span><p><b>Saved here, sealed with your password.</b>${tip('Only the key is stored, sealed under your password. Never your phrase.')}</p></div>`
+    : `<div class="promise"><span>02</span><p><b>Not saved unless you set a password.</b>${tip(`${WHERE.closing} forgets the key. With a password, only the key is stored, sealed under it. Never your phrase.`)}</p></div>`}
     </section>
     <section class="entry panel">
       ${mode === 'kept' ? '' : `<div class="tabs"><button data-mode="restore" class="${mode === 'restore' ? 'active' : ''}">Restore</button><button data-mode="create" class="${mode === 'create' ? 'active' : ''}">Create new</button></div>`}
       ${mode === 'kept' ? unlockForm() : (mode === 'restore' ? restoreForm() : createForm())}
-      <div class="scope"><b>Holds</b><span>Shielded ZEC, and Zyn tokens and items. The same phrase opens Nap on the web, in the browser extension and on your phone.</span></div>
+      <div class="scope"><b>Holds</b><span>Shielded ZEC, Zyn tokens and items.${tip('The same recovery phrase opens Nap on the web, in the browser extension and on your phone.')}</span></div>
     </section>
   </main>`);
   root.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => onboarding(b.dataset.mode));
@@ -318,8 +320,8 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
 function keepField() {
   const why = IN_EXTENSION ? 'the toolbar wallet opens with it' : 'Nap opens with it in this browser';
   const field = IN_EXTENSION || setupMode
-    ? `<label>Password for this browser <span class="muted">(8+ characters — ${why})</span><input id="keep-password" type="password" autocomplete="new-password" required minlength="8"></label>`
-    : '<label>Keep on this device <span class="muted">(optional password, 8+ characters)</span><input id="keep-password" type="password" autocomplete="new-password" placeholder="Leave blank to forget on close"></label>';
+    ? `<label>Password${tip(`8+ characters. ${why[0].toUpperCase()}${why.slice(1)}.`)}<input id="keep-password" type="password" autocomplete="new-password" required minlength="8" placeholder="8+ characters"></label>`
+    : `<label>Password (optional)${tip('Set one to keep the wallet on this device, sealed. Leave it blank and closing forgets the key.')}<input id="keep-password" type="password" autocomplete="new-password" placeholder="Blank: forget on close"></label>`;
   // Saving over a wallet already kept here loses it on this device: said, and
   // confirmed, before anything is replaced.
   return field + (keptWallet()
@@ -336,12 +338,12 @@ function replaceConfirmed() {
 }
 
 function restoreForm() {
-  return `<form id="restore-form"><p class="kicker">WELCOME BACK</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="word 1  word 2  word 3 …"></textarea></label><div class="split"><label>Optional passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Leave blank if unused"></label><label>Account<input id="account-index" type="number" min="0" max="2147483647" value="0"></label></div>${keepField()}<button class="primary" type="submit">Restore on this device <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="restore-form"><h2>Restore wallet</h2><label>24-word recovery phrase<textarea id="words" rows="5" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="word 1  word 2  word 3 …"></textarea></label><div class="split"><label>Passphrase${tip('An extra word some wallets add to the phrase. Leave blank if you never set one.')}<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account${tip('Which account under this phrase. 0 unless you use more than one.')}<input id="account-index" type="number" min="0" max="2147483647" value="0"></label></div>${keepField()}<button class="primary" type="submit">Restore <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function createForm() {
   if (!generatedWords) generatedWords = newMnemonic();
   const numbered = generatedWords.split(' ').map((w, i) => `<span><i>${String(i + 1).padStart(2, '0')}</i>${w}</span>`).join('');
-  return `<form id="create-form"><p class="kicker">NEW POCKET</p><h2>Write this down first.</h2><p class="muted">These words restore both your Nap Zcash wallet and your Zyn items. They are shown once.</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
+  return `<form id="create-form"><h2>New wallet</h2><p class="muted">Write down these 24 words. They are shown once.${tip('They restore your ZEC and your Zyn tokens and items in any Nap.')}</p><div class="phrase">${numbered}</div><label class="check"><input id="ack" type="checkbox"><span>I saved all 24 words offline. I understand a screenshot or cloud note can expose my wallet.</span></label>${keepField()}<button class="primary" type="submit" disabled>Open my wallet <span>→</span></button><p class="error" id="form-error" role="alert"></p></form>`;
 }
 function bindRestore() {
   root.querySelector('#restore-form').onsubmit = async (event) => {
@@ -434,23 +436,23 @@ function wallet(message = '') {
   const account = identity.accountHex;
   shell(`<main class="wallet">
     <aside class="rail">
-      <div><p class="kicker">YOUR ZYN ACCOUNT</p><button class="account-copy" id="copy-account"><b>${short(account)}</b><span>Copy full ID</span></button></div>
+      <div><p class="kicker">ZYN ACCOUNT</p><button class="account-copy" id="copy-account"><b>${short(account)}</b><span>Copy full ID</span></button></div>
       <nav><button class="active">Pocket</button><button id="zec-link">Zcash</button><button id="receive-link">Receive</button><button id="market-link">Market</button><button id="bridge-link">Bridge</button>${napBrowser ? '<button id="browser-link">Browser</button>' : ''}<button id="recovery-link">Recovery</button></nav>
       <button class="quiet" id="forget">${keptWallet() ? 'Lock' : 'Lock &amp; forget key'}</button>
     </aside>
     <section class="content">
-      <div class="topline"><div><p class="eyebrow">POCKET / ITEMS</p><h1>Small things,<br>held properly.</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>
+      <div class="topline"><div><h1>Pocket</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>
       <div class="notice ${message ? 'show' : ''}" id="notice">${escapeHtml(message)}</div>
-      ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD DETECTED</p><h2>Your mole is waiting.</h2><p>The coordinator sees this public account ID—not your phrase or key.</p></div><button id="claim">Claim gift <span>→</span></button></section>` : ''}
-      ${tapLink ? `<section class="claim"><div><p class="kicker">EVENT TAG TAPPED</p><h2>Your certificate is waiting.</h2><p>It goes into this wallet privately: the certificate service learns this account ID and nothing else, and nobody can see who holds it.</p></div><button id="attend">Collect certificate <span>→</span></button></section>` : ''}
+      ${claimCode ? `<section class="claim"><div><p class="kicker">GIFT CARD</p><h2>Nap Mole to claim${tip('The gift coordinator sees this public account ID, not your phrase or key.')}</h2></div><button id="claim">Claim <span>→</span></button></section>` : ''}
+      ${tapLink ? `<section class="claim"><div><p class="kicker">EVENT TAG</p><h2>Certificate to collect${tip('The certificate service learns this account ID and nothing else. Nobody can see who holds it.')}</h2></div><button id="attend">Collect <span>→</span></button></section>` : ''}
       ${zecSection()}
       <section><div class="section-title"><h2>Coins</h2><span id="coin-count">—</span></div><div class="coins" id="coins"><div class="skeleton"></div></div></section>
-      <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork — fetches each item's picture from the gateway, which tells that host your IP, which items you hold, and when. Off by default.</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
+      <section><div class="section-title"><h2>Items</h2><span id="item-count">—</span></div><label class="art-consent"><input type="checkbox" id="art-toggle"><span>Show artwork${tip("Loads each item's picture from the gateway, which tells that host your IP address, which items you hold, and when. Off by default.")}</span></label><div class="items" id="items"><div class="skeleton"></div><div class="skeleton"></div></div></section>
       <section class="activity"><div class="section-title"><h2>Account</h2></div><div class="account-card"><div><span>Public account</span><code>${account}</code></div><canvas id="qr" width="164" height="164"></canvas></div></section>
-      <section class="activity"><div class="section-title"><h2>Bring ZEC in</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Send shielded ZEC here and it arrives as ZEC.zy. No memo needed — this address is yours alone.</p><button class="quiet" id="copy-deposit" hidden>Copy address</button> <button class="quiet" id="deposit-from-zec">Pay it from my ZEC →</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
-      ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Take ZEC out</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">The chain records only a commitment to the address. The vault pays it once two custodians sign; the Zcash network fee comes out of the amount, and any bridge fee is added on top.</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
+      <section class="activity"><div class="section-title"><h2>Deposit ZEC</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Arrives as ZEC.zy.${tip('Send shielded ZEC here. No memo needed; this address is yours alone.')}</p><button class="quiet" id="copy-deposit" hidden>Copy address</button> <button class="quiet" id="deposit-from-zec">Pay it from my ZEC →</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
+      ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Withdraw ZEC</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">Fees${tip('The chain records only a commitment to the address. The vault pays it once two custodians sign. The Zcash network fee comes out of the amount; any bridge fee is added on top.')}</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
     </section>
-  </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><p class="kicker">RECOVERY</p><h2>The phrase is the wallet.</h2><p>Nap does not store it in this browser. Restore this same phrase, passphrase and account index in any Nap to recover <code>${account}</code>.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
+  </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><h2>Recovery</h2><p>Restore this phrase, passphrase and account index in any Nap to recover <code>${account}</code>. Nap does not store the phrase.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
   QRCode.toCanvas(root.querySelector('#qr'), account, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
   void loadDepositAddress(identity);
   root.querySelector('#withdraw-form')?.addEventListener('submit', async (e) => {
@@ -517,7 +519,7 @@ function zecSection() {
   if (!identity.zec) {
     const kept = !!keptWallet();
     return `<section class="zec" id="zec"><div class="section-title"><h2>Zcash</h2><span>not on this device yet</span></div>
-      <form class="account-card zec-add" id="zec-add"><div><span>Add your Zcash wallet</span><p class="muted">This device holds your Zyn keys but not your Zcash keys — it was set up before Nap held ZEC in the browser. Enter your recovery phrase once to add them${kept ? '; your device password seals them with the rest' : ''}.</p>
+      <form class="account-card zec-add" id="zec-add"><div><span>Add your Zcash wallet</span><p class="muted">Enter your recovery phrase once.${tip(`This device was set up before Nap held ZEC in the browser, so it has your Zyn keys but not your Zcash keys${kept ? '. Your device password seals them with the rest' : ''}.`)}</p>
         <label class="visually-hidden" for="zec-add-words">Recovery phrase</label><textarea id="zec-add-words" class="withdraw-input" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="24-word recovery phrase"></textarea>
         <label class="visually-hidden" for="zec-add-pass">Passphrase</label><input id="zec-add-pass" class="withdraw-input" type="password" autocomplete="off" placeholder="Passphrase, if you used one">
         ${kept ? '<label class="visually-hidden" for="zec-add-device">Device password</label><input id="zec-add-device" class="withdraw-input" type="password" autocomplete="current-password" placeholder="This device\'s password">' : ''}
@@ -525,12 +527,12 @@ function zecSection() {
   }
   return `<section class="zec" id="zec"><div class="section-title"><h2>Zcash</h2><span id="zec-sync">Opening…</span></div>
     <div class="zec-balance"><div><b id="zec-total">—</b><span>ZEC</span></div><p id="zec-detail" class="zec-detail">Shielded. Only this phrase can see it.</p></div>
-    <div class="account-card"><div><span>Your Zcash address</span><code id="zec-address">Opening…</code><p class="muted">A shielded address. Pay it from any Zcash wallet or exchange that sends shielded; what arrives is visible only to this phrase.</p><button class="quiet" id="zec-copy" hidden>Copy address</button></div><canvas id="zec-qr" width="164" height="164"></canvas></div>
+    <div class="account-card"><div><span>Your Zcash address</span><code id="zec-address">Opening…</code><p class="muted">Shielded${tip('Pay it from any Zcash wallet or exchange that sends shielded. What arrives is visible only to this phrase.')}</p><button class="quiet" id="zec-copy" hidden>Copy address</button></div><canvas id="zec-qr" width="164" height="164"></canvas></div>
     <form class="account-card" id="zec-send"><div><span>Send ZEC</span>
       <label class="visually-hidden" for="zec-to">Zcash address</label><input id="zec-to" class="withdraw-input" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…">
       <label class="visually-hidden" for="zec-amount">Amount</label><input id="zec-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC">
       <label class="visually-hidden" for="zec-memo">Memo</label><input id="zec-memo" class="withdraw-input" maxlength="512" autocomplete="off" placeholder="Memo (optional, shielded addresses only)">
-      <p class="muted" id="zec-send-note">A Zcash transaction from this wallet. The network fee is added on top. Proving it takes about half a minute on this device; keep the tab open.</p></div>
+      <p class="muted" id="zec-send-note">Network fee added on top.${tip('Proving takes about half a minute on this device; keep the tab open.')}</p></div>
       <div><button class="primary" type="submit" id="zec-go" disabled>Review <span>→</span></button></div></form>
     <ul class="zec-notes" id="zec-notes"></ul></section>`;
 }
@@ -961,6 +963,10 @@ async function refreshObject(epoch, announce, active) {
       for (const p of market.pools || []) {
         if (/^[0-9a-f]{64}$/.test(p.lp) && typeof p.a === 'string' && typeof p.b === 'string') tickers.set(p.lp, `LP ${nameOf(p.a)}/${nameOf(p.b)}`);
       }
+      // Lending shares: lZEC.zy, lETH.zy, lSOL.zy, as Zyn Lend names them.
+      for (const a of [zec, ...tickers.keys()]) {
+        if (/^[0-9a-f]{64}$/.test(a) && !tickers.get(a)?.startsWith('LP ')) tickers.set(hex(lendAsset(unhex(a, 32))), `l${nameOf(a)}`);
+      }
     } catch { /* names only */ }
     if (!active()) return;
   }
@@ -1044,7 +1050,7 @@ function renderItems() {
   // redeeming are the Cave store's.
   if (config.kind === 'object') {
     root.querySelector('#item-count').textContent = String(held.length);
-    root.querySelector('#items').innerHTML = held.length ? held.map((h, i) => `<article class="item" data-index="${i}"><div class="art"><img src="/nap-mark.png" alt=""></div><div><p class="kicker">ITEM</p><h3>${escapeHtml(h.meta.symbol)}</h3><p class="media-status">${h.meta.event ? `${escapeHtml(h.meta.event.date)}${h.meta.event.place ? ` · ${escapeHtml(h.meta.event.place)}` : ''}. Proof you were there; only you can see you hold it.` : 'Trade it in the Cave store.'}</p><button>Send →</button></div></article>`).join('') : '<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Items you buy in the Cave store appear here.</p></div>';
+    root.querySelector('#items').innerHTML = held.length ? held.map((h, i) => `<article class="item" data-index="${i}"><div class="art"><img src="/nap-mark.png" alt=""></div><div><p class="kicker">ITEM</p><h3>${escapeHtml(h.meta.symbol)}</h3><p class="media-status">${h.meta.event ? `${escapeHtml(h.meta.event.date)}${h.meta.event.place ? ` · ${escapeHtml(h.meta.event.place)}` : ''}. Proof you were there; only you can see you hold it.` : 'Trade it in the Cave store.'}</p><button>Send →</button></div></article>`).join('') : '<div class="empty"><img src="/nap-mark.png" alt=""><h3>No items yet.</h3><p>Items you buy in the Cave store appear here.</p></div>';
     root.querySelectorAll('.item').forEach((el) => {
       const h = held[Number(el.dataset.index)];
       el.querySelector('button').onclick = () => openObjectSend({ asset: h.asset, amount: h.amount, meta: h.meta });
@@ -1052,7 +1058,7 @@ function renderItems() {
     return;
   }
   root.querySelector('#item-count').textContent = String(list.length);
-  root.querySelector('#items').innerHTML = list.length ? list.map((h, i) => `<article class="item" data-index="${i}"><div class="art" data-content="${escapeHtml(h.meta.content)}"><img src="/nap-mark.png" alt="Generic placeholder; artwork not verified"></div><div><p class="kicker">ITEM · #${escapeHtml(h.asset)}</p><h3>${escapeHtml(h.meta.symbol || `Item ${h.asset}`)}</h3><p class="media-status">${h.listing ? `Listed · ${escapeHtml(readableAmount(h.listing.wantAmount))} ZEC.zy` : 'Artwork not verified'}</p><button>Review & send →</button> <button data-list>${h.listing ? 'Cancel listing' : 'List for sale'} →</button></div></article>`).join('') : `<div class="empty"><img src="/nap-mark.png" alt=""><h3>This pocket is quiet.</h3><p>Claim a gift or receive a Zyn item at the account below.</p></div>`;
+  root.querySelector('#items').innerHTML = list.length ? list.map((h, i) => `<article class="item" data-index="${i}"><div class="art" data-content="${escapeHtml(h.meta.content)}"><img src="/nap-mark.png" alt="Generic placeholder; artwork not verified"></div><div><p class="kicker">ITEM · #${escapeHtml(h.asset)}</p><h3>${escapeHtml(h.meta.symbol || `Item ${h.asset}`)}</h3><p class="media-status">${h.listing ? `Listed · ${escapeHtml(readableAmount(h.listing.wantAmount))} ZEC.zy` : 'Artwork not verified'}</p><button>Review & send →</button> <button data-list>${h.listing ? 'Cancel listing' : 'List for sale'} →</button></div></article>`).join('') : `<div class="empty"><img src="/nap-mark.png" alt=""><h3>No items yet.</h3><p>Claim a gift or receive a Zyn item at the account below.</p></div>`;
   root.querySelectorAll('.item').forEach((el) => {
     const item = list[Number(el.dataset.index)];
     const [send, listBtn] = el.querySelectorAll('button');
@@ -1212,7 +1218,7 @@ function openObjectSend(coin) {
   const dialog = root.querySelector('#send-dialog');
   const isItem = !!coin.meta.item;
   const isZec = coin.asset === config.zecAsset;
-  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>${isItem ? 'Send this item.' : 'Send.'}</h2><p class="muted">To a Zyn account id, or to a Zcash address. A Zcash address that belongs to a Zyn account is paid on Zyn, privately and at once${isZec ? '; any other Zcash address is paid on Zcash, as a withdrawal' : isItem ? '; an item cannot leave for any other Zcash address' : ''}. Transfers cannot be undone.</p><form><label>Recipient<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Zyn account (64 hex) or ${escapeHtml(config.zcashPrefix)}…"></label>${isItem ? '<input id="send-amount" type="hidden" value="1">' : '<label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>'}<div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(coin.exact ?? readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SEND ${escapeHtml(coin.meta.symbol)}</p><h2>${isItem ? 'Send item' : 'Send'}</h2><p class="muted">To a Zyn account ID or a Zcash address. Cannot be undone.${tip(`A Zcash address that belongs to a Zyn account is paid on Zyn, privately and at once${isZec ? '. Any other Zcash address is paid on Zcash, as a withdrawal' : isItem ? '. An item cannot go to any other Zcash address' : ''}.`)}</p><form><label>Recipient<input id="send-to" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Zyn account (64 hex) or ${escapeHtml(config.zcashPrefix)}…"></label>${isItem ? '<input id="send-amount" type="hidden" value="1">' : '<label>Amount<input id="send-amount" inputmode="decimal" autocomplete="off" placeholder="0.0"></label>'}<div class="review"><span>Asset</span><b>${escapeHtml(coin.meta.symbol)}</b><span>You hold</span><b>${escapeHtml(coin.exact ?? readableAmount(coin.amount))}</b><span>Network</span><b>${escapeHtml(config.network)} · ${config.chain}</b></div><button class="primary" type="submit">Review →</button><p class="error" role="alert"></p></form>`;
   dialog.querySelector('.x').onclick = () => dialog.close();
   dialog.querySelector('form').onsubmit = async (event) => {
     event.preventDefault();

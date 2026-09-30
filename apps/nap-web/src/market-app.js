@@ -17,10 +17,12 @@ import { isHex, isInt, isSmall, validOffer, PER_CLAIM } from './ledger.js';
 import * as mk from './market.js';
 import { bindNetworkPick, networkPill, rememberNetwork } from './netpick.js';
 import { endpoint } from './origin.js';
+import { installTips, tip } from './tip.js';
 import './styles.css';
 import './market.css';
 
 const root = document.querySelector('#app');
+installTips();
 const KEPT_KEY = 'nap.kept.v1';
 const NETWORK_KEY = 'nap.network';
 let config;
@@ -354,15 +356,11 @@ function renderWallet(error = '') {
   const kept = keptWallet();
   $('#view').innerHTML = `<div class="mk-grid mk-unlock">
     <section class="entry panel mk-entry">
-      ${kept ? `<form id="kept-form"><p class="kicker">THIS DEVICE</p><h2>Open your wallet.</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>` : ''}
-      <form id="phrase-form" ${kept ? 'hidden' : ''}><p class="kicker">RECOVERY PHRASE</p><h2>Wake your wallet.</h2><label>24-word recovery phrase<textarea id="words" rows="4" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label><div class="split"><label>Passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account<input id="account-index" type="number" min="0" value="0"></label></div><button class="primary" type="submit">Open <span>→</span></button></form>
+      ${kept ? `<form id="kept-form"><h2>Unlock</h2><label>Password<input id="kept-password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Open <span>→</span></button></form><p class="muted"><a href="" id="use-phrase">Use a recovery phrase instead</a></p>` : ''}
+      <form id="phrase-form" ${kept ? 'hidden' : ''}><h2>Restore wallet</h2><label>24-word recovery phrase<textarea id="words" rows="4" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label><div class="split"><label>Passphrase<input id="passphrase" type="password" autocomplete="off" placeholder="Blank if unused"></label><label>Account<input id="account-index" type="number" min="0" value="0"></label></div><button class="primary" type="submit">Open <span>→</span></button></form>
       <p class="error" id="form-error" role="alert">${esc(error)}</p>
-      <div class="scope"><b>${esc(config.network)}</b><span>The same account as your wallet. The key stays in this tab; nothing new is stored.</span></div>
+      <div class="scope"><b>${esc(config.network)}</b><span>Same account as your wallet.${tip('The key stays in this tab and only signs. Prices, pools and sales are public. Balances are read from your own notes, and what you are owed is found by IDs only your key derives. Nothing new is stored.')}</span></div>
     </section>
-    <aside class="mk-card mk-side">
-      <div class="mk-explain"><h3>Why the market needs your key</h3><p>Only to sign. Prices, pools and sales are public and need nothing. An order, liquidity, a commitment or a collection is signed here by your key and sent as it is; balances are read by opening your own notes, and what you are owed is found by ids only your key derives.</p></div>
-      <div class="mk-explain"><h3>Nobody cuts in line</h3><p>Every order in an epoch clears at one price, so where yours sits in the batch cannot matter. Who traded is not shown to the public; the operator sees it today, and the plan is that one day nobody does.</p></div>
-    </aside>
   </div>`;
   $('#use-phrase')?.addEventListener('click', (e) => { e.preventDefault(); $('#phrase-form').hidden = false; $('#kept-form').hidden = true; });
   $('#kept-form')?.addEventListener('submit', async (e) => {
@@ -447,11 +445,11 @@ function render() {
 function renderSwap() {
   const pools = state.pools;
   if (!pools.length && !loaded) {
-    $('#view').innerHTML = `${heading('SWAP', 'Reading<br><em>the market…</em>')}<div class="mk-empty"><p>Asking ${esc(config.network)} for its pools.</p></div>`;
+    $('#view').innerHTML = `${heading('Swap')}<div class="mk-empty"><p>Loading pools…</p></div>`;
     return;
   }
   if (!pools.length) {
-    $('#view').innerHTML = `${heading('SWAP', 'No pools yet.')}<div class="mk-empty"><p>A pool opens when someone provides both sides of a pair. Launches open theirs when their sale closes.</p><button class="mk-act" id="go-pools">Open a pool →</button></div>`;
+    $('#view').innerHTML = `${heading('Swap')}<div class="mk-empty"><p>No pools yet.</p><button class="mk-act" id="go-pools">Open a pool →</button></div>`;
     $('#go-pools').onclick = () => { view = 'pools'; render(); };
     return;
   }
@@ -459,7 +457,7 @@ function renderSwap() {
   ui.pool = pool.id;
   const sell = ui.sellA ? pool.a : pool.b;
   const buy = ui.sellA ? pool.b : pool.a;
-  $('#view').innerHTML = `${heading('SWAP', 'One price<br><em>per epoch.</em>')}
+  $('#view').innerHTML = `${heading('Swap', 'All orders in an epoch clear together at one price: p = (y + 2b′) / (x + 2a′). There is no order within the batch, so nothing to sandwich. Who traded is not public; the operator sees it.')}
   <div class="mk-grid">
     <form class="mk-card mk-swap" id="swap-form">
       <label class="mk-field"><span>Pair</span><select id="pool-pick">${pools.map((p) => `<option value="${p.id}" ${p.id === pool.id ? 'selected' : ''}>${esc(name(p.a))} / ${esc(name(p.b))}</option>`).join('')}</select></label>
@@ -478,7 +476,6 @@ function renderSwap() {
     </form>
     <aside class="mk-card mk-side">
       ${poolFacts(pool)}
-      <div class="mk-explain"><h3>Why nobody can jump the queue</h3><p>All orders in an epoch pay <code>p = (y + 2·b′) / (x + 2·a′)</code>, the price at which the pool ends where it traded. There is no order inside the batch, so there is nothing to sandwich — not even for the sequencer, who is the only one who sees it.</p></div>
     </aside>
   </div>`;
   const amount = $('#amount');
@@ -553,8 +550,9 @@ function poolFacts(p) {
   </dl>`;
 }
 
-function heading(eyebrow, title) {
-  return `<div class="topline"><div><p class="eyebrow">${eyebrow}</p><h1 class="mk-h1">${title}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>`;
+/// A page's heading: its name, and an "i" when something needs explaining.
+function heading(title, explain = '') {
+  return `<div class="topline"><div><h1 class="mk-h1">${title}${explain ? tip(explain) : ''}</h1></div><button class="refresh" id="refresh" aria-label="Refresh"><span aria-hidden="true">↻</span><span class="refresh-word">Refresh</span></button></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +564,7 @@ function renderPools() {
   // pool share in a pool is a loop: neither is offered here.
   const assets = [...new Set([config.zecAsset, ...state.held.map((h) => h.asset)])]
     .filter((a) => !state.items.has(a) && !state.pools.some((p) => p.lp === a));
-  $('#view').innerHTML = `${heading('POOLS', 'Provide both sides,<br><em>earn every batch.</em>')}
+  $('#view').innerHTML = `${heading('Pools')}
   <section class="mk-list">${state.pools.length ? state.pools.map((p) => `
     <article class="mk-card mk-pool">
       <header><h3>${esc(name(p.a))} <span>/</span> ${esc(name(p.b))}</h3><span class="mk-pill">${(p.fee_bps / 100).toFixed(2)}%</span></header>
@@ -589,8 +587,7 @@ function renderPools() {
       </form>
     </article>`).join('') : `<div class="mk-empty"><p>${loaded ? 'No pools yet. Open the first one below.' : 'Reading the pools…'}</p></div>`}</section>
   <form class="mk-card mk-create" id="create-pool">
-    <h2>Open a pool</h2>
-    <p class="mk-fine">You set the first price by what you put in. A sliver of the first shares is locked for good so the pool can never be emptied and restarted at a different price.</p>
+    <h2>Open a pool${tip('What you put in sets the first price. A small part of the first shares is locked for good, so the pool can never be emptied and restarted at another price.')}</h2>
     <div class="mk-two">
       <label class="mk-field"><span>First asset</span><select name="a">${assets.map((a) => `<option value="${a}">${esc(name(a))} · ${fmt(balance(a), 4)}</option>`).join('')}</select></label>
       <label class="mk-field"><span>Amount</span><input name="amount_a" inputmode="decimal" autocomplete="off"></label>
@@ -719,9 +716,9 @@ function renderLaunchpad() {
   const launches = [...state.launches].sort((p, q) => order[p.state] - order[q.state] || q.closes_at_epoch - p.closes_at_epoch);
   const jade = config.launchpadUrl ? new URL(config.launchpadUrl) : null;
   const trading = state.curves.filter((c) => !c.graduated).length;
-  $('#view').innerHTML = `${heading('LAUNCHPAD', 'Everyone pays<br><em>the same price.</em>')}
-  ${jade ? `<div class="mk-empty mk-jade"><p><b>Pump-style launches live on Cave Jade.</b> Anyone makes a token; it trades at once on one curve for every token, each epoch at one price, and graduates into a locked pool that trades here. ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
-  <p class="mk-fine mk-lead">Below: fixed-price sales, where everyone who commits before the close pays the same price.</p>
+  $('#view').innerHTML = `${heading('Launchpad')}
+  ${jade ? `<div class="mk-empty mk-jade"><p><b>Bonding-curve launches are on Cave Jade.</b>${tip('Anyone can create a token. It trades at once on a bonding curve, at one price per epoch, and graduates into a locked pool that trades here.')} ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
+  <h2 class="mk-sub">Fixed-price sales${tip('Everyone who commits before the close pays the same price.')}</h2>
   <section class="mk-list">${launches.length ? launches.map(launchCard).join('') : `<div class="mk-empty"><p>${loaded ? 'No sales yet. Start the first one below.' : 'Reading the sales…'}</p></div>`}</section>
   ${createLaunchForm()}`;
   for (const l of launches) {
@@ -831,8 +828,8 @@ function bindCreateLaunch() {
 
 function renderOwed() {
   if (!identity) {
-    $('#view').innerHTML = `${heading('OWED TO YOU', 'Settled,<br><em>waiting for you.</em>')}
-    <div class="mk-empty"><p>What the market owes you is found with your key, and only with it — there is no way to look it up for an account. Open your wallet to see it.</p><button class="mk-act" id="owed-open">Open wallet →</button></div>`;
+    $('#view').innerHTML = `${heading('Owed', 'Swap proceeds, refunds, pool shares and sale allocations wait here until you collect them. They are found by IDs derived from your key; nobody else can look them up.')}
+    <div class="mk-empty"><p>Open your wallet to see what you are owed.</p><button class="mk-act" id="owed-open">Open wallet →</button></div>`;
     $('#owed-open').onclick = () => requireWallet();
     return;
   }
@@ -842,8 +839,7 @@ function renderOwed() {
     const key = `${c.kind || 'Owed'}\u0000${c.asset}`;
     byKind.set(key, (byKind.get(key) || 0n) + BigInt(c.amount));
   }
-  $('#view').innerHTML = `${heading('OWED TO YOU', 'Settled,<br><em>waiting for you.</em>')}
-  <p class="mk-fine mk-lead">Swap proceeds, refunds, pool shares and sale allocations are held by the ledger until you collect them. Only this wallet can find them — they are listed by ids derived from your key, and nobody else can ask for them.</p>
+  $('#view').innerHTML = `${heading('Owed', 'Swap proceeds, refunds, pool shares and sale allocations wait here until you collect them. They are found by IDs derived from your key; nobody else can look them up.')}
   ${state.owed.length ? `<section class="coins">${[...byKind].map(([k, v]) => { const [kind, a] = k.split('\u0000'); return `<div class="coin"><div><span>${esc(kind)}</span><b>${amt(v)} ${esc(name(a))}</b></div></div>`; }).join('')}</section>
   <button class="primary mk-act mk-collect" id="collect">Collect all ${state.owed.length} <span>→</span></button>`
     : `<div class="mk-empty"><p>${loaded ? 'Nothing owed right now. Orders settle at the end of the epoch they were placed in.' : 'Looking for what the market owes you…'}</p></div>`}
