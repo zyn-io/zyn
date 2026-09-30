@@ -48,7 +48,8 @@ export function claimSources(identity, limit, from = 0) {
   const me = identity.account;
   for (let n = from; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
-    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce)]) {
+    const lend = mk.lendSource(me, nonce);
+    for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.lotSource(lend)]) {
       out.push(...mk.claimIds(source).map(hex));
     }
   }
@@ -99,11 +100,13 @@ export async function recoverNonces(config, identity, { gap = RECOVERY_GAP } = {
       at.set(hex(mk.voucherTicketId(mk.voucherCommitment(me, nonce), 0)), n);
       const commitment = mk.depositCommitment(me, nonce);
       for (const a of bridged) at.set(hex(mk.depositKey(commitment, unhex(a))), n);
+      // A lending position (or the auction it became) is keyed by its source.
+      at.set(hex(mk.lendSource(me, nonce)), n);
     }
     const ids = [...at.keys()];
     // One page's questions at once: a restore should take seconds, not a minute.
     const asks = [];
-    for (const [method, field, size] of [['zyn_claims', 'id', 240], ['zyn_tickets', 'ticket', 500], ['zyn_waiting', 'key', 500]]) {
+    for (const [method, field, size] of [['zyn_claims', 'id', 240], ['zyn_tickets', 'ticket', 500], ['zyn_waiting', 'key', 500], ['zyn_lendPositions', 'id', 240]]) {
       for (let i = 0; i < ids.length; i += size) {
         asks.push(call(config, method, { ids: ids.slice(i, i + size).join(',') }).then((part) => (Array.isArray(part) ? part.map((row) => row[field]) : []), () => []));
       }
@@ -126,13 +129,16 @@ const CLAIM_KINDS = [
   ['listing', ['Sale proceeds', 'Listing', 'Listing']],
   ['curve-order', ['Curve trade filled', 'Curve trade refunded — the price moved past your floor', 'Curve trade']],
   ['curve', ['Creator payout', 'Creator payout', 'Creator payout']],
+  ['lend', ['Lending: shares, coins or collateral', 'Lending refund', 'Lending']],
+  ['lend-lot', ['Left over after liquidation', 'Collateral back after liquidation', 'Liquidation']],
 ];
 function claimKinds(identity, limit, from = 0) {
   const kinds = new Map();
   const me = identity.account;
   for (let n = from; n < limit; n++) {
     const nonce = mk.marketNonce(identity.secretKey, n);
-    const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce)];
+    const lend = mk.lendSource(me, nonce);
+    const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.lotSource(lend)];
     sources.forEach((source, i) => mk.claimIds(source).forEach((id, k) => kinds.set(hex(id), CLAIM_KINDS[i][1][k])));
   }
   return kinds;
@@ -405,4 +411,18 @@ export async function submitIntent(config, identity, intent) {
   const refused = /Refused\("([^"]*)"\)/.exec(String(result?.receipts || ''));
   if (refused) throw new Error(`The chain refused: ${refused[1]}`);
   return result;
+}
+
+/// This wallet's lending positions, and any that became auctions: asked by
+/// the ids only this wallet can derive, so nobody learns whose they are.
+export async function loadPositions(config, identity) {
+  const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
+  const ids = [];
+  for (let n = 0; n < count; n++) ids.push(hex(mk.lendSource(identity.account, mk.marketNonce(identity.secretKey, n))));
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 240) {
+    const part = await call(config, 'zyn_lendPositions', { ids: ids.slice(i, i + 240).join(',') }).catch(() => []);
+    if (Array.isArray(part)) rows.push(...part);
+  }
+  return rows;
 }

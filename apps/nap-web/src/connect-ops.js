@@ -127,6 +127,53 @@ async function namer(ctx, market) {
 
 const tokenText = (raw) => { const v = BigInt(raw) / WAD; return v.toLocaleString('en-US'); };
 
+// ---------------------------------------------------------------------------
+// Zyn Lend (objectvm/src/lend.rs; zyn-io/zyn-lend).
+// ---------------------------------------------------------------------------
+
+const pctText = (wadRate) => `${(Number(BigInt(wadRate) * 10_000n / WAD) / 100).toFixed(2)}%`;
+
+/// The lending markets, checked: a pool that does not parse is not offered.
+async function lendBook(ctx) {
+  const m = await ledger.call(ctx.config, 'zyn_lendMarkets');
+  const pools = (m.pools || []).filter((x) => isHex(x.asset) && isHex(x.receipt)
+    && ['cash', 'borrowed', 'supplied', 'shares', 'borrow_rate', 'supply_rate', 'utilization'].every((k) => isInt(x[k]))
+    && [x.max_ltv_bps, x.liquidation_bps, x.penalty_bps].every(Number.isSafeInteger));
+  const prices = Object.fromEntries(Object.entries(m.prices || {}).filter(([a, v]) => isHex(a) && isInt(v)).map(([a, v]) => [a, BigInt(v)]));
+  const name = await namer(ctx, await ledger.call(ctx.config, 'zyn_market'));
+  return { m, pools, prices, name };
+}
+
+function lendPool(book, asset, what) {
+  if (!isHex(asset)) throw bad(`${what} must be 64 hex characters`);
+  const pool = book.pools.find((x) => x.asset === asset);
+  if (!pool) throw bad(`${what}: that asset is not lent on this chain`);
+  return pool;
+}
+
+/// Dollars for an amount at a posted price, both WAD.
+const usdOf = (amount, price) => (price ? (amount * price) / WAD : null);
+const usdText = (v) => (v == null ? 'no price posted' : `$${(Number(v / (WAD / 100n)) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
+
+/// Health and the collateral price that liquidates, as the ledger will see it.
+function lendPreview(book, coll, collAmount, borrow, owed) {
+  const pc = book.prices[coll.asset], pb = book.prices[borrow.asset];
+  const cv = usdOf(collAmount, pc), dv = usdOf(owed, pb);
+  if (cv == null || dv == null) return { health: null, liquidation: null, allowed: false, cv, dv };
+  const allowed = dv * 10_000n <= cv * BigInt(coll.max_ltv_bps);
+  const health = dv > 0n ? Number((cv * BigInt(coll.liquidation_bps) * 100n) / (dv * 10_000n)) / 100 : null;
+  const liquidation = dv > 0n && collAmount > 0n ? (dv * 10_000n * WAD) / (collAmount * BigInt(coll.liquidation_bps)) : null;
+  return { health, liquidation, allowed, cv, dv };
+}
+
+async function ownPosition(ctx, id) {
+  if (!isHex(id)) throw bad('position must be 64 hex characters');
+  const p = (await ledger.loadPositions(ctx.config, ctx.identity)).find((x) => x.id === id);
+  if (!p) throw bad('This wallet has no position with that id');
+  if (p.state !== 'open') throw bad('That position is in a liquidation auction');
+  return p;
+}
+
 export const METHODS = {
   nap_connect: { kind: 'connect' },
   nap_session: { kind: 'session' },
@@ -347,6 +394,204 @@ export const METHODS = {
             trader: ctx.identity.account, pool: unhex(p.pool), sellA, amountIn, minOut, nonce: n, inputs, change,
           }));
           return { order: hex(mk.orderId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  // --- Zyn Lend ---------------------------------------------------------------
+
+  zyn_lendMarkets: { kind: 'public', run: async (ctx) => ledger.call(ctx.config, 'zyn_lendMarkets') },
+  zyn_lendPositions: { kind: 'read', run: async (ctx) => ({ positions: await ledger.loadPositions(ctx.config, ctx.identity) }) },
+
+  zyn_lendSupply: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const book = await lendBook(ctx);
+      const pool = lendPool(book, p.asset, 'asset');
+      const amount = amountOf(p.amount, 'amount');
+      const name = book.name(pool.asset);
+      await mustHold(ctx, pool.asset, amount, name);
+      return {
+        title: `Lend ${name}`,
+        danger: false,
+        rows: [
+          ['You lend', `${wadText(amount)} ${name}`],
+          ['Earning now', `${pctText(pool.supply_rate)} a year, changing as the pool is used`],
+          ['You receive', `l${name} shares, collected into this wallet`],
+          ['Pool lent out', pctText(pool.utilization)],
+        ],
+        note: 'If a borrower\'s collateral sells for less than their debt, the loss lowers every share in this pool. Withdrawing needs the coins to be free in the pool.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pool.asset), amount);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendSupplyIntent({ lender: ctx.identity.account, asset: unhex(pool.asset), amount, nonce: n, inputs, change }));
+          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendWithdraw: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const book = await lendBook(ctx);
+      const pool = lendPool(book, p.asset, 'asset');
+      const shares = amountOf(p.shares, 'shares');
+      const name = book.name(pool.asset);
+      await mustHold(ctx, pool.receipt, shares, `l${name}`);
+      const worth = BigInt(pool.shares) > 0n ? (shares * BigInt(pool.supplied)) / BigInt(pool.shares) : 0n;
+      if (worth > BigInt(pool.cash)) throw bad(`Only ${wadText(pool.cash)} ${name} is free in the pool right now; the rest is lent out`);
+      return {
+        title: `Withdraw ${name}`,
+        danger: false,
+        rows: [['You return', `${wadText(shares)} l${name}`], ['About', `${wadText(worth)} ${name}, collected into this wallet`]],
+        note: 'The exact amount is what the shares are worth when this is applied.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pool.receipt), shares);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendWithdrawIntent({ lender: ctx.identity.account, asset: unhex(pool.asset), shares, nonce: n, inputs, change }));
+          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendOpen: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const book = await lendBook(ctx);
+      const coll = lendPool(book, p.collateral, 'collateral');
+      const borrow = lendPool(book, p.borrow, 'borrow');
+      if (coll.asset === borrow.asset) throw bad('Collateral and the borrowed asset must differ');
+      const collAmount = amountOf(p.collateralAmount, 'collateralAmount');
+      const amount = amountOf(p.amount, 'amount');
+      const [cn, bn] = [book.name(coll.asset), book.name(borrow.asset)];
+      await mustHold(ctx, coll.asset, collAmount, cn);
+      if (amount > BigInt(borrow.cash)) throw bad(`The ${bn} pool has ${wadText(borrow.cash)} free to borrow`);
+      const v = lendPreview(book, coll, collAmount, borrow, amount);
+      if (v.health == null) throw bad('No price is posted for this pair yet; borrowing opens once one is');
+      if (!v.allowed) throw bad(`That is over the ${coll.max_ltv_bps / 100}% most ${cn} collateral may borrow`);
+      return {
+        title: `Borrow ${bn} against ${cn}`,
+        danger: v.health < 1.5,
+        rows: [
+          ['You lock', `${wadText(collAmount)} ${cn} (${usdText(v.cv)})`],
+          ['You borrow', `${wadText(amount)} ${bn} (${usdText(v.dv)})`],
+          ['Health', `${v.health.toFixed(2)} — liquidated below 1.00`],
+          ['Liquidated if', `${cn} falls to ${usdText(v.liquidation)}`],
+          ['Borrow rate', `${pctText(borrow.borrow_rate)} a year, changing as the pool is used`],
+          ['If liquidated', `your ${cn} is auctioned to cover the debt plus ${coll.penalty_bps / 100}%; what is left comes back to you`],
+        ],
+        note: 'The position is private: only this wallet can find it. Prices are posted by the sequencer; if Zyn\'s own pool for this pair disagrees with them, the chain refuses the borrow.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(coll.asset), collAmount);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendOpenIntent({
+            borrower: ctx.identity.account, collateralAsset: unhex(coll.asset), collateral: collAmount, borrowAsset: unhex(borrow.asset), amount, nonce: n, inputs, change,
+          }));
+          return { position: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendRepay: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const pos = await ownPosition(ctx, p.position);
+      const book = await lendBook(ctx);
+      const name = book.name(pos.borrow_asset);
+      const owed = BigInt(pos.owed);
+      // "all" pays what is owed plus a little for interest until it lands;
+      // the chain returns anything over.
+      const amount = p.amount === 'all' ? owed + owed / 1000n + 1n : amountOf(p.amount, 'amount');
+      await mustHold(ctx, pos.borrow_asset, amount, name);
+      return {
+        title: `Repay ${name}`,
+        danger: false,
+        rows: [['You pay', `${wadText(amount)} ${name}`], ['Owed now', `${wadText(owed)} ${name}`]],
+        note: 'Anything paid over what is owed comes back to this wallet.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pos.borrow_asset), amount);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRepayIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, nonce: n, inputs, change }));
+          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendAddCollateral: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const pos = await ownPosition(ctx, p.position);
+      const book = await lendBook(ctx);
+      const name = book.name(pos.collateral_asset);
+      const amount = amountOf(p.amount, 'amount');
+      await mustHold(ctx, pos.collateral_asset, amount, name);
+      return {
+        title: `Add ${name} collateral`,
+        danger: false,
+        rows: [['You add', `${wadText(amount)} ${name}`], ['Collateral after', `${wadText(BigInt(pos.collateral) + amount)} ${name}`]],
+        note: 'More collateral moves the liquidation price further away.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pos.collateral_asset), amount);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.lendAddCollateralIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, inputs, change }));
+          return { position: pos.id };
+        },
+      };
+    },
+  },
+
+  zyn_lendRemoveCollateral: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const pos = await ownPosition(ctx, p.position);
+      const book = await lendBook(ctx);
+      const name = book.name(pos.collateral_asset);
+      const amount = p.amount === 'all' ? BigInt(pos.collateral) : amountOf(p.amount, 'amount');
+      if (amount > BigInt(pos.collateral)) throw bad('More than the position holds');
+      return {
+        title: `Take out ${name} collateral`,
+        danger: BigInt(pos.owed) > 0n,
+        rows: [['You take out', `${wadText(amount)} ${name}`], ['Debt', `${wadText(pos.owed)} ${book.name(pos.borrow_asset)}`]],
+        note: 'The chain refuses this if it would leave the position over its maximum.',
+        run: async () => {
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRemoveCollateralIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, nonce: n }));
+          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendBid: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      if (!isHex(p.lot)) throw bad('lot must be 64 hex characters');
+      const book = await lendBook(ctx);
+      const lot = (book.m.lots || []).find((x) => x.lot === p.lot);
+      if (!lot || !isHex(lot.borrow_asset) || !isHex(lot.collateral_asset) || !isInt(lot.price) || !isInt(lot.collateral)) throw bad('No such auction lot');
+      const pay = amountOf(p.pay, 'pay');
+      const [cn, bn] = [book.name(lot.collateral_asset), book.name(lot.borrow_asset)];
+      await mustHold(ctx, lot.borrow_asset, pay, bn);
+      const price = BigInt(lot.price);
+      const most = price > 0n ? (pay * WAD) / price : 0n;
+      return {
+        title: `Bid for ${cn} in a liquidation auction`,
+        danger: false,
+        rows: [
+          ['You pay up to', `${wadText(pay)} ${bn}`],
+          ['Price this epoch', `${wadText(price)} ${bn} per ${cn}`],
+          ['You get up to', `${wadText(most)} ${cn}`],
+        ],
+        note: 'Every bid this epoch pays the same price. If bids want more than the lot has, each gets a share and the rest of the payment comes back.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(lot.borrow_asset), pay);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendBidIntent({ bidder: ctx.identity.account, lot: unhex(lot.lot), pay, nonce: n, inputs, change }));
+          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
         },
       };
     },

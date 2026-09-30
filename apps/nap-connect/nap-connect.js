@@ -33,6 +33,16 @@
 //     memo becomes this wallet's tickets, §145; ask fresh:true right before
 //     each burn, so two burns never share a code)
 //     (the sale, §144; collection defaults to Collection Z)
+//   zyn_lendMarkets → pools, rates, posted prices, auction lots (public)
+//   zyn_lendPositions → {positions}  (this wallet's, found by ids only it derives)
+//   zyn_lendSupply {asset, amount}, zyn_lendWithdraw {asset, shares},
+//   zyn_lendOpen {collateral, collateralAmount, borrow, amount} → {position},
+//   zyn_lendRepay {position, amount | 'all'},
+//   zyn_lendAddCollateral {position, amount},
+//   zyn_lendRemoveCollateral {position, amount | 'all'},
+//   zyn_lendBid {lot, pay}
+//     (Zyn Lend; assets are ledger addresses, amounts decimal strings. What
+//     lending pays arrives as claims — collect with zyn_collect.)
 //
 // Call `request` from a click. Opening Nap's window is a popup, and browsers
 // only allow a popup that a click asked for.
