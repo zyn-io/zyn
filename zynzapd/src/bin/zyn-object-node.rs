@@ -102,6 +102,73 @@ fn save(dir: &str, chain: u32, vm: &ObjectVm) {
     }
 }
 
+/// What anchoring needs to survive a restart: the lineage, the sealed epochs
+/// waiting on an anchor, the signatures gathered and the proposal in flight.
+/// Without them a restart while an anchor is on its way leaves the node unable
+/// to accept it when Zcash confirms, and anchoring stops (§157.15).
+fn save_anchoring(dir: &std::path::Path, n: &Node<ObjectVm>) {
+    let Ok(store) = zyn::store::FileStore::new(dir) else {
+        eprintln!("zyn-object-node: cannot open the anchoring store");
+        return;
+    };
+    let chain = n.state().chain_id();
+    let saved = store
+        .save_ledger(n.ledger())
+        .and_then(|_| store.save_certificates(chain, n.pending_certificates()))
+        .and_then(|_| store.save_pending(chain, n.pending()))
+        .and_then(|_| match n.proposal() {
+            Some((a, covered)) => store.save_proposal(chain, &a, covered),
+            None => store.clear_proposal(chain),
+        });
+    if let Err(e) = saved {
+        eprintln!("zyn-object-node: anchoring save failed: {e:?}");
+    }
+}
+
+/// The other half of [`save_anchoring`], for a node just resumed from `vm`.
+fn restore_anchoring(dir: &str, chain: u32, vm: ObjectVm, policy: EpochPolicy, now: u64) -> Node<ObjectVm> {
+    let fail = |what: &str| -> ! {
+        eprintln!("zyn-object-node: {what}");
+        std::process::exit(1);
+    };
+    let store = zyn::store::FileStore::new(dir).unwrap_or_else(|e| fail(&format!("cannot open the anchoring store: {e:?}")));
+    let ledger = store
+        .load_ledger(chain)
+        .unwrap_or_else(|e| fail(&format!("the anchor ledger on disk is unreadable: {e:?}")))
+        .unwrap_or_else(|| zyn::anchor::Ledger::new(chain));
+    if let Some(last) = ledger.last() {
+        // A sealed epoch N leaves the state in epoch N+1.
+        if last.checkpoint.epoch >= vm.epoch {
+            fail(&format!(
+                "the saved state (epoch {}) is older than the last anchor (epoch {}) — a stale state file; refusing to re-anchor settled history",
+                vm.epoch, last.checkpoint.epoch
+            ));
+        }
+    }
+    let mut node = Node::resume_with_ledger(vm, policy, Economics::flat(1), ledger, now);
+    let pending = store
+        .load_pending::<ObjectVm>(chain)
+        .unwrap_or_else(|e| fail(&format!("the pending epochs on disk are unreadable: {e:?}")));
+    if !pending.is_empty() {
+        eprintln!("zyn-object-node: {} sealed epoch(s) waiting on an anchor, restored from disk", pending.len());
+    }
+    node.restore_pending(pending);
+    for c in store.load_certificates(chain) {
+        node.submit_certificate(c);
+    }
+    match store.load_proposal(chain) {
+        Ok(Some((a, covered))) => match node.restore_proposal(a, covered) {
+            Ok(()) => eprintln!("zyn-object-node: anchor proposal for epoch {} restored; waiting for Zcash to confirm it", a.checkpoint.epoch),
+            // The settler still finds it by id among the pending epochs, or
+            // says plainly that it cannot.
+            Err(e) => eprintln!("zyn-object-node: the anchor proposal on disk (epoch {}) cannot be restored: {e}", a.checkpoint.epoch),
+        },
+        Ok(None) => {}
+        Err(e) => fail(&format!("the proposal on disk is unreadable: {e:?}")),
+    }
+    node
+}
+
 fn published_path(dir: &str, chain: u32) -> std::path::PathBuf {
     std::path::Path::new(dir).join(format!("chain-{}.published", chain))
 }
@@ -2528,7 +2595,11 @@ fn main() {
                 v.seq,
                 v.live.len()
             );
-            Node::resume(v, policy, Economics::flat(1), now_secs())
+            if anchoring.is_some() {
+                restore_anchoring(&dir, chain, v, policy, now_secs())
+            } else {
+                Node::resume(v, policy, Economics::flat(1), now_secs())
+            }
         }
         None => {
             eprintln!("zyn-object-node: new chain {}", chain);
@@ -2760,6 +2831,7 @@ fn main() {
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
         let dir = dir.clone();
+        let anchoring_on = anchoring.is_some();
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
             let mut n = node.lock().unwrap();
@@ -2817,6 +2889,9 @@ fn main() {
                     hex(&n.state().state_root())
                 );
                 save(&dir, chain, n.state());
+                if anchoring_on {
+                    save_anchoring(std::path::Path::new(&dir), &n);
+                }
             }
         });
     }
@@ -3025,7 +3100,12 @@ fn main() {
                     floor.store(backing_zat(owed), std::sync::atomic::Ordering::SeqCst);
                 }
             }
-            match settler.poll_once(&node, now_secs()) {
+            let polled = settler.poll_once(&node, now_secs());
+            // A pass can propose, confirm or drop epochs: keep disk in step.
+            if let Ok(n) = node.lock() {
+                save_anchoring(&data_dir, &n);
+            }
+            match polled {
                 Ok(Some(c)) => {
                     eprintln!(
                         "zyn-object-node: anchor for epoch {} CONFIRMED on Zcash in {} at height {} — root {} is now something anyone can check",
@@ -3414,6 +3494,31 @@ mod signed_door {
             sync: Arc::new(Mutex::new(SyncProgress::default())),
             dir: dir.to_string_lossy().to_string(),
         }
+    }
+
+    /// 30 Sep: a restart while an anchor was in flight lost the epochs it
+    /// covered, and the node could never accept it when Zcash confirmed it.
+    #[test]
+    fn anchoring_survives_a_restart() {
+        let r = rig("anchoring");
+        let policy = EpochPolicy { intents_per_epoch: 64, epochs_per_anchor: u64::MAX, max_seconds_per_epoch: 3600, max_seconds_per_anchor: u64::MAX };
+        let mut n = Node::new(CHAIN, objectvm::Limits { max_io: 8 }, policy, Economics::flat(1)).with_manual_anchoring();
+        // Epochs sealed on the clock, as the node does while lending is listed.
+        n.seal_on_clock(3600).unwrap();
+        n.seal_on_clock(7200).unwrap();
+        let a = n.propose_anchor(7200).unwrap();
+        n.seal_on_clock(10800).unwrap(); // sealed while the anchor is in flight
+        save_anchoring(std::path::Path::new(&r.dir), &n);
+        let back = restore_anchoring(&r.dir, CHAIN, n.state().clone(), policy, 5);
+        assert_eq!(back.proposal(), Some((a, 2)), "the proposal in flight, over the epochs it covered");
+        assert_eq!(back.pending().len(), 3);
+        let mut back = back;
+        assert_eq!(back.confirm_anchor(a.id(), None, 6).unwrap(), a);
+        assert_eq!(back.pending().len(), 1);
+        // And the lineage: the next anchor builds on the one just accepted.
+        save_anchoring(std::path::Path::new(&r.dir), &back);
+        let mut again = restore_anchoring(&r.dir, CHAIN, back.state().clone(), policy, 7);
+        assert_eq!(again.propose_anchor(8).unwrap().previous_root, a.checkpoint.state_root);
     }
 
     impl Rig {

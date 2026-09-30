@@ -6617,4 +6617,19 @@ Zecathon (Private Markets, due 28 Oct) and Colosseum (~15 Oct).
 | 157.4 | **The operator posts prices and the time** (`LendPrices`, Coinbase + CoinGecko median, 2% spread, every 30 s). Interest accrues to that timestamp — the ledger has no clock. New borrowing in a pair pauses when Zyn's pool disagrees with the posted prices by more than 5%. A stated trust assumption | ✅ |
 | 157.5 | **Everything lending pays is a claim**, found by ids only the holder derives (`lend_source`, `lot_source`) and collected by Nap. Positions are private from the public, visible to the sequencer (tier 2) | ✅ |
 | 157.6 | **Live on testnet 212 (30 Sep):** pools listed at node start (`ZYN_LEND_ASSETS`), prices posting, anchored and replica-verified; first real loans (SOL.zy against ETH.zy) opened through Nap from zyn-lend.pages.dev (`tests/lend.e2e.mjs`, 9/9) | ✅ |
-| 157.7 | **Not yet:** a ZEC.zy pool with depth (needs TAZ), ZEC pairs' Zyn pools, a backstop reserve for the tail, mainnet | ⏳ |
+| 157.7 | **Not yet:** a ZEC.zy pool with depth (needs TAZ), ZEC pairs' Zyn pools, mainnet | ⏳ |
+
+"The real thing is the engine to make sure 1. economy lowest risk possible
+2. privacy 3. we have revenue" → "protocol owned is ok for now. close economic
+risk and privacy gap".
+
+| # | Decision | |
+|---|---|---|
+| 157.8 | **Guarded mode, switched on by the first `LendLimits` (op 48, operator).** Journals from before it replay to the same roots; the state root's lend section grows (`objectvm.lend.v2`) only once it is on. Saved state is MARKET09 | ✅ |
+| 157.9 | **Caps and a floor.** Per asset: a collateral cap and a borrow cap (whole tokens) and a minimum loan in USD, so no pool takes more than its tail can sell and no loan is too small to be worth liquidating. Testnet: SOL 100/50/$1, ETH 2/1/$1, ZEC 5/2/$1 (`ZYN_LEND_LIMITS`) | ✅ |
+| 157.10 | **Prices must be fresh and confirmed.** Borrowing and collateral removal stop when the last posted price is over 12 epochs old; a move over 15% is held, not used, until a second post within 2% confirms it. Liquidation waits on a held price too, so one bad feed tick neither opens nor closes positions | ✅ |
+| 157.11 | **Losses are booked when they become likely, not when they land.** At lot open the shortfall the floor price implies is taken from insurance first, then written off the pool; whatever the lot recovers goes back to lenders, then insurance, then the owner | ✅ |
+| 157.12 | **Nothing sits unsold.** A lot still open after 37 epochs goes into its pair's Zyn pool batch as a protocol order, minimum 70% of the posted rate; what it fetches settles the lot like any bid | ✅ |
+| 157.13 | **Revenue is protocol-owned for now.** The 10% reserve fills insurance up to 5% of each pool's debt; only above that does it go to the ZYN pot | ✅ |
+| 157.14 | **What the public sees is a snapshot, rounded.** `zyn_lendMarkets` answers from the state at the last seal (the node seals on its clock while lending is listed), with pool sizes to 3 significant figures, utilization to 0.1% and rates computed from that, a share price instead of a share count, and no count of positions. ZynScan names every holder's lending intent just "Lending". One supply or loan can no longer be read off the next answer | ✅ |
+| 157.15 | **The object node keeps anchoring across a restart.** It never saved its pending epochs, proposal or lineage; with lending listed it seals on its clock, so anchors run back to back and a restart (the guarded deploy, 30 Sep) landed with one in flight: the node rebuilt a proposal over every pending epoch, which is not the anchor Zcash confirmed, and stopped anchoring. Now the node saves all four (`chain-N.anchors`, `pending-N-*.sealed`, the proposal, certificates) and restores them; a lost proposal is found by id among the oldest pending epochs; and an anchor sent *before* a restart whose epochs are gone is settled as a transaction, not accepted — it stays on Zcash for anyone to check, and the next anchor finalises past it. One sent by the running process still fails closed | ✅ |

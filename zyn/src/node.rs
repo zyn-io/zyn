@@ -619,15 +619,21 @@ impl<V: MicrochainVm> Node<V> {
 
     /// The anchor over everything sealed since the last one, not yet accepted.
     fn build_anchor(&self) -> Option<Anchor> {
-        let newest = self.pending.last()?.checkpoint;
+        self.build_anchor_over(self.pending.len())
+    }
+
+    /// The anchor over the oldest `covered` pending epochs.
+    fn build_anchor_over(&self, covered: usize) -> Option<Anchor> {
+        let window = self.pending.get(..covered)?;
+        let newest = window.last()?.checkpoint;
         // Claims come from the sealed epochs themselves, so an anchor over a
         // window that opened while another was in flight attests exactly what
         // those epochs covered and not the counters' running totals.
         Some(Anchor {
             checkpoint: newest,
             previous_root: self.ledger.head_root(),
-            epochs: self.pending.len() as u64,
-            actions: self.pending.iter().map(|s| s.actions).sum(),
+            epochs: covered as u64,
+            actions: window.iter().map(|s| s.actions).sum(),
         })
     }
 
@@ -738,6 +744,31 @@ impl<V: MicrochainVm> Node<V> {
         // repeatedly (A124).
         self.anchored_at = now;
         Some(a)
+    }
+
+    /// Rebuild a proposal a restarted node lost, given the id Zcash carries.
+    ///
+    /// Epochs keep sealing while an anchor is in flight, so after a restart
+    /// the pending window is longer than the one the lost proposal covered;
+    /// rebuilding over all of it yields a different id and the confirmed
+    /// anchor could never be accepted. The proposal covered some oldest run
+    /// of pending epochs, so the one whose anchor has this id is it.
+    pub fn recover_proposal(&mut self, id: AnchorId, now: u64) -> bool {
+        if self.proposed.is_some() {
+            return false;
+        }
+        let Some(covered) = (1..=self.pending.len())
+            .find(|&n| self.build_anchor_over(n).is_some_and(|a| a.id() == id))
+        else {
+            return false;
+        };
+        let Some(a) = self.build_anchor_over(covered) else { return false };
+        if self.ledger.check(&a).is_err() {
+            return false;
+        }
+        self.proposed = Some((a, covered));
+        self.anchored_at = now;
+        true
     }
 
     /// Whether the configured cadence says an anchor is due.

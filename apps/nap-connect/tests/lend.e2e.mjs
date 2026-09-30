@@ -48,7 +48,11 @@ ok(true, `connected: ${(await page.textContent('#connect')).trim()}`);
 
 // Approve whatever Nap shows next, and say what it showed.
 async function approve(label, check) {
-  await popup.waitForSelector('#yes', { timeout: 60000 });
+  await popup.waitForSelector('#yes', { timeout: 60000 }).catch(async (e) => {
+    console.log(`${label}: Nap shows ${(await popup.textContent('body').catch(() => '(closed)'))?.replace(/\s+/g, ' ').slice(0, 300)}`);
+    console.log(`${label}: the app says ${await toast()}`);
+    throw e;
+  });
   const shown = (await popup.textContent('main')).replace(/\s+/g, ' ');
   ok(check(shown), `${label}: Nap shows ${shown.slice(0, 140)}…`);
   await popup.screenshot({ path: `${S}/lend-approve-${label}.png` });

@@ -436,6 +436,10 @@ pub struct AnchorSettler<C: Chain, B: Builder> {
     /// The vault holds a single note and anchors serialise on it, so a repair
     /// waits its turn behind whatever is in flight rather than failing.
     reanchor_pending: Vec<Anchor>,
+    /// Anchors this process built and sent. One that is final on Zcash but
+    /// not among these was sent before a restart; if the node can no longer
+    /// reproduce it, its epochs were lost with that process (§157.15).
+    sent_here: Vec<[u8; 32]>,
 }
 
 impl<C: Chain, B: Builder> AnchorSettler<C, B> {
@@ -459,6 +463,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             awaiting: None,
             lineage_lost: Vec::new(),
             reanchor_pending: Vec::new(),
+            sent_here: Vec::new(),
         })
     }
 
@@ -681,9 +686,35 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
                     let anchor_id = self.ledger.entries[i].nonce;
                     let mut n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
                     // A restarted node may have lost the proposal; rebuilding
-                    // it over the same pending epochs yields the same id.
-                    if n.proposed().is_none() {
+                    // it over the same pending epochs yields the same id —
+                    // the oldest run of them, since more may have sealed since.
+                    // A proposal made since the restart, over all of them, is
+                    // not the one on Zcash and nothing has carried it yet.
+                    let sent_here = self.sent_here.contains(&anchor_id);
+                    if !sent_here && n.proposed().is_some_and(|a| a.id() != anchor_id) {
+                        n.withdraw_proposal();
+                    }
+                    if n.proposed().is_none() && !n.recover_proposal(anchor_id, now) {
                         n.propose_anchor(now);
+                    }
+                    if !sent_here && n.proposed().map(|a| a.id()) != Some(anchor_id) {
+                        // Sent before a restart that lost its epochs. It is
+                        // on Zcash for anyone to check against the journal;
+                        // the node cannot accept it, so nothing it covered is
+                        // released by it — the next anchor, over what the
+                        // node does hold, finalises past it. Waiting instead
+                        // (for a confirmation or for signatures) stops
+                        // anchoring for good.
+                        drop(n);
+                        eprintln!(
+                            "zynzapd: anchor {} is final on Zcash but was sent before a restart that lost its epochs; its transaction is settled, and the next anchor finalises past it",
+                            hex(&anchor_id)
+                        );
+                        let (pool, spent) = (self.ledger.entries[i].pool, self.ledger.entries[i].spent.clone());
+                        self.builder.settled(pool, &spent);
+                        self.ledger.entries[i].status = Status::Confirmed;
+                        changed = true;
+                        continue;
                     }
                     // In signer mode a root is not released until the set has
                     // reproduced it. The anchor is on Zcash regardless; only
@@ -817,6 +848,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             pool: built.pool,
         });
         self.save()?;
+        self.sent_here.push(anchor.id());
         let hex_tx: String = built.bytes.iter().map(|b| format!("{:02x}", b)).collect();
         match self.chain.broadcast(&hex_tx) {
             Ok(txid) => eprintln!(
@@ -1342,6 +1374,80 @@ mod tests {
             .expect("confirmed after restart");
         assert_eq!(c.anchor.id(), entry.nonce);
         assert_eq!(restarted.lock().unwrap().ledger().len(), 1);
+    }
+
+    /// 30 Sep: an anchor in flight, the node restarted, and it kept sealing on
+    /// its clock. It proposed over every pending epoch, which is not the
+    /// anchor on Zcash, and refused to confirm that anchor for ever.
+    fn restart_with(n: &Node<SwapState>, pending: bool) -> SharedOf<SwapState> {
+        let mut fresh = Node::resume(n.state().clone(), *n.policy(), Economics::flat(1), 0).with_manual_anchoring();
+        if pending {
+            fresh.restore_pending(n.pending().to_vec());
+        }
+        // Another epoch seals, and the timer proposes over what is pending.
+        for _ in 0..10 {
+            let d = Intent::next_deposit(fresh.state(), [1u8; 32], XZEC, Fixed::whole(1), [0u8; 32]);
+            fresh.submit_operator(d, 0);
+        }
+        fresh.propose_anchor(0);
+        Arc::new(Mutex::new(fresh))
+    }
+
+    #[test]
+    fn a_restarted_node_that_sealed_more_still_confirms_the_anchor_in_flight() {
+        let dir = tmp("restart-more");
+        let chain = FakeChain::default();
+        chain.0.borrow_mut().tip = 100;
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 10, &dir, 1).unwrap();
+        let shared = node();
+        s.poll_once(&shared, 0).unwrap();
+        let entry = s.in_flight().unwrap().clone();
+        let restarted = restart_with(&shared.lock().unwrap(), true);
+        assert_eq!(restarted.lock().unwrap().pending().len(), 2);
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 10, &dir, 1).unwrap();
+        chain.0.borrow_mut().depth.insert(entry.id.clone(), 10);
+        let c = s.poll_once(&restarted, 5).unwrap().expect("confirmed after restart");
+        assert_eq!(c.anchor.id(), entry.nonce);
+        assert_eq!(c.anchor.epochs, 1, "exactly the epochs it covered");
+        assert_eq!(restarted.lock().unwrap().pending().len(), 1, "the later epoch waits for the next anchor");
+    }
+
+    #[test]
+    fn an_anchor_whose_epochs_a_restart_lost_does_not_stop_anchoring() {
+        let dir = tmp("restart-lost");
+        let chain = FakeChain::default();
+        chain.0.borrow_mut().tip = 100;
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 10, &dir, 1).unwrap();
+        let shared = node();
+        s.poll_once(&shared, 0).unwrap();
+        let entry = s.in_flight().unwrap().clone();
+        let restarted = restart_with(&shared.lock().unwrap(), false);
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 10, &dir, 1).unwrap();
+        chain.0.borrow_mut().depth.insert(entry.id.clone(), 10);
+        assert_eq!(s.poll_once(&restarted, 5).unwrap(), None, "not accepted: the node cannot reproduce it");
+        assert_eq!(s.ledger().entries[0].status, Status::Confirmed, "its transaction is settled on Zcash");
+        assert_eq!(s.builder.settled, vec![(ValuePool::Ironwood, vec![7, 9])], "and its notes are spent");
+        let next = s.in_flight().expect("anchoring goes on");
+        assert_ne!(next.nonce, entry.nonce);
+        assert!(restarted.lock().unwrap().ledger().is_empty(), "nothing was accepted on its account");
+    }
+
+    #[test]
+    fn an_anchor_this_process_sent_is_never_waved_through() {
+        let dir = tmp("sent-here");
+        let chain = FakeChain::default();
+        chain.0.borrow_mut().tip = 100;
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 10, &dir, 1).unwrap();
+        let shared = node();
+        s.poll_once(&shared, 0).unwrap();
+        let entry = s.in_flight().unwrap().clone();
+        // The node loses it without the settler restarting: that is not a
+        // restart, so it stays an error rather than something to step past.
+        shared.lock().unwrap().withdraw_proposal();
+        let lost = restart_with(&shared.lock().unwrap(), false);
+        chain.0.borrow_mut().depth.insert(entry.id.clone(), 10);
+        assert!(s.poll_once(&lost, 5).is_err());
+        assert_eq!(s.ledger().entries[0].status, Status::Broadcast);
     }
 
     #[test]
