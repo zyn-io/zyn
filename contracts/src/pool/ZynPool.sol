@@ -17,6 +17,8 @@ import {ZynPoolVerifier} from "./ZynPoolVerifier.sol";
 ///   the relayer's fee. The pool pays out.
 /// - `insertExit`: the authority adds a note for a private withdrawal from
 ///   Zyn, only while the pool holds enough for every note outstanding.
+/// - `sweep`: the authority moves *free* backing (beyond what every live
+///   note is owed) to a sibling pool whose exits need it, or to the vault.
 /// - `setAuthority`: the authority hands itself on (testnet starts with the
 ///   bridge's key; the custodians take over — §158.4).
 ///
@@ -43,6 +45,7 @@ contract ZynPool is ZynPoolVerifier {
     event ToZyn(uint256 indexed nullifierHash, bytes32 code);
     event ToAddress(uint256 indexed nullifierHash);
     event Authority(address next);
+    event Sweep(address to, uint256 amount);
 
     error NotCanonical();
     error WrongAmount();
@@ -151,6 +154,15 @@ contract ZynPool is ZynPoolVerifier {
         (uint32 index, uint256 root) = _insert(commitment);
         live += 1;
         emit Exit(commitment, index, root);
+    }
+
+    /// Free backing only: what stays covers every live note in this pool.
+    function sweep(address payable to, uint256 amount) external {
+        if (msg.sender != authority) revert NotAuthority();
+        if (address(this).balance < denomination * live + amount) revert Underfunded();
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert PayFailed();
+        emit Sweep(to, amount);
     }
 
     function setAuthority(address next) external {

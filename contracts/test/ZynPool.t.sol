@@ -114,6 +114,23 @@ contract ZynPoolTest is Test {
         assertEq(pool.authority(), address(0xB0B));
     }
 
+    function test_sweep_moves_only_free_backing() public {
+        _deposits(); // 3 live notes, 3 sizes held: nothing free
+        vm.prank(authority);
+        vm.expectRevert(ZynPool.Underfunded.selector);
+        pool.sweep(payable(address(0xBEEF)), 1);
+        pool.spendToZyn(vm.parseJsonBytes(fx, ".toZynProof"), _u(".root"), _u(".nullifierHash"), vm.parseJsonBytes32(fx, ".code"));
+        // One size is now free (it backs the bridged asset, not a note here).
+        vm.expectRevert(ZynPool.NotAuthority.selector);
+        pool.sweep(payable(address(this)), SIZE);
+        vm.prank(authority);
+        pool.sweep(payable(address(0xBEEF)), SIZE);
+        assertEq(address(0xBEEF).balance, SIZE);
+        vm.prank(authority);
+        vm.expectRevert(ZynPool.Underfunded.selector);
+        pool.sweep(payable(address(0xBEEF)), 1);
+    }
+
     function test_deposit_gas() public {
         uint256 g = gasleft();
         pool.deposit{value: SIZE}(1);
