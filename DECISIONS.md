@@ -6645,3 +6645,29 @@ code, 30 Sep.
 | 157.18 | **Still true, and said:** the operator sees every position (tier 2); a lot in auction shows its collateral, debt and opening epoch, because bidders must — never whose it was; a loan that is a large share of a thin pool still moves the rounded figures. Privacy of amounts grows with the pools | ✅ |
 | 157.19 | **Repaying everything closes the position.** Nap's "all" sends the repay and then takes all the collateral out, under one approval that shows what comes back; the ledger already lets a debt-free position empty without a price check and removes it once empty. The e2e closes the position it opens, so it runs again on the same wallet | ✅ |
 | 157.20 | **Liquidation is shown as a replay, not staged on testnet.** Only bridge-issued assets can be lent, so a live liquidation on cue would need a false price for a real asset on a public chain. `zyn-lend-demo` runs objectvm — the node's code — through a scripted ETH fall and records each epoch as Bob's wallet sees it and as the node publishes it (`zynzapd::lend_view`, now shared by the node and the demo, so the demo cannot show less than the node does). The app plays it at `lend.zyn-network.com/#/demo`, labelled: prices made up, rules real. A test keeps the recording true to the ledger and checks no public view names Bob or his position | ✅ |
+
+## §158 — Bridges: a transparent channel and a private channel (30 Sep 2026)
+
+"The bridge in/out process is not private… everyone will see the in and out
+from the Solana or eth address… if we can provide solution, make it private
+as well" → "zk stuff on sol and eth are rather advanced enough" → "Or route
+through BTC layer 2 like Mezo" → "So we will build transparent channel and
+private channel at the same time".
+
+What leaks today (§146, §154, §155): the depositor's SOL/ETH address, the exact
+amount and time; payouts go to the revealed address for the exact amount on
+the next poll; so an address in and an address out match by amount and time.
+BTC deposit coins are spent together with the vault's change. ZEC is shielded
+end to end and is not affected.
+
+| # | Decision | |
+|---|---|---|
+| 158.1 | **Two channels.** Transparent: the §146/§154/§155 bridges as they are — any amount, paid in minutes, labelled as public. Private: a pool per chain, fixed sizes, a zero-knowledge proof each way. SOL and ETH mint the same SOL.zy/ETH.zy on both channels (same custodians, equivalent backing; coins blend once on Zyn). Private BTC goes through Mezo and is its own asset, because Mezo's peg is a second trust layer | 🟡 |
+| 158.2 | **The pool is a vault of notes.** Per asset and size (SOL 0.1/1/10, ETH 0.01/0.1/1, BTC-on-Mezo 0.001/0.01/0.1), a Merkle tree (depth 20) of `Poseidon(nullifier, secret)` commitments. Anyone deposits a note of that size from any address | 🟡 |
+| 158.3 | **Two ways to spend a note, each a Groth16 proof** of "one of the notes in a known root, with this nullifier": *to Zyn* — the proof binds a §146.3 deposit code; the pool marks the nullifier, keeps the funds, and the bridge commits the deposit on Zyn (reference: the nullifier hash); *to an address* — the proof binds recipient, relayer and fee; the pool pays out. Which deposit it was is not revealed | 🟡 |
+| 158.4 | **Exits go into the pool, not to an address.** A private withdrawal on Zyn names a note commitment as its destination; the custodians' vault authority (FROST 2-of-3 on Solana, ZynSigners/Safe on EVM) inserts it; the holder spends it to any address whenever they choose. The operator never learns the payout address | 🟡 |
+| 158.5 | **Circuit in Rust:** arkworks Groth16 on BN254 with `light-poseidon` (circom-compatible parameters, matching Solana's Poseidon syscall), MIT/Apache throughout — circomlib is GPL-3.0. Proved in Nap via WebAssembly, like the Zcash core. Verified with `groth16-solana` and a Solidity verifier | 🟡 |
+| 158.6 | **A relayer submits spends** so a fresh address needs no gas; it takes a fee from the payout and learns the recipient, never the note. Anyone may submit their own | 🟡 |
+| 158.7 | **Association sets designed in** (a second root the proof can bind, Privacy Pools style), not enforced on testnet | 🟡 |
+| 158.8 | **Order:** Solana devnet (Colosseum, ~15 Oct) → one EVM contract on Sepolia and Mezo testnet (Zecathon, 28 Oct) → mainnet only after an audit, a trusted-setup ceremony (testnet keys come from a one-party setup and say so) and legal advice | 🟡 |
+| 158.9 | **Native BTC stays transparent**, labelled. Its payouts should stop co-spending deposit coins, and exits may go to Silent Payment addresses (BIP-352) | 🟡 |
