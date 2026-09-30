@@ -6601,3 +6601,20 @@ now is below; §156.6 is the switch.
 | 156.6 | **The switch**, when librustzcash and Zebra ship NU7: bump the crates (workspace and `zec-core`), check `BranchId::Nu7` is `0x77190AD9` and `Envelope::next` accepts it, upgrade Zebra, redeploy `zyn-object-node` and `zyn-lightd` on both hosts with confirmations ×3, rebuild the wasm and deploy Nap web, resubmit the extension and phone apps early (reviews take days). RUNBOOK "NU7" | ⏳ |
 | 156.8 | **The branch id is ZIP 259's `0x77190AD9`** (found 28 Sep while reading Zakura). ZIP 254 (`0x77190AD8`) was withdrawn; ZIP 259 (draft, 15 Sep 2026) replaces it and sets the heights on 5 Oct (testnet) and 20 Oct (mainnet). The check in 156.1 was never affected — it compares the libraries' branch with Zebra's — but the constant turns on the 120-block expiry, the ×3 wallet depth and the "That is NU7" message after the switch. Corrected in source and in Nap web's wasm; the hosts pick it up with the switch's redeploy | ✅ |
 | 156.7 | **Not decided here**: Collection Z's sale terms count blocks (claim window 16,128, notice 1,152). After NU7 they would last a third as long. Keeping their length in time means republishing the terms ×3 before the sale opens — the user's call | open |
+
+## §157 — Zyn Lend: private lending on the object ledger (30 Sep 2026)
+
+"what if a lending protocol" → "the pairs will be ZEC-ETH-SOL, protocol venue
+on Zyn, collateral one borrow another, lend all 3" → "make new repo … it's ok to
+be open source, as long as it enforce running on Zyn" → "build it". For the
+Zecathon (Private Markets, due 28 Oct) and Colosseum (~15 Oct).
+
+| # | Decision | |
+|---|---|---|
+| 157.1 | **The rules are open source, the venue is Zyn.** `zyn-io/zyn-lend` (MIT/Apache) holds the lending crate and the app; `objectvm/src/lend.rs` holds the state and joins it to notes, claims and the seal. What ties it to Zyn is not a licence but what it stands on: private notes, the batch, the bridged assets, the pools the price check uses | ✅ |
+| 157.2 | **Three pools, six directions.** ZEC.zy, ETH.zy, SOL.zy; one collateral and one borrowed asset per position. Risk: ZEC 55/60/8, ETH 75/80/5, SOL 65/70/7 (max LTV / liquidated at / penalty, %). Rate: two-slope utilization curve, 0% → 4%/yr at 80% used → +75%/yr; 10% of interest to the ZYN pot | ✅ |
+| 157.3 | **Liquidation is a Dutch auction in batches (§12f), not a sale into a pool.** A lot opens at 102% of the posted rate and falls a point per epoch to 85%; every bid in an epoch pays one price, pro rata when oversubscribed; a lot sells only what covers debt and penalty and returns the rest; bidders never see whose position it was | ✅ |
+| 157.4 | **The operator posts prices and the time** (`LendPrices`, Coinbase + CoinGecko median, 2% spread, every 30 s). Interest accrues to that timestamp — the ledger has no clock. New borrowing in a pair pauses when Zyn's pool disagrees with the posted prices by more than 5%. A stated trust assumption | ✅ |
+| 157.5 | **Everything lending pays is a claim**, found by ids only the holder derives (`lend_source`, `lot_source`) and collected by Nap. Positions are private from the public, visible to the sequencer (tier 2) | ✅ |
+| 157.6 | **Live on testnet 212 (30 Sep):** pools listed at node start (`ZYN_LEND_ASSETS`), prices posting, anchored and replica-verified; first real loans (SOL.zy against ETH.zy) opened through Nap from zyn-lend.pages.dev (`tests/lend.e2e.mjs`, 9/9) | ✅ |
+| 157.7 | **Not yet:** a ZEC.zy pool with depth (needs TAZ), ZEC pairs' Zyn pools, a backstop reserve for the tail, mainnet | ⏳ |

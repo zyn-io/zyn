@@ -115,10 +115,14 @@ async function oneCurve(ctx, token) {
 /// its symbol, else its short address.
 async function namer(ctx, market) {
   const bridged = await ledger.loadBridged(ctx.config);
+  // Lending receipts, named from the asset they are a share of.
+  const receipts = new Map([[ctx.config.zecAsset, 'ZEC.zy'], ...bridged.map((x) => [x.asset, ledger.bridgedName(ctx.config, x)])]
+    .map(([u, n]) => [hex(mk.lendAsset(unhex(u))), `l${n}`]));
   return (a) => {
     if (a === ctx.config.zecAsset) return 'ZEC.zy';
     const b = bridged.find((x) => x.asset === a);
     if (b) return ledger.bridgedName(ctx.config, b);
+    if (receipts.has(a)) return receipts.get(a);
     const c = (market.curves || []).find((x) => x.token === a);
     const meta = c && isHex(c.meta) ? mk.decodeMeta(c.meta) : null;
     return meta?.symbol || `${a.slice(0, 8)}…`;

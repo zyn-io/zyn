@@ -55,6 +55,7 @@ const W = 10n ** 18n;
 const show = (raw) => { const v = BigInt(raw); const f = (v % W).toString().padStart(18, '0').replace(/0+$/, ''); return `${v / W}${f ? `.${f}` : ''}`; };
 const names = { [config.zecAsset]: 'ZEC.zy' };
 for (const b of await ledger.loadBridged(config).catch(() => [])) names[b.asset] = ledger.bridgedName(config, b);
+{ const mk0 = await import('./src/market.js'); for (const [a, n] of Object.entries({ ...names })) names[obj.hex(mk0.lendAsset(obj.unhex(a)))] = `l${n}`; }
 const nameOf = (a) => names[a] || `${a.slice(0, 8)}…`;
 
 switch (cmd) {

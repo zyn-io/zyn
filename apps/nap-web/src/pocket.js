@@ -5,7 +5,7 @@
 // rules as the full wallet (app.js), which stays the reference for each.
 import { x25519 } from '@noble/curves/ed25519.js';
 import { checkedEpoch, hex, parseAmount, unhex } from './core.js';
-import { bridgedAsset, claimIntent, decodeMeta, exitCommitment, fund, quoteAlone, redeem, swapIntent, withSlippage } from './market.js';
+import { bridgedAsset, claimIntent, decodeMeta, exitCommitment, fund, lendAsset, quoteAlone, redeem, swapIntent, withSlippage } from './market.js';
 import { bridgeMemo, bridgedName, call, claimWaiting, loadBridged, loadOwed, loadWaiting, PER_CLAIM, submitFresh, submitIntent } from './ledger.js';
 import * as btc from './bitcoin.js';
 import { solanaKey } from './solana.js';
@@ -93,6 +93,11 @@ export async function loadPocket(config, identity) {
     const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
     for (const p of market.pools || []) {
       if (/^[0-9a-f]{64}$/.test(p.lp)) { names.set(p.lp, `LP ${nameOf(p.a)}/${nameOf(p.b)}`); origin.set(p.lp, 'Pool share'); }
+    }
+    // Lending receipts (Zyn Lend): derived from the asset lent, so named
+    // from it without asking — lSOL.zy is a share of the SOL.zy pool.
+    for (const [a, n] of [...names]) {
+      if (/^[0-9a-f]{64}$/.test(a) && !n.startsWith('LP ')) { const r = hex(lendAsset(unhex(a))); names.set(r, `l${n}`); origin.set(r, 'Lending share'); }
     }
   } catch { /* names only */ }
 
