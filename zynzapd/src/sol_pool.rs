@@ -181,11 +181,14 @@ pub enum SpendTo {
 }
 
 /// A pool's notes in order, rebuilt from its `deposit` and `exit` events
-/// (each carries the note and its index), kept in a file between calls.
+/// (each carries the note and its index), and the nullifier hashes of its
+/// spends — so a wallet restored from its phrase can tell which of its notes
+/// are spent. Kept in a file between calls.
 #[derive(Default)]
 pub struct Leaves {
     pub newest: Option<String>,
     pub leaves: Vec<String>,
+    pub spent: Vec<String>,
 }
 
 impl Leaves {
@@ -196,13 +199,14 @@ impl Leaves {
             .map(|v| Leaves {
                 newest: v["newest"].as_str().map(String::from),
                 leaves: v["leaves"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect(),
+                spent: v["spent"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect(),
             })
             .unwrap_or_default()
     }
 
     pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, json!({ "newest": self.newest, "leaves": self.leaves }).to_string()).map_err(|e| e.to_string())?;
+        std::fs::write(&tmp, json!({ "newest": self.newest, "leaves": self.leaves, "spent": self.spent }).to_string()).map_err(|e| e.to_string())?;
         std::fs::rename(&tmp, path).map_err(|e| e.to_string())
     }
 

@@ -86,18 +86,42 @@ function mark(config, identity, commitment, state, extra = {}) {
 }
 
 export const info = (config) => ledger.call(config, 'zyn_poolInfo');
-const leaves = async (config, size) => (await ledger.call(config, 'zyn_poolLeaves', { size: String(size) })).leaves;
+const pools = async (config, size) => ledger.call(config, 'zyn_poolLeaves', { size: String(size) });
+const leaves = async (config, size) => (await pools(config, size)).leaves;
+const SPENT = new Set(['to zyn', 'sent', 'spent']);
+/// How far past the last note found a restored wallet keeps looking.
+const GAP = 20;
 
-/// This wallet's notes, each with where it stands: `new` (not in its pool
-/// yet), `in pool`, or spent (`to zyn`, `sent`).
+/// This wallet's notes, each with where it stands: `new` or `burned` (not in
+/// its pool yet), `in pool` (unspent: into Zyn or to an address), or spent.
+/// Found again from the phrase alone: every index is tried against every
+/// pool's notes, and a note whose nullifier hash a spend published is spent.
 export async function notes(config, identity) {
   const b = book(config, identity);
-  const bySize = new Map();
-  for (const n of b.notes) {
-    if (n.state === 'to zyn' || n.state === 'sent') continue;
-    if (!bySize.has(n.size)) bySize.set(n.size, new Set(await leaves(config, n.size).catch(() => [])));
-    if (bySize.get(n.size).has(n.commitment)) n.state = 'in pool';
+  const seen = new Map();
+  for (const size of SIZES) {
+    const r = await pools(config, size).catch(() => ({ leaves: [], spent: [] }));
+    seen.set(size, { leaves: new Set(r.leaves), spent: new Set(r.spent || []) });
   }
+  let last = b.next - 1;
+  for (let i = 0; i <= Math.max(b.next, last + 1) + GAP; i++) {
+    const n = await secrets(config, identity, i);
+    for (const size of SIZES) {
+      const p = seen.get(size);
+      if (!p.leaves.has(n.commitment)) continue;
+      last = Math.max(last, i);
+      let note = b.notes.find((x) => x.commitment === n.commitment);
+      if (!note) {
+        note = { i, size, kind: 'note', commitment: n.commitment, state: 'in pool', at: null };
+        b.notes.push(note);
+      }
+      if (p.spent.has(n.nullifier_hash)) {
+        if (!SPENT.has(note.state)) note.state = 'spent';
+      } else note.state = 'in pool';
+    }
+  }
+  b.next = Math.max(b.next, last + 1);
+  b.notes.sort((x, y) => x.i - y.i);
   save(config, identity, b);
   return b.notes.map(({ i, size, kind, commitment, state, at, signature }) => ({ i, size, kind, commitment, state, at, signature }));
 }
@@ -110,17 +134,19 @@ async function proveFor(config, identity, note, binding) {
   return { m, p: JSON.parse(m.prove(JSON.stringify(ls), s.nullifier, s.secret, binding, randomHex())), count: ls.length };
 }
 
-function own(config, identity, commitment, kind) {
-  const n = book(config, identity).notes.find((x) => x.commitment === commitment && x.kind === kind);
+/// A note of this wallet's that can still be spent — whichever way: a note
+/// deposited on Solana can go to an address, and an exit note into Zyn.
+function own(config, identity, commitment) {
+  const n = book(config, identity).notes.find((x) => x.commitment === commitment);
   if (!n) throw new Error('No such note in this wallet');
-  if (n.state === 'to zyn' || n.state === 'sent') throw new Error('That note is already spent');
+  if (SPENT.has(n.state)) throw new Error('That note is already spent');
   return n;
 }
 
 /// A deposited note, into Zyn: a proof bound to this wallet's deposit code,
 /// submitted by the relayer. Arrives as SOL.zy of the note's size.
 export async function toZyn(config, identity, commitment) {
-  const note = own(config, identity, commitment, 'in');
+  const note = own(config, identity, commitment);
   const code = await bridges.depositCode(config, identity);
   const m = await core();
   const { p } = await proveFor(config, identity, note, m.binding_to_zyn(code));
@@ -147,7 +173,7 @@ export async function withdraw(config, identity, held, size, bps) {
 /// An exit note, to any Solana address, through the relayer (which takes its
 /// fee from the note).
 export async function sendOut(config, identity, commitment, to) {
-  const note = own(config, identity, commitment, 'out');
+  const note = own(config, identity, commitment);
   const recipient = b58decode(String(to).trim());
   if (recipient.length !== 32) throw new Error('That is not a Solana address');
   const i = await info(config);

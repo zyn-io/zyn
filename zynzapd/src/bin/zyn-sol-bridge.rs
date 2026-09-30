@@ -599,8 +599,9 @@ impl Relay {
     }
 
     /// A pool's notes in order, brought up to date from its logs.
-    fn leaves(&self, pool: &str) -> Result<Vec<String>, String> {
-        let path = self.state.join(format!("pool-leaves-{pool}.json"));
+    fn leaves(&self, pool: &str) -> Result<sol_pool::Leaves, String> {
+        // v2: with spent nullifier hashes (a v1 file is rebuilt from the start).
+        let path = self.state.join(format!("pool-leaves-v2-{pool}.json"));
         let mut l = sol_pool::Leaves::load(&path);
         let mut rows: Vec<Value> = Vec::new();
         let mut before: Option<String> = None;
@@ -632,6 +633,11 @@ impl Relay {
                 if ev.len() == 4 && (ev[0] == b"deposit" || ev[0] == b"exit") {
                     let index = u32::from_le_bytes(ev[2].as_slice().try_into().map_err(|_| "a malformed pool event")?) as usize;
                     l.place(index, hex(&ev[1]))?;
+                } else if ev.len() >= 2 && (ev[0] == b"to_zyn" || ev[0] == b"to_address") {
+                    let nh = hex(&ev[1]);
+                    if !l.spent.contains(&nh) {
+                        l.spent.push(nh);
+                    }
                 }
             }
         }
@@ -639,7 +645,7 @@ impl Relay {
             l.newest = newest;
             l.save(&path)?;
         }
-        Ok(l.leaves)
+        Ok(l)
     }
 
     fn handle(&self, body: &Value) -> Result<Value, String> {
@@ -652,7 +658,8 @@ impl Relay {
             })),
             "zyn_poolLeaves" => {
                 let (size, pool) = self.pool(size_of(&body["size"]))?;
-                Ok(json!({ "size": size, "leaves": self.leaves(&pool)? }))
+                let l = self.leaves(&pool)?;
+                Ok(json!({ "size": size, "leaves": l.leaves, "spent": l.spent }))
             }
             "zyn_poolRelay" => {
                 let (_, pool) = self.pool(size_of(&body["size"]))?;

@@ -154,6 +154,20 @@ await page.waitForFunction(() => /Withdrawal recorded|refused|error/i.test(docum
 ok(/Withdrawal recorded/.test(await toast()), `withdraw: ${await toast()}`);
 await page.screenshot({ path: `${S}/lend-bridge.png`, fullPage: true });
 
+// The private channel: sizes for SOL, and this wallet's notes with their
+// states (the lender wallet has made private deposits and exits).
+await page.check('input[name="br-mode"][value="in"]');
+await page.check('input[name="br-channel"][value="private"]');
+await page.check('#br-asset input[value="sol"]');
+await page.waitForSelector('input[name="br-size"]');
+ok(/Deposit 1 SOL with Phantom/.test(await page.textContent('#br-go')), `private deposit offers the pool sizes: ${await page.textContent('#br-go')}`);
+await page.waitForFunction(() => document.querySelectorAll('.br-note').length > 0, null, { timeout: 60000 }).catch(() => {});
+const notesText = (await page.textContent('#br-note-list').catch(() => '')).replace(/\s+/g, ' ');
+ok(/spent|sent|moved into Zyn/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120)}`);
+await page.check('#br-asset input[value="eth"]');
+ok(/comes with the EVM pool/.test(await page.textContent('#br-body')), 'private ETH says when it comes');
+await page.screenshot({ path: `${S}/lend-bridge-private.png`, fullPage: true });
+
 await b.close();
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

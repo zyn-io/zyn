@@ -787,9 +787,9 @@ export const METHODS = {
     kind: 'write',
     async prepare(ctx, p) {
       if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
-      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment && x.kind === 'in');
+      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment);
       if (!n) throw bad('No such note in this wallet');
-      if (n.state !== 'in pool') throw bad(n.state === 'to zyn' ? 'That note is already in Zyn' : 'That note is not in its pool yet; try again once its deposit is confirmed');
+      if (n.state !== 'in pool') throw bad(['to zyn', 'sent', 'spent'].includes(n.state) ? 'That note is already spent' : 'That note is not in its pool yet; try again once it is confirmed');
       const sol = n.size / 1e9;
       return {
         title: `Move ${sol} SOL into Zyn`,
@@ -833,9 +833,9 @@ export const METHODS = {
       if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
       const to = String(p?.to || '').trim();
       if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to)) throw bad('That is not a Solana address');
-      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment && x.kind === 'out');
+      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment);
       if (!n) throw bad('No such note in this wallet');
-      if (n.state !== 'in pool') throw bad(n.state === 'sent' ? 'That note is already sent' : 'The bridge has not put that note into the pool yet');
+      if (n.state !== 'in pool') throw bad(['to zyn', 'sent', 'spent'].includes(n.state) ? 'That note is already spent' : 'That note is not in its pool yet');
       const i = await pool.info(ctx.config);
       const sol = n.size / 1e9;
       return {
