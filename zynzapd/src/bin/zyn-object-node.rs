@@ -2605,6 +2605,37 @@ fn main() {
                 Some((sym.trim().to_uppercase(), <[u8; 32]>::try_from(unhex(h.trim())?).ok()?))
             })
             .collect();
+        // List what is named and not listed yet, at the design's risk
+        // (zyn_lend::params). Listing again would only reset the risk, so an
+        // asset already listed is left as it is.
+        for (sym, asset) in &assets {
+            let risk = match sym.as_str() {
+                "ZEC" => objectvm::zyn_lend::params::ZEC,
+                "ETH" => objectvm::zyn_lend::params::ETH,
+                "SOL" => objectvm::zyn_lend::params::SOL,
+                other => {
+                    eprintln!("zyn-object-node: no lending risk defined for {other}; not listed");
+                    continue;
+                }
+            };
+            let listed = node.lock().map(|n| n.state().market.lend.listed.contains_key(asset)).unwrap_or(true);
+            if listed {
+                continue;
+            }
+            let op = Op::LendList {
+                program: zyn_vm::program::lend_list(),
+                asset: *asset,
+                max_ltv_bps: risk.max_ltv_bps,
+                liquidation_bps: risk.liquidation_bps,
+                penalty_bps: risk.penalty_bps,
+            };
+            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                match r {
+                    objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: listing {sym} for lending refused: {why}"),
+                    _ => eprintln!("zyn-object-node: {sym} listed for lending"),
+                }
+            }
+        }
         let every: u64 = std::env::var("ZYN_LEND_PRICE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(5);
         eprintln!("zyn-object-node: lending prices every {every}s for {}", assets.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(", "));
         let node = Arc::clone(&node);
