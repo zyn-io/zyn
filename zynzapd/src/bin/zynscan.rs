@@ -167,6 +167,25 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // Like a ZEC deposit: which asset arrived, not how much or for whom.
         Op::DepositCommitted { asset, .. } => ("Bridge deposit", true, json!({ "asset": hex(asset) })),
         Op::ClaimDeposit { asset, .. } => ("Bridge deposit claimed", false, json!({ "asset": hex(asset) })),
+        // Lending: which pool or pair, as a swap shows its pool; never how
+        // much, never whose. Listings and prices are the operator's, public.
+        Op::LendList { asset, max_ltv_bps, liquidation_bps, penalty_bps, .. } => (
+            "Lending pool listed",
+            true,
+            json!({ "asset": hex(asset), "max_ltv_bps": max_ltv_bps, "liquidation_bps": liquidation_bps, "penalty_bps": penalty_bps }),
+        ),
+        Op::LendPrices { at, prices, .. } => (
+            "Lending prices",
+            true,
+            json!({ "at": at, "prices": prices.iter().map(|(a, p)| json!({ "asset": hex(a), "usd": p.0.to_string() })).collect::<Vec<_>>() }),
+        ),
+        Op::LendSupply { asset, .. } => ("Lent", false, json!({ "asset": hex(asset) })),
+        Op::LendWithdraw { asset, .. } => ("Lending withdrawn", false, json!({ "asset": hex(asset) })),
+        Op::LendOpen { collateral_asset, borrow_asset, .. } => ("Borrowed", false, json!({ "collateral": hex(collateral_asset), "borrowed": hex(borrow_asset) })),
+        Op::LendRepay { .. } => ("Loan repaid", false, Value::Null),
+        Op::LendAddCollateral { .. } | Op::LendRemoveCollateral { .. } => ("Collateral changed", false, Value::Null),
+        // A lot is public (it has to be, to be bid on); its owner is not.
+        Op::LendBid { lot, .. } => ("Auction bid", false, json!({ "lot": hex(lot) })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }

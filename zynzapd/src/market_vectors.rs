@@ -258,7 +258,64 @@ pub fn vectors() -> Vec<(&'static str, String)> {
     .into_iter()
     .chain(sale_vectors(&input))
     .chain(bridge_vectors())
+    .chain(lend_vectors(&input))
     .collect()
+}
+
+/// Zyn Lend: its programs, derived ids and the seven intents a holder signs.
+fn lend_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
+    use objectvm::lend::{lend_asset, lend_source, lot_source};
+    let enc = |op: &Op| hex(&ObjectVm::encode_intent(op));
+    let position = lend_source(&OWNER, &NONCE);
+    vec![
+        ("program_lend_supply", hex(&program::lend_supply().0)),
+        ("program_lend_withdraw", hex(&program::lend_withdraw().0)),
+        ("program_lend_open", hex(&program::lend_open().0)),
+        ("program_lend_repay", hex(&program::lend_repay().0)),
+        ("program_lend_collateral", hex(&program::lend_collateral().0)),
+        ("program_lend_bid", hex(&program::lend_bid().0)),
+        ("lend_asset", hex(&lend_asset(&ZEC))),
+        ("lend_source", hex(&position)),
+        ("lot_source", hex(&lot_source(&position))),
+        (
+            "lend_supply",
+            enc(&Op::LendSupply { lender: OWNER, program: program::lend_supply(), asset: ZEC, amount: Fixed::whole(3), nonce: NONCE, inputs: input.to_vec(), change: vec![change()] }),
+        ),
+        (
+            "lend_withdraw",
+            enc(&Op::LendWithdraw { lender: OWNER, program: program::lend_withdraw(), asset: ZEC, shares: Fixed::whole(3), nonce: NONCE, inputs: input.to_vec(), change: vec![change()] }),
+        ),
+        (
+            "lend_open",
+            enc(&Op::LendOpen {
+                borrower: OWNER,
+                program: program::lend_open(),
+                collateral_asset: ZEC,
+                collateral: Fixed::whole(5),
+                borrow_asset: TOKEN,
+                amount: Fixed::whole(1),
+                nonce: NONCE,
+                inputs: input.to_vec(),
+                change: vec![change()],
+            }),
+        ),
+        (
+            "lend_repay",
+            enc(&Op::LendRepay { borrower: OWNER, program: program::lend_repay(), position, amount: Fixed::whole(1), nonce: NONCE, inputs: input.to_vec(), change: vec![change()] }),
+        ),
+        (
+            "lend_add_collateral",
+            enc(&Op::LendAddCollateral { borrower: OWNER, program: program::lend_collateral(), position, amount: Fixed::whole(1), inputs: input.to_vec(), change: vec![change()] }),
+        ),
+        (
+            "lend_remove_collateral",
+            enc(&Op::LendRemoveCollateral { borrower: OWNER, program: program::lend_collateral(), position, amount: Fixed::whole(1), nonce: NONCE }),
+        ),
+        (
+            "lend_bid",
+            enc(&Op::LendBid { bidder: OWNER, program: program::lend_bid(), lot: lot_source(&position), pay: Fixed::whole(1), nonce: NONCE, inputs: input.to_vec(), change: vec![change()] }),
+        ),
+    ]
 }
 
 /// Collection Z's lottery (DECISIONS §144): ids, leaves, a proof and the

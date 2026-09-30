@@ -49,9 +49,15 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['saleTickets', 'sale-tickets'],
   ['saleClaim', 'sale-claim'],
   ['saleMint', 'sale-mint'],
+  ['lendSupply', 'lend-supply'],
+  ['lendWithdraw', 'lend-withdraw'],
+  ['lendOpen', 'lend-open'],
+  ['lendRepay', 'lend-repay'],
+  ['lendCollateral', 'lend-collateral'],
+  ['lendBid', 'lend-bid'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -368,6 +374,48 @@ export const depositKey = (commitment, asset) => id('objectvm.deposit-claim.v1',
 export const exitCommitment = (address, salt) => keccak_256(concatBytes(address, salt));
 export const claimDepositIntent = (o) => concatBytes(
   new Uint8Array([TAG.claimDeposit]), o.owner, prog('claim'), o.secret, o.asset, outputs([o.output]),
+);
+
+// ---- Zyn Lend (objectvm/src/lend.rs) ----------------------------------------
+//
+// Everything lending pays — receipt shares, withdrawals, borrowed coins,
+// auction fills, refunds — is a claim under `lendSource(owner, nonce)` (k 0,
+// and k 1 for a refund), collected like any other. A position's id is the
+// source of the intent that opened it; what a liquidation leaves is claimable
+// under `lotSource(position)`.
+
+/// The receipt asset for lending `underlying`: lZEC, lETH, lSOL.
+export const lendAsset = (underlying) => id('objectvm.lend.v1', underlying);
+export const lendSource = (owner, nonce) => id('objectvm.lend-src.v1', owner, nonce);
+export const lotSource = (position) => id('objectvm.lend-lot.v1', position);
+
+export const lendSupplyIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendSupply]), o.lender, prog('lendSupply'), o.asset, i128Bytes(o.amount), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+
+export const lendWithdrawIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendWithdraw]), o.lender, prog('lendWithdraw'), o.asset, i128Bytes(o.shares), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+
+export const lendOpenIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendOpen]), o.borrower, prog('lendOpen'), o.collateralAsset, i128Bytes(o.collateral),
+  o.borrowAsset, i128Bytes(o.amount), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+
+export const lendRepayIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendRepay]), o.borrower, prog('lendRepay'), o.position, i128Bytes(o.amount), o.nonce, inputs(o.inputs), outputs(o.change),
+);
+
+export const lendAddCollateralIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendAddCollateral]), o.borrower, prog('lendCollateral'), o.position, i128Bytes(o.amount), inputs(o.inputs), outputs(o.change),
+);
+
+export const lendRemoveCollateralIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendRemoveCollateral]), o.borrower, prog('lendCollateral'), o.position, i128Bytes(o.amount), o.nonce,
+);
+
+export const lendBidIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendBid]), o.bidder, prog('lendBid'), o.lot, i128Bytes(o.pay), o.nonce, inputs(o.inputs), outputs(o.change),
 );
 
 export const itemAsset = (collection, serial) => deriveAddress(ADDRESS_SCOPE_V1, te.encode('item'), [collection, u32be(serial)]);

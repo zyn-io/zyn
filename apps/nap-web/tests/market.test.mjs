@@ -195,3 +195,21 @@ test('bridged assets beside ZEC: ids, the deposit commitment, the claim and the 
   assert.equal(hex(m.claimDepositIntent({ owner: OWNER, secret: NONCE, asset: sol, output })), v.claim_deposit);
 });
 
+
+test('Zyn Lend: programs, ids and every holder intent match the ledger byte for byte', () => {
+  for (const [k, name] of [['lendSupply', 'supply'], ['lendWithdraw', 'withdraw'], ['lendOpen', 'open'], ['lendRepay', 'repay'], ['lendCollateral', 'collateral'], ['lendBid', 'bid']]) {
+    assert.equal(m.MARKET_PROGRAM[k], v[`program_lend_${name}`], k);
+  }
+  assert.equal(hex(m.lendAsset(ZEC)), v.lend_asset);
+  const position = m.lendSource(OWNER, NONCE);
+  assert.equal(hex(position), v.lend_source);
+  assert.equal(hex(m.lotSource(position)), v.lot_source);
+  const common = { nonce: NONCE, inputs, change };
+  assert.equal(hex(m.lendSupplyIntent({ lender: OWNER, asset: ZEC, amount: W(3), ...common })), v.lend_supply);
+  assert.equal(hex(m.lendWithdrawIntent({ lender: OWNER, asset: ZEC, shares: W(3), ...common })), v.lend_withdraw);
+  assert.equal(hex(m.lendOpenIntent({ borrower: OWNER, collateralAsset: ZEC, collateral: W(5), borrowAsset: TOKEN, amount: W(1), ...common })), v.lend_open);
+  assert.equal(hex(m.lendRepayIntent({ borrower: OWNER, position, amount: W(1), ...common })), v.lend_repay);
+  assert.equal(hex(m.lendAddCollateralIntent({ borrower: OWNER, position, amount: W(1), inputs, change })), v.lend_add_collateral);
+  assert.equal(hex(m.lendRemoveCollateralIntent({ borrower: OWNER, position, amount: W(1), nonce: NONCE })), v.lend_remove_collateral);
+  assert.equal(hex(m.lendBidIntent({ bidder: OWNER, lot: m.lotSource(position), pay: W(1), ...common })), v.lend_bid);
+});

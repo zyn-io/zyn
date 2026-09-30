@@ -864,6 +864,30 @@ fn handle(
             let stats = HISTORY.get().and_then(|h| h.lock().ok()).map(|h| h.stats(now_secs())).unwrap_or(serde_json::json!([]));
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", stats)
         }
+        // Zyn Lend, public: pools, rates, posted prices and open auction lots
+        // (a lot never names whose position it was).
+        "zyn_lendMarkets" => {
+            let n = node.lock().unwrap();
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", lend_markets_json(n.state()))
+        }
+        // Positions by id. An id is `lend_source(owner, nonce)`, which only
+        // its owner can derive, so asking reveals nothing to anyone else.
+        "zyn_lendPositions" => {
+            let Some(list) = field(body, "ids") else {
+                return err("no ids");
+            };
+            let n = node.lock().unwrap();
+            let mut rows = Vec::new();
+            for id in list.split(',').filter(|s| !s.is_empty()).take(256) {
+                let Some(key) = unhex(id).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                    return err("an id is not 32 hex bytes");
+                };
+                if let Some(v) = lend_position_json(n.state(), &key) {
+                    rows.push(v);
+                }
+            }
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
         "zyn_market" => {
             let n = node.lock().unwrap();
             format!(
@@ -1391,8 +1415,102 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_lendMarkets, zyn_lendPositions, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
     )
+}
+
+/// A pool's public figures for the lending app.
+fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
+    use objectvm::lend::{lend_asset, lot_source, Lend};
+    let l = &s.market.lend;
+    let pools: Vec<serde_json::Value> = l
+        .listed
+        .iter()
+        .map(|(a, x)| {
+            let p = &x.pool;
+            serde_json::json!({
+                "asset": hex(a),
+                "receipt": hex(&lend_asset(a)),
+                "cash": p.cash.to_string(),
+                "borrowed": p.debt().unwrap_or(0).to_string(),
+                "supplied": p.value().unwrap_or(0).to_string(),
+                "shares": p.supply_shares.to_string(),
+                "borrow_index": p.borrow_index.to_string(),
+                "utilization": p.utilization().unwrap_or(0).to_string(),
+                "borrow_rate": p.borrow_rate(&objectvm::zyn_lend::CURVE).unwrap_or(0).to_string(),
+                "supply_rate": p.supply_rate(&objectvm::zyn_lend::CURVE).unwrap_or(0).to_string(),
+                "max_ltv_bps": x.risk.max_ltv_bps,
+                "liquidation_bps": x.risk.liquidation_bps,
+                "penalty_bps": x.risk.penalty_bps,
+            })
+        })
+        .collect();
+    let prices: serde_json::Map<String, serde_json::Value> =
+        l.prices.iter().map(|(a, p)| (hex(a), serde_json::Value::String(p.0.to_string()))).collect();
+    let lots: Vec<serde_json::Value> = l
+        .lots
+        .iter()
+        .map(|(pos, lot)| {
+            let owed = l.listed.get(&lot.borrow_asset).and_then(|x| x.pool.owed(lot.debt_shares.0).ok()).unwrap_or(0);
+            serde_json::json!({
+                "lot": hex(&lot_source(pos)),
+                "collateral_asset": hex(&lot.collateral_asset),
+                "collateral": lot.collateral.0.to_string(),
+                "borrow_asset": hex(&lot.borrow_asset),
+                "owed": owed.to_string(),
+                "proceeds": lot.proceeds.0.to_string(),
+                "price": Lend::lot_price(lot, s.epoch).unwrap_or(0).to_string(),
+                "opened": lot.opened,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "epoch": s.epoch,
+        "time": l.time,
+        "prices": prices,
+        "pools": pools,
+        "lots": lots,
+        "positions": l.positions.len(),
+    })
+}
+
+/// One position, or the auction it became, for its owner.
+fn lend_position_json(s: &ObjectVm, id: &[u8; 32]) -> Option<serde_json::Value> {
+    use objectvm::lend::lot_source;
+    let l = &s.market.lend;
+    if let Some(p) = l.positions.get(id) {
+        let pool = &l.listed.get(&p.borrow_asset)?.pool;
+        let owed = pool.owed(p.debt_shares.0).ok()?;
+        let risk = l.listed.get(&p.collateral_asset)?.risk;
+        let price = |a: &[u8; 32]| l.prices.get(a).map(|x| x.0);
+        let health = match (price(&p.collateral_asset), price(&p.borrow_asset)) {
+            (Some(pc), Some(pb)) => {
+                let cv = objectvm::zyn_lend::position::value(p.collateral.0, pc).ok()?;
+                let dv = objectvm::zyn_lend::position::debt_value(owed, pb).ok()?;
+                objectvm::zyn_lend::position::health(cv, dv, &risk).ok()?.map(|h| h.to_string())
+            }
+            _ => None,
+        };
+        return Some(serde_json::json!({
+            "id": hex(id),
+            "state": "open",
+            "collateral_asset": hex(&p.collateral_asset),
+            "collateral": p.collateral.0.to_string(),
+            "borrow_asset": hex(&p.borrow_asset),
+            "owed": owed.to_string(),
+            "health": health,
+        }));
+    }
+    let lot = l.lots.get(id)?;
+    Some(serde_json::json!({
+        "id": hex(id),
+        "state": "auction",
+        "lot": hex(&lot_source(id)),
+        "collateral_asset": hex(&lot.collateral_asset),
+        "collateral": lot.collateral.0.to_string(),
+        "borrow_asset": hex(&lot.borrow_asset),
+        "proceeds": lot.proceeds.0.to_string(),
+    }))
 }
 
 fn err(why: &str) -> String {
@@ -2474,6 +2592,70 @@ fn main() {
         });
     }
 
+    // Zyn Lend's prices: every ZYN_LEND_PRICE_SECS (30), the median of
+    // Coinbase and CoinGecko for each listed asset, posted with the time.
+    // Interest accrues to that time; a source pair that disagrees by more
+    // than 2% posts nothing for that asset that round.
+    //   ZYN_LEND_ASSETS  ZEC=<asset hex>,ETH=<asset hex>,SOL=<asset hex>
+    if let Ok(spec) = std::env::var("ZYN_LEND_ASSETS") {
+        let assets: Vec<(String, [u8; 32])> = spec
+            .split(',')
+            .filter_map(|kv| {
+                let (sym, h) = kv.split_once('=')?;
+                Some((sym.trim().to_uppercase(), <[u8; 32]>::try_from(unhex(h.trim())?).ok()?))
+            })
+            .collect();
+        let every: u64 = std::env::var("ZYN_LEND_PRICE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(5);
+        eprintln!("zyn-object-node: lending prices every {every}s for {}", assets.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(", "));
+        let node = Arc::clone(&node);
+        let journal = Arc::clone(&journal);
+        let pub_log = Arc::clone(&pub_log);
+        let dir = dir.clone();
+        std::thread::spawn(move || {
+            use zynzapd::feeds::{aggregate, to_fixed, Fetcher, Http, Source};
+            let http = Http::default();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(every));
+                let listed: Vec<[u8; 32]> = node.lock().map(|n| n.state().market.lend.listed.keys().copied().collect()).unwrap_or_default();
+                if listed.is_empty() {
+                    continue;
+                }
+                let gecko = |s: &str| match s {
+                    "ZEC" => "zcash",
+                    "ETH" => "ethereum",
+                    "SOL" => "solana",
+                    "BTC" => "bitcoin",
+                    other => other,
+                }
+                .to_string();
+                http.prime(&assets.iter().map(|(s, _)| gecko(s)).collect::<Vec<_>>());
+                let mut prices = Vec::new();
+                for (sym, asset) in &assets {
+                    if !listed.contains(asset) {
+                        continue;
+                    }
+                    let samples: Vec<f64> = [Source::Coinbase(format!("{sym}-USD")), Source::CoinGecko(gecko(sym))]
+                        .iter()
+                        .filter_map(|src| http.fetch(src).ok())
+                        .collect();
+                    match aggregate(samples, 0.02).and_then(to_fixed) {
+                        Some(p) => prices.push((*asset, p)),
+                        None => eprintln!("zyn-object-node: no agreed price for {sym} this round"),
+                    }
+                }
+                if prices.is_empty() {
+                    continue;
+                }
+                let op = Op::LendPrices { program: zyn_vm::program::lend_prices(), at: now_secs(), prices };
+                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                    if let objectvm::Receipt::Refused(why) = r {
+                        eprintln!("zyn-object-node: lending prices refused: {why}");
+                    }
+                }
+            }
+        });
+    }
+
     // Seal on a timer, so a chain with no traffic still advances and a wallet
     // scanning it sees epochs go by rather than wondering if it is alive.
     {
@@ -2494,8 +2676,10 @@ fn main() {
                 .launches
                 .values()
                 .any(|l| l.state == objectvm::market::LaunchState::Open);
+            // Likewise a lending auction: its price steps down per epoch.
+            let auction_open = !n.state().market.lend.lots.is_empty();
             let sealed = n.seal_if_due(now_secs()).is_some()
-                || (sale_open && n.seal_on_clock(now_secs()).is_some());
+                || ((sale_open || auction_open) && n.seal_on_clock(now_secs()).is_some());
             if sealed {
                 // A sealed epoch is a root worth carrying. Proposing is free
                 // and idempotent — `propose_anchor` refuses while one is in

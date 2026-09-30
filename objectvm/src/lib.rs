@@ -47,6 +47,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::vec as alloc_vec;
 
 pub mod bridge;
+pub mod lend;
+/// The lending rules `lend` runs on (zyn-io/zyn-lend), for readers of its state.
+pub use zyn_lend;
 pub mod curve;
 pub mod sale;
 pub mod market;
@@ -472,6 +475,93 @@ pub enum Op {
         asset: Address,
         output: Output,
     },
+    /// Open a lending pool for `asset`, or change its collateral risk
+    /// (Zyn Lend). Operator only.
+    LendList {
+        program: ProgramId,
+        asset: Address,
+        max_ltv_bps: u32,
+        liquidation_bps: u32,
+        penalty_bps: u32,
+    },
+    /// Prices lending runs on, and the time they describe: every pool accrues
+    /// interest to `at`. Operator only.
+    LendPrices {
+        program: ProgramId,
+        at: u64,
+        prices: Vec<(Address, Fixed)>,
+    },
+    /// Lend `amount` of `asset` for receipt shares, paid as a claim.
+    LendSupply {
+        lender: AccountId,
+        program: ProgramId,
+        asset: Address,
+        amount: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Burn receipt shares of `asset`'s pool for what they are worth, paid as
+    /// a claim.
+    LendWithdraw {
+        lender: AccountId,
+        program: ProgramId,
+        asset: Address,
+        shares: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Lock collateral and borrow against it; the borrowed coins are a claim.
+    LendOpen {
+        borrower: AccountId,
+        program: ProgramId,
+        collateral_asset: Address,
+        collateral: Fixed,
+        borrow_asset: Address,
+        amount: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Pay down a position; anything over what is owed comes back as a claim.
+    LendRepay {
+        borrower: AccountId,
+        program: ProgramId,
+        position: Hash,
+        amount: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    LendAddCollateral {
+        borrower: AccountId,
+        program: ProgramId,
+        position: Hash,
+        amount: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Take collateral out, as a claim, if the position stays within its
+    /// maximum.
+    LendRemoveCollateral {
+        borrower: AccountId,
+        program: ProgramId,
+        position: Hash,
+        amount: Fixed,
+        nonce: Hash,
+    },
+    /// Bid `pay` of the borrowed asset for a liquidation lot's collateral at
+    /// this epoch's auction price.
+    LendBid {
+        bidder: AccountId,
+        program: ProgramId,
+        lot: Hash,
+        pay: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
     Seal,
 }
 
@@ -508,6 +598,9 @@ pub enum Receipt {
     VoucherPosted { first: Hash, count: u32 },
     BridgedRegistered { asset: Address },
     DepositWaiting { key: Hash, amount: Fixed },
+    /// A lending intent applied; `id` is its source (or the receipt asset,
+    /// for a listing).
+    Lent { id: Hash },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -529,6 +622,12 @@ impl Op {
             | Op::ClaimItems { inputs, .. }
             | Op::ClaimVoucherItems { inputs, .. }
             | Op::MintOpen { inputs, .. }
+            | Op::LendSupply { inputs, .. }
+            | Op::LendWithdraw { inputs, .. }
+            | Op::LendOpen { inputs, .. }
+            | Op::LendRepay { inputs, .. }
+            | Op::LendAddCollateral { inputs, .. }
+            | Op::LendBid { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
                 item_nullifier,
@@ -560,6 +659,12 @@ impl Op {
             | Op::CreateCurve { change, .. }
             | Op::CurveTrade { change, .. }
             | Op::BuyTickets { change, .. }
+            | Op::LendSupply { change, .. }
+            | Op::LendWithdraw { change, .. }
+            | Op::LendOpen { change, .. }
+            | Op::LendRepay { change, .. }
+            | Op::LendAddCollateral { change, .. }
+            | Op::LendBid { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
             Op::ClaimItems { change, items, .. } | Op::ClaimVoucherItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
             Op::MintOpen { change, item, .. } => change.iter().chain(std::iter::once(item)).collect(),
@@ -1997,6 +2102,51 @@ impl MicrochainVm for ObjectVm {
                     self.apply_claim_voucher_items(buyer, collection, secret, *k, serials, proof, items, inputs, change)
                 })
             }
+            Op::LendList { program, asset, max_ltv_bps, liquidation_bps, penalty_bps } => one(if *program != program::lend_list() {
+                Err("wrong program for a lending listing")
+            } else {
+                self.apply_lend_list(asset, zyn_lend::Risk { max_ltv_bps: *max_ltv_bps, liquidation_bps: *liquidation_bps, penalty_bps: *penalty_bps })
+            }),
+            Op::LendPrices { program, at, prices } => one(if *program != program::lend_prices() {
+                Err("wrong program for lending prices")
+            } else {
+                self.apply_lend_prices(*at, prices)
+            }),
+            Op::LendSupply { lender, program, asset, amount, nonce, inputs, change } => one(if *program != program::lend_supply() {
+                Err("wrong program for lending")
+            } else {
+                self.apply_lend_supply(lender, asset, *amount, nonce, inputs, change)
+            }),
+            Op::LendWithdraw { lender, program, asset, shares, nonce, inputs, change } => one(if *program != program::lend_withdraw() {
+                Err("wrong program for a lending withdrawal")
+            } else {
+                self.apply_lend_withdraw(lender, asset, *shares, nonce, inputs, change)
+            }),
+            Op::LendOpen { borrower, program, collateral_asset, collateral, borrow_asset, amount, nonce, inputs, change } => one(if *program != program::lend_open() {
+                Err("wrong program for a borrow")
+            } else {
+                self.apply_lend_open(borrower, collateral_asset, *collateral, borrow_asset, *amount, nonce, inputs, change)
+            }),
+            Op::LendRepay { borrower, program, position, amount, nonce, inputs, change } => one(if *program != program::lend_repay() {
+                Err("wrong program for a repayment")
+            } else {
+                self.apply_lend_repay(borrower, position, *amount, nonce, inputs, change)
+            }),
+            Op::LendAddCollateral { borrower, program, position, amount, inputs, change } => one(if *program != program::lend_collateral() {
+                Err("wrong program for collateral")
+            } else {
+                self.apply_lend_add_collateral(borrower, position, *amount, inputs, change)
+            }),
+            Op::LendRemoveCollateral { borrower, program, position, amount, nonce } => one(if *program != program::lend_collateral() {
+                Err("wrong program for collateral")
+            } else {
+                self.apply_lend_remove_collateral(borrower, position, *amount, nonce)
+            }),
+            Op::LendBid { bidder, program, lot, pay, nonce, inputs, change } => one(if *program != program::lend_bid() {
+                Err("wrong program for a bid")
+            } else {
+                self.apply_lend_bid(bidder, lot, *pay, nonce, inputs, change)
+            }),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -2101,6 +2251,13 @@ impl MicrochainVm for ObjectVm {
             Op::CurveTrade { trader, .. } => vec![*trader],
             Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
             Op::ClaimDeposit { owner, .. } => vec![*owner],
+            Op::LendSupply { lender, .. } | Op::LendWithdraw { lender, .. } => vec![*lender],
+            Op::LendOpen { borrower, .. }
+            | Op::LendRepay { borrower, .. }
+            | Op::LendAddCollateral { borrower, .. }
+            | Op::LendRemoveCollateral { borrower, .. } => vec![*borrower],
+            Op::LendBid { bidder, .. } => vec![*bidder],
+            // LendList and LendPrices stay operator-only: no user signs them.
             _ => Vec::new(),
         }
     }
@@ -2535,6 +2692,55 @@ impl MicrochainVm for ObjectVm {
                 }
                 wire::proof(&mut e, proof);
                 wire::outputs(&mut e, items);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendList { program, asset, max_ltv_bps, liquidation_bps, penalty_bps } => {
+                e.u8(39).bytes(&program.0).bytes(asset).u32(*max_ltv_bps).u32(*liquidation_bps).u32(*penalty_bps);
+            }
+            Op::LendPrices { program, at, prices } => {
+                e.u8(40).bytes(&program.0).u64(*at).u32(prices.len() as u32);
+                for (a, p) in prices {
+                    e.bytes(a).fixed(*p);
+                }
+            }
+            Op::LendSupply { lender, program, asset, amount, nonce, inputs, change } => {
+                e.u8(41).bytes(lender).bytes(&program.0).bytes(asset).fixed(*amount).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendWithdraw { lender, program, asset, shares, nonce, inputs, change } => {
+                e.u8(42).bytes(lender).bytes(&program.0).bytes(asset).fixed(*shares).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendOpen { borrower, program, collateral_asset, collateral, borrow_asset, amount, nonce, inputs, change } => {
+                e.u8(43)
+                    .bytes(borrower)
+                    .bytes(&program.0)
+                    .bytes(collateral_asset)
+                    .fixed(*collateral)
+                    .bytes(borrow_asset)
+                    .fixed(*amount)
+                    .bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendRepay { borrower, program, position, amount, nonce, inputs, change } => {
+                e.u8(44).bytes(borrower).bytes(&program.0).bytes(position).fixed(*amount).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendAddCollateral { borrower, program, position, amount, inputs, change } => {
+                e.u8(45).bytes(borrower).bytes(&program.0).bytes(position).fixed(*amount);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendRemoveCollateral { borrower, program, position, amount, nonce } => {
+                e.u8(46).bytes(borrower).bytes(&program.0).bytes(position).fixed(*amount).bytes(nonce);
+            }
+            Op::LendBid { bidder, program, lot, pay, nonce, inputs, change } => {
+                e.u8(47).bytes(bidder).bytes(&program.0).bytes(lot).fixed(*pay).bytes(nonce);
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
             }
@@ -2997,6 +3203,88 @@ impl MicrochainVm for ObjectVm {
                 let item = one_item.remove(0);
                 Some(Op::MintOpen { buyer, program, collection, serial, proof, item, nonce: d.hash().ok()?, inputs: wire::read_inputs(d)?, change: wire::read_outputs(d)? })
             }
+            39 => Some(Op::LendList {
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                max_ltv_bps: d.u32().ok()?,
+                liquidation_bps: d.u32().ok()?,
+                penalty_bps: d.u32().ok()?,
+            }),
+            40 => {
+                let program = ProgramId(d.hash().ok()?);
+                let at = d.u64().ok()?;
+                let n = d.u32().ok()?;
+                if n > 64 {
+                    return None;
+                }
+                let mut prices = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    prices.push((d.hash().ok()?, d.fixed().ok()?));
+                }
+                Some(Op::LendPrices { program, at, prices })
+            }
+            41 => Some(Op::LendSupply {
+                lender: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            42 => Some(Op::LendWithdraw {
+                lender: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                shares: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            43 => Some(Op::LendOpen {
+                borrower: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                collateral_asset: d.hash().ok()?,
+                collateral: d.fixed().ok()?,
+                borrow_asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            44 => Some(Op::LendRepay {
+                borrower: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                position: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            45 => Some(Op::LendAddCollateral {
+                borrower: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                position: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            46 => Some(Op::LendRemoveCollateral {
+                borrower: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                position: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+            }),
+            47 => Some(Op::LendBid {
+                bidder: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                lot: d.hash().ok()?,
+                pay: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
             _ => None,
         }
     }

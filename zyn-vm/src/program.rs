@@ -208,6 +208,46 @@ pub fn bridge_register() -> ProgramId {
     named(b"bridge-register")
 }
 
+/// Open a lending pool for an asset, with its collateral risk. Operator only.
+pub fn lend_list() -> ProgramId {
+    named(b"lend-list")
+}
+
+/// Post the prices and time lending runs on. Operator only.
+pub fn lend_prices() -> ProgramId {
+    named(b"lend-prices")
+}
+
+/// Lend an asset into its pool for receipt shares.
+pub fn lend_supply() -> ProgramId {
+    named(b"lend-supply")
+}
+
+/// Burn receipt shares for the asset they are worth.
+pub fn lend_withdraw() -> ProgramId {
+    named(b"lend-withdraw")
+}
+
+/// Lock collateral and borrow against it.
+pub fn lend_open() -> ProgramId {
+    named(b"lend-open")
+}
+
+/// Pay down a position's debt.
+pub fn lend_repay() -> ProgramId {
+    named(b"lend-repay")
+}
+
+/// Add collateral to a position, or take some out within its limit.
+pub fn lend_collateral() -> ProgramId {
+    named(b"lend-collateral")
+}
+
+/// Bid in a liquidation auction.
+pub fn lend_bid() -> ProgramId {
+    named(b"lend-bid")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")
@@ -272,6 +312,14 @@ pub fn is_named(id: &ProgramId) -> bool {
         sale_mint(),
         sale_vouchers(),
         bridge_register(),
+        lend_list(),
+        lend_prices(),
+        lend_supply(),
+        lend_withdraw(),
+        lend_open(),
+        lend_repay(),
+        lend_collateral(),
+        lend_bid(),
     ]
     .contains(id)
 }
@@ -315,6 +363,14 @@ mod tests {
             sale_mint(),
             sale_vouchers(),
             bridge_register(),
+        lend_list(),
+        lend_prices(),
+        lend_supply(),
+        lend_withdraw(),
+        lend_open(),
+        lend_repay(),
+        lend_collateral(),
+        lend_bid(),
         ];
         for (i, a) in all.iter().enumerate() {
             for (j, b) in all.iter().enumerate() {

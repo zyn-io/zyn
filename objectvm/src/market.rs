@@ -81,7 +81,7 @@ pub const MINIMUM_LIQUIDITY: Fixed = Fixed(1_000);
 /// so its cost grows with the batch; this bounds it.
 pub const MAX_ORDERS_PER_POOL: usize = 256;
 
-fn id(domain: &[u8], parts: &[&[u8]]) -> Hash {
+pub(crate) fn id(domain: &[u8], parts: &[&[u8]]) -> Hash {
     let mut e = Encoder::new();
     e.bytes(domain);
     for p in parts {
@@ -343,6 +343,8 @@ pub struct Market {
     pub bridged: BTreeMap<Address, crate::bridge::Origin>,
     /// Committed deposits waiting for their depositor, by `deposit_key`.
     pub waiting: BTreeMap<Hash, crate::bridge::Waiting>,
+    /// Zyn Lend: pools, prices, positions and liquidation auctions.
+    pub lend: crate::lend::Lend,
 }
 
 impl Market {
@@ -365,6 +367,7 @@ impl Market {
             && self.burns.is_empty()
             && self.bridged.is_empty()
             && self.waiting.is_empty()
+            && self.lend.is_empty()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -452,6 +455,7 @@ impl Market {
                 t = t.checked_add(o.amount_in.0)?;
             }
         }
+        t = t.checked_add(self.lend.holdings(asset)?)?;
         Some(t)
     }
 
@@ -462,6 +466,7 @@ impl Market {
             || self.curves.contains_key(asset)
             || self.items.contains_key(asset)
             || self.pools.keys().any(|p| &lp_asset(p) == asset)
+            || self.lend.is_receipt(asset)
     }
 
     /// Owe `amount` under a claim id. An existing claim for the same owner and
@@ -583,11 +588,15 @@ impl Market {
                 .u32(w.len() as u32)
                 .bytes(&zyn_vm::commit::merkle_root(&w));
         }
+        // And lending: joined once an asset is listed, so older roots keep.
+        if !self.lend.is_empty() {
+            crate::lend::section(&mut e, &self.lend);
+        }
         e.leaf()
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET07").u32(self.pools.len() as u32);
+        e.bytes(b"MARKET08").u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -660,6 +669,7 @@ impl Market {
         crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
         crate::sale::encode(e, &self.sales, &self.tickets, &self.burns);
         crate::bridge::encode(e, &self.bridged, &self.waiting);
+        crate::lend::encode(e, &self.lend);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -670,13 +680,15 @@ impl Market {
         // v4 predates sales and reads as a market with none.
         // v5 predates burn tickets (§145): its sales have no cap and no burns.
         // v6 predates bridged assets beside ZEC (§146) and reads as none.
-        let (v3, v4, v5, v6, v7) = match d.take_bytes(8).ok()? {
-            b"MARKET07" => (true, true, true, true, true),
-            b"MARKET06" => (true, true, true, true, false),
-            b"MARKET05" => (true, true, true, false, false),
-            b"MARKET04" => (true, true, false, false, false),
-            b"MARKET03" => (true, false, false, false, false),
-            b"MARKET02" => (false, false, false, false, false),
+        // v7 predates lending (Zyn Lend) and reads as a market with none.
+        let (v3, v4, v5, v6, v7, v8) = match d.take_bytes(8).ok()? {
+            b"MARKET08" => (true, true, true, true, true, true),
+            b"MARKET07" => (true, true, true, true, true, false),
+            b"MARKET06" => (true, true, true, true, false, false),
+            b"MARKET05" => (true, true, true, false, false, false),
+            b"MARKET04" => (true, true, false, false, false, false),
+            b"MARKET03" => (true, false, false, false, false, false),
+            b"MARKET02" => (false, false, false, false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -803,6 +815,9 @@ impl Market {
             let (bridged, waiting) = crate::bridge::decode(d)?;
             m.bridged = bridged;
             m.waiting = waiting;
+        }
+        if v8 {
+            m.lend = crate::lend::decode(d)?;
         }
         Some(m)
     }
@@ -1098,6 +1113,7 @@ impl ObjectVm {
             || self.market.curve_orders.iter().any(|o| &o.id == source)
             || self.market.curves.values().any(|c| &c.source == source)
             || self.market.commits.contains_key(source)
+            || crate::lend::source_in_use(&self.market.lend, source)
         {
             return Err("that nonce was already used");
         }
@@ -1569,6 +1585,9 @@ impl ObjectVm {
         // Curves first: a curve that graduates this epoch opens its pool
         // here, and its pool's first swaps are next epoch's.
         self.settle_curves();
+        // Lending before the pools clear: its auctions and liquidations are
+        // priced from the posted prices, not from this batch.
+        self.settle_lend();
         let orders = std::mem::take(&mut self.market.orders);
         let pools: Vec<Hash> = self.market.pools.keys().copied().collect();
         for pid in pools {

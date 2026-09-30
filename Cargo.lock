@@ -3112,6 +3112,7 @@ name = "objectvm"
 version = "0.1.0"
 dependencies = [
  "zyn",
+ "zyn-lend",
  "zyn-vm",
 ]
 
@@ -6346,6 +6347,14 @@ dependencies = [
  "zip32",
  "zyn-bridge",
  "zyn-vm",
+]
+
+[[package]]
+name = "zyn-lend"
+version = "0.1.0"
+source = "git+https://github.com/zyn-io/zyn-lend.git?rev=d43f58f08a8b4be8cd8305ef8b8d4eeb54dd6e6a#d43f58f08a8b4be8cd8305ef8b8d4eeb54dd6e6a"
+dependencies = [
+ "uint",
 ]
 
 [[package]]
