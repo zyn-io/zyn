@@ -9,6 +9,7 @@ members = [
     "zyn",
     "zynzapd",
     "objectvm",
+    "zyn-pool",
 ]
 resolver = "2"
 
