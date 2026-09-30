@@ -13,10 +13,13 @@ against the code, then add it here.**
 > application state machines, batches their activity, and anchors state
 > commitments to Zcash.**
 
-Compact, for a headline:
+What we are building towards — the hero headline, one sentence (30 Sep 2026):
 
-> **ZEC has private money. Zyn gives it applications.**
-> Cave is the first consumer app powered by Zyn.
+> **Private finance for every asset, anchored to Zcash.**
+
+It names the destination, not today: the trust section beside it says the
+operator sees positions and trades now. Slogans ("ZEC has private money. Zyn
+gives it applications.") belong only in landing-page sections after the hero.
 
 The hierarchy, which keeps getting flattened:
 
