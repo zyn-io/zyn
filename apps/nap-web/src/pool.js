@@ -112,6 +112,12 @@ async function secrets(config, identity, i) {
 /// deposit into a pool) or `out` (a private exit's destination).
 export async function newNote(config, identity, c, size, kind) {
   const v = sizeOf(c, size);
+  // An index already used on any chain would make the same note again: one
+  // whose nullifier may be spent, so coins deposited to it could never leave.
+  // A wallet restored from its phrase starts with an empty book, so the pools
+  // are read first, and a pool that cannot be read stops the note.
+  const { complete } = await scan(config, identity);
+  if (!complete) throw new Error('Nap could not read every pool to pick a fresh note; try again shortly');
   const b = book(config, identity);
   const i = b.next;
   const n = await secrets(config, identity, i);
@@ -144,11 +150,16 @@ const GAP = 20;
 /// tried against every pool's notes, and a note whose nullifier hash a spend
 /// published is spent.
 export async function notes(config, identity) {
+  return (await scan(config, identity)).notes;
+}
+
+async function scan(config, identity) {
   const b = book(config, identity);
   const seen = [];
+  let complete = true;
   for (const c of channels(config)) {
     for (const size of c.sizes) {
-      const r = await pools(config, c, size).catch(() => ({ leaves: [], spent: [] }));
+      const r = await pools(config, c, size).catch(() => { complete = false; return { leaves: [], spent: [] }; });
       seen.push({ c, size: String(size), leaves: new Set(r.leaves), spent: new Set(r.spent || []) });
     }
   }
@@ -172,9 +183,10 @@ export async function notes(config, identity) {
   b.notes.sort((x, y) => x.i - y.i);
   save(config, identity, b);
   const known = new Set(channels(config).map((c) => c.key));
-  return b.notes
+  const notes = b.notes
     .filter((n) => known.has(chOf(n)))
     .map(({ i, size, kind, commitment, state, at, signature, ...n }) => ({ i, ch: chOf(n), size: String(size), kind, commitment, state, at, signature }));
+  return { notes, complete };
 }
 
 async function proveFor(config, identity, c, note, binding) {

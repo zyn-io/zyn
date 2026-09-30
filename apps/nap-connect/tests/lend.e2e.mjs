@@ -166,11 +166,9 @@ const notesText = (await page.textContent('#br-note-list').catch(() => '')).repl
 ok(/spent|sent|moved into Zyn/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120)}`);
 await page.check('#br-asset input[value="eth"]');
 ok(/Deposit 0\.1 ETH with MetaMask/.test(await page.textContent('#br-go')), `private ETH offers Sepolia's pool sizes: ${await page.textContent('#br-go')}`);
+// Private BTC through Mezo opens with the Mezo Buildathon (15 Oct).
 await page.check('#br-asset input[value="btc"]');
-const btcRead = (await page.textContent('#br-read')).replace(/\s+/g, ' ');
-ok(/Deposit 0\.01 BTC with MetaMask/.test(await page.textContent('#br-go')) && /Mezo testnet/.test(btcRead) && /0\.01 mzBTC\.zy/.test(btcRead), `private BTC goes through Mezo as mzBTC.zy: ${btcRead.slice(0, 120)}`);
-await page.check('input[name="br-mode"][value="out"]');
-ok(/Withdraw 0\.01 BTC privately/.test(await page.textContent('#br-go')), `private BTC out: ${await page.textContent('#br-go')}`);
+ok(/Private BTC is not available yet/.test(await page.textContent('#br-body')) && await page.isHidden('#br-go'), 'private BTC waits for Mezo');
 await page.screenshot({ path: `${S}/lend-bridge-private.png`, fullPage: true });
 
 await b.close();

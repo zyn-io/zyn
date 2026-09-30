@@ -76,10 +76,6 @@
           "assetId": 1,
           "explorer": "https://sepolia.etherscan.io/tx/{tx}"
         },
-        "mezo": {
-          "chainId": 31611,
-          "explorer": "https://explorer.test.mezo.org/tx/{tx}"
-        },
         "btc": {
           "network": "signet",
           "internal": "0050d350a8b966fb662c2ca9ed1439a480971da30ed65944f9b71da0de1d67db",
