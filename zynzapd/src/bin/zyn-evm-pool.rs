@@ -424,7 +424,22 @@ impl Chain {
     // ------------------------------------------------------------ relayer
 
     /// A pool's notes in order and its spent nullifier hashes, from its logs.
+    /// A pool's notes, brought up to date; when the chain's RPC refuses
+    /// (public endpoints rate-limit), the last copy saved — a pool's notes
+    /// only ever grow, so an older copy is a true prefix of the current one.
     fn leaves(&self, p: &Address20) -> Result<Leaves, String> {
+        self.refresh(p).or_else(|e| {
+            let path = self.state.join(format!("pool-leaves-{}.json", hex(p)));
+            if path.exists() {
+                eprintln!("relay: answering from the saved notes ({e})");
+                Ok(Leaves::load(&path))
+            } else {
+                Err(e)
+            }
+        })
+    }
+
+    fn refresh(&self, p: &Address20) -> Result<Leaves, String> {
         let path = self.state.join(format!("pool-leaves-{}.json", hex(p)));
         let mut l = Leaves::load(&path);
         let from = l.newest.as_deref().and_then(|n| n.parse().ok()).unwrap_or(self.from);

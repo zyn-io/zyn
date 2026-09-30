@@ -599,7 +599,22 @@ impl Relay {
     }
 
     /// A pool's notes in order, brought up to date from its logs.
+    /// A pool's notes, brought up to date; when the chain's RPC refuses
+    /// (public endpoints rate-limit), the last copy saved — a pool's notes
+    /// only ever grow, so an older copy is a true prefix of the current one.
     fn leaves(&self, pool: &str) -> Result<sol_pool::Leaves, String> {
+        self.refresh(pool).or_else(|e| {
+            let path = self.state.join(format!("pool-leaves-v2-{pool}.json"));
+            if path.exists() {
+                eprintln!("relay: answering from the saved notes ({e})");
+                Ok(sol_pool::Leaves::load(&path))
+            } else {
+                Err(e)
+            }
+        })
+    }
+
+    fn refresh(&self, pool: &str) -> Result<sol_pool::Leaves, String> {
         // v2: with spent nullifier hashes (a v1 file is rebuilt from the start).
         let path = self.state.join(format!("pool-leaves-v2-{pool}.json"));
         let mut l = sol_pool::Leaves::load(&path);
@@ -643,8 +658,9 @@ impl Relay {
         }
         if newest.is_some() {
             l.newest = newest;
-            l.save(&path)?;
         }
+        // Saved even when empty, so a refused refresh has a copy to answer from.
+        l.save(&path)?;
         Ok(l)
     }
 
