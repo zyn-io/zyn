@@ -676,6 +676,9 @@ pub struct Wallet {
     client: Client,
     /// The tip the server reported when the wallet was opened.
     pub tip: u64,
+    /// The consensus branch the server said the next block is under, with
+    /// that tip. What a send is checked against before it signs.
+    pub branch: u32,
 }
 
 impl Wallet {
@@ -803,6 +806,7 @@ impl Wallet {
             state,
             client,
             tip: info.tip,
+            branch: info.branch,
         })
     }
 
@@ -847,6 +851,24 @@ impl Wallet {
             zyn: self.default_zyn_source(),
         }
         .to_json()
+    }
+
+    /// The two keys this wallet uses on the object ledger.
+    ///
+    /// Derived here rather than by handing the seed out, because the seed is
+    /// the wallet and these are not: a viewing key finds what arrived and a
+    /// nullifier key recognises what left, and neither can move a coin
+    /// (`object_keys`). Callers that scan an object ledger need exactly these
+    /// two and must never need more.
+    pub fn object_keys(
+        &self,
+        account: u32,
+    ) -> Result<(zyn_vm::note_enc::StaticSecret, [u8; 32]), String> {
+        let seed = self.material.seed()?;
+        Ok((
+            crate::object_keys::viewing_secret(&seed, account),
+            crate::object_keys::nullifier_key(&seed, account),
+        ))
     }
 
     pub fn export_backup_with_zyn(&self, source: ZynKeySource) -> String {
@@ -1026,6 +1048,20 @@ impl Wallet {
         Ok(zyn_custody::transparent::plan(&utxos))
     }
 
+    /// The other direction: pay `zatoshi` from the shielded balance to this
+    /// wallet's own transparent address.
+    ///
+    /// For the places that can only read a transparent address — an exchange
+    /// deposit, a service that checks a t-address balance. What lands there is
+    /// public, which is the whole point of doing it and worth saying where the
+    /// holder chooses it. Shielding it again is `shield_transparent`.
+    pub fn unshield(&mut self, zatoshi: u64, on: impl FnMut(Event)) -> Result<String, String> {
+        let to = self
+            .transparent_address()
+            .ok_or("this build cannot derive a transparent address")?;
+        self.send(&to, zatoshi, None, on)
+    }
+
     /// Sweep the doormat into one shielded note this wallet owns.
     ///
     /// The only thing that can be done with transparent funds here, on
@@ -1038,7 +1074,7 @@ impl Wallet {
             return Err("nothing on the transparent address to shield".into());
         }
         self.sync(&mut on)?;
-        let env = Envelope::at(self.state.network, self.tip as u32);
+        let env = Envelope::next(self.state.network, self.tip, self.branch).map_err(|e| e.to_string())?;
         let to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         // Ironwood first, like `send_with_memo`: it is the pool a shielded
@@ -1132,6 +1168,7 @@ impl Wallet {
     pub fn sync(&mut self, mut on: impl FnMut(Event)) -> Result<u64, String> {
         let info = self.client.info().map_err(light)?;
         self.tip = info.tip;
+        self.branch = info.branch;
         let keys = VaultKeys::from_full_viewing_key(self.fvk.clone());
         let ivk = PreparedIncomingViewingKey::new(&self.fvk.to_ivk(Scope::External));
         let from = self
@@ -1140,7 +1177,10 @@ impl Wallet {
             .synced_to()
             .map(|h| h + 1)
             .unwrap_or(self.state.birthday);
-        let to = self.tip.saturating_sub(CONFIRMATIONS);
+        // The same wait in time once NU7 makes blocks three times as often.
+        let to = self
+            .tip
+            .saturating_sub(CONFIRMATIONS * zyn_custody::payout::blocks_per_old_block(self.branch));
         if from > to {
             return Ok(self
                 .state
@@ -1297,7 +1337,7 @@ impl Wallet {
         let mut payment = Payment::new(to, zatoshi);
         payment.memo = memo;
         self.sync(&mut on)?;
-        let env = Envelope::at(network, self.tip as u32);
+        let env = Envelope::next(network, self.tip, self.branch).map_err(|e| e.to_string())?;
         let change_to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         let mut built = None;
@@ -1376,6 +1416,50 @@ mod recovery_tests {
     use super::*;
 
     const WORDS: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+
+    /// The same, for the account a *bought* item lands in.
+    ///
+    /// A checkout quotes against the collection's receiving account (§97.5), so
+    /// this is the account that actually holds what somebody paid for. If the
+    /// browser wallet derived it differently it would look in the wrong place
+    /// and show an empty pocket to a buyer who has just been minted an item —
+    /// which is indistinguishable, to them, from not having received it.
+    #[test]
+    fn the_browser_wallet_derives_the_same_receiving_account() {
+        // Cave Collection Z.
+        let collection =
+            unhex("024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e").unwrap();
+        let collection: [u8; 32] = collection.try_into().unwrap();
+        let material = KeyMaterial::from_mnemonic(WORDS, "", 0).unwrap();
+        let key = crate::receive::collection_key(&material.seed().unwrap(), 0, &collection).unwrap();
+        assert_eq!(
+            hex(&crate::client::account(&key)),
+            "ccb0a7aa79d032e65df27afc13fc1fd5f013e30aca2f700fe5abdfdb839ecf53",
+            "apps/nap-web derives a different receiving account for Collection Z"
+        );
+    }
+
+    /// The desktop wallet, the extension's agent and the browser wallet must
+    /// derive the *same* Zyn account from the same words, or one phrase means
+    /// two wallets and a buyer pays from an account their other device cannot
+    /// see. `apps/nap-web` implements this independently in JavaScript; these
+    /// are the accounts it produces for this phrase, pinned here so the two
+    /// cannot drift apart silently.
+    #[test]
+    fn the_browser_wallet_derives_the_same_zyn_account() {
+        for (account, expected) in [
+            (0u32, "b85db260ec3a7c0a22c19c1f3380bfc75599c0ea4eeeeda69177ab12f9da56ea"),
+            (1u32, "0d4297c55b2fed28fec6a4da0a43337a74f502c86ea740a033ff23cfb813cfce"),
+        ] {
+            let material = KeyMaterial::from_mnemonic(WORDS, "", account).unwrap();
+            let key = material.zyn_signing_key(account).unwrap();
+            assert_eq!(
+                hex(&crate::client::account(&key)),
+                expected,
+                "account {account} disagrees with apps/nap-web"
+            );
+        }
+    }
 
     #[test]
     fn bip39_uses_the_standard_zip32_orchard_account_path() {

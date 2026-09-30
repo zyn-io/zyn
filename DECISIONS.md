@@ -5528,3 +5528,1076 @@ All three were verified in code before being accepted.
 | 106.4 | **The manifest rebuilds the committed root, and there is a test that says so.** The draw reads `content.json`; the terms committed to `02b01b16…`. If those ever disagree the draw runs over a different collection than the one published, which would be discovered by buyers rather than by us | ✅ |
 | 106.5 | **The item id is derived, not read from the file.** It is a function of the collection and the index, and `manifest_root` checks it anyway — a file that disagreed would fail loudly there rather than quietly assigning someone else's item | 🔒 |
 | 106.6 | **The `draw` command is not built, and a stub that prints the five calls it would make is not a build.** What blocked it was the policy being unreachable, which §106.3 fixes; what remains is a scanner, a Zcash reader and the announced heights, all of which are configuration. Written down rather than half-written | ⏳ |
+
+## 107. The node gets a public face and keeps its door (18 Sep 2026)
+
+Proof-of-build for the mainnet Zcash node, live at
+`cave-node-status.pages.dev`, updating every 15s.
+
+| # | Decision | |
+|---|---|---|
+| 107.1 | **The page was already right and the server did not exist.** `app.js` fetched `/api/status` and never Zebra JSON-RPC; the README described the helper as future work. Nothing needed rewriting in the frontend — the missing half was a Pages Function, so that is all that was built | ✅ |
+| 107.2 | **The shape is the allowlist.** `getblockchaininfo` returns chainwork, `size_on_disk`, the value pools, the supply; `shapeStatus` names six fields and the rest never leaves Cloudflare. Filtering a response is a list you can forget to extend — naming what you serve is not | ✅ |
+| 107.3 | **The upstream is `ZEC_RPC_URL`, a project secret**, not a literal. It is absent from the repo, from every built asset, and from every response. A test fails if it becomes a literal, and another fails if an error body is ever built from the upstream's own words — an echoed error is the realistic way an address escapes | ✅ |
+| 107.4 | **The page was naming the node itself.** `index.html` printed `zec-rpc.cavebro.win` as a decorative header coordinate next to the words "rpc gate / sealed". Decorative and complete. It now reads `zebra / loopback`, and a test greps the built output so it cannot come back | ✅ |
+| 107.5 | **No CORS header, and POST refused.** Same-origin only, matching the page's `connect-src 'self'`. Either one missing would turn a status page into the open RPC proxy the whole design avoids. Verified against production: a JSON-RPC POST gets 405 | ✅ |
+| 107.6 | **Readings coalesce for 5s.** Each visitor samples every 15s, so without it a crowd spends the node's 8 r/s (§53.4) on one question. 5s is far inside the 120s the page calls fresh, so a shared reading is never a stale one. Best-effort per isolate: this thins upstream load, it does not cap it | ✅ |
+| 107.7 | **This hides no secret, and should not be described as one.** §53.1 made the RPC public deliberately, default-deny by method, and DNS would give the name away regardless. What is withheld is a working endpoint handed to every visitor of a public page, and the traffic that follows one | ✅ |
+| 107.8 | **The endpoint's output is checked against the page's own validator**, not against a copy of it. `normalizeStatus` is imported into the endpoint's test, so the two halves cannot drift into a page that refuses what its server serves | 🔒 |
+
+## 108. The draw runs for real (18 Sep 2026)
+
+Closing A98. §106 proved the pipeline composes; nothing ran it against a chain.
+
+| # | Decision | |
+|---|---|---|
+| 108.1 | **The close and the reveal are derived, never typed.** `Plan::from_announcement` takes the published `CloseAnnouncement` and its `PublicationProof` and calls `resolve`; the reveal height and drand round come out of the rules the policy committed. Reading them from the environment would have been simpler and would have reopened exactly the hole §101 closed — an operator who can type a reveal round can try rounds until one pays | ✅ |
+| 108.2 | **The draw is a library function, not a file the command writes and the service reads.** `zyn-sale` already holds `Mutex<Option<Run>>` and refuses to settle until the draw exists, so the obvious shape was a serialised batch. There is no decoder for `AllocationBatch` and there does not need to be: §106.2 says the draw is deterministic, so the service can re-run the same function rather than trust an artefact that can drift from it | ✅ |
+| 108.3 | **It refuses to draw over a ledger that can still change.** The tip must have buried the close by the committed confirmations, and the reveal block must exist. Both are refusals rather than warnings, because the draw happens once (§104.1) and a reorg afterwards has no remedy | ✅ |
+| 108.4 | **Every refused payment comes out with its reason**, and `NotATicket` grew a `Display` to make that sayable. A payment that cannot be a ticket is someone whose money is in the vault; if all of them are refused the error names the reasons rather than reporting a sale nobody entered | ✅ |
+| 108.5 | **The manifest is checked against the committed root before anything else.** Verified with the real file: 4,444 entries rebuild `02b01b16…`. A collection that rebuilds a different root is a different collection, and the command says so instead of drawing over it | ✅ |
+| 108.6 | **A scanner that will not advance is an error, not a slow scan.** The range walks in whatever steps the scanner allows; if it comes back below where it was asked, that is its own `from_height` sitting above the sale's, and spinning there would look like progress forever | ✅ |
+| 108.7 | **Every source is injected** — the chain is a trait and the drand transport a closure, so the whole sequence is exercised without a node. This is the shape §105.4 arrived at the hard way, when ten stubbed tests passed against an endpoint that returned 500 for every round | 🔒 |
+| 108.8 | **What it still needs is not code**: `ZYN_VAULT_FVK`, a reachable Zcash node, and a published announcement to point at. The command refuses clearly on each, in that order | ⏳ |
+
+## 109. `zyn_depositAddress` never reached the wallet (18 Sep 2026)
+
+Reported as *"deposit site showing unknown method zyn_depositAddress"*. Three
+faults stacked, and only the outermost was visible.
+
+| # | Decision | |
+|---|---|---|
+| 109.1 | **The reported error came from a stale installed extension.** `unknown method` is thrown by `background.js` when `METHODS` has no entry, and the string appears nowhere in the Rust. Both `src/` and `dist/` carry `zyn_depositAddress`, so the build Chrome had loaded predated it. Reloading it exposed the next fault rather than fixing the page | ✅ |
+| 109.2 | **The real bug: the provider POSTed to a GET-only route.** `app()` sends a POST whenever it is handed a body, and `app('/api/deposit-address', {})` reads as "no parameters" while meaning "POST". The agent answered `{"error":"no such call"}`, which the page showed as the wallet failing when the wallet was fine. Fixed by dropping the argument — the presence of a body *is* the verb | ✅ |
+| 109.3 | **`zyn_bind` passes `{}` correctly** — `/api/bind` really is a POST. The trap is not the `{}`, it is that nothing checked the two tables against each other | ✅ |
+| 109.4 | **The provider and the agent are now checked against each other by test.** `apps/extension/tests/methods.test.js` parses every `app('/path', …)` call out of `background.js` and every `("VERB", "/path")` out of `app.rs`, and fails naming the mismatch: *"POST /api/deposit-address — the agent serves it as GET"*. Verified by reintroducing the bug | ✅ |
+| 109.5 | **`dist/` is asserted equal to `src/`.** Chrome loads `dist`; a fix that lands only in `src` is not a fix, and §109.1 is what that looks like from outside | ✅ |
+| 109.6 | **Behind all three, a configuration mismatch that is correct behaviour.** With the verb fixed the route answers *"this wallet is on mainnet but its Zyn node custodies testnet"* — the agent's `ZYN_NODE` defaults to `168.119.53.39:8099`, which is testnet chain 11. Mainnet Zyn is chain 26460 on Contabo and its 8099 is firewalled by §53.6, so a mainnet deposit address needs the agent pointed through a tunnel. Operator configuration, not a code fault | ⏳ |
+
+## 110. Receiving accounts are reachable from a page (18 Sep 2026)
+
+Half of A92. §95/§97.5 built the derivation, discovery and endpoints; §99 noted
+nothing called them. Finding out why turned up a reason no caller could have.
+
+| # | Decision | |
+|---|---|---|
+| 110.1 | **Two of the three routes could not be called from a browser at all.** `/api/receiving/collection` and `/api/receiving` were `GET`, and this agent reads every parameter from the request *body* — which `fetch` refuses to send on a GET. They were not merely uncalled; they were uncallable, which is why no caller existed to notice | ✅ |
+| 110.2 | **They become POST, joining every other parameterised read here** — `/api/curve`, `/api/curve-quote`, `/api/quote` are all POST for exactly this reason. `/api/receiving/next` takes no input and stays a GET. Nothing called any of them, so the verb was free to correct rather than to version | ✅ |
+| 110.3 | **`zyn_receivingAccount` and `zyn_receivingNext` are on the provider**, as reads. A checkout must quote against the collection's receiving account rather than the identity (§97.5), and until now no page could ask for one. Reads rather than approval-gated: the identity is already a read, and a receiving account is strictly less linkable than the identity it derives from | ✅ |
+| 110.4 | **What is still missing is the caller.** The checkout page does not exist, so A92 stays open: the mint taking the receiving account, the wallet showing items held across the branch as one collection, and the restore drill are all still ahead | ⏳ |
+
+## 111. Treasury share 01 moves to Hetzner (18 Sep 2026)
+
+The sale signs a mint when a buyer settles, so the treasury must be reachable
+while `zyn-sale` serves. It was 2-of-3 across Mac, Air and Windows — three
+machines in one house, two of which sleep.
+
+| # | Decision | |
+|---|---|---|
+| 111.1 | **Moved, not copied**, following §55.1 exactly: transferred over SSH, `sha256` verified at the destination (`6e05b3a1…`), then deleted from the Mac. `public.bin` stays everywhere — it is public, and `zyn-sale` reads it to derive the treasury account | ✅ |
+| 111.2 | **The move was not finished by moving the share.** Hetzner's `zyn-custodian` was the 8 Sep build, which predates treasury support — its own error text listed only `ZYN_CUSTODY_SHARE` and `ZYN_CUSTODY_SOLANA_SHARE`. A share on a box that cannot load it is not custody, and nothing would have said so until a buyer settled | ✅ |
+| 111.3 | **The new binary was renamed into place, not scp'd over.** Two vault custodians have been running there for a week holding mainnet anchoring custody (§54.2); overwriting the path would have meant stopping them, and mainnet custody is already at bare threshold (§54.3). `mv` replaces the directory entry and leaves running processes on their own inode. Verified after: both still up, 7d and 6.8d | ✅ |
+| 111.4 | **Verified by loading it**, not by inspecting the file: `share treasury 0100… serving on 127.0.0.1:8219 — it signs a share on request and holds no quorum`. Stopped afterwards; nothing left listening | ✅ |
+| 111.5 | **Custody is now Hetzner (01), Air (02), Windows (03)** — and this is still not a servable sale. Two holders must be up, and Hetzner is the only always-on one. A83 (Windows runs without a login) is now on the critical path for taking money, not merely for alert noise | 🔨 |
+| 111.6 | **Hetzner now holds one share of each group** — vault 01 in `/var/zyn/custody-main`, treasury 01 in `/var/zyn/treasury`. One host compromise yields one share of each 2-of-3 and a threshold of neither, so this is a redundancy cost rather than a custody one. §55.7's missing offline backups now cover two shares instead of one | 🔨 |
+
+## 112. The checkout exists (18 Sep 2026)
+
+A92/A81's missing half. `zyn-sale` served `/quote`, `/settle` and `/order` and
+no page had ever called them.
+
+| # | Decision | |
+|---|---|---|
+| 112.1 | **`/settle` could not be driven from a browser, and nothing said so.** It takes the buyer's own signed read — the service cannot look up a private balance (§74.23) — and no route produced one. `Node::account_read_payload` now returns exactly the bytes `account_raw` consumes (`id ǀ epoch ǀ scheme ǀ key ǀ signature`, without the `op` and chain a relay prepends), `POST /api/receiving/read` signs one with the *receiving* key, and `zyn_receivingRead` exposes it | ✅ |
+| 112.2 | **`signed_read_header` is now built from that one function** rather than repeating the construction. Two copies drifting would be a signature over one thing and a claim about another | 🔒 |
+| 112.3 | **The signed read is approval-gated; the account lookup is not.** Handing a site a proof discloses that account's balance to whoever receives it, which is a disclosure rather than a lookup, and the approval text says exactly that. Reading *which* account is a read, as the identity already is | ✅ |
+| 112.4 | **The page reaches `zyn-sale` only through a Pages Function that names three calls.** `POST /quote`, `POST /settle`, `GET /order` and nothing else — a forwarded prefix would publish every route the service ever grows. Upstream is `ZYN_SALE_URL`, absent from the repo and from every reply; a failure says *"the sale service is not answering"* and never what upstream said (§107.3). Verified: allowed routes reach upstream, `POST /admin`, `GET /quote` and `DELETE /order` all get `no such call` | ✅ |
+| 112.5 | **It quotes against the collection's receiving account, never the identity.** That is what makes the money and the item land in the same account with no other history, so nothing has to be moved afterwards — and the move is what would have written the link back in (§97.5). A test fails if the page ever calls `zyn_account` instead | ✅ |
+| 112.6 | **It does not promise an item at payment time.** The draw runs once, after the close (§104.1), so the page says nothing is assigned yet and treats *"the draw has not run yet"* as the expected answer — *"Paid and counted"* — rather than showing a buyer an error for having paid on time | ✅ |
+| 112.7 | **The odds are on the page where the money is asked for**: 80 / 19 / 1, per entry. A buyer should not have to find the weights in a document to know what an entry buys | ✅ |
+| 112.8 | **The order survives a reload** in `localStorage` — the code and the address, both already the buyer's. Paying and closing the tab must not lose the claim | ✅ |
+| 112.9 | **What remains is deployment, not code**: `zyn-sale` runs nowhere, so `ZYN_SALE_URL` is unset and the page renders its sealed state. Which is the honest state until the terms are published | ⏳ |
+
+## 113. The terms were approved; the code did not implement them (18 Sep 2026)
+
+Checking the published terms against behaviour rather than against the struct
+that prints them. `tests/sale_pipeline.rs` (§106) proved the pipeline composes
+— under `Fixed { items: 1 }`, `Sequential`, and a close committed in the policy.
+Collection Z sells under `Weighted`, `ConcealedShuffle` and an **announced**
+close. That is a different path through the allocator and none of it had ever
+run. `tests/terms_match_code.rs` drives the real `cave_z::policy()`.
+
+| # | Decision | |
+|---|---|---|
+| 113.1 | **The published policy could not be drawn at all.** With an announced close the policy holds `deposit_close_zcash_height: 0` — `validate` *refuses* a policy that both commits and announces one — and `allocate` measured every ticket against that zero. A payment 500 blocks before the close was refused as *"deposit confirmed after the committed close height"*. Every entry, every time | ✅ |
+| 113.2 | **`allocate_announced` takes the resolved targets.** The close and reveal come from the announcement a caller has publication-checked (§101), read once at the top so no branch can consult the wrong source. The two forms cannot take each other's path: an announced policy without a resolution is refused, and a committed policy with one is too — silently allocating against numbers nobody committed to is the failure this prevents | ✅ |
+| 113.3 | **A weighted concealed sale had no source of randomness for quantity.** `Weighted` demanded a per-ticket drand round; `tickets.rs` sets that to `None` and `evidence_for` supplies no beacon, because under a concealed shuffle both quantity and identity are meant to come from the one collection-wide reveal. Nothing joined the two. Now a ticket with no round of its own seeds from the reveal — the ticket id, txid, height and index still enter the seed, so one beacon gives every entry its own draw | ✅ |
+| 113.4 | **And that is a fairness property, not a convenience.** A per-ticket round resolves ~30s after issue, while the sale is still open, so a buyer would learn how many items their entry drew *before* deciding whether to buy another. The collection-wide reveal resolves nobody's quantity until the door is shut | ✅ |
+| 113.5 | **The change is additive.** A first attempt rejected per-ticket beacons under a concealed shuffle outright and broke three existing tests that use exactly that combination. Making it a fallback rather than a prohibition serves the announced form without changing what already worked | ✅ |
+| 113.6 | **Measured, not asserted: 79.9% / 19.1% / 1.0%** over 2,000 entries against a real Quicknet round, for published weights of 80 / 19 / 1 | ✅ |
+| 113.7 | **The service quoted a price nothing checked.** `ZYN_SALE_PRICE` defaulted to `0.01` while admission requires the deposit to equal `entry_price_zatoshi` *exactly*. A wrong value is not a wrong price — it is every buyer paying, and every one of them refused at the draw, after the close, unrecoverably. Price, collection and symbol now come from the published terms, and an environment variable that disagrees stops the service naming the consequence. §64.16 said this in words; nothing enforced it | ✅ |
+| 113.8 | **The 90/10 split is committed and unimplemented in this path.** The terms print *"900000 to the pool, 100000 to the treasury"*, `SaleTerms::split` is tested, and no settlement code calls it: `pay()` in `zyn-sale` recognises the buyer's balance and moves nothing. A2 records the routing as built in `zyn-io/cave`, which is not the service the checkout talks to. Left open deliberately — where the pool lives and when it is funded relative to anchor finality is a decision, not a fix | 🔨 |
+
+## 114. The entry funds the pot a redemption is paid from (18 Sep 2026)
+
+Closing §113.8 / A101. The 90% was a committed promise with no implementation:
+`pay()` recognised the buyer's balance and moved nothing, so a buyer kept their
+ZEC.zy *and* got an item, and the floor every buyer is trusting was funded by
+nobody.
+
+| # | Decision | |
+|---|---|---|
+| 114.1 | **The pool is the collection's, and redemption is what it is for.** `FundCollection` credits `c.pool`; `RedeemCollectionItem` destroys one item and pays `pool / outstanding`, remainder staying behind. Both existed in the VM and neither was reachable from a sale. Nothing new was invented here — the sale was simply not wired to them | ✅ |
+| 114.2 | **The buyer signs the payment; the sale sends it.** This service holds no key of theirs, so it relays the frame their wallet signed — `submit_raw` takes the bytes untouched because the signature commits to exactly those bytes. Signing and sending are split on purpose: a payment that leaves the wallet but never reaches the sale is a buyer who paid for nothing | ✅ |
+| 114.3 | **Signed from the receiving account**, not the identity — that is the account the deposit credited and the account the item lands in, so the payment discloses no more than the entry already does (§97.5) | ✅ |
+| 114.4 | **The split comes from the published terms, never a percentage computed at the call site.** `SaleTerms::split` was tested and had no caller; it has one now. Rounding goes to the pool, because the floor is what buyers are trusting and a spare zatoshi belongs on their side | ✅ |
+| 114.5 | **The treasury funds the pool with its own threshold signature**, reusing the path the mint already uses. A failure there says *"the entry was paid but the pool was not funded"* rather than a generic refusal, because those two states need different repairs | ✅ |
+| 114.6 | **The quote returns the treasury account** so the page signs against an address the service named rather than one it invented | ✅ |
+| 114.7 | **The page says where the money goes**, beside the address it asks for money at: 90% funds the pool a redeemed item is paid out of, 10% is the treasury's | ✅ |
+| 114.8 | **Still to prove against a live chain**: none of this has run against a node. The ordering it assumes — buyer's transfer accepted, then the treasury's `FundCollection` — is two intents, and a failure between them leaves an entry paid with its pool share unfunded. The message names that state; a reconciliation pass that finds and completes them does not exist yet | ⏳ |
+
+## 115. The money path, over a socket (18 Sep 2026)
+
+`tests/live.rs` has always driven the swap path over a real node. The sale had
+no equivalent, which is why §113 and §114 were possible: every component was
+tested and the thing they add up to was not.
+
+| # | Decision | |
+|---|---|---|
+| 115.1 | **`tests/entry_funds_the_pot.rs` runs the money against an in-process node over TCP**: a credited buyer signs their entry, a gateway relays the bytes untouched, the treasury funds the pool, the item mints, the market opens, and the holder hands the item back for its share | ✅ |
+| 115.2 | **It asserts the two promises the terms make about money** and nothing else did: 90% of an entry reaches the collection's pool, and a redemption is paid out of that pool. Both were unasserted until now — including through the whole period when the sale moved no money at all | ✅ |
+| 115.3 | **The first version passed while being partly vacuous.** `pool_share` drove both the funding amount and the expected pool, so funding 100% of the entry still passed — it proved only that what you fund is what lands. Expectations are now independent literals tied to the published split, and the mutation that fooled it now fails on *"90% of the entry reached the pool"*. Checked by running it | ✅ |
+| 115.4 | **It also pins the honest floor**: `redeem_price` is zero before the collection is live, because until then the quotient is an artefact of how far the sale got rather than something a holder can act on | ✅ |
+
+## 116. A99: the wallet reaches mainnet Zyn (18 Sep 2026)
+
+"Point `ZYN_NODE` at mainnet" was one line of the answer. Four things were
+broken underneath it, each hidden by the one above.
+
+| # | Decision | |
+|---|---|---|
+| 116.1 | **Mainnet Zyn was not running.** `zynzapd-mainnet` had been stopped cleanly on 15 Sep at 15:28 and left disabled; nothing listened on 8099. Started, and chain 26460 answers through the tunnel: seq 348, epoch 5 | ✅ |
+| 116.2 | **It still cannot anchor, and that is expected.** An anchor is a self-send from the vault and the mainnet vault has never been paid — the env file says so in a comment. Alerts go to the journal only, so running it unanchored costs nothing. **Deposits must not be taken until the vault is funded**: an unanchored chain has no Zcash commitment behind it | 🔨 |
+| 116.3 | **The mainnet block server was on a machine that cannot serve it.** `zyn-lightd` lives in the Windows box's WSL distro and depends on that box's mainnet Zebra, which is stopped because its disk is too small. Contabo has a fully synced mainnet Zebra and had no lightd. Deployed there, loopback-only on 8097, reached over the same tunnel as 8099 — the same move as A91, for the same reason | ✅ |
+| 116.4 | **The deposit-address cache was not keyed by chain.** A `utest1…` address cached on 10 Sep survived the switch to mainnet, so a correctly configured mainnet wallet reported that its *node* custodied testnet. The guard caught it, which is the only reason it was a confusing message rather than a buyer paying a testnet address. Now `deposit-address-<chain>`; the stale file is kept aside as evidence | ✅ |
+| 116.5 | **The agent token lived only in the shell that started the agent.** Restarting it lost the secret and nothing could recover it — `nap-agent` was not running to read it from, and the runbook generates it fresh. Now in `~/.zyn/nap-wallet.env`, mode 600, with the node and chain beside it | ✅ |
+| 116.6 | **Verified end to end**: `/api/deposit-address` returns `u15dljrf4z…` with `memo: false` — a mainnet per-account address that needs no memo, which is the property A75 was closed on | ✅ |
+| 116.7 | **The tunnel is not durable.** One `ssh -f -N` with keepalives carries 8099 and 8097; if it drops the wallet loses both. It wants a LaunchAgent before anyone relies on it | 🔨 |
+
+## 117. The parts that must be up are now managed (18 Sep 2026)
+
+Three things the sale depends on were running because someone had started them
+in a shell, or were not running at all.
+
+| # | Decision | |
+|---|---|---|
+| 117.1 | **The mainnet tunnel is a LaunchAgent.** `dev.zyn.mainnet-tunnel` carries 18100→8099 and 8097→8097 with `KeepAlive` and 15s keepalives. The wallet's configuration assumes those ports exist, so a hand-started tunnel made the wallet's health a property of which terminal was open. Verified by killing it: launchd restarted it after the throttle and chain 26460 answered again | ✅ |
+| 117.2 | **Treasury custodians run on both always-on holders.** Neither host was serving the treasury at all: Hetzner had the share but no unit, and the Air's only custodian serves the *Zcash vault* on 8210. A mint is signed when a buyer settles, so these must be listening while the sale serves — which makes them managed services rather than something started for a ceremony and stopped after | ✅ |
+| 117.3 | **Hetzner (01) under systemd, the Air (02) under launchd**, both loopback-only on 8211, both restarting on death. Verified by killing each: both came back serving their share. Threshold is 2, so the sale can settle without the Windows box, whose WSL distro is stopped | ✅ |
+| 117.4 | **Both hosts needed a newer binary first.** Hetzner's was 8 Sep and the Air's 11 Sep; neither knew `ZYN_CUSTODY_TREASURY_SHARE` — their own error text listed only the Zcash and Solana vars. Deployed by rename on both, so the vault custodians (7d and 2d23h) kept their inodes and were never interrupted | ✅ |
+| 117.5 | **The sleeping was misdiagnosed and is recorded so.** The Air has been up 89 days with `sleep 0`; the Windows *box* is up and only its `zyn` WSL distro is stopped. A83 is not on the critical path for taking money — the missing piece was custodians nobody was running, not machines that slept | ✅ |
+| 117.7 | **Deploying by rename left the running vault custodians on the old binary**, which is the cost of the trick that avoided interrupting them: `mv` replaces the directory entry, so a running process keeps its deleted inode until it restarts. Hetzner's two showed `/usr/local/bin/zyn-custodian (deleted)` after 7 days; the Air's after 2d23h. All five custodians across both hosts have now been restarted onto the current binary, one at a time, and hash-verified against the local build — `5a415a3f…` on Hetzner, `46a39048…` on the Air. The window was chosen deliberately: mainnet cannot anchor while the vault is unfunded, so vault custody being briefly down cost nothing | ✅ |
+| 117.6 | **Still to wire when `zyn-sale` is deployed**: these listen on loopback, so the sequencer reaches them over tunnels the custodians open (§54.2). Pointless to build before the service that would call them exists | ⏳ |
+
+## 118. Two testnet Zebras retired (18 Sep 2026)
+
+34 GB each, on two laptops, for one test chain that already has a node on
+always-on infrastructure. Asked and answered by checking what read them.
+
+| # | Decision | |
+|---|---|---|
+| 118.1 | **The Air's served nobody.** Its `signer2` reads `127.0.0.1:18232` — Hetzner's Zebra through the tunnel — while its own node listened on 18242 with no consumer in any agent or config. A fully synced testnet chain, kept current, that nothing asked a question of. Removed outright | ✅ |
+| 118.2 | **The Mac's had a real job, and it is gone on purpose.** `signer1` read its own node on 18242; `signer2` already read Hetzner's. Since Hetzner *is* the chain 11 sequencer, that one independent view was the only thing stopping both signers from verifying the sequencer's anchors against the sequencer's own picture of Zcash. Repointed to 18232 and the node deleted | ✅ |
+| 118.3 | **What that costs, stated plainly:** chain 11's two endorsements now rest on one Zcash view, supplied by the box being endorsed. A sequencer that could lie about Zcash would be believed by both signers. Accepted because it is testnet, because both signers are the operator's anyway (A77 — "the operator asserting to itself"), and because mainnet's arrangement is separate: Contabo has its own Zebra and its custody lives elsewhere. **It would not be acceptable on mainnet** | 🔨 |
+| 118.4 | **Order mattered and was followed**: repoint, reload, confirm the signer came up on the new endpoint and kept endorsing, *then* delete. `launchctl kickstart -k` restarts a job without re-reading its plist — the first attempt silently kept 18242, and the log's startup line is what caught it. `bootout` + `bootstrap` is what applies a changed plist | ✅ |
+| 118.5 | **Both plists are kept, disabled**, as `dev.zyn.zebrad.plist.removed-20260918`, and signer1's old plist as `.bak-18242`. Re-syncing a testnet chain takes days; the configuration should not also have to be rebuilt from memory | ✅ |
+
+## 119. Mainnet Zyn gets a public JSON-RPC, and a browser wallet (18 Sep 2026)
+
+§53.6 kept `zyn-rpc` private "until ZynZap is mature". Reversed deliberately:
+a browser wallet cannot exist without it, and a buyer with no wallet cannot get
+a deposit address.
+
+| # | Decision | |
+|---|---|---|
+| 119.1 | **The gateway existed in code and ran nowhere.** `zyn-rpc` translates JSON-RPC to the node's binary framing — the node's own socket "cannot be reached from a browser" by design. No binary on any host. That, not the static site, is why the wallet was undeployable | ✅ |
+| 119.2 | **Two gateways, one name.** `zyn-rpc.cavebro.win/` is mainnet chain 26460 against Contabo's local node; `/testnet/` is chain 11 against Hetzner's already-public one. The DNS name was reserved by §53.6 and answered nothing; it answers now | ✅ |
+| 119.3 | **No njs method filter, unlike the Zcash RPC beside it.** `zyn-rpc` carries its own method table and refuses anything absent from it, so nginx adds only TLS, a 64 KB body cap and 8 r/s. It holds no key: a write arrives as a signed frame relayed byte for byte, and a read arrives already signed so the account comes from the signature, never a parameter | ✅ |
+| 119.4 | **Mainnet by default, testnet selectable.** `nap-web` took one fixed chain; it now takes a `networks` list with the top level as the default, so a deployment that never heard of it validates exactly as before. Switching keeps the phrase — the seed is chain-independent, so there was no reason to make a network change cost a restore — and clears only the cached answers | ✅ |
+| 119.5 | **Every endpoint is still same-origin.** The wallet refuses a cross-origin URL and its CSP permits none, which is what stops a browser wallet being pointed somewhere bad. Three Pages Functions relay `/rpc`, `/media` and `/claim`; `/rpc` names the two chains it will reach rather than forwarding a prefix, and never echoes the upstream | ✅ |
+| 119.6 | **`/claim` refuses in words.** The gift coordinator is not deployed, and a holder following a claim link should learn the service is absent rather than that their link is malformed | ✅ |
+| 119.7 | **An nginx reload failed on a config I had just written** — `$binary_remote_addr` expanded to nothing in an unquoted heredoc. nginx kept its running config, so `zec-rpc.cavebro.win` and `signal.cavebro.win` never dropped, but the broken file would have taken nginx down at its next restart. Checked both live services from outside before fixing, and `nginx -t` now passes | ✅ |
+| 119.8 | **Live at `nap-web-eaa.pages.dev`; `nap.cavebro.win` is attached but has no DNS record.** Wrangler's OAuth token carries `zone (read)`, not DNS edit, so the CNAME is the one step that needs the operator | ⏳ |
+
+## 120. `unknown operation` was a stale node, not a stuck one (18 Sep 2026)
+
+`nap.cavebro.win` reported *"No deposit address: node refused: unknown
+operation"*. Read as a freeze; it was a version skew.
+
+| # | Decision | |
+|---|---|---|
+| 120.1 | **A frozen node times out or stops advancing. This one answered — with a refusal.** Mainnet 26460 was serving, epoch advancing, and the *local* agent had been issuing mainnet deposit addresses all along. Two different ops: the agent asks `OP_DEPOSIT_ADDRESS` (19, by account id), the browser wallet asks `OP_DEPOSIT_ADDRESS_SIGNED` (28, by pre-signed read). Only 28 was unknown | ✅ |
+| 120.2 | **Op 28 arrived with A80 on 16 Sep; Contabo was running the 15 Sep build.** One day of skew, and only the newer of two paths went through it — which is why the desktop path looked healthy while the browser path did not | ✅ |
+| 120.3 | **`STATE_VERSION` was checked before deploying, not after.** It is still 12 and the node runs `mainnet-v12`, so the current binary loads the same state — a mismatch is a hard reject with no migration path (§codec), and finding that out by restarting a mainnet sequencer would have been the wrong order. State tarred to `/var/backups/zyn/` first | ✅ |
+| 120.4 | **Verified by doing what the browser does**, not by reading the changelog: derived an identity from the BIP-39 test phrase with `nap-web`'s own `core.js`, signed a read for chain 26460 at the live epoch, and called `zyn_depositAddress` through `https://nap.cavebro.win/rpc`. Returns `u1rhlf93n…`, `memo: false` | ✅ |
+| 120.5 | **The old binary is kept as `zynzapd.sep15`.** The window was safe for the same reason the custodian restarts were: mainnet cannot anchor while the vault is unfunded, so a sequencer restart costs nothing that was not already stopped | ✅ |
+| 120.6 | **A version skew between a node and the things that talk to it is invisible until one of them uses a new op.** Nothing reports the node's build, and the failure surfaced as a wallet error blamed on the wallet. Worth a version in `zyn_status` | 🔨 |
+
+## 121. A wallet may be kept on a device, sealed (18 Sep 2026)
+
+Re-typing 24 words on every reload is not a security property — it is a reason
+to write them somewhere worse. Opt-in persistence, with the threat model
+changed deliberately rather than by accident.
+
+| # | Decision | |
+|---|---|---|
+| 121.1 | **What is stored is the derived Ed25519 key, never the phrase.** `identityFromSecretKey` reconstructs everything an identity does from 32 bytes, so the words never need to touch the disk. The words also control the *Zcash* wallet and may be reused elsewhere; the derived key controls one Zyn account at one index. A cracked record costs that account, not the seed behind it | ✅ |
+| 121.2 | **AES-256-GCM under PBKDF2-SHA256 at 600,000 iterations**, OWASP's current floor, with a per-record salt and IV. Once ciphertext is on a disk the password *is* the security, so the KDF is the thing that decides how expensive guessing is | ✅ |
+| 121.3 | **A wrong password and a tampered record fail identically.** GCM authenticates either way; distinguishing them would tell someone holding a stolen file that they are close | ✅ |
+| 121.4 | **A record naming weaker settings is refused before the password is tried.** Editing the stored iteration count down is how an attacker makes a later brute force affordable, and it is the one tamper that the AEAD cannot catch because it is outside the sealed bytes | ✅ |
+| 121.5 | **Off unless asked for, and the page no longer claims otherwise.** It advertised "No browser storage"; it now says "Nothing kept unless you say so", and the README states plainly that keeping moves the threat model from "needs the live tab" to "can guess offline forever" | ✅ |
+| 121.6 | **Locking returns to what the device can offer** — a password where the wallet is kept, the phrase where it is not — and "Forget this device" removes the record | ✅ |
+| 121.7 | **Verified in a browser against live mainnet**, not only in tests: restored with the phrase and a keep password, reloaded, was met by the unlock screen, refused a wrong password, and opened with the right one to account `b85db260…da56ea` — the same account §119.4's cross-implementation vector pins. Test wallet cleared afterwards | ✅ |
+
+## 122. The corner names both chains, and the name is checked (18 Sep 2026)
+
+The wallet spans two networks — ZEC goes in at a Zcash address and arrives as
+ZEC.zy on Zyn — and the header named only one of them.
+
+| # | Decision | |
+|---|---|---|
+| 122.1 | **`ZEC mainnet · Zyn mainnet`**, with the pair carried through the selector: switching gives `ZEC testnet · Zyn testnet`. A Zyn chain sits on exactly one Zcash network and the node refuses to mix them (§116.4), so the pairing is a fact about the deployment rather than two independent settings | ✅ |
+| 122.2 | **The chain id stays off the header** (§121's change) and stays on the send review, where it decides something | ✅ |
+| 122.3 | **The label is verified, not decorative.** `loadDepositAddress` took whatever address string the node returned. It now checks the address against the network the header names — `u1…` for mainnet, `utest1…` for testnet — and shows nothing at all if they disagree. Without that check, "ZEC mainnet" above a `utest1…` address is exactly the confusion §116.4 caused on the desktop side, except here it would be above an address someone is about to send money to | ✅ |
+| 122.4 | **A network that does not name its Zcash side is a configuration error**, refused at load. An optional field would have let a deployment show a label it never checked | ✅ |
+| 122.5 | **`config.json` revalidates on every request** (`max-age=0, must-revalidate`, `cf-cache-status: DYNAMIC`), which matters because the new code *requires* the new fields — a cached older config would be fatal rather than merely stale. Checked rather than assumed | ✅ |
+
+## 123. The wallet shows what it holds, not only what it owns one of (18 Sep 2026)
+
+`nap-web` listed items and no balances. The data was already being fetched and
+thrown away: `refresh` reads `account.spendable`, and `renderItems` filtered it
+to holdings with a `content` hash — every fungible coin fell out of the render.
+
+| # | Decision | |
+|---|---|---|
+| 123.1 | **A Coins section above Items**, from the same `spendable` the items come from. Mainnet carries two fungible assets — `ZEC.zy` (which is `XZEC`) and `ZYN` — and neither had ever been visible to a holder | ✅ |
+| 123.2 | **`ZEC.zy` is listed even at zero.** Somebody who has just sent a deposit needs to watch it arrive; an empty list would read as the wallet not having noticed, which is exactly when a buyer sends a second one | ✅ |
+| 123.3 | **`readableAmount` lives in `core.js`, not the view.** It is a pure function and the tests are there. Written as display-only and documented so: anything that decides something re-reads the raw string, because a trimmed amount must never be what a signature is computed over | ✅ |
+| 123.4 | **A dust balance is not rounded away.** `0.000000000000000001` renders whole — a formatter that collapsed it would tell a holder they have nothing while the chain says otherwise | ✅ |
+| 123.5 | **First styling attempt was wrong and the screenshot caught it.** The coin card was written with the dark cave palette the other sites use; the wallet is cream. It now uses the same card as an item — `#fffaf0`, `#1f24282d`, 14px — rather than a grey block floating on the page | ✅ |
+
+## 124. The wallet looks where bought items actually land (19 Sep 2026)
+
+§97.5 sends a purchase to the collection's *receiving* account so the money and
+the item share an account with no other history. The wallet read only the
+identity. A buyer would have paid, been minted an item, opened Nap and seen an
+empty pocket — indistinguishable, to them, from not having received it.
+
+| # | Decision | |
+|---|---|---|
+| 124.1 | **`deriveCollectionAccount` ports `receive::collection_key` to the browser**: HKDF-SHA256, salt `nap.zyn.receive.v1`, info `"collection" ‖ u32(account) ‖ collection`. Pinned on both sides against the same phrase — Collection Z resolves to `ccb0a7aa…` in Rust and in JavaScript. A drift here does not error, it looks in the wrong place | ✅ |
+| 124.2 | **The kept wallet had to carry them.** Sealing only the identity key (§121.1) left a reopened wallet unable to derive anything, because the seed is deliberately not stored. The sealed record is now a bundle — identity key plus one key per collection — and still contains no mnemonic, so a cracked record costs those accounts and not the Zcash wallet the same words control | ✅ |
+| 124.3 | **`refresh` reads every account and tags each holding with the key that holds it.** Not merely cosmetic: `openSend` now signs with `item.owner`, so sending a bought item is signed by the account that actually holds it rather than by an identity holding nothing | ✅ |
+| 124.4 | **Collections are declared per network** in `config.json`, so a wallet never derives a receiving account for a chain that has no such collection | ✅ |
+| 124.5 | **Verified against live mainnet, both paths**: restore-from-phrase synced at epoch 510, and reopening a *kept* wallet issued **two** `zyn_account` reads — identity and Collection Z — which is the specific thing that would silently regress if the seal ever stopped carrying them | ✅ |
+| 124.6 | **Caught by asking what a buyer sees, not by a failing test.** Nothing was broken; the wallet did exactly what it was written to do. A92's acceptance drill — clear state, restore, prove every item comes back — is what should have caught it, and is still unrun | 🔨 |
+
+## 125. The terms are published (19 Sep 2026)
+
+A96, first half. §64.16 required canonical `cave-sale-terms/v1` bytes published
+before the first deposit; they existed only as a digest a binary could print.
+
+| # | Decision | |
+|---|---|---|
+| 125.1 | **The bytes are published, not only the digest.** `zyn-cave-terms bytes` emits the 187 canonical bytes, served both inside `cavebro.win/terms` and as `cavebro.win/cave-sale-terms-v1.hex` so a verifier can `curl` them rather than scrape a page. A digest nobody can recompute is a number, not a commitment | ✅ |
+| 125.2 | **The recipe is on the page**, six lines of standard-library Python. The domain and payload are each length-prefixed before hashing, which is why no two different documents can collide — stated, because a reader should not have to infer the framing from a hash that happens to match | ✅ |
+| 125.3 | **Verified end to end against the live site**: fetching `cave-sale-terms-v1.hex` from cavebro.win and running the published recipe reproduces `159b454e…`. A test does the same from the page's own bytes, so the page cannot drift from the digest it claims, and a second asserts the downloadable file equals the bytes shown | ✅ |
+| 125.4 | **The page says what it does not prove.** It establishes *what* the terms are, not *when* they were written — it is our own web server, and nothing inside a document dates itself. The Zcash stamp that would date it has not happened, and the page says so in those words rather than leaving a careful reader to work it out | ✅ |
+| 125.5 | **`terms` sits in the landing navbar**, beside `deposit`. Terms reachable only by URL are published in the same sense a notice in a locked drawer is | ✅ |
+| 125.6 | **The remaining half of A96 is blocked behind A59.** Stamping the digest into a `ZYP` memo is a vault spend, and the vault is unfunded — the same gate as anchoring. Until then the timing rests on our word | ⏳ |
+
+## 126. The settle crash window is recoverable (19 Sep 2026)
+
+Closing §114.8. A paid entry funds the collection's pool in a *second* chain
+operation by a *different* signer. A failure between the two was silent, and
+`pay()` doing both meant the order rolled back to `Reserved` — losing the record
+that the buyer had already paid.
+
+| # | Decision | |
+|---|---|---|
+| 126.1 | **The payment is written down before the pool is funded**, and that order is the whole point. `settle` now takes `fund_pool` as its own step, called only after `State::Paid` is persisted. A failure after that line leaves a record saying the buyer paid, instead of a rollback that says they did not | ✅ |
+| 126.2 | **`Order::pool_funded` records the second half separately from `state`**, because it is a different operation by a different signer and collapsing them into one enum would make the half-done case unrepresentable | ✅ |
+| 126.3 | **Six fields still decode, and read as unfunded.** A record written before this field existed is checked rather than assumed paid out — the conservative direction, since the wrong guess here silently shorts the floor | ✅ |
+| 126.4 | **`unfunded` makes the shortfall findable and `reconcile` finishes it**, idempotently: an order already marked funded is left alone, so running it twice does not pay twice. Tested by failing the pool deliberately, then reconciling, and asserting the buyer paid **once** and the pool received **once** | ✅ |
+| 126.5 | **An unpaid reservation is not a shortfall.** Funding its share would pay the pool out of the treasury for a sale that never happened, so `reconcile` refuses it | ✅ |
+| 126.6 | **`zyn-sale reconcile` stops at the first failure** rather than carrying on. If the treasury cannot fund one share it will not fund the next, and a long list of identical errors buries the reason | ✅ |
+| 126.7 | **The buyer is told the truth.** A pool failure now answers *"your payment landed; the collection's share has not, and an operator will finish it"* — not a generic refusal that would read as "your money is gone" | ✅ |
+
+## 127. A node says what it can do (19 Sep 2026)
+
+Closing A104. §120 was a one-day skew: the browser wallet asked for op 28, a
+node built the day before did not know it, and the refusal surfaced as a
+*wallet* error. Nothing reported the node's build, so the failure pointed at the
+wrong component.
+
+| # | Decision | |
+|---|---|---|
+| 127.1 | **`PROTOCOL_VERSION` is the highest op code the node answers**, so a caller's check is `protocol >= OP_THEY_NEED` rather than a table of versions to features. It must be bumped whenever an op is added, and the constant says so | ✅ |
+| 127.2 | **Appended to `OP_STATUS`, which is append-only by design.** An older client that reads the fixed fields and stops is unaffected; a newer client reading an older node gets `protocol: 0` — "too old to say", not "supports nothing" | ✅ |
+| 127.3 | **Surfaced in the JSON-RPC `zyn_status`**, because the browser wallet is the caller that was blamed and the one that cannot inspect a binary | ✅ |
+| 127.4 | **A test that sliced the status body from the end had to learn about the suffix.** Fixed by having it strip the version block rather than by loosening the assertion — the tail offsets are the thing it exists to check, and appending is the documented pattern here | ✅ |
+
+## 128. Both chains on the current build (19 Sep 2026)
+
+| # | Decision | |
+|---|---|---|
+| 128.1 | **Mainnet and testnet nodes and gateways all deployed**, state tarred first on both hosts, `STATE_VERSION` confirmed still 12 against each data directory before anything stopped. Binaries renamed into place and the services restarted, so a running process was never asked to overwrite itself | ✅ |
+| 128.2 | **The version reporting found a second skew on its first use.** After upgrading the mainnet node, `zyn_status` still said nothing — because the *gateway* was the older binary. Upgrading that surfaced a third: testnet reported `protocol: 0`, exactly as designed for a node too old to say, and its node was the 16 Sep build. All four are now `protocol 28, build 0.1.0` | ✅ |
+| 128.3 | **Nothing regressed**: testnet advancing at epoch 4,671, and signer1 verified an anchor through epoch 4,667 and endorsed it against the upgraded node | ✅ |
+| 128.4 | **`zyn-sale` was not deployed, and the blockers are not code.** Contabo holds none of what it needs — no treasury `public.bin`, no 4,444-entry manifest, no whitelist registry — and **no invitation codes have been issued**, so a deployed service would refuse every quote. Custody is also unreachable: Contabo forwards both *vault* custodians (8212, 8213) and neither *treasury* one, and Hetzner's key pins `permitopen` to 8210, not 8211 | ⏳ |
+
+## 129. A sequencer restart no longer deadlocks anchoring (19 Sep 2026)
+
+Reported as "testnet signer down". It was not: both signers were running and
+had endorsed. Restarting the sequencer during the §128 deploy discarded the
+signatures it had already been given, and no signer would send them again.
+
+| # | Decision | |
+|---|---|---|
+| 129.1 | **The alert named the wrong component, and the logs said so plainly**: `anchor cdc63d82… is on Zcash and confirmed; awaiting signatures (120 pass(es)) before releasing its deposits`, against signers whose own logs showed them endorsing that exact anchor an hour earlier. "Signer down" meant "the sequencer has not heard from a signer", which after a restart is also what a healthy, finished signer looks like | ✅ |
+| 129.2 | **§81 already cured the neighbouring case and could not cure this one.** A signer re-offers until it sees the anchor settle *in its own ledger* — which covers a sequencer restart mid-flight. Here the anchor had settled, so every signer had correctly stopped, while the sequencer still needed the certificate to release deposits. One step past where the existing cure reaches | ✅ |
+| 129.3 | **`pending_certificates` was an in-memory `Vec` and is now written beside the ledger.** Saved on shutdown, restored at startup through the `submit_certificate` path that already existed. Keeping them is the only end of this the sequencer controls — it cannot make a finished signer speak again | ✅ |
+| 129.4 | **A damaged certificate file is dropped, not fatal.** They are an optimisation over asking the set again; refusing to boot over them would turn a recoverable restart into an outage. Tested with garbage in the file | ✅ |
+| 129.5 | **Testnet was unstuck by rewinding both signers' state** so they re-verified from the base root and re-offered. `anchored_epoch` moved 4662 → 4667 and the anchors component went green. That is the manual repair this fix exists to remove | ✅ |
+| 129.6 | **Mainnet got the fix before it could ever hit this.** It cannot anchor yet, so there were no certificates in flight to lose in the transition — the cheapest possible moment to change how they are stored | ✅ |
+| 129.7 | **The deploy caused it, and the deploy is how it was found.** Worth stating: every restart until today carried this hazard silently, and mainnet anchoring gates the sale | ✅ |
+
+---
+
+## 130. The private object model becomes the plan (20 Sep 2026)
+
+`zyn-private-object-model.md` described assets as shielded state objects —
+commitments, nullifiers, values nobody but the holder can read — and §70.9
+deferred it as "a separate later scope" with "no bespoke proof system
+authorized". That deferral is withdrawn. The model is adopted, and the
+operator-blind tier is now a **release gate rather than a destination**: no
+deposit opens until a holder's amounts and ownership are hidden from us too.
+
+The reason is not that the old tier was dishonest. §92.3 is a defensible
+sentence and it was always said out loud. The reason is that the product claim
+is "Zcash privacy should not end where programmability begins", and on the
+operator-trusted tier that claim is aspirational at exactly the moment a
+stranger's money arrives. Taking deposits first and closing the gap afterwards
+would mean the first buyers are the ones who never got the property.
+
+| # | Decision | |
+|---|---|---|
+| 130.1 | **Adopted: assets on Zyn are private state objects, not account balances.** An object is consumed and its successors created; a nullifier retires it; the public sees commitments. This replaces the account-and-balance shape of the ledger, not the account *identity* — `account_of` still names who may spend, and the wallet-controlled schemes (§2) are unaffected | 🔒 direction |
+| 130.2 | **Supersedes §70.9 and the sequencing half of §93.9.** Notes, nullifiers and zero-knowledge transfers were "the destination"; they are now the plan, and a bespoke proof system **is** authorized by this decision. §70.1's tier statement remains correct about *today* and stays until the gate is met | 🔒 |
+| 130.3 | **Now is the cheapest moment this will ever be.** Mainnet holds 2 accounts and has never anchored; nothing has been sold. The same change after the 4,444 sell is a re-mint of real holdings. §129.6 made the identical argument about certificate storage a day earlier — the transition is free precisely while the chain is empty | ✅ |
+| 130.4 | **Four tiers, each shippable and each honest on its own.** The ladder is the roadmap; a tier is not "done" until the sentence it licenses is true. See the privacy ladder in BACKLOG | 🔒 |
+| 130.5 | **Tier 2 is a `STATE_VERSION` bump and retires the balance-shaped intents.** `STATE_VERSION` hard-rejects mismatches with no migration (§71.34), which is the correct behaviour and means this is a coordinated replacement, not a rollout. Plan it as one | 🔒 |
+| 130.6 | **Tier 3 buys hidden amounts without a circuit, and is not to be skipped.** Pedersen value commitments summing to zero prove conservation; Bulletproofs range proofs stop negative-value overflow and need no trusted setup; ownership is a signature over the nullifier; note contents are encrypted to the recipient. The operator still sees the graph. This is a real property, reachable without a cryptographer, and it is the fallback if Tier 4 slips | 🔒 |
+| 130.7 | **Only Tier 4 makes the operator blind**, because the remaining leak is *which* commitment was spent, and hiding that is a Merkle-membership proof in zero knowledge. This is the rung that needs a cryptographer and an audit, and it is the gate on deposits | 🔒 gate |
+| 130.8 | **The gate is Zyn-as-private-money, not every product that touches the vault.** What waits for tier 4 is holding a spendable balance in Zyn *under a privacy claim* — the thing the brief is about. ZEC still moves into the vault before then for a purchase; that is a sale, not a custody promise | 🔒 gate |
+| 130.8a | **Cave is gated at tier 1, not tier 4, and that is §70.1 unchanged.** §70.1 selected the operator-trusted tier *for the NFT product* and it was always the honest answer there: a buyer acquires a collectible whose allocation record is already blind (§93.2). Cave opens on tier 1 plus Gate 2's security items. §130 raises the bar for Zyn's money product; it does not retroactively raise Cave's | 🔒 scope |
+| 130.8b | **ZynZap and the launchpad are not tier-4 gated either — but their copy is.** The live site at `zynzap.pages.dev` says "private balances", "private LP positions" and "spendable here, privately". Those are false on every tier below 3. Whatever ships there states the tier it is actually on, or does not use the word | 🔒 invariant; 🔨 copy is wrong today |
+| 130.8c | **A59 and A100 are therefore not blocked by this decision.** The funding drill proceeds; the sale opens on tier 1 + Gate 2. An earlier draft of §130 read the gate as covering every deposit and would have parked the only revenue behind a proving system | ✅ corrected same day |
+| 130.8d | **Nap straddles the boundary, and its layout makes a claim its copy does not.** The Zcash half — shielded notes, keys on the holder's machine — is private by Zcash's own guarantee and is gated by nothing here. The Zyn tab inherits whatever tier Zyn is on. But the wallet's design system says `--private` tints "what only this key can see" and calls keeping that apart from `--record` "the one thing this wallet's layout is *about*" — and applies it to `.nft-send-panel`, which is Zyn state the operator reads today. The wallet has two categories and the truth needs three: private to you, visible to the operator, publicly verifiable | 🔨 A109 |
+| 130.8e | **A wallet is the worst surface on which to blur this**, because it shows shielded ZEC and Zyn holdings side by side and invites the reader to assume one property covers both. It is also the surface going to a store listing. Nap is not tier-gated; its *visual vocabulary* is | 🔒 invariant |
+| 130.9 | **Tier 1 ships first and immediately.** A90, A94 and P2 are built or nearly so and move ownership from public to operator-trusted. They are not made redundant by Tier 4: sealing protects the journals that exist today, and today's plaintext mirror contents stay plaintext forever (§70.8) | 🔨 |
+| 130.9a | **Tier 1 survives tier 2, item by item, and the reasoning differs for each.** A90 protects the epochs being published *now*, which stay plaintext forever if it is not on (§70.8), and is still required at tiers 2 and 3 because the sequencer validates in the clear there. A94 is orthogonal at every tier — it governs who reads the Zcash vault, not Zyn's state shape. P2 is the one tier 2 partially subsumes, since a commitment hides ownership without fresh accounts; its derivation/backup/restore machinery survives, and Cave needs it under §130.8a regardless | 🔒 |
+| 130.13 | **The external solvency check quietly depends on plaintext deposit amounts, and §130 had not noticed.** `ZYN_BACKING_SIGNERS` is the only check on the system performed against *Zcash* rather than against ourselves: `backing.rs:158` sums the note values a txid actually paid the vault, decrypted with the vault FVK, and refuses if `paid < amount` — where `amount` comes from the `CreditDeposit` intent in the clear. Commit deposit amounts and that comparison has nothing on one side: the backing signer set becomes decorative while still appearing to pass. **Tier 3 must keep a checkable quantity on the deposit path, or replace this check before hiding it.** It is the sharpest constraint found and it is not the one we expected | 🔒 invariant |
+| 130.14 | **The precedent is already in the tree, and it is not the accounts section.** `zyn-vm/src/collection.rs` already commits items to their own tree with their own proof path, and says so: *"'I own item X' and 'I hold N xZEC' are two different proof paths"*. swapvm carries it as a **conditional** section (`merkle.rs:322-324`), which is exactly how a commitments/nullifiers section gets added without disturbing existing roots. Tier 2 is closer to extending a shipped pattern than to inventing one | ✅ observed |
+| 130.15 | **Build the commitment tree on `commit.rs`, not on bridgetree.** `ProofIndex` (`commit.rs:192-264`) is the append-structure we want, is `no_std`, and already lives inside the guest boundary — `zyn-vm` builds for `riscv32im-unknown-none-elf`. The vendored `bridgetree`/`incrementalmerkletree` in `zyn-custody` hash with Orchard's `MerkleHashOrchard` and would drag Pallas into the guest. Same shape, wrong side of the line | 🔒 |
+| 130.16 | **Conformance forbids two things tier 2 would do naively.** S6 requires account ids strictly ascending and `account_ids().len() == account_leaves().len()`; S3 requires `account_leaves()` byte-identical after a *rejected* batch (`conformance.rs:398,413`); and the suite refuses outright a VM whose fixture has no accounts (`:292-299`). A commitment appended eagerly — before a batch is known to be accepted — violates S3. Commitments must be appended on commit, not on submission | 🔒 |
+| 130.17 | **The verifier never enumerated accounts, and that is the good news.** `verify_record` needs the record bytes, the path and the anchored root: `O(log n)`, no account list (`da.rs:421`, `commit.rs:268`). Enumeration is entirely a *publisher* burden — `Snapshot::of` walks every account every seal (`node.rs:591`). So an object ledger does not change what a holder's counterparty must do; it changes what we must do each epoch | ✅ observed |
+| 130.18 | **The escape hatch stops at "VALID".** Nothing turns a verified `ExitProof` into a payout: `zyn-cli verify-exit` prints VALID and tells the holder to cross-check the root against the mirror. The redemption step is a custodian procedure, not code. This makes the anchor-cadence tradeoff smaller than stated when daily anchoring was set — the hatch is already operator-mediated — and makes writing that redemption path a prerequisite for claiming a hatch at all | ✅ observed; ⏳ |
+| 130.10 | **Publishing commitments and nullifiers in the clear returns some of what §70.4 gave up.** Sealing is blunt — encrypt the journal and permissionless replay dies. A stranger holding no key can still check that no nullifier appeared twice, which is the double-spend argument, without learning an amount or an owner | 🔒 |
+| 130.11 | **Explicitly not authorized by this decision**: a new language or VM (§2's rejections stand, including Move), fully private pool reserves in the first version, private lending, a ZYN token, or custom AMM mathematics. The economics stay boring and proven; the novelty is the state model. Sui is named nowhere here — its objects are public, and everything private in the brief is Zcash's own construction | 🔒 scope |
+| 130.12 | **The honest sentence changes per tier and must be checked before it is said.** Tier 1: "private from the public, operator-trusted." Tier 3: "we cannot see what you hold." Tier 4: the brief's one-sentence definition. §92.3's discipline — name the tier you are actually on — survives this decision unchanged and is the reason it is safe to state any of them | 🔒 invariant |
+
+---
+
+## 131. No zkVM for v1, and the circuit count is one (21 Sep 2026)
+
+The private-object brief's author was asked whether Zyn should prove execution
+in a zkVM. The answer was no for the first version, design for one later, and
+it is right — with one correction that makes v1 materially cheaper than the
+brief itself claims.
+
+| # | Decision | |
+|---|---|---|
+| 131.1 | **No zkVM in v1. Fixed circuits above the object layer.** A zkVM is what buys *permissionless* programmability, and nothing about the hard problems — vault security, object discovery, nullifiers, state commitments, batch AMM design, shared-state concurrency, withdrawal integrity, data availability — is a proving problem. Today was an unplanned demonstration: the hours went to a tunnel whose restart loop was its own cause, a note-tree rebuild that looked like a hang, and a signer that exited on one refused fetch. None of that is a circuit | 🔒 direction |
+| 131.2 | **The operation list is one circuit, not six.** Transfer, split, merge, deposit claim and withdrawal are the same shape — *prove ownership of an unspent commitment without revealing which*. That is a single membership circuit. The brief lists them separately and concludes custom circuits are the cheaper path; they are cheaper than it says | ✅ |
+| 131.3 | **Conservation and range are not circuit problems at all.** §130 built the first half today: Pedersen value commitments sum to the identity, so conservation is a group operation with no circuit, no trusted setup and no proving key. Non-negativity is Bulletproofs, same. What is left needing zero knowledge is *only* membership — which is the precise definition of tier 4, and it is narrower than "prove the transition" | ✅ `zyn-vm/src/value.rs` |
+| 131.4 | **Put a `program_id` in the transaction, not only on the VM.** `VM_NAME`/`VM_VERSION` and `vm_id = H(name, version)` (§2.4) already discriminate per *chain*. The brief asks for a discriminant per *transaction* — `PRIVATE_TRANSFER`, `AMM_SWAP`, `ADD_LIQUIDITY` mapping to fixed circuits now, and to a zkVM program hash later. That is a different and better thing, it costs one field today, and adding it after a format is deployed costs a `STATE_VERSION` bump | 🔒 do now |
+| 131.5 | **The brief's audit column is backwards and should not be inherited.** It scores custom circuits as a "narrow surface". Narrow *each*, wide in total: six hand-written circuits is six audits, and a circuit bug is silent and catastrophic in a way a VM bug is not, because a zkVM is one engine audited once and reused. Zcash's own 2018 counterfeiting vulnerability was in the circuit. 131.2 is what actually reduces this surface — fewer circuits, not a different technology | 🔒 |
+| 131.6 | **This is §2.5 restated, not a new direction.** *Stage 0 compiled-in → Stage 1 rv32im ELF → Stage 2 permissionless* is already a staged path to proven execution that defers committing to one, and rv32im was chosen partly because it is where the zkVM ecosystem is (SP1, RISC Zero). `swapvm::guest` exists for exactly this and says so. The brief and §2 are the same position reached twice, which is worth more than either alone | ✅ |
+| 131.7 | **Keep the tier-4 path open in every dependency decision.** `curve25519-dalek` was added for §130's value commitments only after checking `zyn-vm` still builds for `riscv32im-unknown-none-elf --no-default-features`. Anything that breaks that target forecloses proving later, and the check is one command | 🔒 invariant |
+| 131.8 | **The demand thesis, stated as a thesis.** The bet is that a collectible whose ownership is *verifiably* committed to Zcash — and private — is worth more than one that is not, and that the object layer is what makes both true at once. It is a bet, not an observation: the register holds four whitelist registrations, and nothing is sold. Claims about whether *other* projects are genuinely on-chain were looked at in September and **not established either way**; they are not evidence for this and must not be cited as though they were | ⏳ unproven |
+| 131.9 | **So the order stands: Cave ships on tier 1, the object layer matures behind it.** §130.8a already scoped Cave to the operator-trusted tier. 131.8 is the reason not to invert that — gating the only revenue on a proof system would spend a year answering a question four registrations cannot yet ask | 🔒 |
+
+---
+
+## 132. Listings are encumbrances, and the buyer claims (21 Sep 2026)
+
+Today `PlaceOffer` moves the offered asset into `POT_OFFERS` (`state.rs:75`) —
+escrow, protocol-held rather than operator-held, which is the safer of the two
+custodial designs. Under the object model it can stop being custodial at all.
+
+| # | Decision | |
+|---|---|---|
+| 132.1 | **A listing encumbers an object; it does not move it.** The item stays the seller's, and the VM refuses any spend of it except the offer's settlement. Strictly better than escrow on three counts: nobody takes custody, the seller can prove ownership throughout, and cancelling transfers nothing back because nothing was transferred | 🔒 direction |
+| 132.2 | **The claim is one atomic transaction.** Buyer's payment objects and the encumbered item go in; payment to the seller and the item to the buyer come out. Nothing is staged, so a buyer cannot pay without receiving, and a cancel that lands first makes the claim fail with the payment still the buyer's. The sequencer's ordering settles the race and no lock is needed for it | 🔒 |
+| 132.3 | **The store lights a button; the VM decides a sale.** The store watches for the buyer's credit and enables the claim in the frontend. That is convenience, not authority: it never holds the item, cannot fabricate a sale the VM would reject, and cannot permanently censor one — a buyer able to construct the transaction claims without the button, with forced inclusion (§33) behind that | 🔒 invariant |
+| 132.4 | **Listings are attributed to the store, which is the privacy gain.** Every listing reads as the store's, so sellers are indistinguishable from one another; the anonymity set is the number of concurrent sellers. The item id being public costs nothing, because under the object model nobody ever knew who owned it. **This is store-trusted, not anonymous** — the store knows every seller, and that does not improve at tier 3. It improves at tier 4. Nobody may describe it as anonymous before then | 🔒 scope |
+| 132.5 | **An encumbered object's commitment-to-nullifier link becomes public at settlement**, because the claim must name the commitment it is entitled to spend. That is the one thing the object model otherwise hides, and it is accepted here precisely scoped: the item was publicly listed and publicly sold, so its trade being traceable is expected. The seller's *other* objects keep unlinkable nullifiers. Wherever "commitments are unlinkable" is written down, this exception belongs beside it | 🔒 invariant |
+| 132.6 | **A public listing is first-come.** Anyone who pays the asked price may claim. That is what a listing *is*; a sale to a named buyer is a different instrument and is not this one | 🔒 |
+| 132.7 | **The claim hangs on `program_id` (§131.4).** Settlement is a transaction naming `take-offer` as its rule, not a transfer with special-case logic. The VM refuses unknown rules and refuses known rules it does not implement, so supporting this is an act someone takes in a diff | ✅ mechanism exists |
+
+| # | Decision | |
+|---|---|---|
+| 132.8 | **The AMM waits, and does not gate Cave.** A market for items is an order book, not a pool: §132's encumbrance and claim need no batching, no hidden reserves and no circuit. The pool questions — what the coarsest publication is that still lets someone trade, and whether reserves move per trade or per batch — stay open and stop being on any critical path. Worth noting one finding so it is not re-proposed: **publishing slippage or APR publishes the reserves.** Under `x·y = k` the slippage on a known trade size solves for `x` in one step, and APR over a public fee rate gives the ratio directly. Hiding reserves while showing either is arithmetic, not an implementation detail; what works is coarser granularity — per batch, daily averages, banded slippage — which is batching reached from the trader's side rather than the cryptographer's | 🔒 deferred |
+
+---
+
+## 133. Cave launches on the object ledger (21 Sep 2026)
+
+§130.8a said Cave ships at tier 1 rather than waiting for tier 4, and that
+stands. What changes is *which VM it ships on*: `objectvm`, not swapvm — so
+items are objects from the first mint and nothing is ever re-minted.
+
+| # | Decision | |
+|---|---|---|
+| 133.1 | **Cave mints onto `objectvm`.** The alternative was shipping on the account ledger and moving 4,444 items later, which is a re-mint of real holdings with real owners. Doing it before anything is sold costs nothing; doing it after is the expensive version of the same change (§130.3 made this argument about certificates a day earlier and it holds here) | 🔒 |
+| 133.2 | **The sale machinery did not have to move.** `sale.rs` holds two references to swapvm and both are type imports; `draw.rs` and `cave-randomness` hold none. The draw, allocator, whitelist and settlement reconciliation were already VM-agnostic, which is why this decision is affordable at all | ✅ measured |
+| 133.3 | **`collection.rs` is not needed here, because objects are what it was invented to be.** It compresses items into a Merkle tree since "a distinct asset costs a token entry… a million-item collection is not survivable". An object *is* a leaf in a tree. On the object ledger an item is `asset = collection, amount = 1` and the compression is structural rather than bolted on | ✅ |
+| 133.4 | **This ships at tier 2, not tier 1** — better than §130.8a assumed, and still not tier 4. Nobody holding a mirror can build the owner map, because the published sections carry commitments and nullifiers and no owner. The operator still can. The sentence Cave may use is "private from the public; we can see them", and not one word more (§130.12) | 🔒 invariant |
+| 133.5 | **Nap must read the object ledger before deposits open.** A store whose buyers cannot see what they bought is not shippable. Today a wallet asks the node what an account holds; against an object ledger that query does not exist, and discovery becomes scan-and-trial-decrypt — the Zcash sync problem arriving inside Zyn | 🔒 gate |
+| 133.6 | **A ZEC deposit must create an object, not credit an account** — and that is what makes note encryption the keystone rather than a later nicety. The sequencer creates the note; the depositor has to be able to find it. Deriving the nonce publicly from the txid would let an observer confirm a guessed recipient by recomputing the commitment, so the note is encrypted to the recipient instead and discovered by trial decryption. The same mechanism serves 133.5, which is why A114 comes before the deposit path rather than after | 🔒 |
+
+---
+
+## 134. Tiers 3 and 4 are one step, and the range check is a circuit constraint (21 Sep 2026)
+
+§130 split hiding *amounts* from hiding *which object was spent*, on the
+grounds that the first needed no circuit. Attempting it showed that it does.
+
+| # | Decision | |
+|---|---|---|
+| 134.1 | **Pedersen commitments hide amounts and do not constrain them.** An amount is a scalar modulo the group order, so a negative one is an enormous positive one and a spender may balance `10 = 11 + (−1)` and mint value. `value.rs` carries a test that does exactly that and passes the balance check. The fix is a range proof, and without one tier 3 is not a weaker privacy tier — it is unsound | ✅ demonstrated |
+| 134.2 | **The obvious library does not build for the target.** `bulletproofs 5.0.0` depends directly on `clear_on_drop`, whose build script fails on `riscv32im-unknown-none-elf`. Structural to the crate, not a feature flag, and found by running §131.7's check before wiring anything in rather than after | ✅ measured |
+| 134.3 | **Zcash does not attach range proofs; it constrains values inside its circuit.** Orchard's Halo 2 circuit checks that a note's value is in range as part of the same proof that checks everything else. Aztec's Noir does the same — a `u64` cast *induces* a range constraint. Range is a constraint, not a proof, and Bulletproofs exist for the case where you have commitments and no circuit | ✅ |
+| 134.4 | **So tier 3 folds into tier 4.** Hiding amounts safely needs the circuit that hiding the spend needs, and once that circuit exists the range check is inside it at no extra cost. There is no cheap intermediate rung, and pretending there was cost a day to discover | 🔒 |
+| 134.5 | **Build it on Halo 2, which is already vendored.** `halo2_proofs 0.3.5`, `halo2_gadgets 0.5.0` and `pasta_curves` arrive through `orchard` via `zcash_primitives` — the same construction Zcash ships and has had audited. The alternative was hand-writing a verifier, which §131.5 warns is the failure mode that is silent when wrong, and which the circuit would have made redundant within months | 🔒 direction |
+| 134.6 | **`value.rs` stays, and so does its refusing verifier.** Pedersen conservation is correct and will be used; only the claim that it is *sufficient* was wrong. `RangeProof::verify` returning `RangeProofsNotImplemented` remains the honest state, and it is what stops a VM wiring this in and quietly accepting spends that mint value | 🔒 invariant |
+| 134.7 | **I overstated §131.7 while finding this.** A std-only dependency does not foreclose tier 4 — §131.1 chose fixed circuits, so the `riscv32im` target belongs to the *zkVM* path that v1 defers. Keeping it building preserves an option; it is not a hard gate. The rule is good and was applied as a harder constraint than it is | ✅ corrected |
+| 134.8 | **Nothing below this moves.** The object ledger — deposits, transfers, listings, claims, exits, the registry, the wallet — is the layer underneath and is unaffected. Cave still ships at tier 2 (§133.4), where nobody holding a mirror can build the owner map | 🔒 |
+
+**A note on the name.** Two unrelated things are called Noir. Aztec's Noir is
+the ZK language referenced in 134.3. **Noir Wallet** (`zknoir.com`) is a Zcash
+browser extension by the RHEA Finance team — a wallet over Zcash rather than
+an execution layer, per its own SDK docs, and a peer of *Nap* rather than of
+Zyn. What its "swaps and lending" do concretely is not stated in its public
+docs and is not assumed here.
+
+## §135 — The deposit bridge derives its nonces (21 Sep 2026)
+
+A confirmed Zcash deposit becomes an object whose commitment includes a
+nonce. That nonce has two requirements that pull against each other, and the
+obvious implementation satisfies only one.
+
+**It must be unguessable.** Everything else about a deposit is public: the
+account comes from the memo, the amount from the Zcash transaction. If the
+nonce were predictable, a stranger would recompute the commitment and learn
+which object on the ledger is that deposit — which is the whole privacy claim.
+
+**It must be the same on every attempt.** A bridge can die between building an
+intent and learning whether it landed. This is not a hypothetical: it is the
+ordinary case of a process restart during a network call.
+
+Random satisfies the first and fails the second, and the failure is worse than
+a retry that doesn't work. The VM dedupes on the Zcash txid, so a second
+intent with a fresh nonce is refused as `AlreadyCredited` — correct, and
+useless: the object from the *first* attempt is already published, and the
+bridge has forgotten the nonce that made it. The holder's wallet scans for
+that commitment and finds nothing. The money is in the vault, the credit is on
+the ledger, and no party can connect them.
+
+So both secrets are derived (§A116):
+
+```text
+  nonce      HKDF(bridge_seed, "zyn.ingress.nonce.v1",     "nonce"     ‖ txid)
+  ephemeral  HKDF(bridge_seed, "zyn.ingress.ephemeral.v1", "ephemeral" ‖ txid)
+```
+
+Deterministic given the seed, unguessable without it. A restarted bridge
+rebuilds a byte-identical intent, which makes resubmitting free and makes
+`AlreadyCredited` a proof the work was done rather than a report of loss.
+
+**Keyed on the txid alone.** Adding the account or amount would let one
+deposit have two valid nonces if either were ever re-read differently — which
+is the failure this exists to prevent.
+
+**The bridge seed is not a wallet seed.** It cannot spend anything; spending
+needs the holder's key. It can recompute every deposit commitment the bridge
+has ever made and link each to its Zcash transaction, which undoes the privacy
+of every deposit at once. It belongs where the vault's other secrets are.
+
+### §135.1 — What this does not yet solve
+
+A deposit for an account that has never registered a viewing key cannot be
+credited: the object would be one nobody can open. It is reported as pending
+and the ZEC stays in the vault, which is right. But the watcher marks that
+height scanned and will not report the deposit again, so the pending list is
+the only record the vault owes it — and nothing persists that list. A116's
+test found this; A117 fixes it, and it gates opening deposits independently of
+the privacy ladder.
+
+## §136 — Getting out of an object ledger (22 Sep 2026)
+
+The account ledger's escape hatch enumerates every balance and proves the list
+hashes into a root anchored on Zcash. An object ledger has no enumerable
+balance, so that proof has no translation, and a holder would have nothing to
+show a custodian if the sequencer went away. A106 makes designing the
+replacement a precondition of switching chain 26460 over, not a follow-up.
+
+A holder must establish two things:
+
+1. **The note existed** — its commitment is a leaf of the commitments tree,
+   whose root is a section of an anchored root.
+2. **It was not spent** — its nullifier is absent from the spent set at that
+   same root.
+
+### §136.1 — Unspentness comes from the live set, not from the nullifiers
+
+The first version of this design proved unspentness by showing the note's
+nullifier was absent from the spent set. **That is unsound at this tier, and
+the audit that found it also demonstrated it.**
+
+A spend carries `(commitment, nullifier)` pairs chosen by the spender. The VM
+cannot check that a nullifier derives from the spender's key: it does not hold
+the key, and there is no circuit yet to constrain one. So a spender publishes
+any nullifier they like. `live` still stops them spending the object twice, so
+this is not a double-spend — it is worse. The object leaves the live set while
+its real nullifier is never published, and an exit proof that tests absence
+then says the note is unspent. **The vault pays for a note that was already
+sold.** `a_spend_with_an_invented_nullifier_must_not_leave_an_exitable_note`
+reproduces it.
+
+The fix is to prove membership in the **live set**, which is the VM's own
+record of what remains unspent. It needs no key, so nothing about it can be
+forged by a spender, and it is now a committed section (`SECTION_LIVE`).
+
+Three things fall out of it, all improvements:
+
+- **No nullifier key is revealed.** The earlier design leaked it by necessity;
+  this one never asks for it, so exiting no longer costs the holder the
+  linkability of their past spends.
+- **Registration is no longer a precondition of exiting.** A119 is dissolved
+  rather than deferred: it existed only because the proof was bound to a
+  registered key.
+- **`Op::Register` no longer carries a nullifier-key commitment.** It was
+  added for the earlier design and nothing uses it now. An unused consensus
+  field that looks like a security check is worse than no field, because the
+  next reader assumes it is enforced.
+
+### §136.2 — What the nullifier set is still for
+
+It is how a *wallet* recognises its own spends (`scan.rs`). A spender who
+publishes a nullifier other than their own only confuses their own wallet, so
+nothing else rests on it.
+
+It is **not** a double-spend audit trail, and §130.10's claim that "anyone can
+check we did not double-spend" has to be read against the live set instead: an
+object leaves `live` exactly once, and that transition is committed. Tier 3+4
+makes the nullifier sound by constraining its derivation inside the circuit,
+at which point the two records agree and either can be checked.
+
+### §136.3 — One encoding for the account leaf
+
+`account_record` and `account_leaf` encoded the same thing separately, and
+when the leaf grew a field the record did not follow. The conformance suite
+caught it (rule S6). They now share one function. Two encodings of one fact is
+a drift waiting to happen.
+
+### §136.4 — Who gets paid
+
+The proof names the note's **owner**, and a custodian pays that account's
+bound destination rather than whoever presented the proof. That is what makes
+an exit proof safe to publish: holding a copy of someone else's buys nothing.
+
+It also means the proof needs no signature. What it proves is a statement
+about an account, not a request from a person.
+
+### §136.5 — What a verifier still has to supply
+
+That `anchored` is a root Zcash actually saw. The proof shows its sections
+hash to that root; it cannot show the root was witnessed, and nothing
+self-contained could. A custodian looks the anchor up.
+
+### §136.6 — Conservation is a sum, so every term must be positive
+
+The audit found three ways to create value or halt the VM, all from the same
+root: amounts were checked against *zero* rather than against *positive*.
+
+**A negative output pays for an inflated one.** Conservation is a per-asset
+sum of inputs minus outputs. Spend 10, create 1,000 for yourself and −990 for
+anywhere, and the sum is zero. The books balance and the spender holds a
+hundred times what they put in — spendable, sellable, and exitable against the
+vault. `commitment()` refused `Fixed::ZERO` and nothing else, so the note was
+committable and entered every tree.
+
+Fixed at that chokepoint: `commitment()` now refuses any amount `<= 0`, and a
+note that cannot be committed cannot enter any tree, which covers every path
+at once rather than each call site separately.
+
+**A negative withdrawal raises the backed supply.** `apply_withdraw` subtracts
+the amount from `issued`, so a negative one adds. It also records a debt of
+less than nothing. One of those and the chain will let you withdraw the
+difference for real.
+
+**A negative asking price is met by any payment, including none**, because the
+claim path checks the seller was paid *at least* the asking price.
+
+**An unchecked `sum()` over attacker-chosen outputs panics.** The claim path
+totalled the seller's payment with `.sum()`, which overflows on two outputs of
+`i128::MAX`. A panic inside the VM is a halt, not a refusal, and the input
+that causes one is free to construct. Now a checked fold that refuses.
+
+The general rule this leaves: **a value that participates in a sum must be
+validated as positive at the point it enters the system, not where it is
+used.** Zero-checks are what you write when you are thinking about empty
+inputs rather than about hostile ones.
+
+### §136.7 — What "anyone can check we did not double-spend" actually means
+
+§130.10 said publishing commitments and nullifiers in the clear lets a
+stranger with no key check that no nullifier appeared twice. **That check does
+not work**, and finding out why took a wrong turn worth recording.
+
+A nullifier is chosen by the spender. The VM cannot verify it derives from
+their key — it holds no key, and there is no circuit yet to constrain the
+derivation. An operator retiring the same object twice would simply publish
+two unrelated nullifiers, and "no nullifier appeared twice" would pass.
+
+**The wrong fix** was to derive the nullifier in the VM from the commitment,
+making it verifiable by anyone. It works, and it destroys a property the
+design holds deliberately: `a_published_nullifier_does_not_name_its_commitment`
+asserts that a nullifier must not identify which commitment it retired, and
+without the owner's key there is no path between them. A VM-derived nullifier
+is that path, published for everyone. The test caught it, which is the whole
+reason to write a test for a property rather than a behaviour.
+
+**The right check is counting.** Every commitment ever appended is either
+still live or has been retired, and retiring one publishes exactly one
+nullifier:
+
+```text
+    commitments  ==  live  +  nullifiers
+```
+
+An operator who retires an object quietly fails it, and so does one who
+invents spends that retired nothing. It needs no key, it does not reveal which
+nullifier belongs to which commitment, and the counts are in the node's status
+output so anyone can run it. `ObjectVm::reconciled()`.
+
+This is weaker than the claim §130.10 made: it proves the books balance, not
+that a particular object was spent once. The stronger statement needs the
+derivation constrained inside a proof, which is A108. Until then the honest
+sentence is "anyone can check the ledger accounts for every object it
+created", and that is what the docs should say.
+
+## §137 — A market on the object ledger, hidden from the public (23 Sep 2026)
+
+The §130.11 scope lock said the object ledger would carry transfers and
+listings and nothing else until tier 3. It is lifted by direction: A108 waits
+for funding, and funding waits on something people use — NFTs first, and if
+they do not carry it, launches. So the market is built at tier 2, with the
+same honesty line as everything else: **private from the public, visible to
+the operator.**
+
+### §137.1 — Batches, at the FM-AMM price
+
+A sequencer that sees orders one at a time can reorder them, and on a
+constant-product pool reordering is profit. So a swap is escrowed in the epoch
+it arrives in and every order in a pool clears together at the seal, at
+`p = (y + 2b′)/(x + 2a′)` — the function-maximising AMM (Canidio & Fritsch
+2023; CoW AMM), the price at which the pool's post-trade marginal price equals
+the price it traded at. Order within the batch cannot matter, so there is
+nothing to sandwich; `x′y′ ≥ xy` for every batch (the gap is
+`(x·b′ − y·a′)²`), and each reserve stays above half. The cost is honest and
+visible: a lone order pays roughly twice the constant-product impact, and the
+difference stays with liquidity providers rather than an arbitrageur.
+
+Minimums are refunds, not partial fills: an order the batch price does not
+satisfy is returned whole and the batch repriced without it.
+
+### §137.2 — Claims, because the VM cannot encrypt
+
+A batch settles after the trader has signed and left, and the VM holds no
+randomness and no reason to encrypt a note for anyone. So what the ledger owes
+is a claim — owner, asset, amount — redeemed by its owner with notes they
+encrypted themselves. One redemption path for swaps, refunds, pool shares and
+sale allocations.
+
+A claim's id derives from a nonce in the intent that created it, and the
+wallet derives its nonces from its key and a counter. That is the whole
+discovery mechanism: there is deliberately no "claims for this account",
+because that query would answer anyone who asked.
+
+### §137.3 — Launches sell at one price
+
+The whole supply is issued into escrow. Commitments are private until the
+close; at the close everyone pays the same price, oversubscription is filled
+pro rata and the rest refunded, and under the soft cap everything is refunded
+and the token burned — the creator's share with it. On success part of the
+raise and a token reserve seed a pool whose shares are **all** locked: nobody
+holds them, so nobody can pull the liquidity from under the buyers.
+
+A launch's name is its 32-byte `meta`, read by the wallet as an 8-byte symbol
+and a 24-byte name. On chain and public, so every wallet shows the same name
+without a server; decoded strictly, so a copycat cannot pad their way into
+someone else's.
+
+### §137.4 — What is public, and what the root commits
+
+Public: pool reserves, shares and fee; sale terms and total raised. Committed
+only as blinded leaves: orders, claims, commitments, and who created a sale.
+The market joins `sections()` only once used, so every root and saved state
+from before is byte-identical. Pool shares and launched tokens exist only on
+the ledger and cannot be withdrawn to Zcash.
+
+### §137.5 — Sales need the clock
+
+Epochs advance with traffic, and a sale closes at an epoch — so on a quiet
+chain a sale could stay open forever. While any sale is open, the node seals
+on the clock even with nothing to seal. With none open, it does not, and an
+idle chain does not fill its history with empty epochs.
+
+## §138 — The bridge fee and the NFT resale fee feed the ZYN pot (23 Sep 2026)
+
+The object ledger (§130) carried value but none of the fee rail the account
+ledger had (§68.6, §69.9). The two parts of it that are not trading fees are
+brought across unchanged in shape; the launchpad and pool fees wait for the
+product decision on launches (§137).
+
+| # | Decision | |
+|---|---|---|
+| 138.1 | **Nothing is charged until the operator sets it.** `SetFees` and `RegisterCollection` are operator intents, journalled like any other, so every replica charges exactly what the chain charged — and a chain that never set them replays byte-identically | 🔒 |
+| 138.2 | **The bridge fee is `bridge_bps` on a deposit, taken from it, and on a withdrawal, added on top** (§30's 50 bps is the starting rate). The fee is ZEC.zy that stays issued and backed and belongs to the ZYN pot. A deposit credited without the fee is refused once one is set | ✅ |
+| 138.3 | **The ZYN pot is keyless and public** (§71.23): no intent spends from it, and `zyn_market` reports it beside the schedule so the fee can be checked against what was kept. It is the object ledger's future-ZYN-POL pot (§68.6); its release is §71.22's open question, unchanged | 🔒 |
+| 138.4 | **A registered collection charges `fee_bps` on each side of a resale, in its quote asset** — the buyer on top, the seller out of the proceeds, so the listed price is the price — split 50% ZYN pot, 40% the collection's redemption floor, 10% creator (§69.9), remainder to the pot. Cave collections: 100 bps a side, creator Treasury 26460 | ✅ |
+| 138.5 | **Terms are set once.** A holder prices an item against its collection's terms, so they do not move under them; `RegisterCollection` on an existing collection is refused | 🔒 |
+| 138.6 | **The floor is redeemable, or it is not a floor.** `Redeem` burns items for `floor × burned / outstanding`, as a claim | ✅ |
+| 138.7 | **Ceilings in consensus:** 2% bridge, 10% a side on resale | 🔒 |
+| 138.8 | **An item is its own asset, `item_address(collection, serial)`** — the address the manifest commits to (§86.2). §133.3's `asset = collection, amount = 1` made items fungible within a collection: after one sale or send nothing, not even the VM, knew *which* item a holder had. With one asset per item, conservation carries identity through every transfer. Supersedes §133.3 | 🔒 |
+| 138.9 | **The primary sale delivers with `MintItem`**, operator only, sealed to the buyer's registered viewing key (`primary::mint_item`, `zyn_mintItem` on the operator's token). A serial mints once, and never past the collection's **cap**, fixed at registration: minting past what holders were promised dilutes their share of the floor | 🔒 |
+| 138.10 | **Collection items sell through `List`, paid by claim.** The listing publishes the item's nullifier (§132.5) and names no seller; the buyer's outputs are the item and their own change; the seller's proceeds (price less their side of the fee) wait as a claim derived from a nonce only they hold. `PlaceOffer` refuses a collection's items so there is one sale path to get right | ✅ |
+| 138.11 | Items cannot leave for Zcash: they are made on the ledger and nothing in the vault backs them | 🔒 |
+
+## §139 — Nap holds ZEC in the browser (23 Sep 2026)
+
+Browser Nap held Zyn tokens and items and sent ZEC holders to desktop Nap for
+Zcash itself. It now holds shielded ZEC the way any Zcash wallet does: sync,
+balance, receive, send.
+
+| # | Decision | |
+|---|---|---|
+| 139.1 | **One wallet core, two builds.** The browser runs the desktop's own `zyn_custody` scanning, note trees and payout builder, compiled to WebAssembly (`apps/nap-web/zec-core`, crate `nap-zec`). No second Zcash implementation in JavaScript. `zyn-custody` gains a default `multicore` feature; the browser build turns it off and proves on one thread | 🔒 |
+| 139.2 | **The page carries the frames; the core decides.** The core builds every `zyn-lightd` request and checks every reply (`lightd::request`/`lightd::decode`, shared with the desktop's TCP client). The page only posts bytes. Nothing it sends names a key or a shielded address | 🔒 |
+| 139.3 | **`zyn-lightd` gets an HTTP door** (`ZYN_LIGHTD_HTTP`): the same request frame as a POST body, the same reply frame back. Loopback only, behind the gateway's TLS, CORS and rate limit; the page reaches it through the same-origin `/zec/<network>` Pages Function, as it reaches `/rpc` | ✅ |
+| 139.4 | **Same phrase, same keys, same state format.** ZIP-32 Orchard account from the BIP-39 seed, exactly as `KeyMaterial::spending_key`; tests on both sides pin the same vectors. The scan state is the desktop's `ZYNWAL01` bytes | 🔒 |
+| 139.5 | **The spending keys are sealed with the rest, never the phrase.** A kept wallet adds both networks' Zcash keys to its sealed record; one sealed before this asks for the phrase once, checks it opens *this* Zyn account, and reseals. The scan state sits in IndexedDB under AES-GCM keyed from the spending key, under a derived name: a locked device shows nothing about its ZEC | 🔒 |
+| 139.6 | **A Zcash address gets a Zcash transaction; a Zyn account gets Zyn tokens and items.** The Zcash section sends only to Zcash addresses and turns a Zyn account id away to Coins/Items. Moving ZEC into Zyn is an ordinary payment to the account's own deposit address ("Pay it from my ZEC") | ✅ |
+| 139.7 | **Proving runs in a Web Worker,** about 21 s for a two-action payment including building the key (measured on testnet, Node, one thread). The page stays live; the send says to keep the tab open | ✅ |
+| 139.8 | **Where a scan starts.** A phrase created in the browser starts at the tip. A restored one starts at the network's `zecBirthday` (config: mainnet 3,440,000, testnet 4,320,000); "Scan from an earlier block" reseeds from any height | ✅ |
+
+## §140 — Nap connects to sites: Nap Connect (23 Sep 2026)
+
+Sites on Zyn and Zcash can find Nap and ask it for things. Surveyed first:
+Ethereum wallets announce themselves with EIP-6963 events and gate accounts
+behind `eth_requestAccounts`; web-only wallets (Coinbase Smart Wallet's
+keys.coinbase.com and the like) open their own origin in a popup and talk by
+`postMessage`; Zcash has no connection standard — MetaMask's Zcash snap
+serves only its own site (`getViewingKey`, `signPczt`), and a
+WalletConnect-for-Zcash grant was declined in May 2026 — but Zcash wallets do
+share ZIP-321 payment requests.
+
+| # | Decision | |
+|---|---|---|
+| 140.1 | **One provider interface for every Nap:** `request({method, params})`, EIP-1193 error codes, one method set (`apps/nap-connect/README.md`). A site written against the extension works against the browser wallet unchanged | 🔒 |
+| 140.2 | **Discovery is EIP-6963's shape under our own names:** the extension answers `nap:requestProvider` with `nap:announceProvider {info, provider}`; `window.zyn` stays for older pages | ✅ |
+| 140.3 | **Nap in the browser connects through its own window** (`/connect.html`, popup + `postMessage`). Nap answers only its opener, at the origin of the opener's first message; the site listens only to Nap's window at Nap's origin; the page refuses to run framed, and `_headers` forbids framing everywhere | 🔒 |
+| 140.4 | **Connect before anything about the holder.** `nap_connect` is approved once per site and shows the Zyn account and a Zcash address — never balances, notes or keys. Any read of the holder's data, or any write, from an unconnected site prompts the connection first (as `eth_requestAccounts` does). Public order-book reads need nothing. This closes the extension's old gap, where any page could read `zyn_account` | 🔒 |
+| 140.5 | **Writes are prepared from the chain, not the site.** An approval shows the listed price, the item, the ZIP-321 amount and memo as Nap reads them; a site's `pay` that disagrees with the listing is refused | 🔒 |
+| 140.6 | **ZEC requests are ZIP-321** (`zec_pay {uri}`), single-recipient; a multi-payment or unknown `req-` request is refused whole. One parser (`nap-web/src/zip321.js`) serves the browser wallet, its Send field and the extension build | ✅ |
+| 140.7 | **The Cave store connects through Nap Connect:** a header button and picker (extension, Nap in the browser). It reads only the public order book itself (`zyn_offers`, no credentials) so anyone can browse; everything about the holder goes through their Nap. A localhost-only `?nap=` override exists for development and is not read on the real domain | ✅ |
+
+## §141 — Pump.fun-style launches on the object ledger (23 Sep 2026)
+
+The user chose a pump.fun-style launchpad and adopted the fee package. Studied
+first: pump.fun's virtual constant product, §69's linear curve, and shld.fun,
+a live launchpad on Zcash. Its "ZSA" tokens are not native assets but an
+operator-kept ledger whose events ride ordinary Ironwood payments — 332
+tokens in 16 days, 18 graduated, 244 of the rest under 1% sold, 24 h volume
+7.5 ZEC (99% one token), no creator rewards, 3% buy fee.
+
+| # | Decision | |
+|---|---|---|
+| 141.1 | **One curve for every token, in consensus** (`objectvm::curve`): 1B supply in 80,000 lots of 12,500; lot i costs 7,721 + i zatoshi; graduation at lot 51,098 — 17.00005 ZEC raised, 47 ZEC FDV, 7.62× from the start, pump.fun's shape in dollars at today's ZEC. A creator cannot tune it against buyers | 🔒 |
+| 141.2 | **Linear, not virtual constant product, because of batches.** With each epoch's buys at the average price over the lots they take, the raise to graduate is exactly the integral however the flow arrives, so the pool (the unsold 28,902 lots and everything raised) opens within 0.0011% of the curve's last price. Virtual constant product under FM-AMM batching makes the raise path-dependent (20–42 ZEC for a 20 ZEC target) | 🔒 |
+| 141.3 | **Each epoch settles at the seal, sells then buys, each side at one average price, buyers pro rata by budget.** Order is the VM's rule, never arrival, so neither the sequencer nor a bot gains by ordering; one epoch can never buy past graduation, and the crossing epoch fills to the end and refunds the rest. Every rounding favours the curve: the reserve always covers buying back every lot sold | 🔒 |
+| 141.4 | **Tokens exist only as bought:** issued on a buy, burned on a sell, the remainder issued into the pool at graduation. No creator allocation; the creator buys like anyone | ✅ |
+| 141.5 | **Fees (adopted package), operator-set with `SetCurveTerms`, fixed per token at creation:** a fee on the quote side of every curve trade (on top of a buy, out of a sell), split 50% ZYN pot / 40% the token's graduation liquidity / 10% creator; a creation bond. Creator share and bond are paid only at graduation. Ceilings 2% and 1 ZEC.zy. Graduated pools 30 bps, kept by the pool. **Testnet 212: 100 bps, no bond (23 Sep). Mainnet: not set** | ✅ |
+| 141.6 | **Graduation is atomic:** a locked pool (every share, nobody holds any), the creator's escrow and bond paid, the curve closed. The graduation pot joins the pool, which opens slightly above the curve's last price — buyers' fees deepen the market rather than the operator | 🔒 |
+| 141.7 | **A curve token cannot be pooled before graduation** — the pool it graduates into cannot be squatted — **nor withdrawn** (it is derived) | 🔒 |
+| 141.8 | **Nap-only.** Tokens live on Zyn and no other Zcash wallet can show them, so there is no "buy from any wallet" path. Sites reach Nap through Nap Connect: `zyn_curves` (public), `zyn_curveHoldings`, `zyn_curveCreate`, `zyn_curveBuy`, `zyn_curveSell`, `zyn_swap`, `zyn_collect` | ✅ |
+| 141.9 | **Cave Jade is the launchpad's site:** the public yard read straight from the chain (anyone can browse), every write through Nap. Its COOP becomes `same-origin-allow-popups` so Nap's window can answer; `connect-src` admits only the chain's RPC. §69.35's provider-only rule is superseded for public reads | ✅ |
+| 141.10 | **Charts come from the node, derived, not consensus** (`zynzapd::market_history`): after each epoch the node records a point per token whose curve or pool moved — lots sold, price, ZEC set in it, and the epoch's net change — to `chain-<id>.history`; `zyn_history {token, since}` and `zyn_curveStats` serve it. Batches clear at one price, so the finest grain is an epoch's net movement and no wallet ever appears. A token younger than a window reports its change since it was made. History starts when a node first runs this code | ✅ |
+| 141.11 | **Market cap is the headline** (price × 1B, in ZEC and in USD); candles of market cap at 1m–1d; a bonding-curve progress bar; age; sorts Movers (default — never the empty tab), New, Market cap, Last trade, About to graduate, Graduated. Pump.fun without its social layer: no comments, no holder list — holders are private and the page says so | ✅ |
+| 141.12 | **Pictures and descriptions are off chain, attached once by the creator with a proof.** Nap returns, with a new token, an ed25519 signature over `"cave.jade.content.v1" ‖ token ‖ sha256({description, image, v:1})`; Jade's store (Pages Function + KV) checks that the key's account and nonce derive the token, keeps the first attachment only, limits size and type (data-URL PNG/JPEG/WebP/GIF, ≤300 KB after shrinking in the browser; 400 chars), rate-limits by IP, and has an operator hide list. The chain carries only the ticker and name | ✅ |
+| 141.13 | **Trades carry floors and settle themselves.** Buys send `minTokens`, sells `minZec` (slippage 1–10%); after the seal the page calls `zyn_collect`, which Nap now serves to a connected site without a prompt — it only moves what the ledger already owes the holder. `zyn_curveHoldings` adds the ZEC.zy balance and, for its holder only, the tokens they made | ✅ |
+
+## §142 — Rarity classes for Collection Z (23 Sep 2026)
+
+The 4,444 had no rarity (`collection.json` said "none; controlled family distribution only"). The user asked for classes where the traits are the clue, and approved these after seeing each class as a grid.
+
+| # | Decision | |
+|---|---|---|
+| 142.1 | **Scored from traits alone:** an item's score is Σ −log₂(share of the 4,444 with that value) over Species, Background, Body, Eyes, Mouth/Beak (one slot), Headgear, Interactive Light. Visual Family is left out — it names a production batch, not something a holder sees | ✅ |
+| 142.2 | **Classes by rank, fixed sizes:** Mythic 44 (1%), Legendary 178 (4%), Epic 445 (10%), Rare 888 (20%), Uncommon 1,334 (30%), Common 1,555 (35%); ties by collection index. Species spread: Mythic 22 Mole / 20 Owl / 2 Moth | ✅ |
+| 142.3 | **Moths are not rarer by traits.** Moths have far fewer variants per slot (9 bodies against the moles' 22), so each moth trait is widely shared and cancels the species' scarcity — 45% of moths land in Common against 34% of moles. Accepted as what the traits say | ✅ |
+| 142.4 | **Rarity is in the committed metadata:** `Rarity` and `Rarity Rank` attributes enter each manifest preimage. With the re-cut images of 142.9 and the replacements of 142.10–142.11 the manifest root moves `02b01b16…` → `0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426`; policy digest → `a572a747…0b13`; terms digest `159b454e…` → `f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e`. Item addresses and the collection id do not move (they derive from the index). Done before any entry existed; the terms page says so | ✅ |
+| 142.5 | **Rarity cannot go stale silently:** `tools/assign_rarity.py` derives it; the store validator refuses metadata whose rarity no longer matches its tags; `RARITY.json` is the copy kept in git | ✅ |
+| 142.6 | **Known weak spot:** 34 items hold a trait seen on ≤3 items, several tagged at low confidence (mole mouths "Friendly Smile", "Glowing Grin"; "Zero Field Halo"), and they dominate Mythic. A human look at those 34 before the sale would stop a mislabel from minting a Mythic | ⏳ |
+| 142.7 | **1,373 images had slicing defects repaired at their edges** (`tools/repair_slicing.py`, every change in `IMAGE-REPAIRS.json` with old and new hashes): 444 with a dark gutter line (mostly the bottom 1–3 px) extended from the first real line; 1,018 with streak bands — ≥8 px of one repeated edge column that has detail along it — inpainted from the surrounding pixels. Mirroring was rejected (it made mirrored half-characters). Nothing inside the art changed, so traits and reviews hold; checksums and catalog hashes follow the new bytes. Moth #0668, overwritten by a thumbnail sheet on 23 Sep, was restored from its manifest blob | ✅ |
+| 142.8 | ~~**209 wide bands (≥16 px) are improved, not clean**~~ superseded by 142.9 (re-cut, no bands). — Mole 0598–0747 and 1347–1356 are almost whole source boards cut too narrow, plus 32 owls. At full size their sides read as soft smears. The clean fix is new art or a swap for a reserve cell (mole 68, owl and moth reserves exist), which changes traits and rarity. Also open: near-twin moles 1624/1649/1674, 2097/2117/2134, 2179/2209, 1690/1727, 2163/2189, 2176/2206, 0452/0457 | ⏳ |
+| 142.9 | **The Moles and Owls are re-cut from their source canvases, square by cropping** (`tools/reslice_square.py`, `RESLICE.json`), replacing 142.7's edge repairs for those species. The same measured cells (proven: each rebuilds its original image exactly with the old exporter); flat gutter slivers trimmed; a tall cell loses its extra height — Moles half from the top, Owls 15% (their ear tufts sit high) — instead of being padded with repeated edge pixels. No streaks remain anywhere. Same portraits, same traits; framing slightly tighter. Moths were never padded and keep 142.7's 12 frame-line fixes. The user also saw a code-drawn layered alternative and preferred the original art | ✅ |
+| 142.10 | **Nine near-duplicate Moles replaced from a new 3×3 board** (`canvas-34`, the user's; builder `DUPLICATE_REPLACEMENTS`): 0457, 1649, 1674, 1727, 2117, 2134, 2189, 2206, 2209 — the later members of 0452/0457, 1624/1649/1674, 1690/1727, 2097/2117/2134, 2163/2189, 2176/2206, 2179/2209; the first of each group stays. Each board slot keeps its group's family (geode, rail, root, cipher, moon, prism, shielded, gold vein, node) with directly reviewed tags. Rarity from those tags: seven Mythic (ranks 1, 2, 3, 4, 6, 8, 19), 2206 Legendary 49, 2209 Legendary 158. Both builders now finish with the square re-cut and rarity, because a plain rebuild had silently restored the padded slices | ✅ |
+| 142.11 | **Five more near-twins replaced from a second board** (`canvas-35`, "Duplicate Replacement Board B"): 1943 (twin of 1887), 2133 (2110), 2219 (2095), 2111 and 2128 (2097). Rarity from their tags: 2111 Mythic 3, 1943 Mythic 4, 2219 Mythic 7, 2133 Mythic 12, 2128 Legendary 53. The near-duplicate scan finds no same-template, same-colour pairs left | ✅ |
+| 142.12 | **Four wild cards held outside the 4,444, for the team** — board 35's remaining cells, cut by the same rules into `mole-wild-cards/` (tracked record `wild-cards.json`; metadata `Edition: Wild Card`). CAVEZ's cap is 4,444 on chain and in the terms, so they are not CAVEZ items: delivering them means their own small collection | ✅ |
+| 142.13 | **Published 24 Sep 2026: the art and the revised terms.** All 8,888 Collection Z blobs (4,444 images, 4,444 manifests) at `cavebro.win/blobs/<hash>`, each checked against its name before staging and all 8,888 answering live; `cavebro.win/terms` and `cave-sale-terms-v1.hex` carry root `0c56593e…8426` and terms digest `f2c32420…a59e`, recomputed from the live bytes. **The collection is now frozen**: any change to an image, trait or rarity is a different sale. Still to do before the door opens: register CAVEZ on 26460 (operator, the user's activation script), stamp the digest (A96), whitelist codes and the sale service (A100) | ✅ |
+
+## §143 — ZynScan: the ledger replayed, in public (24 Sep 2026)
+
+The user: transactions should at least be visibly on chain, even before Zcash carries them — still more than other Zcash projects show.
+
+| # | Decision | |
+|---|---|---|
+| 143.1 | **`zynscan` is rewritten for the object ledger** (the old binary served the retired AMM chain's anchors). It replays the node's own journal files through `ObjectVm` — the replica's rules, nothing interpreted by hand — incrementally, and serves a read-only GET API: summary, epochs, one epoch, transactions, one transaction, the public market | ✅ |
+| 143.2 | **It checks, not just shows:** the summary carries the root it replayed and the node's `state_root`, and `agrees` when both are at the same sequence. Verified on the devnet, testnet 212 and mainnet 26460 | ✅ |
+| 143.3 | **Tier 2 holds (§130.12, §133.4).** For a holder's operation it publishes the kind, accepted or refused, notes created and spent, and at most a public object id (a coin, a pool, a collection) — never an account, an amount, an owner or a destination. Operator operations (fees, collection registration, curve terms, item mints' collection and serial, exits' Zcash txid) are public by nature and shown whole. A test pins that a curve trade's trader and amount never appear. Account pages were not built: collecting one account's history is the thing tier 2 exists to prevent | 🔒 |
+| 143.4 | **Settlement is stated as it is.** An epoch shows "on Zyn" until an anchor carries it, then the Zcash height and txid. Testnet 212 is anchored through epoch 22; mainnet waits on a funded vault | ✅ |
+| 143.5 | **Where it runs:** `zynscan-mainnet` on Contabo (127.0.0.1:8093), `zynscan` on Hetzner (127.0.0.1:8093, forwarded by the object tunnel to Contabo :8593); nginx `zyn-rpc.cavebro.win/scan/` and `/scan-testnet/`, GET only, CORS from the server block. Site: `zynscan.pages.dev` (`apps/zynscan`), CSP pinned to the gateway | ✅ |
+
+## §144 — Collection Z's sale on the object ledger (24 Sep 2026)
+
+The user: rebuild the sale for the new chain — buyers do not pay a separate Zcash entry; they deposit ZEC, it is bridged, and they buy with it. Keep the lottery. Claims must not depend on trusting the operator.
+
+| # | Decision | |
+|---|---|---|
+| 144.1 | **Tickets are bought on Zyn, in ZEC.zy** (`BuyTickets`, tag 27): 1–20 per buy, at the terms' entry price (0.01). No Zcash payment to watch, no confirmations, no reservation codes — a ticket exists the moment its intent is accepted. The whitelist page stays a sign-up list; it gates nothing | ✅ |
+| 144.2 | **A ticket id is `H(buyer, nonce, k)`** from a market nonce only the buyer's key derives, so the chain's ticket list (`zyn_tickets`) names no one, and a restored wallet finds its own tickets by asking for the ids it can derive (both Naps: first ticket per nonce, then the rest of each buy) | 🔒 |
+| 144.3 | **Money:** 10% of every sale payment (ticket, claim, open mint) is a claim to the collection's creator (the treasury); 90% goes to the collection floor that redemption pays out of. The sale object holds no value itself — conservation counts floors and claims | ✅ |
+| 144.4 | **The lottery is the published one** (`cave-randomness`, policy `a572a747…0b13`, weights 1:80 / 2:19 / 3:1, concealed shuffle over the frozen manifest `0c56593e…8426`). Each Zyn ticket stands in the engine's ticket where a Zcash deposit stood: its id is the deposit txid and recipient, its place is the tx index, and its height is the close. `zynzapd::sale_draw` is the whole mapping | ✅ |
+| 144.5 | **The close is a Zcash height announced in advance** (§104). `zyn-sale-draw close` posts `CloseSale` with that block's hash once Zcash reaches it; the chain refuses tickets after it. **It also refuses to close if the reveal's drand round is already public** — the engine fixes that round from the announcement, not from the close, so an announcement naming too early a round would leave only the Zcash block hidden while tickets were still on sale | 🔒 |
+| 144.6 | **The draw is posted as a Merkle root** (`PostDraw`): one leaf per winning ticket, `H("objectvm.draw-leaf.v1", ticket, serials)`, in ticket order. The full result is served beside the chain (`zyn_saleDraw`); both Naps rebuild the root from it and use it only if it matches the chain's. Anyone with the tickets, the announcement, the drand beacon and the Zcash reveal block can re-run the draw and get the same root | ✅ |
+| 144.7 | **Claims are trustless:** `ClaimItems` names the ticket (by nonce and k, so only its buyer can), the serials and a proof against the posted root; the chain checks the proof, takes the claim price (0.005 each), and mints each item straight to the buyer as a sealed note. The operator cannot claim for anyone, and cannot withhold a claim once the root is posted | 🔒 |
+| 144.8 | **The claim window is the terms' 16,128 blocks after the close** (as published; the first build counted from the reveal block and was corrected 24 Sep). After it, `zyn-sale-draw open-mint` posts the order the rest sell in: what the draw handed nobody, in the engine's revealed order, then unclaimed wins in draw order — both fixed by the reveal, so nobody chooses what sells next. `MintOpen` takes the next place with a proof against that root, at the open price (0.0133) | ✅ |
+| 144.9 | **Where it lives:** ops 26–32 in `objectvm::sale`; the operator's runner `zyn-sale-draw` (status/open/close/draw/open-mint; token read from the node's env, never printed); node RPCs `zyn_market.sales`, `zyn_tickets`, `zyn_saleDraw`; Nap Connect `zyn_saleInfo`, `zyn_saleTickets`, `zyn_buyTickets`, `zyn_claimItems`, `zyn_mintOpen` in Nap in the browser and (through the desktop app) the extension; `cavebro.win/mint` rebuilt on them; ZynScan names each step. The retired checkout (`/api/sale` relay, receiving accounts) is no longer used by any page | ✅ |
+| 144.10 | **A rehearsal policy** (`cave_z::rehearsal_policy`) keeps the published odds, shuffle, manifest and prices with minutes of notice instead of a day. Its digest differs, so nothing is ever sold under it. Rehearsed end to end on a local devnet with real testnet Zcash blocks and real drand rounds (24 Sep) | ✅ |
+| 144.11 | **Consensus change, deployed 24 Sep 2026** (commit `09f37ac`): tags 26–32 and the sale section of the state root, present only once a sale exists. Upgraded in replay-first order — mainnet replica (Windows WSL), testnet replica and mainnet ZynScan (Contabo), testnet ZynScan (Hetzner), then the testnet node and the mainnet node. Both nodes restarted at the same sequence with the same root (212: seq 97 `b9a9498e…0d80`; 26460: seq 7 `bfcec476…646b`), both ZynScans agree, `zyn_tickets`/`zyn_saleDraw` answer on both gateways. `zyn-sale-draw` is installed on Hetzner and Contabo. Old binaries kept as `*.bak-20260924-sale`. **Opening a sale is the user's call** | ✅ |
+
+## §145 — Burn a Solana token for Collection Z tickets (24 Sep 2026)
+
+The user: launch a memecoin on Solana (pump.fun, paired with ZEC) for attention, and connect it to Zyn so the attention becomes activity on Zyn — burning the coin should get people into the draw, beside paying ZEC.zy.
+
+| # | Decision | |
+|---|---|---|
+| 145.1 | **Two ways onto one ticket list:** pay ZEC.zy (`BuyTickets`) or burn the token on Solana. A burn becomes ordinary tickets in the same order, drawn at the same odds; nothing in the lottery, the terms digest or the draw changes | ✅ |
+| 145.2 | **The burn's memo carries `zyn:<commitment>`**, `H("objectvm.voucher.v1", account, secret)` with the secret one of the wallet's market nonces. It names no Zyn account. The claim reveals the secret *from that account*, so a revealed secret lets nobody else claim the burn's other tickets (tested) | 🔒 |
+| 145.3 | **Tickets exist when the burn is posted, not when it is redeemed** (`PostVoucher`, tag 34, operator): nobody burns and then misses the close by forgetting a step. Ids are `H("objectvm.voucher-ticket.v1", commitment, k)`; Nap finds them by the same scan of its nonces that finds bought tickets | ✅ |
+| 145.4 | **A burn counts once** — the chain records every burn id, `H("objectvm.solana-burn.v1", signature)`, and refuses a second post; a commitment counts once too. Anyone can recompute the ids from Solana, so "Zyn burn tickets = Solana burns ÷ rate" is checkable | ✅ |
+| 145.5 | **Burn tickets pay nothing into the floor, and a sale caps them** (`SetVoucherCap`, tag 33; none until set; never below what is posted). The user did not choose between treasury-funded and free-and-capped, so the default is free, capped and stated on the page. A winning burn ticket still pays the claim price per item — which is also what brings its holder's ZEC into Nap | ✅ |
+| 145.6 | **Trust, stated plainly:** Zyn cannot verify Solana, so the operator's `zyn-burn-watch` decides which burns are posted (finalized, successful, the one mint, a `zyn:` memo, whole tickets at the published rate, at most 20 per burn). The draw and the claims stay trustless (§144) | ✅ |
+| 145.7 | **Burns after the close, past the cap, or under one ticket earn nothing** and are not refunded — the watcher logs them, the page says so before anyone burns, and the operator runs the watcher once right before `close` so a burn that landed in time is counted | ✅ |
+| 145.8 | **The burn is built by the store, signed by the holder's wallet:** `solana-burn.js` lays out one legacy transaction (`burnChecked` + memo) and hands the bytes to any Wallet Standard wallet (7e.7) — no Solana SDK. The page reads only `getLatestBlockhash` and the holder's `getTokenAccountsByOwner` for the one mint, straight from Solana (the burn config's `rpc`, or the public endpoint — which refuses Cloudflare's workers, so a relay was tried and dropped); the policy's `connect-src` names exactly those origins, built from the configs. The layout was accepted and finalized by Solana devnet (24 Sep) and is pinned in a test | ✅ |
+| 145.9 | **Where it lives:** ops 33–35 in `objectvm::sale` (snapshot `MARKET06`; `MARKET05` still loads; the sale section of the root grows a burns root — no live chain has a sale yet, so no root changes); `zynzapd::burn_watch` + `zyn-burn-watch` (status/cap/once/run); Nap Connect `zyn_burnMemo` (web and desktop/extension), burn tickets in `zyn_saleTickets` and `zyn_claimItems`; `cavebro.win/mint` shows the burn button only when `/burn.json` (mainnet) or `/burn-testnet.json` exists; ZynScan shows "Burn posted" | ✅ |
+| 145.10 | **Consensus change, deployed 24 Sep 2026** (commit `83688f2`; tags 33–35, `MARKET06` state): replay-first order again — mainnet replica (Windows WSL), testnet replica and mainnet ZynScan (Contabo), testnet ZynScan (Hetzner), then both nodes. Both restarted at the same sequence and root (212: seq 97 `b9a9498e…0d80`; 26460: seq 7 `bfcec476…646b`); both ZynScans agree. `zyn-burn-watch` is on both boxes, idle until a mint is set. Each node's pre-upgrade state file is kept as `*.object-state.bak-20260924-burn` — the previous binary cannot read `MARKET06`, so a rollback restores both. **Still the user's:** the token, its rate per ticket and the cap | ✅ |
+
+## §146 — SOL.zy and ETH.zy on the object ledger, testnet first (24 Sep 2026)
+
+The user: for the Colosseum narrative, bridge SOL and ETH (Ethereum L1) as well as ZEC; judges need testnet/devnet (Solana devnet, Ethereum Sepolia); about three weeks; "as long as there's some proof would be enough".
+
+| # | Decision | |
+|---|---|---|
+| 146.1 | **Bridged assets are private notes, like ZEC.zy**, named by §66.13 from public facts: SOL.zy (devnet) = `bridged("solana-devnet", "")` = `9204324e…2ad1`; ETH.zy (Sepolia) = `bridged("eip155:11155111", "")`. Mainnet SOL and ETH get their own ids later; a test coin can never pass for a real one | 🔒 |
+| 146.2 | **`RegisterBridged` (tag 36, operator)** records an origin from the frozen registry (ported from the AMM chain's validator) with its decimals. Only registered assets take committed deposits; ZEC.zy keeps its own path | ✅ |
+| 146.3 | **Deposits carry a commitment, not an account.** Other chains have no per-account shielded address, so a deposit carries `H("objectvm.deposit.v1", account, secret)` (the secret one of the wallet's market nonces) — a Solana memo `zyn:<hex>`, or the `bytes32` `ZynVault.depositNative` already takes. `DepositCommitted` (37, operator) records it once by its reference, issues the gross, sends the bridge fee to the pot and keeps the rest waiting under `H(commitment, asset)` (counted in `holdings`, so conservation holds); `ClaimDeposit` (38) takes it as a note by revealing the secret *from the committed account* | 🔒 |
+| 146.4 | **A fresh code per deposit:** Nap reuses a code only until a deposit with it lands, so two deposits are not linked by their memo. Waiting deposits are found by the same nonce scan as claims and are claimed on their own (Nap Bridge, and `zyn_collect`) | ✅ |
+| 146.5 | **Exits are the ordinary `Withdraw`**, committing to `keccak(address ‖ salt)` on the destination chain; the holder reveals the address with `zyn_bridgeReveal` (accepted only when it reproduces an unpaid exit of that asset) and the chain's bridge reads it through `zyn_bridgeExits` (operator token). Paid exits are recorded with `SettleExit`, the Solana signature's hash or the Ethereum transaction hash | ✅ |
+| 146.6 | **Solana: `zyn-sol-bridge`** reuses the devnet vault `7KacSY…KZmA` — a FROST ed25519 2-of-3 key — and its durable nonce `BrRELA…d61H`. Payouts are built and signed through `custody::prepare_with` by the custodians, rebroadcastable and never repeated; the network fee comes from the exit. Rehearsed 24 Sep on real devnet: 0.05 SOL in by Nap's code, claimed; 0.02 out, signed with custodian 3 offline, finalized, settled; vault and issued agree | ✅ |
+| 146.7 | **Ethereum: `ZynVault` unchanged, `ZynSigners` as its signer** — a fixed 2-of-3 EIP-1271 contract (threshold signatures ascending by owner; 3 Foundry tests beside the vault's 20). `zyn-eth-bridge` credits finalized `Deposited` logs by the vault's per-asset index and pays revealed exits; it computes the digest in the contract's encoding and **refuses to sign unless the vault's own `withdrawalDigest` agrees** (the old Rust digest typed the asset `bytes32`, the contract `uint256`). Rehearsed on anvil: 1 ETH in, claimed; 0.4 out, paid exactly, settled | ✅ |
+| 146.8 | **"Some proof" custody, stated:** the SOL shares are the existing devnet custodians (two on Hetzner, one reachable by tunnel — §36.7's concentration is unchanged for devnet); the three ETH owner keys and the gas payer are files on one box. Both vaults are threshold by construction, so spreading the keys later changes no code and no address — ETH needs a new `ZynSigners` and vault, SOL none | ⚠️ |
+| 146.9 | **Nap Bridge** (`/bridge.html`): deposit from a Solana wallet (Wallet Standard, a transfer + memo laid out by `src/solana.js`, accepted by devnet and pinned in a test) or an Ethereum wallet (EIP-1193, `depositNative` with the code); send out to a Solana or `0x` address. Its CSP adds only Solana devnet's RPC. ZynScan shows "Bridge deposit" (asset only) and "Bridged asset registered" | ✅ |
+| 146.10 | **Mainnet waits:** both bridge binaries refuse mainnet (`zyn-sol-bridge` through the custody RPC's own guard; `zyn-eth-bridge` refuses chain 1) until custody is federated | 🔒 |
+| 146.11 | **Consensus change deployed 24 Sep 2026** (tags 36–38, `MARKET07`): nodes, replicas and ZynScans upgraded in replay-first order, both roots unchanged (212 seq 97, 26460 seq 7). **SOL.zy (devnet) is live on testnet 212**: registered, `zyn-sol-bridge.service` on Hetzner. Public round trip through the live services: 0.02 SOL in by a fresh code, claimed as 0.0199 (50 bps bridge fee); 0.01 out, threshold-signed, paid 0.009995 (network fee from the exit), settled; vault +0.02 −0.01, issued 0.01, testnet ZynScan agrees. **ETH.zy (Sepolia) is live too** (24 Sep): `ZynSigners` `0x95cb…fa41` (2 of 3), `ZynVault` `0xe17b…ef27`, `zyn-eth-bridge.service` on Hetzner. Public round trip: 0.01 ETH in by a fresh code (Sepolia block 11772911), claimed as 0.00995; 0.004 out, signed 2-of-3, paid exactly in `0xcde64afb…b558678`, finalized and settled; vault 0.006 = issued 0.006; ZynScan agrees. Lesson: never `source` the node's env file in a shell — `ZYN_DA_MIRRORS` holds `url|token`; systemd parses it, a shell pipes it | ✅ |
+| 146.12 | **Operations, 24 Sep:** the node no longer reads the vault's note stores under its lock (A162; deployed to both nodes, 0 slow calls of 60 on testnet during catch-up, roots unchanged). The DA mirror token was rotated on the mirror and in all four env files after being printed to a terminal; both nodes hold the new one. Testnet anchoring resumes by itself once its note trees reach the tip (16k blocks behind at 16:41 UTC) | ✅ |
+| 144.12 | **A sale that closed with no tickets may be set again** (24 Sep, after the first live testnet rehearsal closed empty: nothing could be drawn and `SetSale` refused a closed sale, so the collection's sale was stuck for good). Once any ticket exists, prices and the sale are fixed as before; `zyn-sale-draw draw` over no tickets now says to `open` again or go to `open-mint` | ✅ |
+| 144.13 | **Live rehearsal on testnet 212, 24 Sep** — the whole cycle through the public site and services: the empty sale set again (144.12); 3 tickets bought on cavebro.win/mint through the Nap popup and 1 burned on Solana devnet (posted by `zyn-burn-watch`); an announced close on real testnet heights; the draw over real Zcash block 4388691 and drand round 32492801 (4 tickets, 4 items); all 4 claimed on the page with their art; the open mint posted over 4,437 serials, leaving out the 3 test items that already existed; one minted on the page (Zyn Owl #0457). ZEC.zy spent matches to the zatoshi (3 × 0.01 + 4 × 0.005 + 0.0133); testnet ZynScan agrees. Browser test `apps/nap-connect/tests/sale.e2e.mjs`, phases buy/claim/mint | ✅ |
+
+## §147 — ZYN release: a milestone ladder, and an airdrop to NFT holders at genesis (25 Sep 2026)
+
+The user: airdrop a small portion to Cave and Nap NFT holders; release ZYN at milestones — genesis at 420 ZEC in the pot, later 1,000 ZEC, later more — but do not anchor every rule now, because ZYN's value should not depend on Zcash alone in the future. Snapshot, and the 333 Nap Mole holders.
+
+| # | Decision | |
+|---|---|---|
+| 147.1 | **§71 stands:** 21,000,000 ZYN, created once, never minted again, never burned; 18,900,000 in the keyless reserve; 2,100,000 opening the ZYN:ZEC.zy market. **Genesis is the first milestone and the only one fixed now:** 420 ZEC.zy in the future-ZYN-POL pot opens the market at 0.0002 | 🔒 |
+| 147.2 | **Later milestones are committed by rule, not by number.** Each is published — its trigger and what it releases from the reserve — a fixed notice period before it can fire, and cannot fire otherwise. "1,000 ZEC.zy in the pot" is the expected second; its size and every later step are decided when announced. Nothing is released by time alone (§71.6) | 🔒 rule; ⏳ notice period, milestone 2 |
+| 147.3 | **Only genesis is measured in ZEC.** Later triggers may be measured in whatever ZYN's own market can price — liquidity across ZEC.zy, SOL.zy, ETH.zy and later assets, or ZYN pool depth — so ZYN's value is not tied to Zcash alone. This is §71.8's transition, made concrete | 🔒 direction |
+| 147.4 | **An airdrop to NFT holders at genesis, by snapshot.** At the genesis epoch the chain itself — not an operator-supplied list — gives every minted item of Cave Collection Z and of the 333 Nap Moles held by an account other than the treasury a ZYN claim owed to that item's holder, one per item. Holders stay private (claim ids derive from the item; the ledger's claim record names no one publicly) and collect it like any other claim. Items the treasury still holds, unminted serials and items redeemed against the floor get nothing. **This amends §71.13** — "nobody receives ZYN" — for this one, bounded allocation | 🔒 |
+| 147.5 | **Ten releases of 2,100,000 ZYN each** (25 Sep): genesis is the first, the 18,900,000 reserve is the other nine. **Each release: 10% to the community, 90% to the market.** Genesis's 10% is the NFT-holder airdrop — 210,000 ZYN (confirmed); later releases' 10% is named in their announcements. **Notice period: 30 days** (confirmed). At genesis the 90% (1,890,000) pairs with the pot's 420 ZEC.zy as protocol-owned liquidity — opening near 0.000222 ZEC per ZYN; the airdrop is the only float | 🔒 |
+| 147.5a | **Later releases' 90% (proposed): sold in a one-price sale** (the ledger's commit-and-clear launch — one clearing price, no allocation, a floor at the last market price, window and floor named in the 30-day announcement), **and what it raises becomes ZYN pool liquidity**, so each release deepens the market instead of flooding it. Open: whether a fixed treasury share of the proceeds is taken, stated per announcement | ⏳ user |
+| 147.6 | **The Nap Mole half needs the 333 on this ledger first:** they retired with the AMM chain, all still held by the treasury (RUNBOOK). They are re-minted on the object ledger and given out through the claim-code gift path before the snapshot; any the treasury still holds at genesis are excluded | ⏳ re-mint + gift path |
+| 147.7 | **To build, on the object ledger:** ZYN issuance at genesis into keyless pots (§71.19–21 were built on the AMM chain), the opening pool, the milestone release operation with its notice period, and the snapshot airdrop operation | ⏳ |
+
+## §148 — The Nap extension is a wallet by itself (25 Sep 2026)
+
+The extension was a window onto desktop Nap (`127.0.0.1:8977`), and desktop
+Nap has no public download: from a store it would have opened onto "Nap isn't
+running". The holder's call: "Extension wallet should be able to work by
+itself."
+
+| # | Decision | |
+|---|---|---|
+| 148.1 | **The extension is Nap in the browser, packaged.** Its pages are apps/nap-web built in extension mode; one wallet codebase serves nap.cavebro.win and the extension. Keys live on the extension's origin, sealed under the holder's password when kept; the phrase is never stored | ✅ |
+| 148.2 | **One server.** Every endpoint is on nap.cavebro.win (the only host permission); on the web every endpoint stays a same-origin path. `src/origin.js` enforces both | 🔒 |
+| 148.3 | **Sites reach Nap's connect window directly**, over a runtime port from the content script; the browser names the port's origin, so a page cannot speak for another. The background only opens the window; nothing a site waits on lives in the service worker | 🔒 |
+| 148.4 | **The provider goes to https pages** (and localhost for development), not every URL | ✅ |
+| 148.5 | **Desktop Nap is no longer behind the extension.** Its own UI stays; whether the extension should also reach it (when it runs) is open | ⏳ |
+| 148.6 | **Stores:** Chrome Web Store and Firefox Add-ons, from `apps/extension/release/`. Firefox gets the source package (rebuilds byte for byte) and declares `financialAndPaymentInfo` — the signed transactions that leave the device | ✅ |
+
+## §149 — Nap on phones is the web wallet in a native shell (25 Sep 2026)
+
+"Also prepare for the nap mobile app." The desktop project (`apps/nap`) wraps
+the Rust wallet core and had a phone plan that stopped at halo2 on Android;
+the web wallet already runs Zcash in WebAssembly and is laid out for phones.
+
+| # | Decision | |
+|---|---|---|
+| 149.1 | **One wallet codebase for web, extension and phones.** `apps/nap-mobile` is a Tauri 2 shell with no commands or plugins around `apps/nap-web` built with `--mode mobile`; keys are made and sealed on the phone | ✅ |
+| 149.2 | **Nap's server answers the app's origins only** (`tauri://localhost`, `http(s)://tauri.localhost`) via a Pages middleware; other cross-origin pages still get no readable reply | 🔒 |
+| 149.3 | **Identifier `io.infinityteam.napwallet`** on both stores (the one the desktop app already uses); iPhone-only and iOS 15+ for the first version; Android native code aligned for 16 KB pages | ✅ |
+| 149.4 | **Publishing needs the holder:** Apple Developer Program as an organization (3.1.5), Google Play account (12 testers × 14 days if personal), the upload key (`scripts/make-upload-key.sh`) | ⏳ |
+| 149.5 | **Next, before review:** biometric unlock through Keychain/Keystore (4.2), and a decision on whether iOS ships Nap Market (3.1.5(iii)) | ⏳ |
+
+## §150 — Attendance certificates: tap an event's NFC tag, get a private certificate (25 Sep 2026)
+
+The holder's direction: fun features for the app — NFC at crypto events,
+"more like attend certificate", and "prepare the tech part so future
+integration will be possible" without yet deciding who issues them.
+
+| # | Decision | |
+|---|---|---|
+| 150.1 | **An event is a collection; a certificate is one of its items.** The event's manifest (name, date, place, issuer, art hash, cap, mode) is canonicalised and hashed, and the collection address is derived from the hash (`objectvm.attend.event.v1`), so an event cannot be reworded after it is registered | 🔒 |
+| 150.2 | **Taps are NTAG 424 DNA SUN reads** (NXP AN12196): encrypted UID and counter plus an 8-byte CMAC, checked in `zynzapd::tap` (RFC 4493 CMAC; NXP's example tap is a test vector). A copied link is worth one tap | 🔒 |
+| 150.3 | **Two modes.** `badge`: one certificate per tag (badges, wristbands), the first account to claim a tag keeps it; `door`: one shared tag, one certificate per account, each tap good once. Either way one per account, a claim binds once and a retry reaches the same serial | ✅ |
+| 150.4 | **The mint is the operator's** (`zyn_mintItem`), from `zyn-attend`, like the Cave sale's delivery — trusted and said so. Opening this to any organiser is one consensus step: a mint signed by the collection's own issuer. Not built until that is decided | ⏳ |
+| 150.5 | **Nap:** a tag opens `nap.cavebro.win/tap?e=…&picc=…&cmac=…`; the wallet keeps the tap through unlock or creation, publishes its receiving key if needed, collects, and names certificates by their event. `/attend[/testnet]` relays to the network's service (503 until configured) | ✅ |
+| 150.6 | **Open:** phone-app deep links (need the Apple team id and Play signing key), soulbound certificates, and proving attendance privately (a signed read of holding one item of a collection) | ⏳ |
+
+## §151 — Face ID / fingerprint unlock in the phone app (25 Sep 2026)
+
+Before the first App Store review (guideline 4.2 reads thin web wrappers as
+"just a website") and because typing a password on a phone is the slow path.
+
+| # | Decision | |
+|---|---|---|
+| 151.1 | **What biometrics release is the kept wallet's password**, not a key: the sealed wallet stays exactly as on the web, the password still opens it, the phrase still restores it | 🔒 |
+| 151.2 | **The password lives in the platform's secure store**, released only to this device's current biometrics — Keychain `.biometryCurrentSet` (+ an explicit `evaluatePolicy`), Android Keystore key with per-use strong-biometric auth. New faces/fingers invalidate it; it never leaves the device | 🔒 |
+| 151.3 | **Offered, not imposed:** once, after the password opens the wallet; "Not now" is final for the session. Forgetting the device removes it. Web and extension builds carry none of this | ✅ |
+| 151.4 | **One native plugin, no third-party code:** `apps/nap-mobile/plugins/napvault` (Swift + Kotlin + Rust), exposed only to the app's own pages through a capability | ✅ |
+
+## §152 — The Nap browser in the phone app (25 Sep 2026)
+
+"Why can't iphone app open link. Phantom and jupiter has some browser
+features" → "so build it". The audit (same day) found outside links did
+nothing on iOS and loaded inside the wallet on Android.
+
+| # | Decision | |
+|---|---|---|
+| 152.1 | **Sites open in the Nap browser, a separate native web view** with an address bar and a start page of Nap's sites (Cave store, Jade, Collection Z, ZynScan). It has no Tauri IPC and no access to the wallet's origin, storage or Face ID | 🔒 |
+| 152.2 | **Every https site in it can reach Nap** through the same provider as the extension (Nap Connect), named by the origin the platform reports for the main frame | 🔒 |
+| 152.3 | **The wallet serves those requests with connect-ops' methods**: public at once, the holder's data after connecting, every write approved in a native sheet (Approve armed after 0.8 s). The connect sheet says holdings are visible when asked — the audit's H1 wording fix, here first | ✅ |
+| 152.4 | **The wallet's own view never leaves the app's pages**; outside links and new windows open in the Nap browser | 🔒 |
+| 152.5 | **One Zcash account per wallet page:** sites use the wallet's own (its address once open; payments wait for its sync), never a second one in the same worker | ✅ |
+
+## §153 — The wallet audit's four highs, fixed (25 Sep 2026)
+
+The 25 Sep audit of every Nap build (keys, web surface, transactions, site
+connections, phone app) found no critical issue and four high ones. "do them":
+
+| # | Decision | |
+|---|---|---|
+| 153.1 | **Amounts that do not fit are refused, never wrapped.** `parseAmount` stops below 2^127; the one 128-bit encoder every intent uses throws outside the signed range. A site could have had a listing shown at 340 quintillion ZEC.zy and signed at 5 wei | 🔒 |
+| 153.2 | **The connect screens say what a connected site can read**: account and Zcash address, and — when it asks — balances, items, what is owed, sale tickets and coins made. The privacy policy says the same. (Jade's portfolio uses the coins-made list, so it stays; honesty, not removal) | ✅ |
+| 153.3 | **A restored wallet finds its count.** A device that never counted for a wallet walks its nonces in pages of 64 for anything the chain still holds under them (claims, tickets, waiting deposits, coins made), stopping after 256 empty in a row, and keeps the count. Once per device; ~1.6 s on testnet. A run of more than 256 fully collected trades is the one case it cannot see past | ✅ |
+| 153.4 | **iOS 16 is the phone app's minimum** (AbortSignal.timeout and wasm-unsafe-eval arrived in Safari 16); the web build targets safari16 / chrome103 / firefox114 so newer syntax fails the build, not the phone. Supersedes §149.3's iOS 15 | ✅ |
+| 153.5 | **Open from the audit:** the kept wallet's KDF and password rule (Argon2, 12+ characters, phone backups), one connect window with a rate limit, per-asset approval labels and token ids, exit salts that survive lost storage, /rpc allowlist, app privacy screen and auto-lock, Firefox 127 minimum, broken `href="/"` links in the extension | ⏳ |
+
+
+## §154 — BTC.zy: Bitcoin signet on the bridge (25 Sep 2026)
+
+"is there a possibility to bridge monero on Zyn" → "or get BTC on the bridge
+now, easier" → "build it". Monero waits: no threshold-signing library we would
+trust, and view keys that break its privacy model. Bitcoin has both.
+
+| # | Decision | |
+|---|---|---|
+| 154.1 | **One Taproot key, 2-of-3 FROST** (`frost-secp256k1-tr`, BIP-340/341 compatible), made by `zyn-ceremony bitcoin`; the custodians sign it on their own ops (7 and 8) beside the Solana and Zcash ones. Testnet runs all three shares on one box, as SOL does — stated, not hidden | 🔒 |
+| 154.2 | **The deposit code is the address.** Bitcoin wallets cannot attach a memo, so a deposit goes to the vault's internal key tweaked with `taggedHash("Zyn/BtcDeposit", commitment)` standing where a script tree's root would be. Only the key path spends it; no script is ever revealed. Nap derives the address itself (`bitcoin.js`, vectors pinned against `zyn-custody`) and never takes one from a server | 🔒 |
+| 154.3 | **The bridge watches only codes it was told about**: Nap calls `zyn_depositWatch {network, commitment}` (public, registered bitcoin networks only, capped at 200,000) when it shows an address. The node already learns the commitment when the deposit is credited, so this tells it nothing new except earlier | ✅ |
+| 154.4 | **Credited at 2 confirmations, once per output** (`DepositCommitted` with the outpoint as reference); several sends to one address add up and are claimed together. Change and fee buffer sit at the vault's key-path address (BIP-86 tweak) | ✅ |
+| 154.5 | **Exits pay segwit and Taproot addresses only** (the revealed destination is the output script, 22–42 bytes, never OP_RETURN); legacy addresses are refused in Nap before anything is burned. Whole satoshi, at least 0.0001 BTC | 🔒 |
+| 154.6 | **The network fee comes out of the payouts**, shared equally across the exits one transaction pays; an exit too small to carry its share waits. What leaves the vault is what Zyn burned. The signed transaction is written to `inflight.json` before it is broadcast, so a crash rebroadcasts rather than pays twice | 🔒 |
+| 154.7 | **Signet, not testnet3 or testnet4, and not mainnet.** `bitcoin-signet` is the registered network; `ZYN_BTC_NETWORK=testnet4` is supported but unused. Mainnet needs custodians on separate boxes first | ⏳ |
+
+## §155 — ETH.zy on mainnet: a capped pilot whose vault answers to the team's Safe (26 Sep 2026)
+
+"should we test the sol and eth bridge on zyn mainnet now" → "make it. Eth I
+have Safe" → "Safe: 0xEE74…b983, 2-3. Solana can wait, build eth now" → cap
+"0.01". This relaxes §146.10 and §69.1 for one asset, on purpose and within a
+cap: the ETH boundary opens on mainnet before Phase 2, as a pilot.
+
+| # | Decision | |
+|---|---|---|
+| 155.1 | **The vault's signer is the team's Safe** (`0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983`, Safe v1.4.1, 2 of 3 owners). `ZynVault` `0x235730d7738CC16d3b94d0e3D7097F9ddE22A459` on Ethereum mainnet, deployed block 26062420; asset 1 = native ETH; admin handed to the same Safe, so the deployer keeps no role. No bridge key can move funds | ✅ |
+| 155.2 | **`withdrawAsSigner`**: the signer may call the vault directly with the same payouts and nonce a signed `withdraw` would carry — how a Safe executes a payout. One nonce for both paths, so neither can replay the other | ✅ |
+| 155.3 | **The bridge only proposes.** In Safe mode `zyn-eth-bridge` holds a proposer key (`0x11C34dD3B2698a02975FDE9241A0E418b68ADC9B`, listed as a proposer on the Safe) and no gas money. Each batch (≤ 8 exits) is simulated from the Safe, hashed by the Safe's own `getTransactionHash`, recorded in `proposal.json`, then posted to the Safe transaction service. Two owners approve and execute in Safe{Wallet}; the bridge settles the exits once that execution is finalized. If the Safe spends the proposal's nonce on anything else, the bridge pays nothing and waits for the operator to delete the record. On chain 1 the bridge refuses to run without a Safe | ✅ |
+| 155.4 | **Capped at 0.01 ETH issued** (`ZYN_ETH_CAP_WEI`). A deposit that would pass the cap is not credited; it is appended to `over-cap.jsonl` (index, amount, sender, tx, commitment) for the Safe to refund by hand. Nap checks the room left before a deposit and says so | ✅ |
+| 155.5 | **Stated where users decide**: Nap's ETH card and the landing page say pilot, the cap, who holds the Safe, that its owners could move what the vault holds, that payouts wait on them, and that the contract is unaudited | ✅ |
+| 155.6 | **Rehearsed before mainnet** on an anvil fork of mainnet against the real Safe (owners impersonated): deposit, over-cap deposit, withdraw, proposal, `approveHash` × 2 + `execTransaction`, settle; and a rejected proposal re-proposed at the next nonce. The first mainnet run found what the mock did not: the Safe service refuses lowercase addresses (400/422); everything now goes out EIP-55 | ✅ |
+| 155.7 | **Not yet**: SOL on mainnet (a Squads multisig would play the Safe's part), an audit, a higher cap. Raising the cap is a new decision here, not an env edit | ⏳ |
+
+## §156 — NU7: nothing signs for an upgrade this build does not know (27 Sep 2026)
+
+"Zcash is upgrading NU7 soon, check if we need to change anything" → "make our
+infra NU7 compatible". NU7 activates on testnet 6 Oct 2026; the mainnet target
+is 5 Nov (go/no-go 20 Oct). It brings a new consensus branch (`0x77190AD9`, ZIP 259),
+25-second blocks (ZIP 218), no v4 transactions (ZIP 2003) and the NSM. The
+libraries we build on (zcash_protocol 0.10.6 the newest) do not know NU7's
+branch or heights yet, so the switch itself waits for them. What can be done
+now is below; §156.6 is the switch.
+
+| # | Decision | |
+|---|---|---|
+| 156.1 | **Fail closed on the branch.** Every Zcash transaction we sign — vault exits (`object_exit`, `settle`), anchors, desktop Nap, browser Nap — is built with `Envelope::next(network, tip, branch)`, where `branch` is what Zebra says the *next* block is under (`getblockchaininfo` → `consensus.nextblock`). If this build would sign for any other branch, it refuses and says so ("That is NU7: this build predates it…"). A transaction signed under the wrong branch never lands, so a stale build would otherwise leave exits in flight until they expire and ask the custodians again and again for nothing. The browser and desktop wallets get the branch through `zyn-lightd`'s INFO, which now passes on Zebra's answer instead of computing its own | ✅ |
+| 156.2 | **Signed for the next block, not the tip.** The envelope used the tip's branch; at an upgrade's first block that was off by one. Now height = tip + 1 | ✅ |
+| 156.3 | **Waits keep their length in time.** Expiry is 40 blocks before NU7 and 120 after it (both about 50 minutes, ZIP 218). The wallets' scan depth of 3 blocks becomes 9 when the next block is NU7 (`blocks_per_old_block`). The object nodes' and replica's `ZYN_CONFIRMATIONS` go ×3 at the switch (6→18, 10→30) — an env change made with the switch's deploy, erring towards waiting longer | ✅ / at the switch |
+| 156.4 | **Custodians need no NU7 rebuild.** They sign a bare sighash with re-randomized FROST, which NU7 does not change; the coordinator builds the transaction. The Hetzner, Air and Windows shares stay as they are | ✅ |
+| 156.5 | **Zebra to 6.4.2 now** (`ops/zebra-upgrade.sh`, both hosts): the security fix for malformed v6 transactions. It moves Zebra's own end of support to about 2 Nov 2026, so the NU7 Zebra release must be in before then on mainnet, and before 6 Oct on testnet | the user runs it |
+| 156.6 | **The switch**, when librustzcash and Zebra ship NU7: bump the crates (workspace and `zec-core`), check `BranchId::Nu7` is `0x77190AD9` and `Envelope::next` accepts it, upgrade Zebra, redeploy `zyn-object-node` and `zyn-lightd` on both hosts with confirmations ×3, rebuild the wasm and deploy Nap web, resubmit the extension and phone apps early (reviews take days). RUNBOOK "NU7" | ⏳ |
+| 156.8 | **The branch id is ZIP 259's `0x77190AD9`** (found 28 Sep while reading Zakura). ZIP 254 (`0x77190AD8`) was withdrawn; ZIP 259 (draft, 15 Sep 2026) replaces it and sets the heights on 5 Oct (testnet) and 20 Oct (mainnet). The check in 156.1 was never affected — it compares the libraries' branch with Zebra's — but the constant turns on the 120-block expiry, the ×3 wallet depth and the "That is NU7" message after the switch. Corrected in source and in Nap web's wasm; the hosts pick it up with the switch's redeploy | ✅ |
+| 156.7 | **Not decided here**: Collection Z's sale terms count blocks (claim window 16,128, notice 1,152). After NU7 they would last a third as long. Keeping their length in time means republishing the terms ×3 before the sale opens — the user's call | open |

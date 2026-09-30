@@ -79,6 +79,22 @@ pub fn run(
     tickets: &[TicketEvidence],
     reveal: Option<&RevealEvidence>,
 ) -> Result<Run, Refused> {
+    run_resolved(policy, manifest, tickets, reveal, None)
+}
+
+/// The same draw, for a policy whose close was announced rather than committed.
+///
+/// `targets` carries what the announcement resolved to. A policy that announces
+/// its close holds a close height of zero and no reveal targets, so without
+/// these the allocator measures every ticket against zero and refuses the whole
+/// sale — which is what Collection Z's real policy did until §113.
+pub fn run_resolved(
+    policy: &AllocationPolicy,
+    manifest: &[ManifestEntry],
+    tickets: &[TicketEvidence],
+    reveal: Option<&RevealEvidence>,
+    targets: Option<&cave_randomness::ResolvedClose>,
+) -> Result<Run, Refused> {
     if tickets.is_empty() {
         return Err(Refused::NoTickets);
     }
@@ -91,8 +107,11 @@ pub fn run(
     if policy.identity == cave_randomness::IdentityPolicy::ConcealedShuffle && reveal.is_none() {
         return Err(Refused::NeedsReveal);
     }
-    let batch = allocate(policy, manifest, tickets, reveal)
-        .map_err(|e| Refused::Engine(e.to_string()))?;
+    let batch = match targets {
+        Some(t) => cave_randomness::allocate_announced(policy, manifest, tickets, reveal, t),
+        None => allocate(policy, manifest, tickets, reveal),
+    }
+    .map_err(|e| Refused::Engine(e.to_string()))?;
     Ok(Run {
         tickets: tickets.len(),
         batch,

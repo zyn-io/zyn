@@ -8,15 +8,15 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/deposit" />
     <meta property="og:title" content="Cave — bring ZEC in" />
-    <meta property="og:description" content="One address, yours alone. No memo, no custodian's promise." />
+    <meta property="og:description" content="One address, yours alone, derived from your own key. No memo." />
     <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Cave — bring ZEC in" />
-    <meta name="twitter:description" content="One address, yours alone. No memo, no custodian's promise." />
+    <meta name="twitter:description" content="One address, yours alone, derived from your own key. No memo." />
     <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <title>Cave — bring ZEC in</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
-    <link rel="stylesheet" href="/styles.css?v=20260909-landing3" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
     <style>
       /* Same cave, same torch. This is the mouth of the tunnel where money
          comes in, so it is lit a little warmer than the register. */
@@ -30,10 +30,10 @@
       .register::before {
         content: "";
         position: absolute;
-        inset: -20% -30% auto;
+        inset: -20% 0 auto;
         height: 70%;
         background: radial-gradient(
-          ellipse 46% 60% at 30% 0%,
+          ellipse 44% 60% at 30% 0%,
           rgba(244, 183, 40, 0.07),
           transparent 68%
         );
@@ -41,8 +41,8 @@
       }
       .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
       .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
-      .lede { margin: 26px 0 0; max-width: 54ch; font-size: clamp(12px, 1.1vw, 14px); line-height: 1.85; color: var(--muted); }
-      .lede strong { color: var(--ink); font-weight: 400; }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
 
       .ledger {
         margin: 52px 0 0;
@@ -56,7 +56,7 @@
         gap: 14px;
         padding: 11px 16px;
         border-bottom: 1px solid var(--line);
-        color: #62665f;
+        color: var(--muted);
         text-transform: uppercase;
         font-size: 8px;
         letter-spacing: 0.19em;
@@ -67,8 +67,8 @@
       .state { display: grid; gap: 18px; }
       .state[hidden] { display: none; }
 
-      .say { font-size: clamp(11px, 1vw, 13px); line-height: 1.8; color: var(--muted); margin: 0; }
-      .say strong { color: var(--ink); font-weight: 400; }
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
 
       .act {
         justify-self: start;
@@ -169,28 +169,32 @@
         grid-template-columns: 22px 1fr;
         gap: 12px;
         align-items: baseline;
-        font-size: clamp(11px, 1vw, 13px);
-        line-height: 1.75;
-        color: var(--muted);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--read);
       }
       .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
-      .facts strong { color: var(--ink); font-weight: 400; }
+      .facts strong { color: var(--ink); font-weight: 600; }
 
-      .out { margin: 0; font-size: 11px; line-height: 1.7; min-height: 1.2em; }
+      .out { margin: 0; font-family: var(--sans); font-size: 14px; line-height: 1.55; min-height: 1.2em; }
       .out.bad { color: #ff8b6b; }
       .out.ok { color: var(--acid); }
 
       .smallprint {
         margin: 34px 0 0;
-        font-size: 10px;
-        line-height: 1.9;
-        color: #5c6058;
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--read-dim);
         max-width: 60ch;
       }
-      .smallprint strong { color: var(--muted); font-weight: 400; }
+      .smallprint strong { color: var(--read); font-weight: 600; }
       .back {
-        display: inline-block;
-        margin: 40px 0 0;
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin: 32px 0 0;
         font-family: var(--mono);
         font-size: 10px;
         letter-spacing: 0.14em;
@@ -202,6 +206,19 @@
     </style>
   </head>
   <body>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit" aria-current="page"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </header>
     <main class="register">
       <h1><span>Bring ZEC</span><span>into the cave</span></h1>
 
@@ -214,78 +231,23 @@
       <div class="ledger">
         <div class="ledger-index">
           <span>Tunnel mouth</span>
-          <span>Deposit · <b id="net">ZEC → ZEC.zy</b></span>
+          <span>In your <b>Nap</b></span>
         </div>
         <div class="ledger-body">
-
-          <section class="state" id="s-looking">
-            <p class="say">Looking for a wallet…</p>
-          </section>
-
-          <section class="state" id="s-nowallet" hidden>
+          <section class="state">
             <p class="say">
-              <strong>An address has to belong to someone.</strong> Yours is derived from a key
-              only you hold, which is what makes this a deposit rather than a deposit with a
-              custodian. Nap Wallet holds that key — install it, come back, and the address
-              below is yours permanently.
+              <strong>Your deposit address lives in Nap</strong>, because it is derived from a key
+              only you hold. Open Nap, switch to <strong>Zyn</strong> and choose
+              <strong>Bring ZEC in</strong>: it shows the one address that credits you, and the
+              ZEC.zy lands in the same wallet you trade with here.
             </p>
-            <a class="act" href="/#wallet">Get Nap Wallet</a>
-            <p class="say">
-              Already have it? Unlock it and <a href="" id="retry" style="color: var(--zec)">look again</a>.
-            </p>
-          </section>
-
-          <section class="state" id="s-ready" hidden>
-            <p class="say">
-              Wallet found. Ask it for the address it wants to be paid at — it is a plain read,
-              and nothing moves.
-            </p>
-            <button class="act" id="ask" type="button">Show my address</button>
-            <p class="out" id="out" role="status" aria-live="polite"></p>
-          </section>
-
-          <section class="state" id="s-addr" hidden>
-            <div class="addr-row">
-              <span class="tag good" id="kind">Yours alone</span>
-              <span class="tag" id="memo-tag" hidden>Memo required</span>
-            </div>
-            <div class="addr-and-qr">
-              <div class="addr" id="address"></div>
-              <figure class="qr" id="qr-wrap" hidden>
-                <canvas id="qr" width="180" height="180"></canvas>
-                <figcaption id="qr-caption">Scan from a phone wallet</figcaption>
-              </figure>
-            </div>
-            <div class="addr-row">
-              <button class="act" id="copy" type="button">Copy address</button>
-              <button class="act ghost" id="again" type="button">Check again</button>
-            </div>
-
-            <div class="alarm" id="alarm" hidden>
-              <h2>This one needs a memo</h2>
-              <p class="say">
-                Your wallet could not issue an address of its own, so this is the
-                <strong>shared vault</strong>. It credits nobody without the line below attached as
-                the transaction memo — and <strong>an exchange will not attach it</strong>. Send
-                from a wallet that lets you write a memo, or money will arrive belonging to no one.
-              </p>
-              <div class="memo" id="memo"></div>
-            </div>
-
+            <a class="act" href="https://nap.cavebro.win" rel="noreferrer">Open Nap</a>
             <ul class="facts">
-              <li><b>01</b><span>Send any amount of <strong>shielded ZEC</strong> to that address.</span></li>
+              <li><b>01</b><span>Send <strong>shielded ZEC</strong> to the address Nap shows you.</span></li>
               <li><b>02</b><span>It is credited once Zcash confirms it — <strong>a few minutes</strong>, not instant.</span></li>
               <li><b>03</b><span>It arrives as <strong>ZEC.zy</strong>, the same ZEC, spendable in the cave.</span></li>
-              <li><b>04</b><span>The address is <strong>permanent</strong>. Reuse it, or hand it to an exchange withdrawal.</span></li>
             </ul>
-            <p class="out" id="out2" role="status" aria-live="polite"></p>
           </section>
-
-          <section class="state" id="s-broke" hidden>
-            <p class="say" id="broke"></p>
-            <button class="act ghost" id="retry2" type="button">Try again</button>
-          </section>
-
         </div>
       </div>
 
@@ -293,136 +255,12 @@
         Deposited ZEC is held by the <strong>Zyn vault</strong>, a threshold account whose shares
         sit on separate machines. That is custody, and we say so: today you are trusting that
         vault to honour an exit, the same as any bridge. What you are not trusting is a
-        website — the address is derived from your own key, the vault's holdings are public,
-        and an exit is a chain operation rather than a support request.
+        website — the address is derived from your own key, what the ledger has issued against
+        the vault is public, and an exit is a chain operation rather than a support request.
       </p>
 
       <a class="back" href="/">← back to the cave</a>
     </main>
 
-    <script type="module">
-      import { toCanvas } from '/qr.js';
-
-      // The provider is injected by the Nap Wallet extension. It may arrive
-      // after this script runs, so the page waits for the event as well as
-      // checking — a wallet that loads a beat late must not read as absent.
-      const provider = () => (window.zyn && window.zyn.isZynZap ? window.zyn : null);
-
-      const states = ['looking', 'nowallet', 'ready', 'addr', 'broke'];
-      const el = (id) => document.getElementById(id);
-      const show = (name) => {
-        for (const s of states) el('s-' + s).hidden = s !== name;
-      };
-      const say = (node, message, ok) => {
-        node.textContent = message;
-        node.className = 'out ' + (ok ? 'ok' : 'bad');
-      };
-
-      function look() {
-        if (provider()) show('ready');
-        else show('nowallet');
-      }
-
-      async function ask() {
-        const p = provider();
-        if (!p) return look();
-        const button = el('ask');
-        button.disabled = true;
-        say(el('out'), '');
-        try {
-          const r = await p.request({ method: 'zyn_depositAddress', params: {} });
-          const address = r && r.address;
-          if (!address) throw new Error('the wallet returned no address');
-          render(address, !!(r && r.memo));
-        } catch (e) {
-          // A rejected or failed read is not a dead end — the wallet may just
-          // be locked, so the page offers the same button again rather than
-          // sending the reader away.
-          el('broke').textContent = e.message || String(e);
-          show('broke');
-        } finally {
-          button.disabled = false;
-        }
-      }
-
-      // ZIP-321, the same request the desktop wallet builds. The depositor's
-      // wallet fills in the address itself, and the memo where one is needed:
-      // a hundred-character shielded address retyped by hand is the likeliest
-      // way a deposit goes wrong, and a hand-typed memo the likeliest way one
-      // arrives unattributable.
-      const base64url = (text) =>
-        btoa(String.fromCharCode(...new TextEncoder().encode(text)))
-          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-      const depositUri = (address, memo) =>
-        `zcash:${address}?message=${encodeURIComponent('Zyn deposit')}`
-        + (memo ? `&memo=${base64url(memo)}` : '');
-
-      function render(address, needsMemo) {
-        el('address').textContent = address;
-        el('kind').textContent = needsMemo ? 'Shared vault' : 'Yours alone';
-        el('kind').className = needsMemo ? 'tag warn' : 'tag good';
-        el('memo-tag').hidden = !needsMemo;
-        el('alarm').hidden = !needsMemo;
-        // With no memo the picture can be the bare address, which every wallet
-        // reads. With one, it has to be the ZIP-321 request instead, because a
-        // scanned address alone would produce a payment that credits nobody —
-        // and the caption has to name wallets that honour the memo rather than
-        // implying any scanner will do.
-        drawQr(needsMemo ? null : address);
-        if (needsMemo) {
-          // The account is what the memo has to carry. Ask for it separately so
-          // a wallet that cannot issue an address can still be paid correctly.
-          provider()
-            .request({ method: 'zyn_account', params: {} })
-            .then((a) => {
-              const memo = 'ZYN1:' + ((a && a.account) || '');
-              el('memo').textContent = memo;
-              if (a && a.account) drawQr(address, memo);
-            })
-            .catch(() => { el('memo').textContent = 'ZYN1:<ask your wallet for its Zyn account>'; });
-        }
-        show('addr');
-      }
-
-      function drawQr(address, memo) {
-        const wrap = el('qr-wrap');
-        if (!address) {
-          // Waiting on the account before a memo QR can be built. Showing the
-          // bare address in the meantime would be the exact wrong picture.
-          wrap.hidden = true;
-          return;
-        }
-        try {
-          // Dark on the parchment the rest of the cave uses, drawn at whatever
-          // module size fits 180px rather than a fixed one.
-          toCanvas(el('qr'), memo ? depositUri(address, memo) : address, {
-            level: 'M', width: 180, dark: '#0a0c0a', light: '#f0eee6',
-          });
-          el('qr-caption').textContent = memo
-            ? 'Carries the memo — Zashi, Ywallet, Zingo'
-            : 'Scan from a phone wallet';
-          wrap.hidden = false;
-        } catch {
-          wrap.hidden = true;
-        }
-      }
-
-      el('ask').addEventListener('click', ask);
-      el('again').addEventListener('click', ask);
-      el('retry2').addEventListener('click', () => { show('ready'); });
-      el('retry').addEventListener('click', (e) => { e.preventDefault(); look(); });
-      el('copy').addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(el('address').textContent);
-          say(el('out2'), 'Copied. Paste it into the wallet or exchange you are sending from.', true);
-        } catch {
-          say(el('out2'), 'Could not reach the clipboard — select the address and copy it.', false);
-        }
-      });
-
-      window.addEventListener('zyn#initialized', look, { once: true });
-      look();
-    </script>
   </body>
 </html>

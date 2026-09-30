@@ -776,10 +776,16 @@ impl Bridge {
                         ScanRangeError::Rpc(e) => e.to_string(),
                         // Loud, and fatal to the pass. Crediting the rest would
                         // attest backing that includes money nobody can claim.
-                        ScanRangeError::Unattributable { height, amount } => format!(
-                            "shielded funds at height {} carry no Zyn memo ({:?}) — \
+                        ScanRangeError::Unattributable {
+                            txid,
+                            height,
+                            amount,
+                        } => format!(
+                            "shielded funds at height {} carry no Zyn memo ({:?}) in {} — \
                              a human has to decide who they belong to",
-                            height, amount
+                            height,
+                            amount,
+                            txid.iter().map(|b| format!("{:02x}", b)).collect::<String>()
                         ),
                     })?;
                     forced = obs.forced().to_vec();

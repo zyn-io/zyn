@@ -28,9 +28,12 @@ use crate::wire::{Decoder, SwapDecode, SwapEncode, WireError};
 
 /// Format version, so a state written by one build is never silently misread
 /// by another.
-/// Version 8 activates authorization-aware intent commitments. The state body
-/// is unchanged, so versions 1-7 still decode for migration; continuing from
-/// one under VM v2 folds `ZYNAUTH1` records into the next epoch root.
+/// **There is no migration.** `decode` compares this for exact equality and
+/// refuses anything else (`WireError::UnknownDiscriminant`), in both
+/// directions — a bump is a coordinated replacement of the sequencer and every
+/// replica, never a rolling upgrade (DECISIONS 71.34). An earlier version of
+/// this comment claimed versions 1-7 still decoded; they have not for a long
+/// time, and believing it would mean planning an upgrade that cannot happen.
 pub const STATE_VERSION: u16 = 12;
 
 impl SwapState {

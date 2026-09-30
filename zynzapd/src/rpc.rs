@@ -80,6 +80,17 @@ pub const OP_DEPOSIT_ADDRESS: u8 = 19;
 /// the method exposed there takes this op instead, and a stranger who cannot
 /// sign cannot make the register grow.
 pub const OP_DEPOSIT_ADDRESS_SIGNED: u8 = 28;
+
+/// What this node's operation set can do, for callers to check before asking.
+///
+/// §120 was a one-day skew: the browser wallet asked for op 28, a node built the
+/// day before did not know it, and the refusal surfaced as a *wallet* error. A
+/// node that reports this lets a caller say "this build is too old for what I
+/// need" instead of a user reading `unknown operation` and blaming the app.
+///
+/// **Bump this whenever an op is added.** It is the highest op code the node
+/// answers, so a caller's check is `protocol >= OP_THEY_NEED`.
+pub const PROTOCOL_VERSION: u32 = 28;
 /// Every collection: cap, minted, outstanding, pool, phase and the redeem
 /// price. Public, and it has to be — the floor is the thing a buyer is
 /// trusting, so it is exactly the number that must not require asking us.
@@ -399,6 +410,12 @@ pub fn dispatch(server: &Server, frame: &[u8]) -> Vec<u8> {
                         .u32(censored);
                 }
             }
+            // Appended last: what this build can do, and what it is. A caller
+            // can refuse an op the node is too old for rather than discovering
+            // it as an `unknown operation` a user blames on the wallet (§120).
+            e.u32(PROTOCOL_VERSION);
+            let build = env!("CARGO_PKG_VERSION");
+            e.u16(build.len() as u16).bytes(build.as_bytes());
             body.extend_from_slice(e.finish());
             ok_frame(body)
         }),
@@ -1799,8 +1816,19 @@ mod tests {
         }
         let out = dispatch(&s, &req(wire::OP_STATUS, 9, &[]));
         let body = body_of(&out);
-        // role, anchored epoch, verified height, forced pending, censored: the last 25 bytes.
-        let tail = &body[body.len() - 25..];
+        // role, anchored epoch, verified height, forced pending, censored.
+        //
+        // Counted from the end, so the version block §127 appends after them
+        // has to come off first: u32 protocol, u16 length, then the build
+        // string. Fields are only ever appended here, so this is the shape any
+        // reader of the tail has to account for.
+        let build_len = u16::from_be_bytes(
+            body[body.len() - 2 - env!("CARGO_PKG_VERSION").len()..][..2]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let version_block = 4 + 2 + build_len;
+        let tail = &body[body.len() - version_block - 25..body.len() - version_block];
         assert_eq!(tail[0], 1, "role: replica");
         assert_eq!(u64::from_be_bytes(tail[1..9].try_into().unwrap()), 4);
         assert_eq!(

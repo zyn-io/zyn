@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="Take a place in Cave Collection Z. Tickets in ZEC.zy through Nap, drawn when the door closes." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/mint" />
+    <meta property="og:title" content="Cave Collection Z — take a place" />
+    <meta property="og:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave Collection Z — take a place" />
+    <meta name="twitter:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
+    <title>Cave Collection Z — take a place</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>    
+      /* Same cave, same torch. This is the mouth of the tunnel where money
+         comes in, so it is lit a little warmer than the register. */
+      .register {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px;
+        position: relative;
+        z-index: 2;
+      }
+      .register::before {
+        content: "";
+        position: absolute;
+        inset: -20% 0 auto;
+        height: 70%;
+        background: radial-gradient(
+          ellipse 44% 60% at 30% 0%,
+          rgba(244, 183, 40, 0.07),
+          transparent 68%
+        );
+        pointer-events: none;
+      }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
+
+      .ledger {
+        margin: 52px 0 0;
+        border: 1px solid var(--line);
+        box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5);
+        background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95));
+      }
+      .ledger-index {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
+
+      .act {
+        justify-self: start;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 13px 22px;
+        color: var(--black);
+        background: var(--zec);
+        border: 0;
+        cursor: pointer;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+      }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      /* The address is the whole point of the page, so it is the largest
+         readable thing on it and it wraps rather than truncating — a
+         truncated address that looks complete is how money goes missing. */
+      .addr {
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.4);
+        padding: 18px;
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        line-height: 1.85;
+        word-break: break-all;
+        color: var(--ink);
+        user-select: all;
+      }
+      .addr-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      /* The address and its picture are the same fact twice, so they sit
+         together and wrap together on a narrow screen. */
+      .addr-and-qr { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+      .addr-and-qr .addr { flex: 1 1 260px; margin: 0; }
+      .qr { margin: 0; display: grid; gap: 8px; justify-items: center; }
+      .qr[hidden] { display: none; }
+      .qr canvas {
+        display: block;
+        border: 1px solid var(--line);
+        background: #f0eee6;
+        padding: 8px;
+        image-rendering: pixelated;
+      }
+      .qr figcaption {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .tag.good { color: var(--acid); border-color: rgba(199, 240, 75, 0.4); }
+      .tag.warn { color: var(--zec); border-color: rgba(244, 183, 40, 0.45); }
+
+      /* A shared address with no memo silently loses money, so this is the one
+         thing on the page allowed to shout. */
+      .alarm {
+        border: 1px solid rgba(244, 183, 40, 0.5);
+        background: rgba(244, 183, 40, 0.07);
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+      .alarm h2 {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        color: var(--zec);
+      }
+      .memo {
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        word-break: break-all;
+        color: var(--ink);
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid var(--line);
+        padding: 12px;
+        user-select: all;
+      }
+
+      .facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+      .facts li {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 12px;
+        align-items: baseline;
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--read);
+      }
+      .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
+      .facts strong { color: var(--ink); font-weight: 600; }
+
+      .out { margin: 0; font-family: var(--sans); font-size: 14px; line-height: 1.55; min-height: 1.2em; }
+      .out.bad { color: #ff8b6b; }
+      .out.ok { color: var(--acid); }
+
+      .smallprint {
+        margin: 34px 0 0;
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--read-dim);
+        max-width: 60ch;
+      }
+      .smallprint strong { color: var(--read); font-weight: 600; }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin: 32px 0 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .back:hover { color: var(--acid); }
+    
+      /* Checkout-only furniture. Everything above is the deposit door's, kept
+         identical on purpose: the two pages are the same room. */
+      .field { display: block; margin: 20px 0 0; }
+      .field span {
+        display: block;
+        margin: 0 0 8px;
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .field input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.32);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+      }
+      .field input:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+      .field input::placeholder { color: #4a4e47; }
+
+      /* The odds, stated where the money is asked for rather than in a FAQ. */
+      .odds {
+        margin: 22px 0 0;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .odds div { padding: 14px 4px 2px; text-align: center; }
+      .odds div + div { border-left: 1px solid var(--line); }
+      .odds b {
+        display: block;
+        font-family: var(--serif);
+        font-size: 26px;
+        line-height: 1;
+        color: var(--acid);
+        font-variant-numeric: tabular-nums;
+      }
+      .odds span {
+        display: block;
+        margin-top: 7px;
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .total {
+        margin: 24px 0 0;
+        padding: 15px 16px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--zec);
+        background: rgba(0, 0, 0, 0.28);
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .total span {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .total b {
+        font-family: var(--serif);
+        font-size: 30px;
+        line-height: 1;
+        color: var(--zec);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .serials { margin: 20px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+      .serials b {
+        padding: 9px 13px;
+        border: 1px solid var(--acid);
+        color: var(--acid);
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .act.small { padding: 9px 14px; font-size: 9.5px; }
+      .field input[type="number"] { max-width: 9ch; }
+      .mine { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+      .mine li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .mine li b { color: var(--ink); font-weight: 400; }
+      .mine li.won b { color: var(--acid); }
+      .won-art { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+      .won-art figure { margin: 0; display: grid; gap: 6px; }
+      .won-art img { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--line); background: #0d0f0c; image-rendering: pixelated; }
+      .won-art figcaption { display: grid; gap: 5px; justify-items: start; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+      .won-art figcaption .tag { font-size: 7.5px; padding: 3px 6px; }
+      .burn { display: grid; gap: 14px; margin-top: 10px; padding-top: 22px; border-top: 1px dashed var(--line); }
+      .burn[hidden] { display: none; }
+      .say.small { font-size: 13.5px; color: var(--read-dim); }
+      .nav { display: flex; flex-wrap: wrap; gap: 0 22px; margin: 26px 0 0; }
+      .nav a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 6px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body data-page="mint">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint" aria-current="page"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>Take a place</span><span>in the cave</span></h1>
+
+      <p class="lede" id="lede">
+        A ticket costs <strong id="lede-price">0.01 ZEC.zy</strong> and buys a place in the draw — not a
+        chosen creature. <strong>What you get is decided after the door shuts</strong>, by a
+        number nobody can see yet. That is the whole design: there is no early look and
+        no better ticket.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>Collection Z · 4,444</span>
+          <span><b id="phase">checking</b> <button class="act ghost small" type="button" data-wallet-button>Connect Nap</button></span>
+        </div>
+        <div class="ledger-body">
+
+          <section class="state" id="s-looking">
+            <p class="say" role="status">Reading the sale from the chain…</p>
+          </section>
+
+          <section class="state" id="s-none" hidden>
+            <p class="say">
+              <strong>The door is not open yet.</strong> Tickets are sold in one window, announced
+              before it starts and closed at a Zcash height fixed in advance. Nothing is sold outside
+              it, and nobody is let in early — including us.
+            </p>
+            <a class="act ghost" href="/whitelist">Hear when it opens</a>
+          </section>
+
+          <section class="state" id="s-open" hidden>
+            <p class="say">
+              Tickets are paid in <strong>ZEC.zy</strong> — ZEC you have brought into Nap. No address to
+              send to and no confirmations to wait for: the ticket is yours as soon as Nap signs it.
+            </p>
+            <label class="field">
+              <span>Tickets</span>
+              <input id="count-in" type="number" min="1" max="20" step="1" value="1" />
+            </label>
+
+            <div class="odds">
+              <div><b>80%</b><span>one item</span></div>
+              <div><b>19%</b><span>two items</span></div>
+              <div><b>1%</b><span>three items</span></div>
+            </div>
+            <p class="say">
+              Per ticket, by weights published before the sale opened. A winning ticket then
+              claims its items at <strong id="claim-price">—</strong> each.
+            </p>
+
+            <div class="total">
+              <span>To pay now</span>
+              <b id="total">—</b>
+            </div>
+            <div class="addr-row">
+              <button class="act" id="buy" type="button">Buy tickets</button>
+              <a class="act ghost" href="/deposit">Bring ZEC in</a>
+            </div>
+            <p class="out" id="out" role="status" aria-live="polite"></p>
+
+            <div class="burn" id="burn" hidden>
+              <p class="say">
+                <strong>Or burn <span data-burn-symbol>the token</span> for tickets.</strong>
+                <span id="burn-rate">—</span> on Solana is one ticket, into the same draw at the same odds.
+                The burn carries a code from your Nap, so the tickets are yours and nobody else's — without
+                your Solana wallet ever naming your Zyn account. <span id="burn-left">—</span> burn tickets left.
+              </p>
+              <label class="field">
+                <span>Tickets to burn for</span>
+                <input id="burn-in" type="number" min="1" max="20" step="1" value="1" />
+              </label>
+              <div class="total">
+                <span>To burn</span>
+                <b id="burn-total">—</b>
+              </div>
+              <button class="act ghost" id="burn-go" type="button">Burn with a Solana wallet</button>
+              <p class="say small">
+                A burn cannot be undone. A burn ticket costs nothing into the pool; if it wins, its items are
+                claimed at the claim price like any other. Burns that arrive after the sale closes, after the
+                burn tickets run out, or for more tickets than are left earn no tickets — this page lets you burn
+                only for what is left.
+              </p>
+              <p class="out" id="out-burn" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+
+          <section class="state" id="s-closed" hidden>
+            <p class="say">
+              <strong>The door is shut.</strong> Every ticket is in. The draw waits for a Zcash block
+              and a drand round that did not exist when the sale closed; once both are public it runs
+              once, and anyone can run it again from the same inputs.
+            </p>
+          </section>
+
+          <section class="state" id="s-drawn" hidden>
+            <p class="say">
+              <strong>The draw has run.</strong> Your wallet proves which tickets are its own — the
+              cave cannot look them up, and nobody else can claim them. Each item is minted straight
+              into Nap.
+            </p>
+            <div class="won-art" id="won-art"></div>
+            <div class="total" id="claim-total-row">
+              <span>To claim</span>
+              <b id="claim-total">—</b>
+            </div>
+            <p class="say small" id="claim-deadline"></p>
+            <button class="act" id="claim" type="button">Claim what I drew</button>
+            <p class="out" id="out-claim" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="state" id="s-openmint" hidden>
+            <p class="say">
+              <strong>Claims are closed; the rest are on sale.</strong> What the draw handed nobody, and
+              what winners left, sell in an order posted after the draw — the next ones in line,
+              whichever they are.
+            </p>
+            <label class="field">
+              <span>Items</span>
+              <input id="mint-in" type="number" min="1" max="10" step="1" value="1" />
+            </label>
+            <div class="total">
+              <span><span id="left">—</span> left · each</span>
+              <b id="open-price">—</b>
+            </div>
+            <button class="act" id="mint" type="button">Mint</button>
+            <p class="out" id="out-mint" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="state" id="s-soldout" hidden>
+            <p class="say"><strong>All 4,444 are out.</strong> From here they change hands on the market.</p>
+            <a class="act" href="/market">The market</a>
+          </section>
+
+          <section class="state" id="mine-box" hidden>
+            <p class="say"><strong>Your tickets</strong></p>
+            <ul class="mine" id="mine"></ul>
+          </section>
+
+          <section class="state" id="s-broke" hidden>
+            <p class="say">The chain did not answer.</p>
+            <p class="out bad" id="broke"></p>
+            <button class="act ghost" id="retry" type="button">Try again</button>
+          </section>
+
+        </div>
+      </div>
+
+      <p class="smallprint">
+        Tickets are paid in ZEC.zy on the Zyn object ledger; 90% funds the pool a redeemed item is
+        paid out of and 10% is the treasury's. The allocation is drawn once, from a drand beacon and
+        a Zcash block chosen before either existed, over every ticket bought before the close. The
+        chain holds the result as a Merkle root and accepts a claim only with a proof against it.
+      </p>
+
+      <nav class="nav">
+        <a href="/items">My shelf</a>
+        <a href="/market">The market</a>
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/terms">The terms</a>
+      </nav>
+    </main>
+
+    <script type="module" src="/zstore.js?v=5"></script>
+  </body>
+</html>

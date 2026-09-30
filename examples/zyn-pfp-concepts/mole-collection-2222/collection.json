@@ -2,11 +2,28 @@
   "name": "Zyn Moles \u2014 Collection 01",
   "species": "Mole",
   "supply": 2222,
-  "canvasCount": 33,
-  "authoredCellCapacity": 2537,
-  "acceptedUniqueSourceCells": 2290,
-  "reserveSourceCells": 68,
-  "rejectedSourceCells": 247,
+  "canvasCount": 35,
+  "authoredCellCapacity": 2555,
+  "acceptedUniqueSourceCells": 2308,
+  "reserveSourceCells": 72,
+  "rejectedSourceCells": 261,
+  "visualDuplicateReplacementCount": 14,
+  "visualDuplicateReplacementTokens": [
+    "0457",
+    "1649",
+    "1674",
+    "1727",
+    "2117",
+    "2134",
+    "2189",
+    "2206",
+    "2209",
+    "1943",
+    "2133",
+    "2219",
+    "2111",
+    "2128"
+  ],
   "rendering": "exact full-cell slices, edge-padded to square, uniformly resized",
   "metadataSchema": "zyn-atomic-components/v1",
   "viewerRenderer": "zyn-light-v1",
@@ -18,8 +35,20 @@
     "Body",
     "Eyes",
     "Mouth",
-    "Headgear"
+    "Headgear",
+    "Rarity"
   ],
-  "rarity": "none; controlled family distribution only",
+  "rarity": {
+    "schema": "zyn-cavez-rarity/v1",
+    "method": "information content: sum of -log2(share of the 4,444 with that value) over species, background, body, eyes, mouth/beak, headgear and interactive light; ranked highest first, ties by collection index; classes by rank: 1% Mythic, 4% Legendary, 10% Epic, 20% Rare, 30% Uncommon, 35% Common",
+    "classes": {
+      "Mythic": 30,
+      "Legendary": 94,
+      "Epic": 227,
+      "Rare": 419,
+      "Uncommon": 707,
+      "Common": 745
+    }
+  },
   "detailedTraitTagging": "complete \u2014 visually categorized"
 }

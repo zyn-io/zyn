@@ -8,6 +8,7 @@ members = [
     "swapvm",
     "zyn",
     "zynzapd",
+    "objectvm",
 ]
 resolver = "2"
 

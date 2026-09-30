@@ -23,8 +23,8 @@ use zyn_custody::solana::custody::{ceremony, vault_address, Id, Keys};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 5 || !matches!(args[1].as_str(), "solana" | "zcash") {
-        eprintln!("usage: zyn-ceremony <solana|zcash> <threshold> <participants> <dir>");
+    if args.len() != 5 || !matches!(args[1].as_str(), "solana" | "zcash" | "bitcoin") {
+        eprintln!("usage: zyn-ceremony <solana|zcash|bitcoin> <threshold> <participants> <dir>");
         std::process::exit(2);
     }
     let threshold: u16 = args[2].parse().expect("threshold");
@@ -32,6 +32,22 @@ fn main() {
     let dir = std::path::PathBuf::from(&args[4]);
 
     match args[1].as_str() {
+        // A Taproot vault (§154): the group key is the internal key; deposits
+        // go to it tweaked per deposit code, change to its key path.
+        "bitcoin" => {
+            use zyn_custody::bitcoin as btc;
+            let keys: Vec<(btc::Id, btc::Keys)> = match btc::ceremony(threshold, participants, &mut OsRng) {
+                Ok(k) => k.into_iter().collect(),
+                Err(e) => {
+                    eprintln!("ceremony refused: {:?}", e);
+                    std::process::exit(1);
+                }
+            };
+            zyn_custody::shares::save::<btc::Bitcoin>(&dir, &keys).expect("write shares");
+            let public = &keys[0].1.public_package;
+            println!("internal key {}", btc::internal_key(public).expect("taproot key"));
+            println!("signet vault {}", btc::vault_address(public, bitcoin::Network::Signet).expect("address"));
+        }
         "solana" => {
             let keys: Vec<(Id, Keys)> = match ceremony(threshold, participants, &mut OsRng) {
                 Ok(k) => k.into_iter().collect(),

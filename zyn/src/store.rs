@@ -22,6 +22,7 @@ use zyn_vm::spec::MicrochainVm;
 
 const MAGIC: &[u8; 10] = b"ZYNSTATE01";
 const LEDGER_MAGIC: &[u8; 9] = b"ZYNANCH01";
+const CERTS_MAGIC: &[u8; 9] = b"ZYNCERT01";
 const SEALED_MAGIC: &[u8; 9] = b"ZYNSEAL01";
 const PROPOSAL_MAGIC: &[u8; 9] = b"ZYNPROP01";
 
@@ -193,6 +194,67 @@ impl FileStore {
         }
         fs::rename(&tmp_path, &final_path)?;
         Ok(())
+    }
+
+    /// Certificates for anchors still waiting to settle.
+    ///
+    /// Written beside the ledger so a restart does not discard signatures the
+    /// set has already given. Losing them deadlocks anchoring: the signers have
+    /// seen the anchor settle and will not offer again (§129).
+    pub fn save_certificates(
+        &self,
+        chain_id: u32,
+        pending: &[(crate::anchor::AnchorId, crate::anchor::Certificate)],
+    ) -> Result<(), StoreError> {
+        let mut out = Vec::new();
+        out.extend_from_slice(CERTS_MAGIC);
+        out.extend_from_slice(&chain_id.to_be_bytes());
+        out.extend_from_slice(&(pending.len() as u32).to_be_bytes());
+        for (_, c) in pending {
+            let cb = c.encode();
+            out.extend_from_slice(&(cb.len() as u32).to_be_bytes());
+            out.extend_from_slice(&cb);
+        }
+        self.write_atomic(&format!("chain-{}.certs", chain_id), &out)
+    }
+
+    /// What was gathered before the last stop. A file that does not parse is
+    /// dropped rather than fatal: these are an optimisation over asking the
+    /// set again, and refusing to start over them would turn a recoverable
+    /// restart into an outage.
+    pub fn load_certificates(
+        &self,
+        chain_id: u32,
+    ) -> Vec<crate::anchor::Certificate> {
+        let Ok(b) = fs::read(self.dir.join(format!("chain-{}.certs", chain_id))) else {
+            return Vec::new();
+        };
+        if b.len() < CERTS_MAGIC.len() + 8 || &b[..CERTS_MAGIC.len()] != CERTS_MAGIC {
+            return Vec::new();
+        }
+        let mut p = CERTS_MAGIC.len();
+        if u32::from_be_bytes(b[p..p + 4].try_into().unwrap_or([0; 4])) != chain_id {
+            return Vec::new();
+        }
+        p += 4;
+        let n = u32::from_be_bytes(b[p..p + 4].try_into().unwrap_or([0; 4])) as usize;
+        p += 4;
+        let mut out = Vec::new();
+        for _ in 0..n {
+            if p + 4 > b.len() {
+                break;
+            }
+            let len = u32::from_be_bytes(b[p..p + 4].try_into().unwrap_or([0; 4])) as usize;
+            p += 4;
+            if p + len > b.len() {
+                break;
+            }
+            if let Some(c) = crate::anchor::Certificate::decode(&b[p..p + len]) {
+                out.push(c);
+            }
+            p += len;
+        }
+        out
     }
 
     /// The persisted lineage, re-checked entry by entry, or `None` on a first
@@ -477,6 +539,44 @@ mod tests {
             Saved::decode(&extra),
             Err(StoreError::Trailing(1))
         ));
+    }
+
+    /// Certificates must outlive a restart, because nothing else will bring
+    /// them back: every signer stops offering once it has seen the anchor
+    /// settle in its own ledger (§81), so a sequencer that lost them waits for
+    /// signatures nobody will send again.
+    #[test]
+    fn certificates_survive_a_restart() {
+        use crate::anchor::Certificate;
+        let dir = tmpdir("certs");
+        let store = FileStore::new(&dir).unwrap();
+        assert!(store.load_certificates(11).is_empty(), "nothing before anything is saved");
+
+        let mut cert = Certificate::new([0xa1; 32]);
+        let _ = cert.add([0xb2; 32], [0xc3; 64]);
+        let pending = vec![([0xa1u8; 32], cert.clone())];
+        store.save_certificates(11, &pending).unwrap();
+
+        let back = store.load_certificates(11);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].anchor, [0xa1; 32]);
+        assert_eq!(back[0].signatures, cert.signatures, "the signatures come back intact");
+
+        // Another chain's file is not this chain's.
+        assert!(store.load_certificates(12).is_empty(), "chain id is checked");
+    }
+
+    /// A damaged file must not stop a node starting. These are an optimisation
+    /// over asking the set again; refusing to boot over them would turn a
+    /// recoverable restart into an outage.
+    #[test]
+    fn a_damaged_certificate_file_is_dropped_not_fatal() {
+        use std::io::Write;
+        let dir = tmpdir("certs-damaged");
+        let store = FileStore::new(&dir).unwrap();
+        let mut f = fs::File::create(dir.join("chain-11.certs")).unwrap();
+        f.write_all(b"not a certificate file at all").unwrap();
+        assert!(store.load_certificates(11).is_empty(), "garbage reads as nothing");
     }
 
     #[test]

@@ -60,6 +60,65 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Fetch the base state, waiting for the mirror rather than dying without it.
+///
+/// A signer reaches its mirror through an `ssh -L` from a home box, and that
+/// forward blinks: the tunnel restarts, the link drops for a few seconds, the
+/// far end reloads. A one-shot fetch turns each of those into a **permanent**
+/// signer outage, because the process exits and only a human restart clears
+/// it — the chain then runs below its signer set until somebody notices. That
+/// is exactly how signer 3 stayed down (A110).
+///
+/// So retry, with a cap, and say why on every attempt. A genuine
+/// misconfiguration — wrong URL, wrong `ZYN_DA_KEY` — produces the same
+/// message repeatedly and is just as visible as an immediate exit would have
+/// been, while a blink costs seconds instead of an outage. Retrying forever is
+/// deliberate: the mirror coming back is the only thing that should start this
+/// process, and systemd restarting us to try again buys nothing.
+fn fetch_base_state<F: zynzapd::replica::Fetch>(
+    fetch: &F,
+    chain_id: u32,
+) -> Result<Vec<u8>, String> {
+    fetch_base_state_every(fetch, chain_id, std::time::Duration::from_secs(1))
+}
+
+/// The retry loop, with the first delay as a parameter so a test can drive it
+/// without sleeping for real seconds.
+fn fetch_base_state_every<F: zynzapd::replica::Fetch>(
+    fetch: &F,
+    chain_id: u32,
+    first_wait: std::time::Duration,
+) -> Result<Vec<u8>, String> {
+    let path = format!("chain-{}/base.state", chain_id);
+    let mut wait = first_wait;
+    let cap = std::time::Duration::from_secs(30);
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match zynzapd::replica::Fetch::get(fetch, &path) {
+            Ok(bytes) => {
+                if attempt > 1 {
+                    eprintln!(
+                        "zyn-replica: base state fetched on attempt {} — the mirror is back",
+                        attempt
+                    );
+                }
+                return Ok(bytes);
+            }
+            Err(e) => {
+                eprintln!(
+                    "zyn-replica: cannot fetch the base state (attempt {}, retrying in {}s): {}",
+                    attempt,
+                    wait.as_secs(),
+                    e
+                );
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(cap);
+            }
+        }
+    }
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("zyn-replica: {}", e);
@@ -180,9 +239,7 @@ fn run() -> Result<(), String> {
             let root: [u8; 32] = unhex(&hex_root)
                 .and_then(|b| b.try_into().ok())
                 .ok_or("ZYN_BASE_ROOT must be 32 bytes of hex")?;
-            let bytes =
-                zynzapd::replica::Fetch::get(&fetch, &format!("chain-{}/base.state", chain_id))
-                    .map_err(|e| format!("cannot fetch the base state: {}", e))?;
+            let bytes = fetch_base_state(&fetch, chain_id)?;
             Some((bytes, root))
         }
         None => None,
@@ -516,5 +573,57 @@ fn run() -> Result<(), String> {
             *h = alerter.health();
         }
         std::thread::sleep(std::time::Duration::from_secs(poll_secs));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    /// A mirror that refuses `fail_times` times and then answers.
+    struct Flaky {
+        fail_times: Cell<u32>,
+        asked: Cell<u32>,
+    }
+
+    impl zynzapd::replica::Fetch for Flaky {
+        fn get(&self, _rel: &str) -> Result<Vec<u8>, String> {
+            self.asked.set(self.asked.get() + 1);
+            let left = self.fail_times.get();
+            if left > 0 {
+                self.fail_times.set(left - 1);
+                return Err("Connection refused (os error 111)".into());
+            }
+            Ok(b"base".to_vec())
+        }
+    }
+
+    /// The bug this exists to prevent: a signer that meets one refused
+    /// connection and exits stays down until a human restarts it, so a
+    /// three-second tunnel blink becomes an outage of however long it takes
+    /// somebody to notice.
+    #[test]
+    fn a_blinking_mirror_is_waited_out_rather_than_fatal() {
+        let flaky = Flaky {
+            fail_times: Cell::new(3),
+            asked: Cell::new(0),
+        };
+        let got = fetch_base_state_every(&flaky, 11, Duration::from_millis(1))
+            .expect("a mirror that comes back must be waited for, not given up on");
+        assert_eq!(got, b"base".to_vec());
+        assert_eq!(flaky.asked.get(), 4, "three refusals, then the answer");
+    }
+
+    /// A mirror that answers first time must not be delayed by the retry path.
+    #[test]
+    fn a_healthy_mirror_is_read_once() {
+        let ok = Flaky {
+            fail_times: Cell::new(0),
+            asked: Cell::new(0),
+        };
+        assert!(fetch_base_state_every(&ok, 11, Duration::from_millis(1)).is_ok());
+        assert_eq!(ok.asked.get(), 1);
     }
 }

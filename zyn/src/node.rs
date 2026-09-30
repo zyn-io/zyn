@@ -221,6 +221,18 @@ impl<V: MicrochainVm> Node<V> {
         self.pending_certificates.push((cert.anchor, cert));
     }
 
+    /// Certificates gathered for anchors that have not settled yet.
+    ///
+    /// Read so they can outlive a restart. §81 made a signer re-offer until it
+    /// sees an anchor settle in its *own* ledger — which cures a sequencer
+    /// restart mid-flight. It does not cure one after settlement: every signer
+    /// has stopped offering by then, and a sequencer that still needs the
+    /// certificate to release deposits waits for signatures nobody will send
+    /// again. Keeping them is the only end of that the sequencer controls.
+    pub fn pending_certificates(&self) -> &[(crate::anchor::AnchorId, Certificate)] {
+        &self.pending_certificates
+    }
+
     /// Fold one signer's endorsement of an anchor into its pending
     /// certificate. Counted only if a set is configured, the signer is in it,
     /// and the signature opens the id — so a replica that reproduced a root
@@ -538,6 +550,21 @@ impl<V: MicrochainVm> Node<V> {
         self.seal(now)
     }
 
+    /// Seal on the clock alone, even an epoch nobody wrote to, once the
+    /// policy's epoch length has passed.
+    ///
+    /// For an application whose state changes with time rather than with
+    /// traffic — a sale that closes at an epoch has to *reach* that epoch, and
+    /// on a quiet chain epochs otherwise stand still. The caller decides when
+    /// that applies; an idle chain with nothing waiting should not fill its
+    /// history with empty epochs.
+    pub fn seal_on_clock(&mut self, now: u64) -> Option<Checkpoint> {
+        if now.saturating_sub(self.sealed_at) < self.policy.max_seconds_per_epoch {
+            return None;
+        }
+        self.seal(now)
+    }
+
     /// Anchor now regardless of policy, for the same reason.
     pub fn anchor_now(&mut self, now: u64) -> Option<Anchor> {
         if self.epochs_since_anchor == 0 {
@@ -697,14 +724,34 @@ impl<V: MicrochainVm> Node<V> {
     /// [`Self::confirm_anchor`] settles exactly what this proposal covered.
     /// One proposal at a time — two anchors in flight would race for the same
     /// `previous_root`.
-    pub fn propose_anchor(&mut self, _now: u64) -> Option<Anchor> {
+    pub fn propose_anchor(&mut self, now: u64) -> Option<Anchor> {
         if self.proposed.is_some() || self.pending.is_empty() {
             return None;
         }
         let a = self.build_anchor()?;
         self.ledger.check(&a).ok()?;
         self.proposed = Some((a, self.pending.len()));
+        // Restart the cadence clock here rather than at confirmation. An
+        // anchor costs a Zcash fee whether or not it is ever endorsed, so the
+        // thing to rate-limit is *proposing* one. Waiting for confirmation to
+        // restart the clock is what let a dead signer set be charged for
+        // repeatedly (A124).
+        self.anchored_at = now;
         Some(a)
+    }
+
+    /// Whether the configured cadence says an anchor is due.
+    ///
+    /// The automatic path consults the policy inline; the manual path — where
+    /// a settler carries the anchor to Zcash — had no such check and proposed
+    /// one on **every seal**, so a daily cadence produced an anchor per
+    /// confirmation round-trip instead. Each one burns a fee, so the vault
+    /// emptied in an afternoon (A124).
+    pub fn anchor_due(&self, now: u64) -> bool {
+        self.policy.should_anchor(
+            self.epochs_since_anchor,
+            now.saturating_sub(self.anchored_at),
+        )
     }
 
     /// The chain has the proposed anchor: accept it, publish its snapshot, and
@@ -777,6 +824,22 @@ mod tests {
     /// The deposit index comes from the chain, so a helper needs to read it.
     fn deposit(node: &Chain, n: u8) -> Intent {
         Intent::next_deposit(node.state(), acct(n), XZEC, Fixed::whole(100), [0u8; 32])
+    }
+
+    /// A quiet chain still moves epochs on the clock when asked to — and only
+    /// once the epoch's time is up, so a caller polling it does not seal twice.
+    #[test]
+    fn a_clock_seal_waits_for_the_epoch_to_run_out() {
+        let mut s = SwapState::new(1, Params::v1());
+        s.tokens.get_mut(&XZEC).unwrap().vault.as_mut().unwrap().observed = Fixed::whole(1);
+        let p = EpochPolicy { max_seconds_per_epoch: 60, ..policy() };
+        let mut n: Chain = Node::resume(s, p, Economics::flat(1_000), 100);
+        assert!(n.seal_if_due(1_000).is_none(), "an empty epoch never seals on policy");
+        assert!(n.seal_on_clock(159).is_none(), "not before its time");
+        let cp = n.seal_on_clock(160).expect("seals on the clock");
+        assert_eq!(cp.epoch, 0);
+        assert!(n.seal_on_clock(200).is_none(), "and the clock restarts");
+        assert!(n.seal_on_clock(220).is_some());
     }
 
     #[test]
@@ -1495,5 +1558,62 @@ mod tests {
         assert!(n.add_endorsement(a.id(), id, k.sign(&a.id()).to_bytes()));
         assert!(n.add_endorsement(a.id(), id, k.sign(&a.id()).to_bytes()));
         assert!(n.signer_liveness().unwrap().1.contains_key(&id));
+    }
+}
+
+#[cfg(test)]
+mod cadence_governs_both_paths {
+
+    use super::*;
+    use crate::epoch::EpochPolicy;
+    use swapvm::state::SwapState;
+    use swapvm::Params;
+
+    fn daily() -> EpochPolicy {
+        EpochPolicy {
+            intents_per_epoch: 10,
+            epochs_per_anchor: 100_000,
+            max_seconds_per_epoch: 0,
+            max_seconds_per_anchor: 86_400,
+        }
+    }
+
+    fn manual_node() -> Node<SwapState> {
+        let s = SwapState::new(1, Params::v1());
+        Node::resume(s, daily(), Economics::flat(1_000), 0).with_manual_anchoring()
+    }
+
+    /// The manual path proposed an anchor on **every seal**, so a daily
+    /// cadence produced one per Zcash confirmation round-trip — about every
+    /// sixteen minutes — and each burned a fee until the vault could not pay
+    /// for another (A124). `anchor_due` is what the caller must now ask.
+    #[test]
+    fn a_daily_cadence_is_not_due_minutes_after_the_last_anchor() {
+        let mut n = manual_node();
+        let start = 1_000_000u64;
+        n.seal(start);
+
+        assert!(n.anchor_due(start), "the first anchor is due");
+        assert!(n.propose_anchor(start).is_some(), "and is proposed");
+
+        assert!(
+            !n.anchor_due(start + 16 * 60),
+            "sixteen minutes on — one confirmation round-trip — it is not due"
+        );
+        assert!(!n.anchor_due(start + 3_600), "nor an hour");
+        assert!(!n.anchor_due(start + 86_399), "nor a second short of a day");
+        assert!(n.anchor_due(start + 86_400), "a day later it is");
+    }
+
+    /// The clock restarts when an anchor is *proposed*, not when it confirms.
+    /// The fee is paid either way, so a signer set that never endorses must
+    /// not be charged again and again while it stays down.
+    #[test]
+    fn an_unendorsed_proposal_still_restarts_the_clock() {
+        let mut n = manual_node();
+        let start = 2_000_000u64;
+        n.seal(start);
+        assert!(n.propose_anchor(start).is_some());
+        assert!(!n.anchor_due(start + 7_200), "two hours on, still not due");
     }
 }

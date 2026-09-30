@@ -4561,13 +4561,14 @@
   },
   {
     "id": "MOLE-0457",
-    "canvas": 6,
-    "cell": 60,
-    "row": 6,
-    "column": 10,
-    "family": "Afterglow and Eclipse",
-    "sourceWidth": 128,
-    "sourceHeight": 142
+    "canvas": 34,
+    "cell": 1,
+    "row": 1,
+    "column": 1,
+    "family": "Crystal Geodes",
+    "sourceWidth": 389,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "0452"
   },
   {
     "id": "MOLE-0458",
@@ -16481,13 +16482,14 @@
   },
   {
     "id": "MOLE-1649",
-    "canvas": 24,
-    "cell": 33,
-    "row": 4,
-    "column": 3,
-    "family": "Genesis Core",
-    "sourceWidth": 127,
-    "sourceHeight": 137
+    "canvas": 34,
+    "cell": 2,
+    "row": 1,
+    "column": 2,
+    "family": "Ancient Rail",
+    "sourceWidth": 385,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "1624"
   },
   {
     "id": "MOLE-1650",
@@ -16731,13 +16733,14 @@
   },
   {
     "id": "MOLE-1674",
-    "canvas": 24,
-    "cell": 58,
-    "row": 6,
-    "column": 8,
-    "family": "Genesis Core",
-    "sourceWidth": 128,
-    "sourceHeight": 135
+    "canvas": 34,
+    "cell": 3,
+    "row": 1,
+    "column": 3,
+    "family": "Root Network",
+    "sourceWidth": 388,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "1624"
   },
   {
     "id": "MOLE-1675",
@@ -17261,13 +17264,14 @@
   },
   {
     "id": "MOLE-1727",
-    "canvas": 25,
-    "cell": 41,
-    "row": 5,
+    "canvas": 34,
+    "cell": 4,
+    "row": 2,
     "column": 1,
-    "family": "Full-Spectrum Reserve A",
-    "sourceWidth": 127,
-    "sourceHeight": 135
+    "family": "Quantum Tunnel",
+    "sourceWidth": 389,
+    "sourceHeight": 386,
+    "replacementForVisualDuplicateOf": "1690"
   },
   {
     "id": "MOLE-1728",
@@ -19421,13 +19425,14 @@
   },
   {
     "id": "MOLE-1943",
-    "canvas": 28,
-    "cell": 59,
-    "row": 6,
-    "column": 9,
-    "family": "Headgear Reserve",
-    "sourceWidth": 128,
-    "sourceHeight": 132
+    "canvas": 35,
+    "cell": 1,
+    "row": 1,
+    "column": 1,
+    "family": "Afterglow and Eclipse",
+    "sourceWidth": 394,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "1887"
   },
   {
     "id": "MOLE-1944",
@@ -21101,13 +21106,14 @@
   },
   {
     "id": "MOLE-2111",
-    "canvas": 31,
-    "cell": 18,
+    "canvas": 35,
+    "cell": 4,
     "row": 2,
-    "column": 8,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 126,
-    "sourceHeight": 142
+    "column": 1,
+    "family": "Archivists and Geologists",
+    "sourceWidth": 394,
+    "sourceHeight": 392,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2112",
@@ -21161,13 +21167,14 @@
   },
   {
     "id": "MOLE-2117",
-    "canvas": 31,
-    "cell": 24,
-    "row": 3,
-    "column": 4,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 127,
-    "sourceHeight": 144
+    "canvas": 34,
+    "cell": 5,
+    "row": 2,
+    "column": 2,
+    "family": "Moonlight and Starlight",
+    "sourceWidth": 385,
+    "sourceHeight": 386,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2118",
@@ -21271,13 +21278,14 @@
   },
   {
     "id": "MOLE-2128",
-    "canvas": 31,
-    "cell": 35,
-    "row": 4,
-    "column": 5,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 124,
-    "sourceHeight": 144
+    "canvas": 35,
+    "cell": 5,
+    "row": 2,
+    "column": 2,
+    "family": "Aurora and Bioluminescence",
+    "sourceWidth": 383,
+    "sourceHeight": 392,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2129",
@@ -21321,23 +21329,25 @@
   },
   {
     "id": "MOLE-2133",
-    "canvas": 31,
-    "cell": 40,
-    "row": 4,
-    "column": 10,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 132,
-    "sourceHeight": 144
+    "canvas": 35,
+    "cell": 2,
+    "row": 1,
+    "column": 2,
+    "family": "Caustics and Veiled Light",
+    "sourceWidth": 383,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "2110"
   },
   {
     "id": "MOLE-2134",
-    "canvas": 31,
-    "cell": 41,
-    "row": 5,
-    "column": 1,
-    "family": "Clean Geometry Reserve A",
-    "sourceWidth": 128,
-    "sourceHeight": 143
+    "canvas": 34,
+    "cell": 6,
+    "row": 2,
+    "column": 3,
+    "family": "Prism and Laser",
+    "sourceWidth": 388,
+    "sourceHeight": 386,
+    "replacementForVisualDuplicateOf": "2097"
   },
   {
     "id": "MOLE-2135",
@@ -21881,13 +21891,14 @@
   },
   {
     "id": "MOLE-2189",
-    "canvas": 32,
-    "cell": 36,
-    "row": 4,
-    "column": 6,
-    "family": "Clean Geometry Reserve B",
-    "sourceWidth": 138,
-    "sourceHeight": 144
+    "canvas": 34,
+    "cell": 7,
+    "row": 3,
+    "column": 1,
+    "family": "Shielded Stealth",
+    "sourceWidth": 389,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "2163"
   },
   {
     "id": "MOLE-2190",
@@ -22051,13 +22062,14 @@
   },
   {
     "id": "MOLE-2206",
-    "canvas": 32,
-    "cell": 53,
-    "row": 6,
-    "column": 3,
-    "family": "Clean Geometry Reserve B",
-    "sourceWidth": 132,
-    "sourceHeight": 137
+    "canvas": 34,
+    "cell": 8,
+    "row": 3,
+    "column": 2,
+    "family": "Gold Vein",
+    "sourceWidth": 385,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "2176"
   },
   {
     "id": "MOLE-2207",
@@ -22081,13 +22093,14 @@
   },
   {
     "id": "MOLE-2209",
-    "canvas": 32,
-    "cell": 56,
-    "row": 6,
-    "column": 6,
-    "family": "Clean Geometry Reserve B",
-    "sourceWidth": 138,
-    "sourceHeight": 137
+    "canvas": 34,
+    "cell": 9,
+    "row": 3,
+    "column": 3,
+    "family": "Node and Cipher",
+    "sourceWidth": 388,
+    "sourceHeight": 388,
+    "replacementForVisualDuplicateOf": "2179"
   },
   {
     "id": "MOLE-2210",
@@ -22181,13 +22194,14 @@
   },
   {
     "id": "MOLE-2219",
-    "canvas": 33,
-    "cell": 6,
+    "canvas": 35,
+    "cell": 3,
     "row": 1,
-    "column": 6,
-    "family": "Clean Geometry Reserve C",
-    "sourceWidth": 123,
-    "sourceHeight": 140
+    "column": 3,
+    "family": "Sunlight and Dawn",
+    "sourceWidth": 395,
+    "sourceHeight": 397,
+    "replacementForVisualDuplicateOf": "2095"
   },
   {
     "id": "MOLE-2220",

@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the reverse tunnel on %i every two minutes
+
+[Timer]
+# Two minutes: long enough that a restart cannot chase its own tail, short
+# enough that a dead forward is minutes of outage rather than the hours this
+# has cost before.
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -33,11 +33,16 @@ use zyn::anchor::Anchor;
 use zyn::node::ConfirmError;
 use zyn_custody::ceremony::{Identifier as ZcashId, VaultKeys as ZcashKeys};
 use zyn_custody::memo::MEMO_FIELD;
-use zyn_custody::payout::{self, Destination, Envelope, Payment};
+use zyn_custody::payout::{self, Destination, Payment};
 use zyn_custody::shielded::PoolStores;
 use zyn_custody::zebra::Zebra;
 
-use crate::rpc::Shared;
+use std::sync::{Arc, Mutex};
+use zyn::node::Node;
+use zyn_vm::spec::MicrochainVm;
+
+/// A node the settler drives, whatever state machine it runs.
+type SharedOf<V> = Arc<Mutex<Node<V>>>;
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -128,9 +133,43 @@ pub struct ZcashBuilder {
     tree_lag: u64,
     /// Built once per bundle version; seconds and hundreds of megabytes.
     proving: Option<(BundleVersion, ProvingKey)>,
+    /// Zatoshi the vault holds for other people — issued ZEC, exits owed,
+    /// deposits waiting for their account — kept current by the node. When
+    /// set, no anchor is built whose fee would come out of it.
+    backing_floor: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+}
+
+/// What an anchor may cost in fees, generously: ZIP-317 for one spend and two
+/// outputs is well under this.
+pub const ANCHOR_FEE_ALLOWANCE: u64 = 20_000;
+
+/// Whether the vault can pay an anchor's fee from its own money.
+///
+/// Anchors pay the vault back to itself, so each one costs only its fee — but
+/// a fee is still ZEC leaving the vault, and a vault holding exactly what it
+/// owes holders has none of its own to spend. The difference is the operator's
+/// fee reserve, topped up with the all-zero memo; without it, the fee would
+/// come out of somebody's backing.
+pub fn covers_backing(held: u64, owed: u64) -> Result<(), String> {
+    if held >= owed.saturating_add(ANCHOR_FEE_ALLOWANCE) {
+        return Ok(());
+    }
+    Err(format!(
+        "anchoring paused: the vault holds {held} zat and owes holders {owed}, so an anchor's fee \
+         would come out of their backing — top up the fee reserve (memo ZYN1: and 64 zeros) \
+         by at least {} zat",
+        owed.saturating_add(ANCHOR_FEE_ALLOWANCE).saturating_sub(held)
+    ))
 }
 
 impl ZcashBuilder {
+    /// Refuse any anchor that would spend below `floor` (see
+    /// [`covers_backing`]).
+    pub fn with_backing_floor(mut self, floor: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+        self.backing_floor = Some(floor);
+        self
+    }
+
     pub fn new(
         network: Network,
         shares: Vec<(ZcashId, ZcashKeys)>,
@@ -183,6 +222,7 @@ impl ZcashBuilder {
             scanner,
             tree_lag,
             proving: None,
+            backing_floor: None,
         })
     }
 
@@ -253,8 +293,10 @@ impl ZcashBuilder {
 }
 
 impl Builder for ZcashBuilder {
-    fn build(&mut self, anchor: &Anchor, tip: u64) -> Result<Built, String> {
-        let env = Envelope::at(self.network, tip as u32);
+    fn build(&mut self, anchor: &Anchor, _tip: u64) -> Result<Built, String> {
+        // From the node, not the caller's tip: checked against the branch the
+        // node says the next block is under, from the same reply.
+        let (_, env) = self.zebra.envelope(self.network)?;
         let to = self.fvk.address_at(0u32, Scope::External);
         let ovk = Some(self.fvk.to_ovk(Scope::External));
         let payment = Payment {
@@ -269,6 +311,14 @@ impl Builder for ZcashBuilder {
         // which is the policy's cadence anyway — so "no note yet" is a wait,
         // not a fault.
         let pool = ValuePool::Ironwood;
+        if let Some(floor) = &self.backing_floor {
+            let mut held: u64 = 0;
+            for p in [ValuePool::Orchard, ValuePool::Ironwood] {
+                let store = self.notes.of(p).lock().map_err(|_| "note store poisoned".to_string())?;
+                held = held.saturating_add(store.balance());
+            }
+            covers_backing(held, floor.load(std::sync::atomic::Ordering::SeqCst))?;
+        }
         let version = env.bundle_version_for(pool).map_err(|e| e.to_string())?;
         self.tree_matches_node(pool)?;
         let mut payout = {
@@ -474,7 +524,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
 
     /// One pass: follow up what is in flight, then propose and send the next.
     /// Returns the anchor the chain confirmed this pass, if any.
-    pub fn poll_once(&mut self, node: &Shared, now: u64) -> Result<Option<Confirmed>, String> {
+    pub fn poll_once<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<Option<Confirmed>, String> {
         // Reported, not repaired automatically. `confirmations` answers "not
         // known to this node", which a resyncing Zebra says about everything —
         // re-broadcasting on that would be a stampede. An operator re-anchors
@@ -617,7 +667,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         Ok(gone)
     }
 
-    fn follow_up(&mut self, node: &Shared, now: u64) -> Result<Option<Confirmed>, String> {
+    fn follow_up<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<Option<Confirmed>, String> {
         let mut changed = false;
         let mut confirmed = None;
         let tip = self.chain.tip()?;
@@ -720,7 +770,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         Ok(confirmed)
     }
 
-    fn send_next(&mut self, node: &Shared, now: u64) -> Result<(), String> {
+    fn send_next<V: MicrochainVm>(&mut self, node: &SharedOf<V>, now: u64) -> Result<(), String> {
         // Do not build on a link that is no longer there. Extending it costs
         // nothing now and produces a chain nobody can verify later, which is
         // far worse than stopping: a stalled chain is recoverable, an
@@ -800,6 +850,16 @@ pub fn is_consensus_refusal(e: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fee reserve is the vault's own money; backing is not.
+    #[test]
+    fn an_anchor_never_spends_what_holders_are_owed() {
+        assert!(covers_backing(1_000_000, 0).is_ok());
+        assert!(covers_backing(1_000_000, 1_000_000).is_err(), "no reserve, no anchor");
+        assert!(covers_backing(1_000_000 + ANCHOR_FEE_ALLOWANCE, 1_000_000).is_ok());
+        let msg = covers_backing(5_000, 0).unwrap_err();
+        assert!(msg.contains("15000 zat"), "{msg}");
+    }
     use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -864,7 +924,7 @@ mod tests {
         }
     }
 
-    fn node() -> Shared {
+    fn node() -> SharedOf<SwapState> {
         let policy = EpochPolicy {
             intents_per_epoch: 10,
             epochs_per_anchor: 1,

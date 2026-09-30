@@ -70,3 +70,28 @@ test('streamed responses are capped even without content-length', async () => {
     await assert.rejects(boundedBytes('/fixture', 12), /too large/);
   } finally { globalThis.fetch = original; }
 });
+
+// The 25 Sep audit's H1: a site asked for a listing at 2^128 + 5 raw units.
+// Nap showed "340282366920938463463.37460743 ZEC.zy" and would have signed 5.
+test('an amount the ledger cannot hold is refused, never wrapped', async () => {
+  const { parseAmount, MAX_AMOUNT } = await import('../src/core.js');
+  const { swapIntent } = await import('../src/market.js');
+  assert.throws(() => parseAmount('340282366920938463463.374607431768211461'), /larger than any the ledger can hold/);
+  assert.throws(() => parseAmount('170141183460469231731.687303715884105728'), /larger than any/, '2^127 raw');
+  assert.equal(parseAmount('170141183460469231731.687303715884105727'), MAX_AMOUNT - 1n, 'the largest that fits');
+  const intent = (amountIn) => swapIntent({ trader: new Uint8Array(32), pool: new Uint8Array(32), sellA: true, amountIn, minOut: 0n, nonce: new Uint8Array(32), inputs: [], change: [] });
+  assert.throws(() => intent((1n << 128n) + 5n), /outside what the ledger can hold/);
+  assert.throws(() => intent(1n << 127n), /outside what the ledger can hold/);
+  assert.ok(intent(MAX_AMOUNT - 1n) instanceof Uint8Array);
+});
+
+// The 25 Sep audit's other H1: the connect screen promised sites would not see
+// balances, while connected sites can read holdings without a prompt.
+test('connect screens say what a connected site can read', async () => {
+  const { readFile } = await import('node:fs/promises');
+  for (const f of ['../src/connect-app.js', '../src/nap-browser.js', '../public/privacy.html']) {
+    const s = await readFile(new URL(f, import.meta.url), 'utf8');
+    assert.doesNotMatch(s, /not see[^<]*balances|balances, your notes|does not see balances/i, f);
+    assert.match(s, /balances, your items, what you are owed, your sale tickets and the coins you made/, f);
+  }
+});

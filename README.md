@@ -7,7 +7,12 @@ commitments to Zcash.
 > ZEC has private money. Zyn gives it somewhere to do things.
 
 **Cave** is the first consumer application powered by Zyn — a ZEC-settled object
-market. **ZynZap / SwapVM** is Zyn's first execution environment.
+market. **ZynZap / SwapVM** was Zyn's first execution environment; since 23 Sep
+2026 both live chains (testnet 212, mainnet 26460) run the **object ledger**
+(`objectvm`), where value is held as notes rather than balances, and a
+market in the VM — batch-cleared swaps, pools and one-price token launches —
+whose participants are hidden from the public and visible to the operator
+(`DECISIONS.md` §137).
 
 ## The trust model, up front
 
@@ -52,7 +57,8 @@ two PRs and a rev bump. C18 and §59.5 are what that lesson cost.
 | `zyn-vm` | the VM spec: commitments, derived addresses, collections, manifests, auth |
 | `zyn-bridge` | vault and bindings |
 | `zyn-custody` | shielded and transparent custody |
-| `swapvm` | the ZynZap AMM VM |
+| `swapvm` | the ZynZap AMM VM (retired chains; kept for their history) |
+| `objectvm` | the object ledger both live chains run: notes, listings, exits, and the private market (`market.rs`) |
 | `zyn` | anchors, ledger, epochs |
 | `zynzapd` | the sequencer daemon, replica and signer |
 

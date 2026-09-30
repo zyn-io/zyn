@@ -16,6 +16,40 @@ disk figures move; check them against upstream rather than trusting this file.
 
 ---
 
+## 0. What may be claimed, and what is gated
+
+**Gated on privacy tier 4 (A108): Zyn as private money.** Nobody holds a
+spendable balance here under a privacy claim until their amounts and ownership
+are hidden from the operator as well as from the public (§130.8).
+
+**Not gated on tier 4:** the Cave sale, which opens on tier 1 plus Gate 2's
+security items — the tier §70.1 selected for that product, and honest for a
+collectible whose allocation record is already blind (§130.8a). Nor ZynZap or
+the launchpad, whose constraint is their copy rather than their tier (§130.8b).
+Nor Nap, whose Zcash half is private by Zcash's own guarantee — though its Zyn
+tab inherits Zyn's tier, and its `--private` tint currently spans both (§130.8d,
+A109). Nor testnet, `zec-multisig`, the grant, or funding the vault.
+
+**Gated on A90, and time-critical:** any further epoch published in plaintext.
+Sealing cannot be applied backwards — what is published unsealed stays readable
+forever (§70.8).
+
+**What an operator may truthfully say today**, and it is less than the site
+implies:
+
+| Asked | The true answer, this week |
+|---|---|
+| Is my deposit private? | Yes — it is a shielded Zcash note, and Zcash protects it |
+| Is what I do inside Zyn private? | **No.** Every `Transfer` names sender, recipient and asset in the journal, and today's DA mirror ships those in plaintext (§92.1, A90) |
+| Who can see my holdings? | Today, anyone who can fetch a bundle. After A90 deploys, the operator and every verifier holding `ZYN_DA_KEY` |
+| Is my withdrawal private? | Yes — shielded again on the way out |
+
+Privacy is lost *inside*, not at the boundary. §92.3's discipline is to name the
+tier you are actually on; do not let a UI, a post or a sale page claim the tier
+above the one that is deployed.
+
+---
+
 ## 1. The node: Zebra
 
 Use **Zebra** (`zebrad`), the Zcash Foundation's Rust implementation.
@@ -287,10 +321,17 @@ and it is what makes the 7-of-10 seven checks instead of seven signatures
 4. Run a full cycle: deposit → credit → anchor → trade → exit → payout.
 5. Rehearse the failures: a reorg, a missing signer, a stalled sequencer, an
    exit that times out.
-6. Only then mainnet, with `Vault::cap` set low and raised slowly.
+6. Only then mainnet, with `Vault::cap` set low and raised slowly — dust first,
+   ours only, as a drill.
+7. **Privacy tier 1 (A90, A94, P2) before the sale opens** (§0). A90 first: it
+   cannot be applied to epochs already published.
+8. **Privacy tier 4 (A108) before Zyn is offered as private money** — a
+   spendable balance held here under a privacy claim. Not required for steps
+   1–7.
 
 Steps 4 and 5 are where the remaining unknowns are. Everything before them is
-either written or a package install.
+either written or a package install. Step 8 is the long one, and it is the only
+step that stands between a working chain and the claim the brief makes.
 
 ---
 
@@ -803,7 +844,14 @@ echo "<reveal line>" >> /etc/zyn/zcash-reveals && systemctl restart zynzapd
 The settler builds, proves, signs and broadcasts on its next pass; the exit
 confirms on Zyn once the payout is `ZYN_CONFIRMATIONS` deep on Zcash.
 
-## 4h. What is deployed (5 Sep 2026)
+## 4h. What is deployed (5 Sep 2026) — RETIRED
+
+> **Chain 11 was retired on 22 Sep 2026.** `zynzapd.service` is stopped and
+> disabled, `:8099` has no listener, and the testnet is now chain 212 (§5f-bis).
+> This section is kept as the record of how that chain was deployed — its
+> paths, its vault and its scan height are what a reader needs to interpret
+> the history and the mirror's `chain-11/` tree. Do not follow it to stand
+> anything up.
 
 On `zyn-zebra-testnet` (168.119.53.39, cax11, Zebra in Docker on the 60 GB volume):
 
@@ -1311,8 +1359,15 @@ Three faces of the wallet, one core (`zynzapd::app`, DECISIONS §26). The page i
 file in all of them (`zynzapd/ui/index.html`); its `api()` picks the
 transport: in-process `invoke` under Tauri, loopback HTTP otherwise.
 
-**Desktop and mobile — `apps/nap`** (Tauri 2, one project for macOS,
-Windows, Linux, iOS, Android). Keys live in the platform app-data dir
+**Phones — `apps/nap-mobile`** (since 25 Sep 2026, DECISIONS §149). The
+iOS and Android app is the web wallet in a Tauri 2 shell, like the extension
+(`apps/nap-web` built with `--mode mobile`); the mobile plan below for
+`apps/nap` is superseded. Build, run, release and store listing:
+`apps/nap-mobile/README.md` and `apps/nap-mobile/store/LISTING.md`. Nap's
+server answers the app's origins through `apps/nap-web/functions/_middleware.js`.
+
+**Desktop — `apps/nap`** (Tauri 2, one project for macOS,
+Windows, Linux; its iOS/Android notes below are historical). Keys live in the platform app-data dir
 (`~/Library/Application Support/io.infinityteam.napwallet` on macOS); the same
 `ZYN_*` env overrides apply when launched from a shell.
 
@@ -1336,38 +1391,39 @@ The Rust core compiles for `aarch64-apple-ios`, `aarch64-apple-ios-sim`,
 `aarch64-linux-android` (targets installed here). Proving an exit on a
 phone takes about a minute and a few hundred MB; it runs off the UI thread.
 
-**Browser extension — `apps/extension`** (Manifest V3). It does not hold
-keys. The popup is the same page pointed at the local app on
-`127.0.0.1:8977`, and `window.zyn` is a provider for sites:
+**Browser extension — `apps/extension`** (Manifest V3, Chrome and Firefox).
+Since 25 Sep 2026 (0.2.0) it is a wallet by itself — no desktop app. It is
+Nap in the browser, packaged: `npm run build` in `apps/extension` builds
+`apps/nap-web` in extension mode (`vite build --mode extension`,
+`.env.extension` sets `VITE_NAP_API=https://nap.cavebro.win`, see
+`src/origin.js`) and adds three small files:
 
-```js
-const { account, address, network } = await window.zyn.request({ method: 'zyn_account' });
-await window.zyn.request({ method: 'zyn_swap', params: { asset_in: 1, asset_out: 2, amount: '0.01' } });
-```
+- the toolbar popup is the wallet (`index.html?popup=1`, 400 px wide; Market
+  and Bridge open in tabs). Keys live in the extension's own storage, sealed
+  under the holder's password if they keep them — as on nap.cavebro.win;
+- `content.js` + `inpage.js` announce Nap to https pages (`nap:announceProvider`,
+  and `window.zyn`) and carry a site's requests over a runtime port straight to
+  `connect.html` — the same connect window as the web, which answers each
+  port at the origin the browser names;
+- `background.js` only opens (or focuses) that window.
 
-Reads (`zyn_account`, `zyn_balances`, `zyn_assets`, `zyn_pools`, `zyn_quote`,
-`zyn_curves`, `zyn_curve`, `zyn_curveQuote`) answer at once. Writes
-(`zyn_transfer`, `zyn_swap`, `zyn_deposit`, `zyn_withdraw`, `zyn_launchCurve`,
-`zyn_buyCurve`, `zyn_sellCurve`) open an approval window naming the site and
-the action; nothing is submitted until it is approved. Launch approval names
-the immutable fee, 0.01 ZEC.zy creation cost and optional dev-buy ceiling;
-curve trades name the exact token amount and maximum/minimum ZEC.zy. The local app answers
-CORS only for `chrome-extension://`, `moz-extension://` and
-`safari-web-extension://` origins, and still requires the `X-Zyn` header,
-so a web page cannot reach it directly.
+Endpoints: everything goes to nap.cavebro.win (the one host permission) —
+`/rpc`, `/zec`, `/media`, `/claim`, the same Pages Functions the web wallet
+uses. Bridging from Phantom or MetaMask needs their providers, which don't
+inject into extension pages; bring SOL or ETH in from nap.cavebro.win/bridge.
 
 ```sh
-cd apps/extension && node build.mjs     # dist/ — load unpacked at chrome://extensions
+cd apps/extension && npm run build     # dist/, dist-firefox/, release/*.zip
+npm run source                         # release/nap-wallet-<v>-source.zip for AMO
+npm test                               # what ships: permissions, pages, packages
+# end to end, no desktop app (Playwright's Chrome for Testing loads it):
+cd ../nap-connect && PHRASE_FILE=… POOL=… SELL=… IN=… OUT=… node tests/extension.e2e.mjs
 ```
 
-To install: `chrome://extensions` → Developer mode → Load unpacked →
-`apps/extension/dist`. Start `nap-wallet` (or the desktop app) first; the
-popup says plainly when it is not running. Firefox needs the same files
-with a `browser_specific_settings` id; Safari needs `xcrun
-safari-web-extension-converter` — both later.
-
-The extension needs `nap-wallet` (or the desktop app, once it also listens —
-see §5) running on the machine.
+Store listing, permission reasons and data declarations:
+`apps/extension/store/LISTING.md`; images in `apps/extension/store/`; privacy
+policy at https://nap.cavebro.win/privacy. The source package rebuilds the
+Firefox add-on byte for byte (checked 25 Sep).
 
 ## 4r. ZynZap, the front (`apps/zynzap`)
 
@@ -1473,11 +1529,15 @@ the verifier set.
 ### The replica
 
 ```
-ZYN_CHAIN_ID=11 ZYN_DATA_DIR=/var/lib/zyn/replica ZYN_LISTEN=0.0.0.0:8100 \
+ZYN_CHAIN_ID=<chain> ZYN_DATA_DIR=/var/lib/zyn/replica ZYN_LISTEN=0.0.0.0:8100 \
 ZYN_DA_MIRRORS=http://<mirror>:8181 ZYN_VAULT_FVK=<hex> \
 ZYN_ZEBRA_HOST=<zebra> ZYN_ZEBRA_PORT=18232 ZYN_BRIDGE_FROM_HEIGHT=<vault birth> \
 ZYN_SEQUENCER=<host:port> ZYN_DA_LISTEN=0.0.0.0:8182 zyn-replica
 ```
+
+`zyn-replica` verifies an **AMM** chain — mainnet 26460, or chain 11 before it
+was retired. The object ledger (chain 212, the testnet) has no replica yet:
+`zyn_anchors` and the DA bundles are what a third party checks it with today.
 
 Holds the vault's **viewing** key only. Each pass: scan Zcash for `ZYA`
 self-sends at depth, fetch the bundle, check `anchor.bin` hashes to the memo's
@@ -2038,6 +2098,21 @@ Fixed durably in `/etc/ssh/sshd_config.d/10-reap-dead-tunnels.conf`:
 `ClientAliveInterval 30`, `ClientAliveCountMax 3`. Dead clients are now reaped
 in 90 s instead of never.
 
+**Mirrored to Contabo on 21 Sep**, which had never had it — its `sshd_config`
+still carried the commented-out `#ClientAliveInterval 0`, so the *mainnet*
+custody forward on 8211 had no reaping at all. One sequencer was cured in
+September and the other was not, because the diagnosis was written up against
+the box it happened on. When a fix is about sshd rather than about Zyn, apply
+it to every host that terminates a tunnel.
+
+**A restart loop can be its own cause.** Testnet's 8112 forward failed with
+`remote port forwarding failed for listen port 8112` while *nothing held the
+port* — `ss` showed it unbound. The unit was restarting every ~6 s and each
+attempt raced its predecessor's half-dead session. Stopping the unit and running
+the identical `ssh` by hand bound first try. Before hunting a permission or a
+zombie, stop the unit and try once: `permitlisten` was correct all along, and so
+was the key.
+
 **To check, do not trust a substring.** `ss -lnt | grep 8232` matches the
 testnet Zebra's `18232` and reads as success while 8232 is unbound. Anchor it:
 `ss -lnt | grep "127.0.0.1:8232"`.
@@ -2310,6 +2385,92 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/j
 is closed at the firewall; the Zyn RPC stays private until ZynZap is mature,
 which is after Cave's secondary trading opens.
 
+## 5g2b. Running the Cave draw (18 Sep 2026)
+
+DECISIONS §108, A98. Runs **once**, after the close is buried. It serves
+nothing, mints nothing and signs nothing — it reads the chain and prints the
+assignment.
+
+The close and reveal are taken from the published announcement, so point it at
+that file rather than typing heights:
+
+```json
+{
+  "announced_at_zcash_height": 3490000,
+  "announced_at_drand_round": 5000000,
+  "deposit_close_zcash_height": 3492000,
+  "publication_txid": "<64 hex: the ZYP memo transaction>",
+  "publication_height": 3490000
+}
+```
+
+`publication_height` must be the height the memo actually confirmed at — the
+resolver refuses when it disagrees with the announcement, which is the
+backdating check (§101, §108.1).
+
+```sh
+export ZYN_SALE_MANIFEST=examples/zyn-pfp-concepts/out/content.json
+export ZYN_SALE_ANNOUNCEMENT=/etc/zyn/cave-close.json
+export ZYN_SALE_SCAN_FROM=<first height a deposit could have landed>
+export ZYN_VAULT_FVK=<96 hex, read-only>
+export ZYN_ZEBRA_HOST=127.0.0.1 ZYN_ZEBRA_PORT=8232
+zyn-sale draw
+```
+
+Before the reveal, prove the beacon is reachable — an unreachable one at reveal
+time is a sale that cannot be drawn:
+
+```sh
+cargo test -p zynzapd --test drand_live -- --ignored
+```
+
+It refuses, in this order, on: a manifest that rebuilds a root other than
+`02b01b16…`; an announcement that gives less notice than the policy promised or
+whose publication landed at another height; a missing `ZYN_SALE_SCAN_FROM`; a
+tip that has not buried the close by 6 confirmations; a reveal block that does
+not exist yet. Each refusal names what to fix.
+
+**Two operators should run it and compare.** The draw is deterministic
+(§106.2), so the assignment root printed by both must match; that is what
+`Run::agrees_with` checks and what makes the result verifiable without either
+of them being trusted.
+
+## 5g3. `cave-node-status.pages.dev` — the node's public face (18 Sep 2026)
+
+DECISIONS §107. A public page showing the mainnet tip, refreshing every 15s.
+The browser reaches `GET /api/status` on the page's own origin and nothing
+else; the Pages Function calls Zebra server-side.
+
+The upstream is a **project secret**, not repo content:
+
+```sh
+cd apps/cave-node-status
+printf 'https://zec-rpc.cavebro.win/' | \
+  npx wrangler pages secret put ZEC_RPC_URL --project-name cave-node-status
+```
+
+Redeploy:
+
+```sh
+cd apps/cave-node-status
+npm test && npm run build
+npx wrangler pages deploy --project-name cave-node-status --branch main --commit-dirty=true
+```
+
+Check it end to end — six fields, and no seventh door:
+
+```sh
+curl -s https://cave-node-status.pages.dev/api/status
+# a JSON-RPC POST must return 405, not a tip:
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo"}' \
+  https://cave-node-status.pages.dev/api/status
+```
+
+If the page says *"The public signal cannot reach the private node"*, the
+Function is answering and Zebra is not — check `zec-rpc.cavebro.win` per 5g2
+before touching this project. A missing `ZEC_RPC_URL` gives 503, not 502.
+
 ## 5h. Zyn mainnet: chain 26460 (11 Sep 2026)
 
 DECISIONS §52, §54, §59. Everything mainnet runs on **Contabo**
@@ -2406,6 +2567,826 @@ unlike the testnet vault, which was dealt and had its shares copied about.
   and `zyn-dkg address <dir> mainnet` agrees on all three. Check the address
   *before* funding — a vault born on the wrong network is discovered by
   whoever pays it.
+
+## 5f-octies. The object testnet (22 Sep 2026)
+
+Chain 212 runs on **Hetzner**, where the vault, Zebra and custodians already
+are — a settler that had to reach them over a tunnel would add a failure mode
+for nothing.
+
+```
+zyn-object-node.service     the chain, anchoring, DA bundles
+zyn-object-tunnel.service   exposes its RPC on the public gateway (8500)
+/etc/zyn/zyn-object.env     0600; carries ZYN_VAULT_FVK
+```
+
+`https://zyn-rpc.cavebro.win/object` is served through the tunnel from
+Contabo's nginx. The old devnet node on Contabo is stopped and disabled.
+
+**Anchoring is opt-in and all-or-nothing.** Without a Zebra, a vault viewing
+key and custodians, the node says `DEVNET … anchoring OFF` and carries
+nothing. With them it says `TESTNET … anchoring ON`, and the status JSON says
+the same — it reported `devnet` while anchoring was live until 22 Sep, which
+is the wrong lie in either direction.
+
+**It anchors from the vault chain 11 used.** 234 Ironwood notes, ~0.0001 TAZ
+burned per anchor, so no faucet request is needed for years. Anchors are paid
+from **Ironwood**, never Orchard: post-NU6.3 the Orchard pool forbids
+cross-address transfers by consensus, so a payout from it must go to a
+transparent output and the exit becomes public.
+
+**The note trees must reach the tip before the first anchor.** Seeding fixes
+only where a tree starts; until it is walked forward the vault's notes are on
+chain and invisible, and every anchor fails with *waiting for a spendable
+Ironwood note* while the money sits there. Each batch is persisted, so a
+restart resumes rather than starting again — catch-up from the vault's birth
+is hours, not minutes. **Do not quote a completion time for it.**
+
+## 5f-quaterdecies. The launchpad: curve terms, testnet, a local devnet (23 Sep 2026)
+
+**Terms** (operator, `zyn_submit` with the node's token, never printed): intent
+`25 ‖ program("configure-curves") ‖ fee_bps u32 ‖ bond i128` (DECISIONS §141.5).
+Testnet 212 has 100 bps and no bond. Ceilings: 2%, 1 ZEC.zy. A token keeps the
+fee in force when it was made.
+
+**Replicas must understand ops 23–25 before any curve intent reaches their
+chain**, or they stop verifying at the first one. Contabo's testnet replica was
+updated 23 Sep (backup `/root/zyn-object-replica.bak-20260923`).
+
+**A local devnet for the whole life** (graduation needs ~17 ZEC.zy, more than
+testnet faucets give): run `zyn-object-node` with `ZYN_CHAIN_ID=212`, its own
+`ZYN_DATA_DIR`, and a `ZYN_SUBMIT_TOKEN` of 32+ characters (shorter is refused);
+no anchoring config means a devnet. Credit test ZEC.zy with an operator
+`Deposit` (op 6) sealed to the account's viewing key — the same shape
+`ingress::credit` builds. Point nap-web's preview at it with
+`NAP_DEV_RPC=http://127.0.0.1:8399`.
+
+**Mainnet 26460 (23 Sep):** node and Windows replica run the curve-aware
+build (backups `/root/zyn-object-node.bak-20260923b` on Contabo,
+`/usr/local/bin/zyn-object-replica.bak-20260923` in WSL `zyn`). Fees, the Cave Z
+registration and curve terms were **set on 24 Sep 2026** (receipts `FeesSet
+{bridge_bps: 50}`, `CollectionRegistered` for `024277b6…5f1e` — creator
+Treasury `b3e4c493…fe99`, quote ZEC.zy, 100 bps, cap 4,444 — and
+`CurveTermsSet {fee_bps: 100, bond: 0.05}`), through the same operator door as
+testnet's — token read on the box, never printed. The Windows replica has
+nothing to replay yet: no DA bundle exists until the first anchor, which waits
+on a funded vault.
+Without terms mainnet curves charge nothing and need no bond.
+
+**Jade** builds with `npm run build:launchpad` (to `apps/cave-market/dist`,
+which the store build also uses — build one, deploy it, then the other) and
+deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
+
+### Cave Jade: deploy, content store, history (23 Sep 2026)
+
+- **Deploy** from `apps/cave-market/jade-stage` (its `wrangler.toml` binds KV `CAVE_JADE_CONTENT`, id `6fec82c33ade4ebba5836456d67cdb04`; `functions/` are the Pages Functions): `node scripts/build-launchpad.mjs && cd jade-stage && npx wrangler@4.40.0 pages deploy dist --project-name cave-jade --branch main`.
+- **Content** lives at KV `c:<token>`. To hide a token's picture and description: `npx wrangler@4.40.0 kv key put --namespace-id 6fec82c33ade4ebba5836456d67cdb04 hide:<token> 1 --remote`; delete that key to show it again.
+- **Local:** `npx wrangler@4.40.0 pages dev dist --port 8788 --kv CAVE_JADE_CONTENT` in `jade-stage`; a local node has no CORS, so put a proxy in front of it and open `/?network=testnet&rpc=http://127.0.0.1:<proxy>` (the `rpc`/`nap` overrides work on localhost only).
+- **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
+- **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
+
+## 5f-duodevicies. End-to-end suites on the public testnet (25 Sep 2026)
+
+Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chrome). Wallets are scratchpad test phrases; none holds anything of value.
+
+| Product | Test | Covers | Last pass |
+|---|---|---|---|
+| Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on cave-jade, Nap approval, content attached | 25 Sep, 12/12 |
+| Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | yard, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
+| DEX | `dex.e2e.mjs` (`A`, `B`, `SELL`, amounts) | open a pool (or use the A/B pool), collect shares, batch swap, add/remove liquidity, collect each | 25 Sep, 9/9 on SOL.zy/ETH.zy and on the graduated TGRAD/TESTZ.zy pool |
+| Extension | `extension.e2e.mjs` (`PHRASE_FILE`, `POOL`, `SELL`, `IN`, `OUT`) | the standalone extension: popup restores and reads testnet, a site finds it, connects in its window, a swap approved and collected, reopen after close | 25 Sep, 12/12 |
+| DEX via a site | `swap.e2e.mjs` (`POOL`, `SELL`, `AMOUNT`, `IN`, `OUT`) | a bare site asks Nap Connect for `zyn_swap`; Nap's approval names both sides; auto-collect | 25 Sep, 4/4 on TGRAD/TESTZ.zy |
+| NFT store | `store-trade.e2e.mjs` (`SELLER_PHRASE`, `BUYER_PHRASE`, `PRICE`) | list on cavebro.win, buy there and on the Cave store, seller collects | 25 Sep, 15/15 |
+| NFT sale | `sale.e2e.mjs` (`PHASE=buy|claim|mint`) | tickets, claims, open mint on cavebro.win/mint (operator half: §5f-sedecies) | 24 Sep |
+
+**Graduation on testnet (25 Sep)** runs on a test coin rather than ZEC.zy (17 ZEC.zy is more than testnet holds): TESTZ, an SPL token on Solana devnet (mint `FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9`, 6 decimals, supply held by the operator's devnet CLI wallet), bridged in as TESTZ.zy (`e2603fcc…c032`). A curve may be quoted in any issued asset, so TGRAD (`17057e59…1614`) was created quoted in TESTZ.zy, bought 17.3 → sold 51,098 lots and graduated into pool `d63cf21d…` (361,275,000 TGRAD / 17.068 TESTZ.zy, 30 bps, locked), then traded there by script, by Nap Market and through Nap Connect. Jade lists only ZEC-quoted coins, so TGRAD does not show there.
+
+To fund a test wallet with TESTZ: take its deposit code (`zyn:<commitment>`, from Nap's bridge page or `ledger.bridgeMemo`), then from the operator's devnet wallet
+`spl-token transfer FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9 <amount> 7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA --url devnet --with-memo zyn:<commitment>` (the recipient resolves to the vault's token account; no `--commitment` flag); it waits under the code (0.5% fee) until the wallet collects.
+
+## 5f-undevicies. ETH.zy mainnet pilot, Safe mode (26 Sep 2026, DECISIONS §155)
+
+`ZynVault` `0x235730d7738CC16d3b94d0e3D7097F9ddE22A459` on Ethereum mainnet (block 26062420), signer **and** admin = the team's Safe `0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983` (2 of 3). `zyn-eth-bridge.service` on **Contabo**, env `/etc/zyn/zyn-eth-bridge.env` plus `/etc/zyn/zyn-object-mainnet.env` (node `127.0.0.1:8599`), proposer key `/etc/zyn/eth-keys/proposer.key` (0600; can only propose), state `/var/lib/zyn/eth-bridge-mainnet`, cap `ZYN_ETH_CAP_WEI=10000000000000000`. Status:
+
+```sh
+systemd-run --quiet --wait --pipe --collect -p EnvironmentFile=/etc/zyn/zyn-object-mainnet.env \
+  -p EnvironmentFile=/etc/zyn/zyn-eth-bridge.env /usr/local/bin/zyn-eth-bridge status
+```
+
+**Paying out.** Withdrawals appear in Safe{Wallet}'s queue as "Zyn bridge: pay out N ETH.zy withdrawal(s)" — a call to the vault's `withdrawAsSigner`. Two owners sign and execute (the executor pays gas). The bridge settles once the transaction is finalized (~15 min). To refuse a payout, reject it in Safe{Wallet} (a rejection spends the same nonce); the bridge then logs "rejected or replaced" and waits — delete `proposal.json` to propose those exits again.
+
+**Over the cap.** Deposits past the cap are not credited; each is a line in `/var/lib/zyn/eth-bridge-mainnet/over-cap.jsonl` with its sender and tx. Refund from the Safe by hand — the vault can only pay through `withdrawAsSigner`, so a refund is a Safe transaction calling it with the vault's current nonce — only while `status` shows no proposal, or it collides with the bridge's — or a plain transfer from the Safe's own ETH (the stuck deposit then stays in the vault as surplus over what is issued).
+
+**Upgrading** the binary: zigbuild `x86_64-unknown-linux-gnu`, copy to `/usr/local/bin/zyn-eth-bridge`, restart. Deployed from scratchpad `eth-mainnet/{deploy-vault,contabo,upgrade}.sh`. Nap: mainnet `bridges.eth` in `apps/nap-web/public/config.json` carries `capWei`, `custody` and `safe`.
+
+## 5f-septendecies. SOL.zy and ETH.zy bridges, testnet (24 Sep 2026, DECISIONS §146)
+
+**SOL (Solana devnet ↔ testnet 212)** — `zyn-sol-bridge.service` on Hetzner, env `/etc/zyn/zyn-sol-bridge.env` plus the node's own env for the token. Vault `7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA` (FROST 2-of-3; public package `/var/zyn/solana-shares/public.bin`; custodians `127.0.0.1:8110/8111/8112`), durable nonce `BrRELAaQBLe3Yx3vNad8jjxDdJZTZ5SmwLHRFTFyd61H`. SPL tokens (25 Sep): `ZYN_SOL_MINTS=<mint>:<decimals>,…` in the bridge env; `zyn-sol-bridge register` registers each (TESTZ is registered on testnet); deposits go to the vault's associated token account with the same memo, payouts are token transfers, and each token account keeps its own cursor `deposit-cursor-<ata>`. State in `/var/lib/zyn/sol-bridge` (`deposit-cursor`, `inflight.json` — a damaged `inflight.json` stops the bridge on purpose: it is the record that prevents paying twice). `zyn-sol-bridge status` shows the vault balance against what Zyn has issued. Top up the vault's lamports for rent/fees with a plain transfer (no memo = credits nobody).
+
+**BTC (Bitcoin signet ↔ testnet 212, DECISIONS §154)** — `zyn-btc-bridge.service` on Hetzner, env `/etc/zyn/zyn-btc-bridge.env` plus the node's env for the token. Key: FROST 2-of-3 Taproot from `zyn-ceremony bitcoin 2 3 /var/zyn/bitcoin-shares` (public package there; shares moved to `/var/zyn/bitcoin-custodian-{1,2,3}`), signed by `zyn-btc-custodian@{1,2,3}` on `127.0.0.1:8121-8123` (BTC-only custodians; the SOL ones on 8110-8112 are separate). Chain view from Esplora (`https://mempool.space/signet/api`). State in `/var/lib/zyn/btc-bridge` (`credited`, `inflight.json` — same rule as SOL: a damaged `inflight.json` stops the bridge). Deposit addresses are per code and derived in Nap; the node keeps the codes to watch in `chain-212.deposit-watch` (data dir). Commands, always through `systemd-run -p EnvironmentFile=/etc/zyn/zyn-object.env -p EnvironmentFile=/etc/zyn/zyn-btc-bridge.env --wait --pipe --collect`: `zyn-btc-bridge status` (vault, issued, watched, in flight), `check` (the custodians sign a throwaway digest — run after any custodian change), `address <commitment>`, `register` (once), `once`. Nap needs `bridges.btc = {network: "signet", internal: "<x-only hex from status>", confirmations: 2, explorer: "https://mempool.space/signet/tx/{tx}"}` in the testnet entry of `config.json`. Deployed with scratchpad `btc-bridge.sh` (safe to re-run; makes the key only once).
+
+**ETH (Sepolia ↔ testnet 212)** — deployed 24 Sep 2026: `ZynSigners` `0x95cb60b0e6FE122ea0AA21725E83e3ef00AEfa41` (2 of owners `0x395b…fbb2`, `0x096E…F6e3`, `0x4966…381e`), `ZynVault` `0xe17bb5943b34133f6a8a5D221BE4eD9493B3ef27` (asset 1 = native ETH, admin and gas payer `0xfFb1…4E89`). `zyn-eth-bridge.service` on Hetzner, keys in `/etc/zyn/eth-keys/` (0600). How it was deployed:
+
+```sh
+# keys: scratchpad eth-sepolia/{owner1,owner2,owner3,payer}.key (0600)
+RPC=https://ethereum-sepolia-rpc.publicnode.com
+forge create src/ZynSigners.sol:ZynSigners --rpc-url $RPC --private-key $(cat payer.key) --broadcast \
+  --constructor-args "[$(cat owner1.addr),$(cat owner2.addr),$(cat owner3.addr)]" 2
+forge create src/ZynVault.sol:ZynVault --rpc-url $RPC --private-key $(cat payer.key) --broadcast \
+  --constructor-args <signers> $(cat payer.addr)
+cast send <vault> "registerAsset(uint32,address)" 1 0x0000000000000000000000000000000000000000 --rpc-url $RPC --private-key $(cat payer.key)
+```
+
+then `zyn-eth-bridge register` and a `zyn-eth-bridge run` unit (env `ZYN_ETH_RPC`, `ZYN_ETH_VAULT`, `ZYN_ETH_KEYS`, `ZYN_ETH_PAYER`, `ZYN_ETH_STATE=/var/lib/zyn/eth-bridge`), and the vault in `apps/nap-web/public/config.json` → testnet `bridges.eth` (`{"chainId":11155111,"vault":"0x…","assetId":1,"explorer":"https://sepolia.etherscan.io/tx/{tx}"}`).
+
+Both bridges refuse mainnet by design (§146.10).
+
+## 5f-sedecies. Running Collection Z's sale (24 Sep 2026, DECISIONS §144)
+
+The operator's half is one binary, `zyn-sale-draw`, run on the box that holds the node — it reads the submit token from the node's env file and writes the draw beside the node's data so the node can serve it.
+
+```sh
+# on Contabo (mainnet); the token never appears on screen
+set -a; . /etc/zyn/zyn-object-mainnet.env; set +a     # ZYN_SUBMIT_TOKEN, ZYN_ZEBRA_*
+export ZYN_SALE_NETWORK=mainnet ZYN_SALE_NODE=http://127.0.0.1:8599 \
+       ZYN_SALE_DATA=/var/lib/zyn/object-mainnet \
+       ZYN_SALE_ANNOUNCEMENT=/root/cave-z-close.json \
+       ZYN_SALE_MANIFEST=/root/content.json               # examples/zyn-pfp-concepts/out/content.json
+zyn-sale-draw status
+```
+
+1. **Open** — `zyn-sale-draw open` posts `SetSale` at the terms' prices (0.01 / 0.005 / 0.0133, 10% treasury). CAVEZ must already be registered (it is on 26460).
+2. **Announce the close** — publish `{announced_at_zcash_height, announced_at_drand_round, deposit_close_zcash_height}`. The close must be ≥ 1,152 blocks after the announcement, and **the drand round must be late enough that round + 2,400 falls after the close** (drand quicknet: round = (unix − 1692803367)/3 + 1). `close` refuses otherwise.
+3. **Close** — `zyn-sale-draw close` once Zcash reaches the close height; it posts `CloseSale` with that block's hash.
+4. **Draw** — `zyn-sale-draw draw` once the reveal block (close + 100) and the reveal drand round both exist. It checks the manifest rebuilds the committed root, runs the engine over every ticket in order, writes `sale-<collection>-draw.json` into the node's data dir (served by `zyn_saleDraw`) and posts the root. Publish the same file anywhere you like — its root is what counts.
+5. **Open mint** — `zyn-sale-draw open-mint` after the claim window (16,128 blocks after the close, as the terms say). It writes `sale-<collection>-open.json` and posts the order's root.
+
+**Burn tickets (DECISIONS §145).** Once the token exists, add `apps/cave-collection-z/burn.json` (`{"cluster":"mainnet","symbol","mint","decimals","per_ticket","token_program","rpc"?}` — `rpc` optional, a paid endpoint that answers browsers; the build adds its origin to the policy), redeploy the store, and on Contabo:
+
+```sh
+export ZYN_BURN_MINT=<mint> ZYN_BURN_PER_TICKET=<base units per ticket> \
+       ZYN_BURN_NODE=http://127.0.0.1:8599 ZYN_BURN_CURSOR=/var/lib/zyn/burn-cursor   # + ZYN_SUBMIT_TOKEN from the env file
+zyn-burn-watch cap <n>      # after `open`: how many burn tickets the sale takes
+zyn-burn-watch run          # as a service; `status` shows tickets left
+```
+
+Run `zyn-burn-watch once` immediately before `zyn-sale-draw close`, so burns that finalized in time are posted before the door shuts. A paid RPC (`ZYN_BURN_RPC` for the watcher, `rpc` in `burn.json` for the page) is worth it on launch day — the public one rate-limits.
+
+Rehearsal: `ZYN_SALE_POLICY=rehearsal` (2-block notice, 2-block reveal, 60 drand rounds; `ZYN_SALE_CLAIM_WINDOW`, default 2). Its digest differs from the published policy, so it is for devnets and testnet only. The 24 Sep rehearsal ran against a local devnet (`scratchpad/devsale/sale.mjs` drove three wallets through Nap Connect's own methods) with testnet Zcash blocks from the Hetzner Zebra.
+
+## 5f-quindecies. ZynScan (24 Sep 2026)
+
+- **Mainnet** `zynscan-mainnet.service` on Contabo: `ZYN_CHAIN_ID=26460`, `ZYN_SCAN_DATA=/var/lib/zyn/object-mainnet`, node `127.0.0.1:8599`, listens `127.0.0.1:8093`.
+- **Testnet** `zynscan.service` on Hetzner: chain 212, data `/var/lib/zyn-object`, node `127.0.0.1:8499`, listens `127.0.0.1:8093`; `zyn-object-tunnel` also forwards it as Contabo `127.0.0.1:8593` (unit backup `/root/zyn-object-tunnel.service.bak-20260924`).
+- **Gateway** `zyn-rpc.cavebro.win/scan/` and `/scan-testnet/` (nginx `sites-enabled/zyn-rpc`, backup `/root/nginx-zyn-rpc.bak-20260924`): GET/HEAD/OPTIONS only; zynscan's own CORS headers are hidden so the server-wide ones are the only ones.
+- **Site** `apps/zynscan` → Pages project `zynscan`: `node scripts/build.mjs && npx wrangler@4.40.0 pages deploy dist --project-name zynscan --branch main`.
+- Both units run as root under `ProtectSystem=strict` (read-only filesystem; the mainnet data dir is root-only). zynscan replays from genesis on start and whenever the journal stops matching what it read; `/api/summary` `agrees` must be `true` — `false` means the journal no longer reproduces the node's root, which is a finding, not a restart.
+- Deploy a new build like the node: zigbuild (`aarch64` Hetzner, `x86_64` Contabo), `install -m755` to `/usr/local/bin/zynscan`, restart the unit.
+
+## 5f-terdecies. The block servers' HTTP door, for browser Nap (23 Sep 2026)
+
+`zyn-lightd` answers HTTP as well as its TCP frames when `ZYN_LIGHTD_HTTP` is
+set: POST one request frame, get the reply frame back (DECISIONS §139).
+
+- **Hetzner (testnet):** `ZYN_LIGHTD_HTTP=127.0.0.1:8095` in
+  `/etc/zyn/zyn-lightd.env`. TCP stays on `0.0.0.0:8098`.
+- **Contabo (mainnet):** drop-in
+  `/etc/systemd/system/zyn-lightd.service.d/http.conf` with the same port. TCP
+  stays on `127.0.0.1:8097`.
+- Check either: `printf '\001' | curl -s --data-binary @- http://127.0.0.1:8095/ | xxd | head -1`
+  → `00 01…` (mainnet) or `00 02…` (testnet), then the tip.
+
+**Routed 23 Sep:**
+
+1. Hetzner's `zyn-object-tunnel` carries `-R 127.0.0.1:8595:127.0.0.1:8095`
+   beside the RPC forward, so testnet's door is on Contabo at :8595 (the
+   `hetzner-object-tunnel` key has no listen restriction). Backup of the old
+   unit: `/root/zyn-object-tunnel.service.bak-20260923` on Hetzner.
+2. `zyn-rpc.cavebro.win` on Contabo's nginx: `location = /zec` → :8095
+   (mainnet), `location = /zec-testnet` → :8595, POST/OPTIONS only, 1 MB
+   bodies, 60 s reads, own rate zone `zynzec` (20 r/s, burst 60;
+   `/etc/nginx/conf.d/zyn-zec-limits.conf`), since all browser traffic
+   comes from Cloudflare's few addresses. Backup:
+   `/root/zyn-rpc.nginx.bak-20260923`.
+3. nap-web deployed; `functions/zec/[[path]].js` maps `/zec/mainnet` →
+   `$ZYN_RPC_URL/zec` and `/zec/testnet` → `/zec-testnet`.
+
+Check from anywhere: `printf '\001' | curl -s --data-binary @- https://nap.cavebro.win/zec/mainnet | xxd | head -1`.
+
+Local testing without any of that: `node relay.mjs 168.119.53.39 8098 18095`
+(HTTP → testnet's public TCP port), then
+`NAP_DEV_ZEC=http://127.0.0.1:18095 npx vite preview`.
+
+**Rebuilding the core:** `apps/nap-web/zec-core/build.sh`. It needs the
+wasm32 target, `wasm-bindgen-cli` 0.2.128 and Homebrew's llvm, and writes
+`apps/nap-web/src/zec-pkg`, which is committed so a Pages build needs no Rust.
+
+## 5f-duodecies. Fees into the ZYN pot (23 Sep 2026)
+
+Operator intents, sent through `zyn_submit` with the node's `ZYN_SUBMIT_TOKEN`
+(read on the box, never printed). The intent hex for each is in
+`apps/nap-web/tests/object-vectors.json` → `market` for the fixture values;
+build others with `zyn-object-vectors` or `ObjectVm::encode_intent`.
+
+```sh
+T=$(grep '^ZYN_SUBMIT_TOKEN=' /etc/zyn/zyn-object.env | cut -d= -f2-)
+curl -s -X POST 127.0.0.1:8499 -d "{\"method\":\"zyn_submit\",\"token\":\"$T\",\"intent\":\"<hex>\"}"
+```
+
+- `SetFees {bridge_bps}` — 50 bps is §30's rate. **Testnet 212: set to 50 on
+  23 Sep.** Mainnet: not set.
+- `RegisterCollection {asset, creator, quote, fee_bps, cap}` — once per
+  collection, immutable. Cave Collection Z: asset `024277b6…5f1e`, 100 bps a
+  side, creator Treasury 26460, quote ZEC.zy, cap 4444. Register before the
+  first mint.
+- **Delivering an item** (the primary sale): `zyn_mintItem {token, collection,
+  owner, serial}` — serial as a string. The node seals it to the buyer's
+  registered viewing key; the buyer must have registered (Nap does on first
+  open). Each serial mints once, never past the cap.
+
+`zyn_market` shows `fees`, `zyn_pot` and `collections`; check the pot against
+the fees after any credit, withdrawal or sale.
+
+## 5f-undecies. The bridge from the wallet (23 Sep 2026)
+
+**In:** Nap asks `zyn_depositAddress {account}`; if the answer says
+`registered: false` it signs a `Register` first. The node appends every account
+it gives an address to `<data>/chain-<id>.deposit-accounts` and recognises
+those addresses from then on, registered or not — a payment before registering
+waits as a debt (`chain-<id>.pending`) and is credited when the account
+registers. It no longer falls through to the memo rules and stops the scan.
+
+**Out:** Nap picks a random salt, asks `zyn_exitCommitment {address, salt}`,
+signs `Withdraw` naming that commitment, then sends `zyn_exitReveal {address,
+salt}`. The node accepts a reveal only when an unpaid exit already carries the
+commitment, hands it to the exit settler and appends `<address> <salt>` to
+`ZYN_EXIT_REVEALS`. The wallet keeps unrevealed exits in `localStorage` and
+retries on every refresh. The Zcash fee comes out of the payout.
+
+**Anchors never spend backing.** The anchor builder refuses unless the vault
+holds issued ZEC.zy + unpaid exits + waiting deposits + 20,000 zat. The
+difference is the **fee reserve**, topped up with memo `ZYN1:` + 64 zeros
+(credited to nobody). Without one the node logs `anchoring paused: … top up the
+fee reserve by at least N zat` — deposits and exits still work, roots just are
+not carried to Zcash until it is funded.
+
+## 5f-decies. The market (23 Sep 2026)
+
+Pools, batch swaps and token launches live in the object VM (`objectvm::market`)
+and are on every object node from this build on. Nothing turns them on: the
+first `CreatePool` or `CreateLaunch` does, and until then the chain's roots and
+saved state are byte-identical to before.
+
+**What the public sees:** each pool's reserves, shares and fee, and each sale's
+terms and total raised — `zyn_market`. **What it does not:** who traded,
+provided liquidity or committed. Those records sit in the root only as leaves
+blinded by the user's own nonce.
+
+**Rhythm:** a swap is escrowed in the epoch it arrives in and clears at that
+epoch's seal, every order in a pool at one FM-AMM price. Proceeds, refunds,
+pool shares and sale allocations become **claims**; the owner collects them
+with a signed `Claim`. `zyn_claims ids=<hex,…>` answers only for ids, which
+derive from the owner's nonce — there is no "claims for this account".
+
+**Sales close at an epoch, and epochs need to move.** While any sale is open
+the node seals on the clock (`ZYN_EPOCH_SECS`) even when nobody trades, so
+"open for 60 epochs" means at most 60 × that. With no sale open, empty
+epochs are not sealed, as before.
+
+**Front end:** `/market.html` in nap-web, the same origin as the wallet, so it
+opens the kept wallet with the same password and reaches the chain through the
+same `/rpc` route.
+
+**Local devnet** for trying it end to end, without touching either chain:
+
+```sh
+ZYN_CHAIN_ID=26460 ZYN_LISTEN=127.0.0.1:8399 ZYN_DATA_DIR=/tmp/dev \
+ZYN_EPOCH_SECS=15 ZYN_SUBMIT_TOKEN=$(openssl rand -hex 24) zyn-object-node
+cd apps/nap-web && npm run build && NAP_DEV_RPC=http://127.0.0.1:8399 npx vite preview
+```
+
+Fund a devnet wallet with operator `Deposit`s through `zyn_submit` (the token
+above); a `Mint` creates no ciphertext, so a wallet cannot see it. Use
+`vite preview`, not `vite dev`: the dev server injects styles inline and the
+shipped CSP blocks them.
+
+## 5f-nonies. Sealed journals and the object replica (23 Sep 2026)
+
+Both object ledgers seal their published journals. `ZYN_DA_KEY` (64 hex) is
+in `/etc/zyn/zyn-object.env` on Hetzner and `/etc/zyn/zyn-object-mainnet.env`
+on Contabo; each was generated on its server and has never left it except
+by pipe. Compare keys by fingerprint, never by printing them:
+
+```sh
+grep '^ZYN_DA_KEY=' <file> | cut -d= -f2 | tr -d '\n' | sha256sum | cut -c1-12
+```
+
+(testnet `804d5ff38223`, mainnet `424708a31869`.) A key that is set but
+malformed stops the node; an unset one starts it with a loud
+`journals will be published UNSEALED`.
+
+Contabo's `zyn-object-replica` holds the **testnet** key in
+`/etc/zyn/zyn-object-replica.env` (a drop-in adds the EnvironmentFile). It
+replays from genesis every pass and must print
+`chain 212 verified through epoch N`.
+
+**What an anchor commits:** the seal's *checkpoint* root — the state just
+before the seal advances the epoch — not the state after it. And the I/O
+limit is part of the root: the node's default is 16 (`ZYN_MAX_IO`), and a
+verifier must run the same one or it disagrees with an honest chain.
+
+**A bundle carries every epoch since the previous anchor**, read from the
+ledger, not the anchor's own `epochs` count: a node restarted between a seal
+and its anchor forgets the pending epoch and undercounts. Testnet's first
+anchor (epoch 1) went out covering only epoch 1 that way, and unsealed. It
+was repaired in place:
+
+```sh
+ZYN_DA_KEY=$(grep '^ZYN_DA_KEY=' /etc/zyn/zyn-object.env | cut -d= -f2) \
+ZYN_CHAIN_ID=212 zyn-da-reseal 1 0 /var/lib/zyn-object/da /var/zyn/mirror
+```
+
+`zyn-da-reseal <anchor-epoch> <first-epoch> <dir>…` rewrites only journal
+files; the anchor, snapshot and certificate are untouched, and the replica
+still checks the journal produces them.
+
+## 5f-septies. Attributions are keyed on the byte order you cannot see (22 Sep 2026)
+
+A shielded deposit with no Zyn memo stops the note-tree walk dead —
+`Unattributable` — and until it is attributed the vault's notes stay invisible
+and every anchor fails for want of a note sitting a few blocks further on.
+
+The trap: **Zcash txids are displayed reversed.** `getblock`, every explorer
+and every log line you are likely to copy from show one byte order; the
+scanner keys `ZYN_*_ATTRIBUTIONS` on the other. An entry in the wrong order
+matches nothing and is indistinguishable from a missing one, so the symptom is
+"I attributed it and nothing changed".
+
+Getting from one to the other:
+
+```sh
+python3 -c "print(bytes.fromhex('<txid>')[::-1].hex())"
+```
+
+The error now names the transaction, in the order the file wants, so this
+should not need diagnosing twice. It previously reported only a height and an
+amount, which left an operator eliminating candidates by hand — that cost most
+of an afternoon here.
+
+**The all-zero account means nobody**: it raises the vault's balance and
+credits no user, which is exactly what faucet funding is. Attribute a top-up
+that way rather than inventing an owner for it.
+
+## 5f-sexies. Checking the object ledger (22 Sep 2026)
+
+```sh
+ZYN_CHAIN_ID=212 ZYN_DATA_DIR=/var/lib/zyn-object \
+ZYN_DA_DIR=/var/lib/zyn-object/da zyn-object-publish
+```
+
+Two answers. **Publishable** means every closed epoch ends with a seal — the
+check a publisher runs before building a bundle, and the one a replica refuses
+without. **Replayed** applies the journal from genesis and prints the root it
+reaches; that root must equal the one `/object` serves.
+
+```
+chain 212: 2 epoch(s) on disk, 2 publishable, 0 refused
+replayed 4 intent(s) across 2 epoch(s) -> root f3461acf…
+```
+
+Replay is the answer that matters. "Publishable" only says each epoch is
+closed; replay says the intents actually produce the state being served. An
+epoch whose records were filed under the wrong number passes the first and
+fails the second — which is precisely how chain 11 ended up with an anchored
+root its own intents could not reproduce.
+
+**Three traps, all of which cost time here:**
+
+- **Seals are records.** A v2 journal holds *authorized* intents, so a bare
+  one decodes as nothing and the epoch reads as never closed. `Authorized::
+  operator` is the honest envelope for something arriving on the operator's
+  own RPC — it names who vouched rather than implying a signature nobody made.
+- **Replay applies seals too.** A seal advances the epoch and is part of what
+  the root commits to. Skipping them reaches a different root and reads as a
+  corrupt journal when nothing is wrong.
+- **State and journal must start together.** Deleting one and keeping the
+  other leaves a chain that cannot be replayed from genesis, which is the
+  single property it exists to have. If you wipe, wipe both.
+
+The newest epoch is normally still open and therefore not publishable. That is
+the system working, and the tool says "still open" rather than counting it as
+a refusal.
+
+## 5f-quinquies. Chain 11 is retired (22 Sep 2026)
+
+Stopped and disabled on Hetzner. Nothing is deleted: 10,442 epoch files and
+64 MB of state stay on the volume, because A126's sequence collision is the
+only surviving evidence of a bug worth understanding.
+
+**Why, rather than repairing it.** Its history is poisoned at epoch 9190 — one
+sequence number carrying two different intents, so the anchored root
+corresponds to no consistent intent set (A126). It held 0.1 **TAZ** from a
+faucet and two accounts, both ours. It was sealing an epoch every five seconds
+that could never anchor — 1,251 of them by the end — and its degraded signer
+set generated alerts that masked real problems on mainnet. Keeping it running
+was not neutral; it was noise plus a growing pile of unanchorable epochs.
+
+It also proved nothing that mainnet does not: **26460 anchors to Zcash for
+real.** Chain 11's remaining value is forensic.
+
+`/testnet` now answers **410 Gone** with a JSON-RPC error naming the date and
+pointing at `/object` and `/`. A 502 from a dead upstream reads as an outage,
+and the difference matters to anyone deciding whether to wait for it.
+
+**The signer and custodian hosts stay as they are.** They were rearranged to
+one identity per machine earlier the same day and are the set the next testnet
+should use; tearing them down to rebuild them would be work for its own sake.
+
+Config backups: `/root/zyn-rpc.bak.retire-testnet` and `.bak.retire2`.
+
+**Both chain-11 JSON-RPC gateways are stopped and disabled** (22 Sep) —
+`zyn-rpc.service` on Hetzner and `zyn-rpc-testnet.service` on Contabo. There
+were two, which is why the first sweep found only one: the search was for
+services on the box that ran the chain, and the second gateway sat on the
+*other* box, relaying across to `168.119.53.39:8099`. When retiring a chain,
+look for its clients on every host, not on its own.
+
+The Hetzner one listened on `127.0.0.1:8095` relaying to the sequencer's
+`:8099`, and it outlived both: `:8099` had no listener, nothing in nginx on
+either box routed to `:8095`, no other unit referenced it, and it held no
+established connection. It stayed up for a week answering for a chain that was
+gone — a gateway to nothing is not harmless, it is a thing that looks like
+infrastructure. The object ledger needs no equivalent: it speaks JSON over
+HTTP itself, which is what `zyn-rpc` existed to provide for a binary node.
+
+## 5f-quinquies. Mainnet on the object ledger — chain 26460 (handed over 23 Sep 2026)
+
+**Live.** `zyn-object-mainnet.service` on Contabo, `127.0.0.1:8599`, config
+`/etc/zyn/zyn-object-mainnet.env` (0600). Public at the gateway's root,
+`https://zyn-rpc.cavebro.win/`. The AMM chain (`zynzapd-mainnet`) and its
+gateway (`zyn-rpc-mainnet`, `:8096`) are stopped and disabled; its state,
+journal and trees stay in `/var/lib/zyn/mainnet-v12`, snapshotted to
+`/root/amm-26460-final-20260922.tgz` (0600). Its published history is at
+Hetzner's `/var/zyn/mirror/chain-26460-amm-retired-20260922`. Bridge floor
+**3,492,731**. Started with trees at the tip (3,492,729), copied from the AMM
+chain.
+
+**It does not anchor yet.** The vault holds one Ironwood note worth less than
+an anchor costs, and a top-up is not planned soon. Epochs seal and are served;
+roots reach no chain until the vault is funded. The status says
+`anchored_epoch: 0`, and the bot pages when the first one lands.
+
+**What retired with the AMM chain: NAPMOLE, 333 items.** Collection
+`d3090c31228b5614ddd13e7ff29bb251e211cfbfe1057a279be2a67460619261`, cap 333,
+all 333 held by the creator `b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99`,
+minted in epochs 2–4 — anchored, since the last anchor was 2457. Ours, and to
+be minted again on the object ledger. The exact content hashes and serials are
+in the retired state; `zyn-inspect /var/lib/zyn/mainnet-v12 26460` lists them
+and their holders without a key. A collection `CAVEZ` (cap 4444) existed with
+nothing minted.
+
+**The handover took two passes, and the script now catches both causes.** Its
+safety check counted ZEC backing only, so it would have retired a chain
+holding 333 items without a word; it now counts outstanding collection items
+and needs `--retire-collections` to proceed. And the object-node binary on
+Contabo predated the bridge floor, so it ignored `ZYN_BRIDGE_FROM_HEIGHT` and
+started scanning from the vault's birth — stopped before it wrote a cursor or
+recorded a debt, redeployed, restarted at 3,492,730. The script now refuses a
+binary that does not know the floor, and stops the ledger if the floor line is
+missing from its log after start.
+
+### Where the mainnet vault's shares are
+
+Three shares from the 10 Sep DKG; threshold two.
+
+| slot on Contabo | share | host | how it reaches Contabo |
+|---|---|---|---|
+| `8212` | 01 | **Hetzner**, `zyn-custodian-main`, `127.0.0.1:8210`, `/var/zyn/custody-main` — moved from the Mac on 11 Sep | `zyn-mirror-tunnel` on Contabo, `-L 8212:127.0.0.1:8210` |
+| `8213` | — | **MacBook Air** | reverse tunnel *into* Contabo, key `air-custody-tunnel`, open since 22 Sep 12:36 |
+| `8211` | — | **Windows box** (HP Pro Mini, `192.168.1.21`), inside the WSL distro `zyn` | key `win-custody-tunnel` is authorized; up since 23 Sep, in the object ledger's list |
+
+Two of two live shares at threshold two: one outage stops anchoring and exits.
+The third's placement is undecided.
+
+**Earlier text, kept for the reasoning:**
+
+**Why 26460, the AMM chain's id.** Both ledgers custody the same vault from
+the same height (same viewing-key fingerprint, both from 3,479,600). Side by
+side under *any* ids they would both credit every deposit — two ledgers
+issuing against one backing — and both would build anchors from the same
+notes, so Zcash refuses one. The AMM chain therefore stops before the object
+ledger starts, and that frees the id. It is the id the wallet config, the
+extension, the docs and the gateway root already use.
+
+**The handover is a script**, `/usr/local/sbin/zyn-handover-26460`
+(source `ops/mainnet/`). With no argument it checks and prints; with
+`--execute` it:
+
+1. refuses unless the AMM chain holds nothing — backing `0.0`, pools `0`
+   (as of 22 Sep: backing 0.0, pools 0, 2 accounts, both ours);
+2. stops and disables `zynzapd-mainnet` — its state and journal stay on disk;
+3. reads where its bridge stopped and writes that + 1 as
+   `ZYN_BRIDGE_FROM_HEIGHT` (A139);
+4. copies its `notes-26460-*.tree` — this vault's trees, at the tip — so the
+   object ledger does not walk 13,000+ blocks;
+5. moves Hetzner's `/var/zyn/mirror/chain-26460` to
+   `chain-26460-amm-retired-<date>`. Publish paths are `chain-<id>/<epoch>`,
+   so the new chain's epoch 0 and index would otherwise land on the old
+   ones. **A verifier of the retired AMM chain reads the archived path from
+   then on.** Its anchors stay on Zcash under chain id 26460 forever; the
+   object ledger's settler tracks its own txids and never scans for
+   sightings, and the object replica checks ±12 blocks around each of its
+   own anchors, all above the handover — so neither is confused by them;
+6. starts `zyn-object-mainnet` and checks it answers as 26460;
+7. repoints nginx `location = /` from `:8096` to `:8599`, `nginx -t` or
+   restore;
+8. retires `zyn-rpc-mainnet`.
+
+It prints the rollback. The dry run passes every precondition.
+
+**What the handover does not fix: the vault is empty.** It holds one Ironwood
+note worth less than an anchor costs (≥20,000 zat: 10,000 self-send +
+10,000 ZIP-317 fee), which is why the AMM chain has not anchored since epoch
+2457 at 21:52 UTC 21 Sep. Top it up from a **mainnet** Nap wallet with
+`/api/topup` — it pays the shared vault address with the all-zero memo, which
+every scanner reads as "credited to nobody". A plain send with no memo stops
+the scan instead.
+
+**Custody: all three shares, threshold two (since 23 Sep, 09:30).** `8212` on
+Contabo is Hetzner's share 01 tunnelled in (`zyn-mirror-tunnel`,
+`-L 8212:127.0.0.1:8210`); `8213` is the Air's share 02 (reverse tunnel);
+`8211` is the Windows box's share 03 (`zyn-custody-tunnel-main` in WSL `zyn`,
+`-R 127.0.0.1:8211:127.0.0.1:8210`, checked every two minutes by
+`zyn-tunnel-watch@8211-main-…`). `ZYN_CUSTODIANS=127.0.0.1:8212,127.0.0.1:8211,127.0.0.1:8213`
+in `/etc/zyn/zyn-object-mainnet.env`. One share can be down without stopping
+anchoring or exits.
+
+**The Windows box after its restart (23 Sep):** `zyn-signer` and `zyn-tunnel`
+verified chain 11 and are **disabled** (chain 11 is retired); `zebrad-mainnet`
+restarted on its own and filled D: before, so its restart policy is now `no`
+and it is stopped; both custodians run the current build (the 8 Sep one is
+kept as `zyn-custodian.sep08`).
+
+## 5f-quater. One signer per machine (22 Sep 2026)
+
+Chain 11's set is 2-of-3 (`ZYN_SIGNER_THRESHOLD=2`). Until today **two of the
+three keys ran on one laptop**, so that laptop was simultaneously sufficient to
+certify anything and necessary for anything to be certified. Both moved off.
+
+| identity | host | init | port |
+|---|---|---|---|
+| `9ce67be6…` | Oracle `levu-paperd` 92.5.12.15 | systemd `zyn-signer1` | 8100 |
+| `27048d32…` | Air 192.168.1.27 (user `zhang`) | launchd `dev.zyn.signer2` | 8101 |
+| `cc158dc4…` | Windows box | systemd `zyn-signer` | — |
+
+A signer endorses **anchors**; it holds no vault share and can move nothing.
+Its endorsement is what releases deposits (`anchor.rs`: *"Release deposits only
+after a signer set endorses each anchor"*), so a set below threshold stops
+deposits becoming spendable — which is exactly what happened all of 21–22 Sep.
+
+**A signer needs three things from elsewhere**: Hetzner's testnet Zebra
+(18232), the DA mirror (8181), and the sequencer to endorse to (8099). The
+first two come over an ssh tunnel whose key on Hetzner is restricted to
+exactly that:
+
+```
+restrict,port-forwarding,permitopen="127.0.0.1:18232",permitopen="127.0.0.1:8181"
+```
+
+No shell, no agent, no pty. A signer reads a chain and endorses; a tunnel key
+that could do more is a tunnel key that eventually will.
+
+**`ZYN_DA_KEY` is not optional any more.** Bundles are sealed from epoch 9184,
+so a verifier without the key cannot read one. signer2 had never been given it
+— it was distributed to the publisher and to signer1 only — which is its own
+reason that signer could not advance. Both new hosts have it; verified by
+comparing digests rather than keys.
+
+**Two traps, both hit today:**
+
+- A manual test tunnel left running holds 18232/8181 and the service unit then
+  cannot bind them. With `Requires=zyn-tunnel.service` the signer is stopped
+  every time the tunnel fails, so it looks like a signer fault and is not.
+  Kill stray `ssh -L` before starting the units.
+- The Air was **already** running a copy of `27048d32`. Installing it a third
+  time on Oracle would have put one signing key on three machines, which is
+  worse hygiene than the problem being solved. One identity, one host.
+
+**Still owed:** the retired plists sit in `~/.zyn/retired/` (0600) on the Mac
+rather than being erased, so the move is reversible while the new hosts prove
+themselves. The original condition — "erase them once chain 11 has anchored
+from the new set" — can no longer be met: chain 11 was retired on 22 Sep and
+will never anchor again. These signers endorsed an **AMM** chain, and the
+testnet that replaced it (chain 212) settles through the FROST custodians
+instead, so the signer set they belong to has no live chain at all. Erase them
+when mainnet 26460 next anchors from this set, or when the keys are rotated —
+not on a condition that cannot occur.
+
+## 5f-ter. The tunnel watchdog (22 Sep 2026)
+
+A reverse tunnel can be perfectly healthy and carry no forward. That is A110,
+and it froze both chains again on 22 Sep.
+
+`ExitOnForwardFailure=yes` — which these units already set — only covers
+**establishment**. If the remote forward is torn down afterwards, because the
+server reaped it or a half-dead predecessor still held the port, ssh keeps a
+live session with nothing on it. `systemctl is-active` says `active`,
+`ServerAliveInterval` sees a responsive peer, and the sequencer cannot reach
+the custodian at all. Every local signal says fine.
+
+So the check has to ask the far end, and the sequencer already answers: its
+health output names each custodian by the port the forward should land on.
+
+```sh
+/usr/local/bin/zyn-tunnel-watch <port> <chain> <unit>
+```
+
+Installed on the Windows box as `zyn-tunnel-watch@<port>-<chain>-<unit>.timer`,
+every two minutes:
+
+```
+zyn-tunnel-watch@8211-main-zyn-custody-tunnel-main.timer
+zyn-tunnel-watch@8112-testnet-zyn-custody-tunnel.timer
+```
+
+Three things it deliberately does **not** do:
+
+- **It does not act on one failed poll.** Two consecutive strikes are required.
+  A single failure is as likely to be the path to the sequencer as the tunnel,
+  and a restart on a blip is its own outage — a restart races the session it
+  just killed for the port, which is precisely how this failure reproduces.
+- **It does not count an unreachable sequencer as a strike.** That says nothing
+  about the tunnel.
+- **It does not guess the chain.** This host holds a share of both vaults and
+  the two tunnels land on different sequencers, so the chain is part of the
+  instance name. An unknown chain exits 64 rather than checking the wrong one.
+
+Sources are kept in `ops/tunnel-watch/` so the box is reproducible.
+
+**The Mac still needs an equivalent.** It runs signers 1 and 2 under launchd,
+and both their tunnels were dead on 22 Sep with `status 255` while the signers
+themselves ran. launchd has no timer units; a `StartInterval` agent doing the
+same check is the shape.
+
+## 5f-bis. The object-ledger testnet — chain 212 (21 Sep 2026, promoted 22 Sep)
+
+DECISIONS §133. **Chain 212 is the testnet.** It replaced chain 11, which was
+retired on 22 Sep 2026 (A126/A128). Anything still naming chain 11 as "the
+testnet" is stale: that chain produces no epochs and its RPC has no listener.
+
+It exists so Cave's mint, listings and claims can be exercised against
+something real before they are exercised against money.
+
+- **On Hetzner** (`168.119.53.39`), `zyn-object-node.service`,
+  `127.0.0.1:8499`, config `/etc/zyn/zyn-object.env` (0600 — it carries
+  `ZYN_VAULT_FVK`), state in `/var/lib/zyn-object`. It reaches the public
+  gateway through `zyn-object-tunnel.service`, a reverse tunnel to Contabo's
+  `127.0.0.1:8500`, which nginx serves as
+  `https://zyn-rpc.cavebro.win/object`. It ran on Contabo as a devnet until
+  22 Sep; the node moved to Hetzner because that is where the testnet Zebra,
+  the vault and the custodians already are.
+- **Anchoring is ON.** Roots are carried to Zcash testnet and settle there,
+  and the status says so in words rather than leaving a reader to guess:
+  `"anchoring": "on — roots are carried to Zcash and settle there"`. The
+  devnet wording (`"none — devnet, roots reach no chain"`) is still what a
+  node without a Zebra, a vault FVK and custodians reports, and it is never
+  the better of the two by default.
+- **The deposit bridge** (22 Sep, A133). Confirmed ZEC in the vault becomes an
+  object its holder can find. Opt-in on `ZYN_BRIDGE_SEED`, the way anchoring is
+  opt-in: without it the banner still says objects are unbacked, because they
+  are. `ZYN_ZEC_ASSET` defaults to the same `XZEC` id the AMM chains use, so one
+  wallet recognises bridged ZEC on either ledger.
+  - **The seed is part of the chain's identity.** Deposit nonces are
+    `HKDF(seed, txid)`, so a restarted bridge rebuilds the *identical* intent
+    and being refused as a duplicate is proof the work was done. Change the
+    seed and the same deposit would build a different object — one the
+    holder's wallet never looks for. It lives in `/etc/zyn/zyn-object.env`
+    (0600) beside the vault FVK. **Back it up.** It cannot spend anything, but
+    anyone holding it can link every deposit commitment to its Zcash
+    transaction.
+  - **Every pass checks the backing first.** The watcher attests to the
+    vault's balance before the credits it covers, and a pass whose attestation
+    comes up short credits *nothing* — including deposits that would
+    individually have been fine. The vault is not short by one deposit; it is
+    short, and no intent repairs that. The cursor does not advance either, so
+    the next pass looks at the same range rather than stepping over the
+    evidence.
+  - **It waits for the note trees.** Before they reach the tip the vault's own
+    notes are invisible, so the balance the watcher would attest to is not the
+    vault's balance — and attesting too low is exactly what the solvency gate
+    treats as an emergency. It runs in the same thread as the note walk, which
+    is also what stops two scanners feeding one tree twice.
+  - **A deposit for an unregistered holder is owed, not dropped.** It goes in
+    `chain-<id>.pending` (`ZYNPEND1`) and is credited the moment that account
+    registers a viewing key. Nothing expires it. Debts are written before the
+    cursor: if only one survives a crash it must be the list of what is owed,
+    because a cursor that is behind only costs a rescan.
+- **Exits** (22 Sep, A134). `ZYN_EXIT_REVEALS`, `<address> <salt-hex>` per
+  line. An object exit names a **commitment**, `H(address ‖ salt)`, not an
+  address — the chain never carries where anyone's money went — so nothing can
+  be paid until the holder reveals the preimage out of band. A reveal is a
+  proof: it is matched by recomputing the commitment, so one naming an address
+  the exit never named is a stranger, not a redirection. A line that does not
+  parse refuses the whole file: a reveal the operator believes they filed and
+  that was quietly dropped is an exit that waits forever for a reason nobody
+  can see. `zyn_status` reports `owed_zatoshi`, counting exits nobody has
+  revealed — an unrevealed exit is still a debt.
+- **A replica** (22 Sep, A135). `zyn-object-replica.service` on **Contabo**,
+  verifying chain 212 from the mirror on a box that does not sequence it. It
+  refetches the published intents, replays them through `ObjectVm` from
+  genesis, and compares the root with the one the chain published; with
+  `ZYN_VAULT_FVK` and a testnet Zebra it also checks Zcash carries the anchor.
+  Contabo has no testnet Zebra, so today it is **replay-only and says so on
+  every start**. Tunnelling to the sequencer's Zebra would not fix that — the
+  box being verified would be supplying the evidence (§118.3).
+- **The wallet reads and writes it** (22 Sep, A136). `apps/nap-web/src/object.js`.
+  An object ledger publishes commitments and nullifiers and says nothing about
+  who owns what, so a balance is **computed**, not asked for: open every
+  published note, drop the ones whose nullifier has appeared, and what is left
+  is the holding. The commitment is recomputed rather than taken from the feed
+  — a mirror could pair a real ciphertext with someone else's commitment.
+  Amounts are `BigInt`, because WAD units exceed what a double holds exactly.
+  - **Both implementations are pinned to one fixture**,
+    `apps/nap-web/tests/object-vectors.json`, printed by `zyn-object-vectors`.
+    `object.test.mjs` holds the browser to it; `object_vectors_are_pinned.rs`
+    holds Rust to it, including a frozen ciphertext and the encoded `Register`
+    and `Spend` intents. Neither side can move alone — and it has to be a
+    fixture rather than a review, because the symptom of drift is **silence**:
+    a wallet looks at the right chain, opens nothing, reports zero, and that
+    is indistinguishable from having been robbed.
+  - **The object keys ride in the sealed blob.** They come from the BIP39 seed,
+    which `deriveIdentity` zeroes, and `identityFromSecretKey` — the path a
+    kept wallet takes — never has it. Derived lazily, a wallet would work from
+    the phrase and report empty from a device. A blob sealed before this still
+    opens and says so rather than showing a silent zero.
+- **The bridge floor** (22 Sep, A139). `ZYN_BRIDGE_FROM_HEIGHT=4380198` on
+  chain 212. A vault outlives the ledgers that custody it, and the bridge
+  scanned from the vault's *birth* — so every deposit chain 11 had already
+  credited would have been credited again on 212, with each ledger's
+  solvency check passing on its own. The floor is where the previous chain's
+  bridge stopped: chain 11's progress file
+  (`/mnt/HC_Volume_106795140/zyn-data-v12/bridge-11-<XZEC>.progress`,
+  `ZYNBRDG2`, `scanned_to` is the big-endian u64 after the magic) reads
+  4,380,197, written when it stopped at 12:33 UTC having credited two
+  deposits. **Every handover of a vault sets this.** A saved cursor below the
+  floor is raised, not trusted.
+- **Scan throughput is the operational limit.** A 200-block step took the
+  better part of an hour on the cax11; `ZYN_SCAN_STEP=25` now lands one every
+  ~2.5 minutes, so progress is durable and visible. It is the same work per
+  block either way — roughly **600 blocks/hour**, which is ~16 hours for a
+  10,000-block catch-up. Sizing a box for a testnet catch-up is one thing;
+  mainnet's chain is longer.
+- **Objects are unbacked until that bridge is turned on.** Anchoring a root and
+  backing an object are different promises, and the banner says them
+  separately.
+- **The routes beside it**: `/` is mainnet 26460. `/testnet` is **410 Gone**
+  since 22 Sep, returning a JSON-RPC error naming chain 11's retirement and
+  pointing at `/object` — a retired chain answers, rather than timing out and
+  looking like an outage.
+- **Methods**: `zyn_status`, `zyn_submit` (a hex intent from
+  `ObjectVm::encode_intent`), `zyn_published` (commitments, ephemeral keys
+  and ciphertexts — everything a wallet needs to rebuild itself and nothing
+  privileged), `zyn_anchors` (the epoch-to-Zcash index, read from the
+  published index file so it cannot disagree with what a replica serves),
+  `zyn_offers` (resting listings, sellers omitted), `zyn_submitSigned` (the
+  holders' door: a signed frame, A145), `zyn_depositAddress`, and since 23
+  Sep `zyn_market` (pools and sales, public) and `zyn_claims` (what is owed,
+  by id only — §5f-decies). Also `zyn_resolveAddress` (the Zyn account behind a vault deposit address), `zyn_viewingKey`, `zyn_items`, `zyn_exitCommitment`, `zyn_exitReveal`, and on the operator's token `zyn_mintItem`. `zyn_submit` is the operator's and needs
+  `ZYN_SUBMIT_TOKEN` (A144). Every reply carries the request's own id (A150).
+- **What `zyn_status` reports beyond the counts** (22 Sep, A129):
+  `anchored_epoch` / `anchored_height` / `anchor_txid` for the last root that
+  landed, and `synced_to` / `sync_target` / `sync_error` for the vault's note
+  trees. Before that both lived only in journald, so "is the chain still
+  reaching Zcash" was a question you could only answer over ssh.
+- **To reset it**: `systemctl stop zyn-object-node; rm -rf
+  /var/lib/zyn-object/*; systemctl start zyn-object-node`. Wallets that had
+  scanned it will report zero afterwards, correctly, because the chain they
+  scanned no longer exists.
+- **A browser GET on `/object` answers with the chain's status** (22 Sep). It
+  used to return nginx's raw `405 Not Allowed` page, which is what anybody
+  clicking a link in a post or a chat would see — a working endpoint that
+  reads as broken. nginx now rewrites a GET to an `internal` location that
+  performs the `zyn_status` call on the reader's behalf (`proxy_method POST`
+  + `proxy_set_body`). `POST` is untouched, and `/object-status` returns 404
+  if requested directly. Config backup at `/root/zyn-rpc.bak.getstatus`.
+  `/` still 405s on GET, deliberately: the mainnet sequencer's surface is not
+  widened to make a link prettier. `/testnet` now answers 410 on any method.
+- **The node bounds what it will read** (22 Sep). A request over 256 KB, or a
+  declared `Content-Length` over it, gets a 413; a connection that stalls is
+  dropped after 15 s. Before that the read buffer grew without a ceiling, so a
+  lying `Content-Length` or headers that never ended grew it until the box ran
+  out of memory — and that box runs the mainnet sequencer. nginx caps the
+  public route already; this is so the loopback listener does not depend on
+  something in front of it.
+- **Resetting the devnet is expected after a state-shape change.** The state
+  root gained `SECTION_LIVE` on 22 Sep, so the persisted chain would have
+  served roots the new binary disagrees with. `systemctl stop
+  zyn-object-node; rm -rf /var/lib/zyn-object/*; systemctl start
+  zyn-object-node`. Wallets that had scanned it report zero afterwards,
+  correctly — the chain they scanned no longer exists.
+- **Rate limiting is shared** with the other two routes (`limit_req zone=zynrpc
+  burst=20`). Hammering `/object` in a loop returns nothing and looks like an
+  outage; space the requests before concluding anything is broken.
 
 ## 5g. The doormat: transparent receive and shielding (10 Sep 2026)
 
@@ -3127,7 +4108,7 @@ Treasury shares (one each, never two in one place):
 
 | Holder | Path | Identifier |
 |---|---|---|
-| Mac | `~/.zyn/treasury` | `01…` |
+| Hetzner (`root@168.119.53.39`) | `/var/zyn/treasury` | `01…` — moved from the Mac 18 Sep, §111 |
 | Air (`zhang@192.168.1.27`) | `~/.zyn/treasury` | `02…` |
 | Windows box | `/var/zyn/treasury` (WSL) | `03…` |
 
@@ -3396,3 +4377,115 @@ journalctl -u zyn-signer -n 5    # "verified N anchor(s); through epoch …"
 
 If a verifier halts on a sealed file, it has the wrong key or no key — those
 report differently on purpose, because the fixes differ.
+
+## 5f-undevicies. Attendance certificates (§150)
+
+`zyn-attend` hands out event certificates for NFC taps. An event is two files
+in `ZYN_ATTEND_EVENTS`: `<name>.json` (public) and `<name>.keys.json` (tag keys,
+0600 — whoever holds them can make taps).
+
+```sh
+cat > events/zcon.json <<'JSON'
+{"name":"Zcon","date":"2026-10-15","place":"Denver","issuer":"Cave","art":"","cap":500,"mode":"badge"}
+JSON
+zyn-attend event zcon                  # its collection address (fixed by the manifest)
+zyn-attend keys zcon                   # fresh tag keys → events/zcon.keys.json (never printed)
+zyn-attend register zcon <creator>     # operator: register the collection (needs ZYN_SUBMIT_TOKEN)
+zyn-attend tap zcon 04a1b2c3d4e5f6 1   # the link a tag would write — rehearsal without a tag
+zyn-attend serve                       # POST /attend, GET /events on ZYN_ATTEND_LISTEN
+```
+
+**Tags:** NTAG 424 DNA. With NXP's TagWriter (or TagXplorer), enable Secure
+Dynamic Messaging on the NDEF file with encrypted PICC data (UID + read
+counter) and a CMAC over nothing but itself, the meta-read and file-read keys
+from `<name>.keys.json`, and the URL
+`https://nap.cavebro.win/tap?e=<collection>&picc=<32 hex placeholder>&cmac=<16 hex placeholder>`
+with the mirrors on the two placeholders. `badge` events want a tag per
+attendee; `door` events one tag everyone taps.
+
+**Wiring:** set `ZYN_ATTEND_URL` (mainnet) / `ZYN_ATTEND_TESTNET_URL` on the
+`nap-web` Pages project to reach the service; until then `/attend` answers
+"not handed out on this network". Rehearsed 25 Sep on a local ledger: badge
+first-claimant, retry, other-wallet refusal, one-per-account, forged tap,
+door replay and cap, and the wallet flow (tap link → new wallet → collect →
+certificate named by its event).
+
+
+## NU7 (27 Sep 2026, DECISIONS §156)
+
+Testnet activates **6 Oct 2026**; the mainnet target is **5 Nov** (go/no-go and
+height decided 20 Oct). Zebra 6.4.2 stops itself around **2 Nov**, so the NU7
+Zebra must be on Contabo before then whatever happens.
+
+### What already holds
+
+- **Nothing signs for the wrong branch.** Exits, anchors and both Nap wallets
+  check the branch Zebra names for the next block (`consensus.nextblock`)
+  against the one this build would sign for, and refuse on a mismatch. If a
+  host shows this in its journal, it is running a build that predates an
+  upgrade (or its Zebra is behind): *"the chain's next block (height …) is
+  under consensus branch 77190ad9 … That is NU7: this build predates it"*.
+  Nothing was signed; update, and it resumes.
+- See what the chain says now:
+  `curl -s -X POST 127.0.0.1:8232 -d '{"jsonrpc":"2.0","id":1,"method":"getblockchaininfo","params":[]}' | jq .result.consensus`
+  (testnet: port 18232 on Hetzner). NU6.3 is `37a5165b`.
+- Expiry and the wallets' scan depth follow the branch on their own (40→120,
+  3→9 blocks). Custodians sign a sighash and need no NU7 build.
+
+### Zebra
+
+`ops/zebra-upgrade.sh contabo|hetzner <version>` swaps the container for a
+pinned `zfnd/zebra:<version>`, rebuilt from the old container's own settings
+(env, mounts, ports, network). The old one is kept, stopped, as
+`<name>-<old version>`; the script prints the three commands to go back.
+6.4.2 now; the NU7 release when it is out (testnet box first).
+
+### The switch, when librustzcash ships NU7
+
+1. **Crates.** Bump `zcash_protocol`, `zcash_primitives`, `orchard`,
+   `zcash_transparent`, `zcash_address`, `sapling-crypto` to the NU7 releases
+   in the workspace and in `apps/nap-web/zec-core`. No `zcash_unstable` flag:
+   use only a release where NU7 has its real branch id and heights.
+2. **Check.** `cargo test -p zyn-custody envelope_tests zebra::tests` and add
+   the case that now must pass:
+   `Envelope::next(TestNetwork, <NU7 height − 1>, NU7_BRANCH_ID)` is `Ok`,
+   with expiry `+ 120`; and `u32::from(BranchId::Nu7) == NU7_BRANCH_ID`.
+   Then the full `cargo test -p zyn-custody -p zynzapd`.
+3. **Zebra** to the NU7 release on the host first (above).
+4. **Hosts.** Build `zyn-object-node` and `zyn-lightd` for
+   `aarch64-unknown-linux-gnu` (Hetzner) and `x86_64-unknown-linux-gnu`
+   (Contabo); install; in the same step set `ZYN_CONFIRMATIONS` ×3 —
+   Hetzner `/etc/zyn/zyn-object.env` 6→18, Contabo `zyn-object-mainnet` 6→18
+   and `zyn-object-replica` 10→30. Restart. Deploying before activation is
+   fine: the new build signs NU6.3 until the NU7 height.
+5. **Nap.** `apps/nap-web/zec-core/build.sh`, `node --test tests/*.test.mjs`,
+   deploy nap-web; rebuild the extension and the phone apps and submit them
+   the same day — store review takes days, and a Nap that predates NU7 can
+   still sync but refuses to send.
+6. **Watch the first blocks.** `journalctl -u zyn-object-node -f` (Hetzner)
+   for the first exit/anchor after activation; a browser send on testnet.
+
+Not in this list: Collection Z's sale terms count blocks (claim 16,128,
+notice 1,152). They are a third as long after NU7 unless republished ×3 —
+decided separately (§156.7).
+
+## Zakura beside Zebra on Contabo (28 Sep 2026)
+
+A second mainnet node, for a second opinion rather than a second host: if
+Contabo goes down, both go. Nothing reads from it yet.
+
+- `ops/zakura-setup.sh` (`LIMIT=25M` to download faster) starts the transient
+  unit `zakura-bootstrap` on Contabo: the latest archive snapshot from
+  `https://zakura.valargroup.dev/mainnet/latest.json` (≈272 GB, capped at
+  15 MB/s, resumable, SHA-256 checked before unpacking), unpacked into
+  `/var/lib/zyn/zakura`, then the container `zakura-mainnet` pinned to the
+  version that made the snapshot, then a check that it gives the same block
+  hash and Orchard root as Zebra. Watch: `journalctl -u zakura-bootstrap -f`.
+  Re-running skips whatever is already done.
+- RPC `127.0.0.1:8242` (no cookie auth, loopback only, like Zebra's 8232). P2P
+  outbound only — no port published.
+- **Zakura releases halt themselves ~3 weeks after release** (v1.4.0 at block
+  3,504,731, ~3 Oct). `getdeprecationinfo` on 8242 says when; upgrade by
+  pulling the new `zakuracore/zakura:<version>` and recreating the container
+  with the same arguments.
+- Disk: ~270 GB, beside Zebra's 262 GB, on the 968 GB disk.

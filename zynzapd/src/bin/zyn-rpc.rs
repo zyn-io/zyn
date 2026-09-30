@@ -24,7 +24,7 @@
 //!   ZYN_RPC_LISTEN     HTTP                       (127.0.0.1:8099 is the node;
 //!                                                  this defaults to :8095)
 //!   ZYN_RPC_NODE       node RPC to relay to       (127.0.0.1:8100, a replica)
-//!   ZYN_CHAIN_ID       the chain                  (11)
+//!   ZYN_CHAIN_ID       the chain                  (required)
 //!   ZYN_RPC_ORIGIN     Access-Control-Allow-Origin (*)
 //! ```
 //!
@@ -54,7 +54,30 @@ const NODE_ERROR: i64 = -32000;
 fn main() {
     let listen = env("ZYN_RPC_LISTEN", "127.0.0.1:8095");
     let node_addr = env("ZYN_RPC_NODE", "127.0.0.1:8100");
-    let chain: u32 = env("ZYN_CHAIN_ID", "11").parse().unwrap_or(11);
+    // No default. This defaulted to 11 until that chain was retired on 22 Sep
+    // 2026, and a tool that silently picks a chain is how you read the wrong
+    // one. Defaulting to mainnet instead would be worse than a dead chain, and
+    // the object ledger (chain 212, the testnet) speaks JSON over HTTP rather
+    // than this binary framing, so it is not a candidate either.
+    let chain: u32 = match std::env::var("ZYN_CHAIN_ID").ok().filter(|v| !v.is_empty()) {
+        Some(v) => match v.parse() {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("{}: ZYN_CHAIN_ID must be a number, got {:?}", "zyn-rpc", v);
+                std::process::exit(1)
+            }
+        },
+        None => {
+            eprintln!(
+                "{}: ZYN_CHAIN_ID is required — it names the chain to serve. \
+                 Mainnet is 26460; testnet chain 11 was retired on 22 Sep 2026 \
+                 and its replacement, chain 212, is an object ledger this tool \
+                 does not speak.",
+                "zyn-rpc"
+            );
+            std::process::exit(1)
+        }
+    };
     let origin = env("ZYN_RPC_ORIGIN", "*");
 
     let listener = TcpListener::bind(&listen).unwrap_or_else(|e| {
@@ -306,7 +329,7 @@ fn call(cfg: &Cfg, method: &str, p: &Value) -> Result<Value, (i64, String)> {
         "zyn_status" => {
             let s = node_err(n.status())?;
             Ok(json!({
-                "chain": cfg.chain,
+                "protocol": s.protocol, "build": s.build, "chain": cfg.chain,
                 "role": if s.role == 1 { "replica" } else { "sequencer" },
                 "seq": s.seq, "epoch": s.epoch, "root": hex(&s.root),
                 "backing": s.backing.to_string(),

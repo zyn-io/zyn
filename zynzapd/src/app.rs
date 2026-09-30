@@ -33,9 +33,51 @@ use crate::wallet::{
 };
 
 pub const DEFAULT_LIGHTD_TESTNET: &str = "168.119.53.39:8098";
-pub const DEFAULT_NODE: &str = "168.119.53.39:8099";
-pub const DEFAULT_CHAIN: u32 = 11;
+/// The AMM sequencer this wallet's swap and pool routes talk to.
+///
+/// Mainnet 26460 on the public gateway. It pointed at `168.119.53.39:8099`,
+/// chain 11, until that chain was retired on 22 Sep 2026 and its sequencer
+/// stopped — a default that names a chain which produces no epochs is a
+/// wallet whose Zyn tab fails for a reason its holder cannot see.
+/// No AMM chain by default.
+///
+/// This named `168.119.53.39:8099`, chain 11, until that chain was retired and
+/// its sequencer stopped. Every route behind `zyn_only` then failed with a
+/// connection error, which reads as a broken machine rather than a chain that
+/// is gone — and the extension's whole Zyn surface reads as broken with it.
+/// Empty means "not configured", which `zyn_only` can say plainly. `ZYN_NODE`
+/// still points it at a sequencer for anyone who has one.
+pub const DEFAULT_NODE: &str = "";
+pub const DEFAULT_CHAIN: u32 = 26460;
+
+/// The object ledger — the **testnet**, chain 212.
+///
+/// A full URL, because the public endpoint is HTTPS on a path and a bare
+/// `host:port` can only ever mean plain HTTP on `/`. The loopback form still
+/// works for a node talking to itself.
+pub const DEFAULT_OBJECT_NODE: &str = "https://zyn-rpc.cavebro.win/object";
+pub const OBJECT_CHAIN: u32 = 212;
+
+/// The object ledger on **mainnet**, chain 26460, at the gateway's root.
+///
+/// 26460 was the AMM chain's id. The two ledgers custody the same vault from
+/// the same height, so they cannot run side by side under any id — both would
+/// credit every deposit — and the AMM chain is retired at handover, which
+/// frees the id. Until that handover this endpoint still answers as the AMM
+/// gateway, and the tab says so rather than inventing a balance.
+pub const DEFAULT_OBJECT_NODE_MAINNET: &str = "https://zyn-rpc.cavebro.win/";
+pub const OBJECT_CHAIN_MAINNET: u32 = 26460;
+/// The testnet vault — custodied by chain 212 since chain 11 was retired.
 pub const DEFAULT_VAULT: &str = "utest1h6sfz7alnztp0vst6u0s8sxj9zhzrv5s7qjy5897qcdse75epp43x4uus90naxaea973q22nshuggyywujdj5zulckj2vppz85x2t407";
+
+/// The mainnet vault, DKG'd 10 Sep across three machines; the sequencer holds
+/// no share of it.
+///
+/// There was only one vault address in this file, the testnet one, so a
+/// mainnet wallet had no way to pay the mainnet vault at all — every
+/// deposit or top-up it built named a testnet address, which the send path
+/// refuses as the wrong network. Refused rather than lost, but unusable.
+pub const DEFAULT_VAULT_MAINNET: &str = "u1kc38pww6c8ahz0z20g9kv9s7afrc2npmr8s6nngw00qufveq43q5m2vh8u7wxpaltl0vjs7etr7y7d0pcm5dtc24pqhu5qfe5cwtyc2u";
 
 /// Where the keys live and what the app talks to.
 #[derive(Clone, Debug)]
@@ -63,7 +105,10 @@ impl Config {
             chain: env("ZYN_CHAIN", &DEFAULT_CHAIN.to_string())
                 .parse()
                 .unwrap_or(DEFAULT_CHAIN),
-            vault: env("ZYN_VAULT", DEFAULT_VAULT),
+            // An explicit override, or empty for "the vault of whichever
+            // network the wallet is on" — the network can change at runtime,
+            // so the choice is made at use, not here.
+            vault: std::env::var("ZYN_VAULT").unwrap_or_default(),
             dir,
         }
     }
@@ -276,7 +321,7 @@ impl App {
             vault: cfg.vault.clone(),
             binding_path,
             binding: Mutex::new(binding),
-            deposit_address: Mutex::new(App::load_deposit_address(&cfg.dir)),
+            deposit_address: Mutex::new(App::load_deposit_address(&cfg.dir, cfg.chain)),
             log: Mutex::new(Vec::new()),
             job: Mutex::new(None),
             view: Mutex::new(None),
@@ -483,8 +528,19 @@ impl App {
         }
     }
 
-    fn load_deposit_address(dir: &std::path::Path) -> Option<String> {
-        let s = std::fs::read_to_string(dir.join("deposit-address")).ok()?;
+    /// Where this chain's cached deposit address lives.
+    ///
+    /// Keyed by chain, because an address belongs to one. The unkeyed file it
+    /// replaces survived a switch from testnet to mainnet and kept answering
+    /// with a `utest1…` address — which made a correctly configured mainnet
+    /// wallet report that its *node* custodied testnet, and would have handed a
+    /// buyer a testnet address if the network guard had not caught it first.
+    fn deposit_address_path(dir: &std::path::Path, chain: u32) -> std::path::PathBuf {
+        dir.join(format!("deposit-address-{}", chain))
+    }
+
+    fn load_deposit_address(dir: &std::path::Path, chain: u32) -> Option<String> {
+        let s = std::fs::read_to_string(Self::deposit_address_path(dir, chain)).ok()?;
         let s = s.trim().to_string();
         (!s.is_empty()).then_some(s)
     }
@@ -499,7 +555,10 @@ impl App {
             return Some(a);
         }
         let addr = self.node.deposit_address(account(&self.key())).ok()?;
-        let _ = std::fs::write(self.cfg.dir.join("deposit-address"), &addr);
+        let _ = std::fs::write(
+            Self::deposit_address_path(&self.cfg.dir, self.node.chain),
+            &addr,
+        );
         *self.deposit_address.lock().ok()? = Some(addr.clone());
         Some(addr)
     }
@@ -510,6 +569,24 @@ impl App {
     /// fetched and already encoded for the node's own network — so a testnet
     /// node answers a mainnet wallet with `utest1…` and gives itself away. No
     /// extra round trip, and no new protocol to keep in step.
+    /// The vault this wallet pays: the override if one was set, otherwise the
+    /// vault of the network the wallet is on right now.
+    pub fn vault_address(&self) -> String {
+        if !self.vault.trim().is_empty() {
+            return self.vault.clone();
+        }
+        let mainnet = self
+            .wallet
+            .lock()
+            .map(|w| w.network() == Network::MainNetwork)
+            .unwrap_or(false);
+        if mainnet {
+            DEFAULT_VAULT_MAINNET.to_string()
+        } else {
+            DEFAULT_VAULT.to_string()
+        }
+    }
+
     pub fn chain_mismatch(&self) -> Option<String> {
         let network = self.wallet.lock().ok()?.network();
         let addr = self.deposit_address()?;
@@ -1291,6 +1368,579 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             Ok(json!({ "schema": AGENT_SCHEMA, "mandate": public, "on_chain_authority_ends_at_epoch": on_chain_until }))
         }
         ("GET", "/api/overview") => overview(app),
+        // What this wallet holds on the object ledger.
+        //
+        // Not a lookup: the ledger answers no question about an account, so
+        // the wallet downloads what everyone is served and opens what it can
+        // with its own viewing key (§133.5). The node is never told which
+        // outputs mattered, because it is never asked about any of them.
+        ("GET", "/api/object/deposit") => {
+            let (host, chain) = object_target(app);
+            let account = account(&app.key());
+            let ask = || crate::object_client::call(&host, "zyn_depositAddress", json!({ "account": hex(&account) }));
+            let mut r = ask()?;
+            // An address credits an account that has published where to be
+            // paid. Registering is one signed intent that moves nothing.
+            if r.get("registered").and_then(Value::as_bool) == Some(false) {
+                let viewing = {
+                    let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                    zyn_vm::note_enc::viewing_public(&w.object_keys(0)?.0)
+                };
+                crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Register {
+                    account,
+                    program: zyn_vm::program::register_viewing_key(),
+                    viewing,
+                })?;
+                r = ask()?;
+            }
+            Ok(r)
+        }
+        ("POST", "/api/object/send") => {
+            let (host, chain) = object_target(app);
+            let raw_to = str_of(input, "to")?.trim().to_string();
+            let asset: [u8; 32] = unhex32(str_of(input, "asset")?.trim()).ok().ok_or("the asset is not a 64-hex id")?;
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            // A Zyn account, a Zcash address that belongs to one, or a Zcash
+            // address outside Zyn — which only ZEC.zy can go to, as a
+            // withdrawal; an item cannot leave.
+            let to: [u8; 32] = match unhex32(&raw_to) {
+                Ok(a) => a,
+                Err(_) => {
+                    let r = crate::object_client::call(&host, "zyn_resolveAddress", json!({ "address": raw_to }))?;
+                    match r.get("account").and_then(Value::as_str).and_then(|a| unhex32(a).ok()) {
+                        Some(a) => a,
+                        None if asset == swapvm::types::XZEC => {
+                            return object_withdraw(app, &host, chain, &raw_to, amount);
+                        }
+                        None => return Err("that Zcash address is outside Zyn, and only ZEC.zy can leave".into()),
+                    }
+                }
+            };
+            let me = account(&app.key());
+            if to == me || to == [0u8; 32] {
+                return Err("choose a different, nonzero recipient".into());
+            }
+            let viewing = crate::object_client::call(&host, "zyn_viewingKey", json!({ "account": hex(&to) }))?;
+            let their = unhex32(viewing.get("viewing").and_then(Value::as_str).unwrap_or("")).ok().ok_or("the ledger gave no viewing key")?;
+            let (vk, nk) = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.object_keys(0)?
+            };
+            let wallet = crate::object_client::scan(&host, &me, vk.clone(), nk).map_err(|e| e.to_string())?;
+            let mine = zyn_vm::note_enc::viewing_public(&vk);
+            let (inputs, change) = crate::object_client::fund(&wallet, &nk, me, &mine, asset, amount)?;
+            let mut outputs = vec![crate::object_client::sealed_output(to, &their, asset, amount)?];
+            outputs.extend(change);
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Spend {
+                spender: me,
+                program: zyn_vm::program::private_transfer(),
+                inputs,
+                outputs,
+            })?;
+            Ok(json!({ "sent": true }))
+        }
+        ("POST", "/api/object/withdraw") => {
+            let (host, chain) = object_target(app);
+            let address = str_of(input, "address")?.trim().to_string();
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            object_withdraw(app, &host, chain, &address, amount)
+        }
+        // The Cave store's side of the NFT cycle, through the extension's
+        // provider: what this wallet holds, the public offer book, and the
+        // signed acts — list, buy, cancel, redeem, collect.
+        ("GET", "/api/object/items") => {
+            let (host, _) = object_target(app);
+            let s = object_session(app, &host)?;
+            let assets: Vec<String> = s.wallet.live.iter().map(|o| hex(&o.note.asset)).filter(|a| a != &hex(&swapvm::types::XZEC)).collect();
+            let known = if assets.is_empty() {
+                json!([])
+            } else {
+                crate::object_client::call(&host, "zyn_items", json!({ "assets": assets.join(",") }))?
+            };
+            let offers = crate::object_client::call(&host, "zyn_offers", json!({}))?;
+            let listed: std::collections::BTreeSet<String> = offers
+                .get("offers")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|o| o.get("item").and_then(Value::as_str).map(String::from)).collect())
+                .unwrap_or_default();
+            let items: Vec<Value> = s
+                .wallet
+                .live
+                .iter()
+                .filter_map(|o| {
+                    let a = hex(&o.note.asset);
+                    let k = known.as_array()?.iter().find(|k| k.get("asset").and_then(Value::as_str) == Some(&a))?;
+                    Some(json!({
+                        "asset": a,
+                        "collection": k.get("collection"),
+                        "serial": k.get("serial"),
+                        "listed": listed.contains(&hex(&o.commitment)),
+                    }))
+                })
+                .collect();
+            Ok(json!({ "account": hex(&s.me), "items": items }))
+        }
+        ("GET", "/api/object/offers") => {
+            let (host, _) = object_target(app);
+            crate::object_client::call(&host, "zyn_offers", json!({}))
+        }
+        ("POST", "/api/object/list") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let asset = unhex32(str_of(input, "asset")?.trim()).map_err(|_| "the item is not a 64-hex asset")?;
+            let price = crate::object_client::parse_amount(str_of(input, "price")?)?;
+            let note = s.wallet.live.iter().find(|o| o.note.asset == asset).ok_or("this wallet does not hold that item")?;
+            let quote = collection_quote(&host, &asset)?;
+            // Another Nap of the same holder may have used the next nonce;
+            // the chain refuses one in use, so step past it.
+            for _ in 0..8 {
+                let nonce = next_market_nonce(app, chain)?;
+                match crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::List {
+                    seller: s.me,
+                    program: zyn_vm::program::place_offer(),
+                    item: note.commitment,
+                    item_nullifier: zyn_vm::object::nullifier(&s.nk, &note.commitment),
+                    price_asset: quote,
+                    price_amount: price,
+                    expires_at_epoch: u32::MAX as u64,
+                    nonce,
+                }) {
+                    Err(e) if nonce_taken(&e) => continue,
+                    other => {
+                        other?;
+                        return Ok(json!({ "listed": true }));
+                    }
+                }
+            }
+            Err("could not find a fresh listing nonce".into())
+        }
+        ("POST", "/api/object/cancel") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let asset = unhex32(str_of(input, "asset")?.trim()).map_err(|_| "the item is not a 64-hex asset")?;
+            let note = s.wallet.live.iter().find(|o| o.note.asset == asset).ok_or("this wallet does not hold that item")?;
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::CancelOffer {
+                seller: s.me,
+                program: zyn_vm::program::cancel_offer(),
+                item: note.commitment,
+            })?;
+            Ok(json!({ "cancelled": true }))
+        }
+        // The launchpad (DECISIONS §141) and graduated pools, for the
+        // extension's provider: the same methods Nap in the browser serves.
+        ("GET", "/api/object/curves") => {
+            let (host, _) = object_target(app);
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            Ok(json!({ "curves": m.get("curves").cloned().unwrap_or(json!([])), "terms": m.get("curve_terms").cloned().unwrap_or(json!({})) }))
+        }
+        ("GET", "/api/object/curve-holdings") => {
+            let (host, _) = object_target(app);
+            let s = object_session(app, &host)?;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let mut out = Vec::new();
+            for c in m.get("curves").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let Some(token) = c.get("token").and_then(Value::as_str).and_then(|t| unhex32(t).ok()) else { continue };
+                let held: i128 = s.wallet.live.iter().filter(|o| o.note.asset == token).map(|o| o.note.amount.0).sum();
+                if held > 0 {
+                    out.push(json!({ "token": hex(&token), "meta": c.get("meta"), "amount": held.to_string() }));
+                }
+            }
+            // The tokens this wallet made: its own nonces, turned into token ids.
+            let (_, chain) = object_target(app);
+            let key = app.key();
+            let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+            let mine: std::collections::BTreeSet<String> =
+                (0..used + 24).map(|n| hex(&objectvm::market::token_of(&s.me, &market_nonce(&key, n)))).collect();
+            let created: Vec<Value> = m
+                .get("curves")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter(|c| c.get("token").and_then(Value::as_str).is_some_and(|t| mine.contains(t))).map(|c| json!({ "token": c["token"], "meta": c.get("meta") })).collect())
+                .unwrap_or_default();
+            let zec: i128 = s.wallet.live.iter().filter(|o| o.note.asset == XZEC).map(|o| o.note.amount.0).sum();
+            Ok(json!({ "zec": zec.to_string(), "holdings": out, "created": created }))
+        }
+        ("POST", "/api/object/curve/create") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let meta = curve_meta(str_of(input, "symbol")?, str_of(input, "name")?)?;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let bond: i128 = m.pointer("/curve_terms/bond").and_then(Value::as_str).and_then(|b| b.parse().ok()).unwrap_or(0);
+            let zec = XZEC;
+            let (inputs, change) = if bond > 0 {
+                crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, zec, zyn_vm::Fixed(bond))?
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::CreateCurve {
+                creator: s.me,
+                program: zyn_vm::program::curve_create(),
+                nonce,
+                quote: zec,
+                meta,
+                inputs: inputs.clone(),
+                change: change.clone(),
+            })?;
+            let token = objectvm::market::token_of(&s.me, &nonce);
+            // A picture and description, if given, are attached off chain by
+            // the page: it gets the proof that this key made this token.
+            let description = input.get("description").and_then(Value::as_str).unwrap_or("");
+            let image = input.get("image").and_then(Value::as_str).unwrap_or("");
+            if description.chars().count() > 400 || image.len() > 420_000 {
+                return Ok(json!({ "token": hex(&token) }));
+            }
+            let hash = content_hash(description, image);
+            Ok(json!({ "token": hex(&token), "content": { "hash": hex(&hash), "proof": content_proof(&app.key(), &nonce, &token, &hash) } }))
+        }
+        ("POST", "/api/object/curve/buy") | ("POST", "/api/object/curve/sell") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let buy = path == "/api/object/curve/buy";
+            let token = unhex32(str_of(input, "token")?.trim()).map_err(|_| "the token is not a 64-hex asset")?;
+            let amount = crate::object_client::parse_amount(str_of(input, if buy { "amount" } else { "tokens" })?)?;
+            if !buy && amount.0 % objectvm::curve::LOT.0 != 0 {
+                return Err("sell whole lots of 12,500 tokens".into());
+            }
+            // The page's floor: whole lots of tokens for a buy, ZEC.zy for a sell.
+            let floor = match input.get(if buy { "minTokens" } else { "minZec" }).and_then(Value::as_str) {
+                Some(v) => crate::object_client::parse_amount(v)?,
+                None => zyn_vm::Fixed::ZERO,
+            };
+            let min_out = if buy { zyn_vm::Fixed(floor.0 / objectvm::curve::LOT.0 * objectvm::curve::LOT.0) } else { floor };
+            let zec = XZEC;
+            let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, if buy { zec } else { token }, amount)?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::CurveTrade {
+                trader: s.me,
+                program: zyn_vm::program::curve_trade(),
+                token,
+                buy,
+                amount_in: amount,
+                min_out,
+                inputs: inputs.clone(),
+                change: change.clone(),
+                nonce,
+            })?;
+            Ok(json!({ "order": hex(&objectvm::curve::curve_order_id(&s.me, &nonce)) }))
+        }
+        ("POST", "/api/object/swap") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let pool_id = str_of(input, "pool")?.trim().to_lowercase();
+            let sell_a = input.get("sellA").and_then(Value::as_bool).ok_or("sellA is required")?;
+            let amount = crate::object_client::parse_amount(str_of(input, "amount")?)?;
+            let slippage = input.get("slippageBps").and_then(Value::as_u64).filter(|b| *b <= 1000).unwrap_or(100) as i128;
+            let m = crate::object_client::call(&host, "zyn_market", json!({}))?;
+            let p = m
+                .get("pools")
+                .and_then(Value::as_array)
+                .and_then(|a| a.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(&pool_id)).cloned())
+                .ok_or("no such pool")?;
+            let num = |k: &str| -> Result<i128, String> { p.get(k).and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or_else(|| format!("the pool has no {k}")) };
+            let fee = p.get("fee_bps").and_then(Value::as_i64).unwrap_or(0) as i128;
+            let (x, y) = if sell_a { (num("reserve_a")?, num("reserve_b")?) } else { (num("reserve_b")?, num("reserve_a")?) };
+            // A lone order at the batch price (objectvm::market::clear), less slippage.
+            let a = amount.0 * (10_000 - fee) / 10_000;
+            let quote = zyn_vm::fixed::mul_div(a, y, x + 2 * a).ok_or("quote overflow")?;
+            let min_out = zyn_vm::Fixed(quote * (10_000 - slippage) / 10_000);
+            let sold = unhex32(p.get(if sell_a { "a" } else { "b" }).and_then(Value::as_str).unwrap_or("")).map_err(|_| "bad pool asset")?;
+            let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, sold, amount)?;
+            let pool = unhex32(&pool_id).map_err(|_| "bad pool id")?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::Swap {
+                trader: s.me,
+                program: zyn_vm::program::amm_swap(),
+                pool,
+                sell_a,
+                amount_in: amount,
+                min_out,
+                inputs: inputs.clone(),
+                change: change.clone(),
+                nonce,
+            })?;
+            Ok(json!({ "order": hex(&objectvm::market::order_id(&s.me, &nonce)) }))
+        }
+        ("POST", "/api/object/buy") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let item = str_of(input, "item")?.trim().to_lowercase();
+            let offers = crate::object_client::call(&host, "zyn_offers", json!({}))?;
+            let o = offers
+                .get("offers")
+                .and_then(Value::as_array)
+                .and_then(|a| a.iter().find(|o| o.get("item").and_then(Value::as_str) == Some(&item)).cloned())
+                .ok_or("that item is no longer listed")?;
+            let get = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            let pay: i128 = get("pay_raw").parse().map_err(|_| "the offer has no price")?;
+            let price_asset = unhex32(&get("price_asset")).map_err(|_| "bad price asset")?;
+            let item_asset = unhex32(&get("asset")).map_err(|_| "bad item asset")?;
+            let (inputs, change) = crate::object_client::fund(&s.wallet, &s.nk, s.me, &s.viewing, price_asset, zyn_vm::Fixed(pay))?;
+            let mut outputs = vec![crate::object_client::sealed_output(s.me, &s.viewing, item_asset, objectvm::market::ITEM_UNIT)?];
+            outputs.extend(change);
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::TakeOffer {
+                buyer: s.me,
+                program: zyn_vm::program::take_offer(),
+                item: unhex32(&item).map_err(|_| "bad item")?,
+                item_nullifier: unhex32(&get("nullifier")).map_err(|_| "that listing publishes no nullifier")?,
+                payment: inputs,
+                outputs,
+            })?;
+            Ok(json!({ "bought": true }))
+        }
+        ("POST", "/api/object/redeem") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let asset = unhex32(str_of(input, "asset")?.trim()).map_err(|_| "the item is not a 64-hex asset")?;
+            let note = s.wallet.live.iter().find(|o| o.note.asset == asset).ok_or("this wallet does not hold that item")?;
+            let info = crate::object_client::call(&host, "zyn_items", json!({ "assets": hex(&asset) }))?;
+            let collection = info
+                .get(0)
+                .and_then(|i| i.get("collection"))
+                .and_then(Value::as_str)
+                .and_then(|c| unhex32(c).ok())
+                .ok_or("that is not a collection item")?;
+            crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Redeem {
+                holder: s.me,
+                program: zyn_vm::program::redeem_item(),
+                asset: collection,
+                inputs: vec![(note.commitment, zyn_vm::object::nullifier(&s.nk, &note.commitment))],
+            })?;
+            Ok(json!({ "redeemed": true }))
+        }
+        // Collection Z's sale (§144) — the same four steps Nap in the browser
+        // serves (connect-ops.js zyn_saleInfo … zyn_mintOpen).
+        ("POST", "/api/object/sale/info") => {
+            let (host, _) = object_target(app);
+            let c = sale_collection(input)?;
+            match load_sale(&host, &c)? {
+                None => Ok(json!({ "sale": null })),
+                Some(s) => {
+                    let remaining = s.open.as_ref().map(|_| s.sale["open_count"].as_u64().unwrap_or(0).saturating_sub(s.sale["open_next"].as_u64().unwrap_or(0)));
+                    Ok(json!({ "sale": s.sale, "drawPosted": s.draw.is_some(), "openPosted": s.open.is_some(), "remaining": remaining }))
+                }
+            }
+        }
+        ("POST", "/api/object/sale/tickets") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let sale = load_sale(&host, &c)?;
+            let draw = sale.as_ref().and_then(|s| s.draw.as_ref());
+            let tickets: Vec<Value> = my_tickets(app, &host, chain, &c)?
+                .iter()
+                .map(|t| {
+                    let won = draw.and_then(|d| d.won.iter().find(|w| w.0 == t.id)).map(|w| w.1.clone()).unwrap_or_default();
+                    let result = if draw.is_none() { "waiting" } else if t.claimed { "claimed" } else if won.is_empty() { "no win" } else { "won" };
+                    let names: Vec<String> = won.iter().map(|x| item_name(&c, *x)).collect();
+                    json!({ "ticket": hex(&t.id), "index": t.index, "claimed": t.claimed, "burned": t.voucher, "result": result, "serials": won, "names": names })
+                })
+                .collect();
+            Ok(json!({ "tickets": tickets }))
+        }
+        ("POST", "/api/object/sale/burn-memo") => {
+            let (host, chain) = object_target(app);
+            let key = app.key();
+            let me = account(&key);
+            // The same memo until a burn with it lands (ledger.js burnMemo).
+            let path = app.cfg.dir.join(format!("burn-nonce-{chain}-{}", hex(&me)));
+            let memo = |n: u64| objectvm::sale::voucher_commitment(&me, &market_nonce(&key, n));
+            if let Some(n) = std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse::<u64>().ok()) {
+                let c = memo(n);
+                let landed = crate::object_client::call(&host, "zyn_tickets", json!({ "ids": hex(&objectvm::sale::voucher_ticket_id(&c, 0)) }))?;
+                if landed.as_array().is_none_or(|a| a.is_empty()) {
+                    return Ok(json!({ "memo": format!("zyn:{}", hex(&c)), "commitment": hex(&c) }));
+                }
+            }
+            let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+            next_market_nonce(app, chain)?;
+            std::fs::write(&path, used.to_string()).map_err(|e| e.to_string())?;
+            let c = memo(used);
+            Ok(json!({ "memo": format!("zyn:{}", hex(&c)), "commitment": hex(&c) }))
+        }
+        ("POST", "/api/object/sale/buy") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let count = input.get("count").and_then(Value::as_u64).unwrap_or(1);
+            if !(1..=20).contains(&count) {
+                return Err("buy between 1 and 20 tickets at a time".into());
+            }
+            let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+            if s.sale["phase"].as_str() != Some("open") {
+                return Err("the sale is closed".into());
+            }
+            let total = s.price("ticket_price")? * count as i128;
+            let w = object_session(app, &host)?;
+            let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(total))?;
+            let nonce = submit_fresh(app, &host, chain, |nonce| objectvm::Op::BuyTickets {
+                buyer: w.me,
+                program: zyn_vm::program::sale_tickets(),
+                collection: c,
+                count: count as u32,
+                nonce,
+                inputs: inputs.clone(),
+                change: change.clone(),
+            })?;
+            let tickets: Vec<String> = (0..count as u32).map(|k| hex(&objectvm::sale::ticket_id(&w.me, &nonce, k))).collect();
+            Ok(json!({ "tickets": tickets }))
+        }
+        ("POST", "/api/object/sale/claim") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+            if s.sale["phase"].as_str() != Some("drawn") {
+                return Err("claims open after the draw is posted and close when the open mint starts".into());
+            }
+            let draw = s.draw.as_ref().ok_or("the posted draw does not match the chain; nothing can be claimed until it does")?;
+            let price = s.price("claim_price")?;
+            let mut claimed = Vec::new();
+            let mut spent: Vec<[u8; 32]> = Vec::new();
+            for t in my_tickets(app, &host, chain, &c)?.iter().filter(|t| !t.claimed) {
+                let Some(i) = draw.won.iter().position(|w| w.0 == t.id) else { continue };
+                if !spent.is_empty() {
+                    wait_spent(app, &host, &spent)?;
+                }
+                let serials = draw.won[i].1.clone();
+                let w = object_session(app, &host)?;
+                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(price * serials.len() as i128))?;
+                let items = serials
+                    .iter()
+                    .map(|x| crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, *x), objectvm::market::ITEM_UNIT))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let used: Vec<[u8; 32]> = inputs.iter().map(|x| x.0).collect();
+                let proof = zyn_vm::commit::merkle_proof(&draw.leaves, i);
+                let buyer = w.me;
+                let program = zyn_vm::program::sale_claim();
+                // A burn ticket is claimed by revealing the secret its memo committed to.
+                let op = if t.voucher {
+                    objectvm::Op::ClaimVoucherItems { buyer, program, collection: c, secret: t.nonce, k: t.k, serials: serials.clone(), proof, items, inputs, change }
+                } else {
+                    objectvm::Op::ClaimItems { buyer, program, collection: c, nonce: t.nonce, k: t.k, serials: serials.clone(), proof, items, inputs, change }
+                };
+                crate::object_client::submit(&host, chain, &app.key(), op)?;
+                spent = used;
+                claimed.extend(serials);
+            }
+            if claimed.is_empty() {
+                return Err("this wallet has no unclaimed winning tickets".into());
+            }
+            Ok(json!({ "claimed": claimed }))
+        }
+        ("POST", "/api/object/sale/mint") => {
+            let (host, chain) = object_target(app);
+            let c = sale_collection(input)?;
+            let count = input.get("count").and_then(Value::as_u64).unwrap_or(1);
+            if !(1..=10).contains(&count) {
+                return Err("mint between 1 and 10 at a time".into());
+            }
+            let mut minted = Vec::new();
+            let mut spent: Vec<[u8; 32]> = Vec::new();
+            for _ in 0..count + 8 {
+                if minted.len() as u64 == count {
+                    break;
+                }
+                if !spent.is_empty() {
+                    wait_spent(app, &host, &spent)?;
+                }
+                let s = load_sale(&host, &c)?.ok_or("there is no sale for that collection")?;
+                if s.sale["phase"].as_str() != Some("openmint") {
+                    return Err("the open mint has not started".into());
+                }
+                let open = s.open.as_ref().ok_or("the posted order does not match the chain; nothing can be minted until it does")?;
+                let pos = s.sale["open_next"].as_u64().unwrap_or(0) as usize;
+                if pos >= open.order.len() {
+                    break;
+                }
+                let serial = open.order[pos];
+                let w = object_session(app, &host)?;
+                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(s.price("open_price")?))?;
+                let item = crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, serial), objectvm::market::ITEM_UNIT)?;
+                let proof = zyn_vm::commit::merkle_proof(&open.leaves, pos);
+                match submit_fresh(app, &host, chain, |nonce| objectvm::Op::MintOpen {
+                    buyer: w.me,
+                    program: zyn_vm::program::sale_mint(),
+                    collection: c,
+                    serial,
+                    proof: proof.clone(),
+                    item: item.clone(),
+                    nonce,
+                    inputs: inputs.clone(),
+                    change: change.clone(),
+                }) {
+                    // Someone else minted that place first; take the next one.
+                    Err(e) if e.contains("not the next item") || e.contains("already minted") => continue,
+                    other => {
+                        other?;
+                    }
+                }
+                spent = inputs.iter().map(|x| x.0).collect();
+                minted.push(serial);
+            }
+            if minted.is_empty() {
+                return Err("the open mint sold out first".into());
+            }
+            let names: Vec<String> = minted.iter().map(|x| item_name(&c, *x)).collect();
+            Ok(json!({ "minted": minted, "names": names }))
+        }
+        ("GET", "/api/object/owed") => {
+            let (host, chain) = object_target(app);
+            let rows = owed_claims(app, &host, chain)?;
+            Ok(json!({ "owed": rows }))
+        }
+        ("POST", "/api/object/collect") => {
+            let (host, chain) = object_target(app);
+            let s = object_session(app, &host)?;
+            let rows = owed_claims(app, &host, chain)?;
+            let mut collected = 0usize;
+            for chunk in rows.chunks(16) {
+                let mut ids = Vec::new();
+                let mut outputs = Vec::new();
+                for r in chunk {
+                    let id = unhex32(r.get("id").and_then(Value::as_str).unwrap_or("")).map_err(|_| "bad claim id")?;
+                    let asset = unhex32(r.get("asset").and_then(Value::as_str).unwrap_or("")).map_err(|_| "bad claim asset")?;
+                    let amount: i128 = r.get("amount").and_then(Value::as_str).unwrap_or("0").parse().map_err(|_| "bad claim amount")?;
+                    ids.push(id);
+                    outputs.push(crate::object_client::sealed_output(s.me, &s.viewing, asset, zyn_vm::Fixed(amount))?);
+                }
+                crate::object_client::submit(&host, chain, &app.key(), objectvm::Op::Claim {
+                    owner: s.me,
+                    program: zyn_vm::program::claim(),
+                    claims: ids,
+                    outputs,
+                })?;
+                collected += chunk.len();
+            }
+            Ok(json!({ "collected": collected }))
+        }
+        ("GET", "/api/object") => {
+            let (host, chain) = object_target(app);
+            let (viewing, nullifier_key) = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.object_keys(0)?
+            };
+            let account = account(&app.key());
+            let wallet = crate::object_client::scan(&host, &account, viewing, nullifier_key)
+                .map_err(|e| e.to_string())?;
+
+            // Grouped by asset, because a holder thinks in assets and the
+            // ledger thinks in notes.
+            let mut by_asset: std::collections::BTreeMap<[u8; 32], (i128, u32)> =
+                std::collections::BTreeMap::new();
+            for o in &wallet.live {
+                let e = by_asset.entry(o.note.asset).or_insert((0, 0));
+                e.0 = e.0.saturating_add(o.note.amount.0);
+                e.1 += 1;
+            }
+            Ok(json!({
+                "node": host,
+                "chain": chain,
+                "account": hex(&account),
+                "held": by_asset.iter().map(|(asset, (amount, notes))| json!({
+                    "asset": hex(asset),
+                    "amount": Fixed(*amount).to_string(),
+                    "notes": notes,
+                })).collect::<Vec<_>>(),
+                "live": wallet.live.len(),
+                // Kept rather than dropped: a wallet that forgets its own
+                // history cannot explain a balance to its holder.
+                "spent": wallet.spent.len(),
+            }))
+        }
         ("GET", "/api/curves") => {
             zyn_only(app)?;
             Ok(json!({ "curves": app.node.curves()?.iter().map(curve_json).collect::<Vec<_>>() }))
@@ -1378,8 +2028,32 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 "outputs": s.as_ref().map(|x| x.count),
             }))
         }
+        // Shielded to this wallet's own transparent address: the switch's
+        // "make public" side. The sweep back is `/api/shield`.
+        ("POST", "/api/unshield") => {
+            let zat = zatoshi_of(input, "amount")?;
+            let to = {
+                let w = app.wallet.try_lock().map_err(|_| "wallet busy")?;
+                let to = w.transparent_address().ok_or("this wallet has no transparent address")?;
+                if zat + zyn_custody::payout::zip317_fee(2, 0) > w.balance().0 + w.balance().1 {
+                    return Err("not enough for that amount plus the fee".into());
+                }
+                to
+            };
+            App::start_job(app, "unshield", move |a| {
+                let txid = send(a, &to, zat, None, "made public")?;
+                Ok(format!("moved {:.8} to your transparent address: {}", zec(zat), txid))
+            })
+        }
         ("POST", "/api/send") => {
-            let to = str_of(input, "to")?.trim().to_string();
+            let mut to = str_of(input, "to")?.trim().to_string();
+            // A Zyn account id: pay its deposit address, so it arrives there as
+            // ZEC.zy. The address is the account's own; no memo is needed.
+            if let Ok(acct) = unhex32(&to) {
+                let (host, _) = object_target(app);
+                let r = crate::object_client::call(&host, "zyn_depositAddress", json!({ "account": hex(&acct) }))?;
+                to = r.get("address").and_then(Value::as_str).ok_or("the ledger gave no deposit address for that account")?.to_string();
+            }
             let zat = zatoshi_of(input, "amount")?;
             let memo = input.get("memo").and_then(Value::as_str).filter(|m| !m.is_empty()).map(String::from);
             {
@@ -1395,13 +2069,21 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             })
         }
         ("GET", "/api/deposit-address") => {
-            zyn_only(app)?;
-            match app.deposit_address() {
-                Some(address) => Ok(json!({ "address": address, "memo": false })),
-                // The node cannot issue one: the shared vault address still
-                // works, but only with the account memo attached.
-                None => Ok(json!({ "address": app.vault, "memo": true })),
-            }
+            // Deliberately **not** behind `zyn_only`. Depositing needs a vault
+            // address, not an AMM chain, and gating it behind one meant a
+            // wallet with no sequencer configured could not tell its holder
+            // where to send anything.
+            //
+            // The guard it does need is the network. `chain_mismatch` derived
+            // that from an address the node issued, so with no node there is
+            // nothing to compare — and a mainnet wallet shown the testnet
+            // vault is real money sent to a chain it cannot come back from.
+            // So the address is checked against the wallet's own network
+            // here, whichever source it came from.
+            let (address, per_account) = checked_vault(app)?;
+            // `memo: true` means the address is shared and the account has to
+            // be named in a memo. A per-account address *is* the attribution.
+            Ok(json!({ "address": address, "memo": !per_account }))
         }
         // A fresh account to receive one item at, so the journal names
         // something that has never been used and never will be again (§95).
@@ -1414,7 +2096,79 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // The account to receive a whole collection at. One derivation, no
         // counter to keep and nothing to orphan — prefer this over an index
         // unless per-item unlinkability is worth a read per item (§97.5).
-        ("GET", "/api/receiving/collection") => {
+        // The buyer's payment, signed and handed back rather than submitted.
+        //
+        // The sale service holds no key of the buyer's, so it cannot move their
+        // money — it relays bytes they signed (`submit_raw`, the reason Bitcoin
+        // has `sendrawtransaction`). Signed with the *receiving* key, because
+        // that is the account the deposit credited and the account the item
+        // will land in.
+        //
+        // Not submitted here: a payment that left the wallet but never reached
+        // the sale is a buyer who paid for nothing. The service submits it, so
+        // the party that needs to know it happened is the party that does it.
+        ("POST", "/api/receiving/pay") => {
+            zyn_only(app)?;
+            let collection = id_of(input, "collection")?;
+            let to = id_of(input, "to")?;
+            let amount = fixed_of(str_of(input, "amount")?)?;
+            if !amount.is_positive() {
+                return Err("a payment must be positive".into());
+            }
+            let key = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.receiving_key_for_collection(&collection)?
+            };
+            let from = account(&key);
+            let held = app
+                .node
+                .account(&key)?
+                .map(|r| {
+                    r.spendable
+                        .iter()
+                        .find(|(a, _)| *a == swapvm::types::XZEC)
+                        .map(|(_, v)| *v)
+                        .unwrap_or(Fixed::ZERO)
+                })
+                .unwrap_or(Fixed::ZERO);
+            // Refused here, where it is still a sentence, rather than as a
+            // rejected intent the page has to interpret.
+            if held < amount {
+                return Err(format!(
+                    "this collection account holds {} ZEC.zy and the payment is {} — \
+                     the deposit may not have been credited yet",
+                    held, amount
+                ));
+            }
+            let epoch = app.node.status()?.epoch;
+            let intent = Intent::Transfer { from, to, asset: swapvm::types::XZEC, amount };
+            let frame = crate::client::frame_submission(&key, app.node.chain, epoch, &intent);
+            Ok(json!({
+                "from": hex(&from),
+                "to": hex(&to),
+                "amount": amount.to_string(),
+                "frame": hex(&frame),
+            }))
+        }
+        // The signed read for a collection's receiving account, for a page to
+        // relay. The sale service cannot look up whether a buyer paid —
+        // balances are private — so the buyer proves it themselves and the
+        // service passes the proof along (§74.23). Signed with the *receiving*
+        // key, so what is disclosed is that account and not the identity.
+        ("POST", "/api/receiving/read") => {
+            zyn_only(app)?;
+            let collection = id_of(input, "collection")?;
+            let key = {
+                let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+                w.receiving_key_for_collection(&collection)?
+            };
+            Ok(json!({
+                "collection": hex(&collection),
+                "account": hex(&account(&key)),
+                "read": hex(&app.node.account_read_payload(&key)?),
+            }))
+        }
+        ("POST", "/api/receiving/collection") => {
             zyn_only(app)?;
             let collection = id_of(input, "collection")?;
             let w = app.wallet.lock().map_err(|_| "wallet busy")?;
@@ -1423,7 +2177,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 "account": hex(&w.collection_account(&collection)?),
             }))
         }
-        ("GET", "/api/receiving") => {
+        ("POST", "/api/receiving") => {
             zyn_only(app)?;
             let index = input
                 .get("index")
@@ -1465,7 +2219,10 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             }))
         }
         ("GET", "/api/zyn-key") => {
-            zyn_only(app)?;
+            // The key is local; only the on-chain record needs a sequencer.
+            // Refusing the whole route left a holder unable to see which Zyn
+            // account they even have.
+            let has_chain = !app.cfg.node.trim().is_empty();
             let current_key = app.key();
             let current = account(&current_key);
             let source = app.zyn_key_source()?;
@@ -1474,13 +2231,25 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 w.default_zyn_source()
                     .and_then(|s| w.zyn_signing_key(&s).ok().map(|k| (s, account(&k))))
             };
-            let record = app.node.account(&current_key)?.unwrap_or_default();
-            let authorities = app.node.collections()?.into_iter()
-                .filter(|c| c.creator == current)
-                .map(|c| json!({ "collection": c.id, "symbol": c.symbol, "phase": c.phase_name() }))
-                .collect::<Vec<_>>();
+            let record = if has_chain {
+                app.node.account(&current_key)?.unwrap_or_default()
+            } else {
+                Default::default()
+            };
+            let authorities = if has_chain {
+                app.node.collections()?.into_iter()
+                    .filter(|c| c.creator == current)
+                    .map(|c| json!({ "collection": c.id, "symbol": c.symbol, "phase": c.phase_name() }))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             Ok(json!({
                 "account": hex(&current),
+                // Says whether the on-chain half below was actually read or
+                // is simply absent, so a page does not render "nothing held"
+                // as a fact when it is an unanswered question.
+                "chain_read": has_chain,
                 "source": match source { ZynKeySource::Derived { .. } => "bip39-hkdf", ZynKeySource::Legacy { .. } => "legacy-ed25519" },
                 "derived_account": derived.as_ref().map(|(_, id)| hex(id)),
                 "migration_available": false,
@@ -1494,13 +2263,17 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             Err("Automatic migration is disabled until settlement verification and resumable recovery are implemented; the original Zyn key has not been changed".into())
         }
         ("POST", "/api/deposit") => {
-            zyn_only(app)?;
+            // Not behind the AMM gate. A deposit is a Zcash transaction to the
+            // vault carrying this account in its memo; it needs a vault
+            // address and a wallet, and no sequencer at all. Gating it meant
+            // the one button that puts money *into* Zyn stopped working when
+            // the AMM chain went away.
             let zat = zatoshi_of(input, "amount")?;
             // Its own address needs no memo — the address is the attribution.
             // Without one, fall back to the shared vault address and a memo.
-            let (to, memo) = match app.deposit_address() {
-                Some(a) => (a, None),
-                None => (app.vault.clone(), Some(zyn_custody::memo::encode_text(&account(&app.key())))),
+            let (to, memo) = match checked_vault(app)? {
+                (a, true) => (a, None),
+                (a, false) => (a, Some(zyn_custody::memo::encode_text(&account(&app.key())))),
             };
             App::start_job(app, "deposit", move |a| {
                 let txid = send(a, &to, zat, memo.as_deref(), "deposit")?;
@@ -1518,9 +2291,15 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
         // The all-zero account is the operator top-up: held for fees, never
         // credited, so supply and backing stay equal and nobody is diluted.
         ("POST", "/api/topup") => {
-            zyn_only(app)?;
+            // The vault's fee reserve: an anchor is a self-send that burns a
+            // ZIP-317 fee, so a vault that holds nothing cannot anchor at all.
+            // Not an AMM operation — it is a Zcash payment to the vault with
+            // the all-zero account in the memo, which every scanner reads as
+            // "credited to nobody" rather than stopping on an unattributed
+            // note. It pays the shared vault address, never a per-account one,
+            // because a per-account address *is* a credit to that account.
             let zat = zatoshi_of(input, "amount")?;
-            let to = app.vault.clone();
+            let to = network_vault(app)?;
             let memo = zyn_custody::memo::encode_text(&[0u8; 32]);
             App::start_job(app, "topup", move |a| {
                 let txid = send(a, &to, zat, Some(&memo), "topup")?;
@@ -1996,7 +2775,66 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
 /// would show balances backed by money it cannot see and hand out deposit
 /// addresses nobody on this chain can pay. Which chain is fine; disagreeing
 /// about it is not.
+/// The shared vault address for the wallet's network, refusing a mismatch.
+fn network_vault(app: &App) -> Result<String, String> {
+    let address = app.vault_address();
+    same_network(app, &address)?;
+    Ok(address)
+}
+
+/// Refuse an address on the other network from the wallet's.
+fn same_network(app: &App, address: &str) -> Result<(), String> {
+    let testnet_address = address.starts_with("utest1") || address.starts_with("tm");
+    let testnet_wallet = {
+        let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+        w.network() != Network::MainNetwork
+    };
+    if testnet_address != testnet_wallet {
+        return Err(format!(
+            "refusing to use a {} vault address with a {} wallet — sending there would put \
+             money on a chain this wallet cannot spend from",
+            if testnet_address { "testnet" } else { "mainnet" },
+            if testnet_wallet { "testnet" } else { "mainnet" }
+        ));
+    }
+    Ok(())
+}
+
+/// The vault to pay, checked against the wallet's own network.
+///
+/// A mainnet wallet shown the testnet vault is real money sent to a chain it
+/// cannot spend from, and `chain_mismatch` cannot catch that — it derived the
+/// network from an address the *node* issued, and a wallet with no AMM chain
+/// has no node to ask.
+fn checked_vault(app: &App) -> Result<(String, bool), String> {
+    let (address, per_account) = match app.deposit_address() {
+        Some(a) => (a, true),
+        None => (app.vault_address(), false),
+    };
+    same_network(app, &address)?;
+    Ok((address, per_account))
+}
+
+/// The gate every route that needs an **AMM** chain passes through.
+///
+/// Two refusals, and the order matters: a wallet with no AMM chain configured
+/// has nothing to mismatch against, so that is checked first.
+///
+/// The second refusal exists because the first symptom was "Connection refused
+/// (os error 61)" against a host that had been switched off. That is a fault
+/// message for a fault that does not exist — nothing is wrong with the
+/// network, the chain those routes served was retired. A holder reading it
+/// checks their firewall; what they need to know is that swaps and pools have
+/// no chain here and their money is on the Zyn tab.
 fn zyn_only(app: &App) -> Result<(), String> {
+    if app.cfg.node.trim().is_empty() {
+        return Err(
+            "this wallet has no AMM chain configured. Chain 11 was retired on 22 Sep 2026 and \
+             the testnet is now the object ledger, chain 212, which has no pools or curves — \
+             holdings there are on the Zyn tab. Set ZYN_NODE to reach an AMM sequencer."
+                .into(),
+        );
+    }
     match app.chain_mismatch() {
         Some(e) => Err(e),
         None => Ok(()),
@@ -2073,6 +2911,378 @@ fn sync(app: &App) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
+/// ZEC.zy out to a Zcash address: commit to it, sign the withdrawal with the
+/// bridge fee on top, and reveal where it goes.
+fn object_withdraw(app: &App, host: &str, chain: u32, address: &str, amount: zyn_vm::Fixed) -> Result<Value, String> {
+    if amount.0 % 10_000_000_000 != 0 {
+        return Err("ZEC has eight decimal places".into());
+    }
+    if amount.0 < 100_000 * 10_000_000_000 {
+        return Err("withdraw at least 0.001 ZEC — the Zcash fee comes out of it".into());
+    }
+    let salt = {
+        use rand::RngCore;
+        let mut b = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut b);
+        b
+    };
+    let c = crate::object_client::call(host, "zyn_exitCommitment", json!({ "address": address, "salt": hex(&salt) }))?;
+    let destination = unhex32(c.get("destination").and_then(Value::as_str).unwrap_or("")).ok().ok_or("the ledger gave no commitment")?;
+    let me = account(&app.key());
+    let (vk, nk) = {
+        let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+        w.object_keys(0)?
+    };
+    let wallet = crate::object_client::scan(host, &me, vk.clone(), nk).map_err(|e| e.to_string())?;
+    let mine = zyn_vm::note_enc::viewing_public(&vk);
+    let zec = swapvm::types::XZEC;
+    let bps = crate::object_client::call(host, "zyn_market", json!({}))?
+        .pointer("/fees/bridge_bps")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let fee = objectvm::market::fee_of(amount, bps as u32).ok_or("fee overflow")?;
+    let (inputs, outputs) = crate::object_client::fund(&wallet, &nk, me, &mine, zec, zyn_vm::Fixed(amount.0 + fee.0))?;
+    crate::object_client::submit(host, chain, &app.key(), objectvm::Op::Withdraw {
+        holder: me,
+        program: zyn_vm::program::withdraw(),
+        inputs,
+        asset: zec,
+        amount,
+        destination,
+        outputs,
+    })?;
+    crate::object_client::call(host, "zyn_exitReveal", json!({ "address": address, "salt": hex(&salt) }))?;
+    Ok(json!({ "withdrawing": true }))
+}
+
+/// What an object-ledger action needs from the wallet: its account, keys,
+/// and the notes it holds right now.
+struct ObjectSession {
+    me: [u8; 32],
+    nk: [u8; 32],
+    viewing: [u8; 32],
+    wallet: zyn_vm::scan::Wallet,
+}
+
+fn object_session(app: &App, host: &str) -> Result<ObjectSession, String> {
+    let me = account(&app.key());
+    let (vk, nk) = {
+        let w = app.wallet.lock().map_err(|_| "wallet busy")?;
+        w.object_keys(0)?
+    };
+    let viewing = zyn_vm::note_enc::viewing_public(&vk);
+    let wallet = crate::object_client::scan(host, &me, vk, nk).map_err(|e| e.to_string())?;
+    Ok(ObjectSession { me, nk, viewing, wallet })
+}
+
+/// The asset a collection item is priced in: its collection's quote.
+fn collection_quote(host: &str, item: &[u8; 32]) -> Result<[u8; 32], String> {
+    let info = crate::object_client::call(host, "zyn_items", json!({ "assets": hex(item) }))?;
+    let collection = info.get(0).and_then(|i| i.get("collection")).and_then(Value::as_str).map(String::from);
+    let market = crate::object_client::call(host, "zyn_market", json!({}))?;
+    let quote = collection.and_then(|c| {
+        market.get("collections")?.as_array()?.iter().find(|x| x.get("asset").and_then(Value::as_str) == Some(&c))?.get("quote")?.as_str().map(String::from)
+    });
+    Ok(quote.and_then(|q| unhex32(&q).ok()).unwrap_or(swapvm::types::XZEC))
+}
+
+/// The same market nonces the web wallet derives — `sha256("nap.market.
+/// nonce.v1" ‖ key ‖ counter)` — so either Nap finds the other's proceeds.
+fn market_nonce(key: &ed25519_dalek::SigningKey, n: u64) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"nap.market.nonce.v1");
+    h.update(key.to_bytes());
+    h.update(n.to_be_bytes());
+    h.finalize().into()
+}
+
+fn nonce_path(app: &App, chain: u32) -> std::path::PathBuf {
+    app.cfg.dir.join(format!("market-nonce-{chain}-{}", hex(&account(&app.key()))))
+}
+
+fn next_market_nonce(app: &App, chain: u32) -> Result<[u8; 32], String> {
+    let path = nonce_path(app, chain);
+    let n: u64 = std::fs::read_to_string(&path).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    std::fs::write(&path, (n + 1).to_string()).map_err(|e| e.to_string())?;
+    Ok(market_nonce(&app.key(), n))
+}
+
+/// Everything owed to this wallet: every claim its nonces can derive, asked
+/// for by id, since there is no "claims for this account" to ask.
+/// Submit an intent that carries a nonce, stepping past any nonce another
+/// Nap of the same holder already used — the chain refuses a reused source.
+/// Returns the nonce that took.
+fn submit_fresh(app: &App, host: &str, chain: u32, build: impl Fn([u8; 32]) -> objectvm::Op) -> Result<[u8; 32], String> {
+    for _ in 0..64 {
+        let nonce = next_market_nonce(app, chain)?;
+        match crate::object_client::submit(host, chain, &app.key(), build(nonce)) {
+            Err(e) if nonce_taken(&e) => continue,
+            other => {
+                other?;
+                return Ok(nonce);
+            }
+        }
+    }
+    Err("every nonce tried was already used".into())
+}
+
+/// What a creator attaches to a token: the hash of `{description, image, v}`
+/// as JSON — the browser wallet's `contentHash`, byte for byte.
+fn content_hash(description: &str, image: &str) -> [u8; 32] {
+    let body = json!({ "description": description, "image": image, "v": 1 }).to_string();
+    Sha256::digest(body.as_bytes()).into()
+}
+
+/// Proof that this key made `token` and attaches `hash` to it — the browser
+/// wallet's `contentProof`, byte for byte, checked by Cave Jade's store.
+fn content_proof(key: &SigningKey, nonce: &[u8; 32], token: &[u8; 32], hash: &[u8; 32]) -> Value {
+    let mut message = b"cave.jade.content.v1".to_vec();
+    message.extend_from_slice(token);
+    message.extend_from_slice(hash);
+    json!({
+        "publicKey": hex(key.verifying_key().as_bytes()),
+        "nonce": hex(nonce),
+        "signature": hex(&key.sign(&message).to_bytes()),
+    })
+}
+
+/// Every way the chain says "this nonce is already taken": by a claim or
+/// order, by a resting listing, or by a coin, whose id is a hash of creator
+/// and nonce. Nap in the browser keeps the same list (ledger.js NONCE_TAKEN).
+fn nonce_taken(e: &str) -> bool {
+    ["that nonce was already used", "that nonce is in use", "that token exists"].iter().any(|m| e.contains(m))
+}
+
+/// A launchpad token's 32 bytes of meta: the ticker in the first 8 (1–8
+/// capitals or digits), the name in the other 24 (plain printable text),
+/// zero-padded — the browser wallet's `encodeMeta`, byte for byte.
+fn curve_meta(symbol: &str, name: &str) -> Result<[u8; 32], String> {
+    let sym = symbol.trim().to_uppercase();
+    let name = name.trim();
+    if sym.is_empty() || sym.len() > 8 || !sym.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+        return Err("a ticker is 1-8 letters or digits".into());
+    }
+    if name.is_empty() || name.len() > 24 || !name.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return Err("a name is 1-24 plain characters".into());
+    }
+    let mut meta = [0u8; 32];
+    meta[..sym.len()].copy_from_slice(sym.as_bytes());
+    meta[8..8 + name.len()].copy_from_slice(name.as_bytes());
+    Ok(meta)
+}
+
+fn owed_claims(app: &App, host: &str, chain: u32) -> Result<Vec<Value>, String> {
+    use objectvm::curve::{curve_order_id, curve_source};
+    use objectvm::market::{claim_id, commit_id, launch_source, liquidity_id, listing_source, order_id};
+    let key = app.key();
+    let me = account(&key);
+    let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let mut ids = Vec::new();
+    for n in 0..used + 24 {
+        let nonce = market_nonce(&key, n);
+        for source in [
+            order_id(&me, &nonce),
+            liquidity_id(&me, &nonce),
+            commit_id(&me, &nonce),
+            launch_source(&me, &nonce),
+            listing_source(&me, &nonce),
+            curve_order_id(&me, &nonce),
+            curve_source(&me, &nonce),
+        ] {
+            for k in 0..3 {
+                ids.push(hex(&claim_id(&source, k)));
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    for part in ids.chunks(240) {
+        if let Some(a) = crate::object_client::call(host, "zyn_claims", json!({ "ids": part.join(",") }))?.as_array() {
+            rows.extend(a.iter().cloned());
+        }
+    }
+    Ok(rows)
+}
+
+/// An item's name as the store shows it: Collection Z's species share one
+/// index space (§86.1) — connect-ops.js itemName, word for word.
+fn item_name(collection: &[u8; 32], serial: u32) -> String {
+    if collection != &crate::cave_z::collection_id() {
+        return format!("{}… #{serial}", &hex(collection)[..6]);
+    }
+    let (species, start) = if serial < 2222 { ("Mole", 0) } else if serial < 3555 { ("Owl", 2222) } else { ("Moth", 3555) };
+    format!("Zyn {species} #{:04}", serial - start + 1)
+}
+
+/// The sale a request names: Collection Z unless it names another.
+fn sale_collection(input: &Value) -> Result<[u8; 32], String> {
+    match input.get("collection").and_then(Value::as_str) {
+        None => Ok(crate::cave_z::collection_id()),
+        Some(c) => unhex32(c.trim()).map_err(|_| "collection must be 64 hex characters".into()),
+    }
+}
+
+struct SaleDraw {
+    won: Vec<([u8; 32], Vec<u32>)>,
+    leaves: Vec<[u8; 32]>,
+}
+
+struct SaleOpen {
+    order: Vec<u32>,
+    leaves: Vec<[u8; 32]>,
+}
+
+struct SaleView {
+    sale: Value,
+    quote: [u8; 32],
+    draw: Option<SaleDraw>,
+    open: Option<SaleOpen>,
+}
+
+impl SaleView {
+    fn price(&self, k: &str) -> Result<i128, String> {
+        self.sale.get(k).and_then(Value::as_str).and_then(|v| v.parse().ok()).ok_or_else(|| format!("the sale has no {k}"))
+    }
+}
+
+/// A sale as the chain holds it, with the posted draw and open-mint order —
+/// each kept only if it rebuilds the root the chain holds, so the node
+/// serving them cannot change who won or what sells next (ledger.js loadSale).
+fn load_sale(host: &str, collection: &[u8; 32]) -> Result<Option<SaleView>, String> {
+    let c = hex(collection);
+    let market = crate::object_client::call(host, "zyn_market", json!({}))?;
+    let Some(sale) = market.get("sales").and_then(Value::as_array).and_then(|a| a.iter().find(|s| s["collection"].as_str() == Some(&c)).cloned()) else {
+        return Ok(None);
+    };
+    let quote = market
+        .get("collections")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().find(|x| x["asset"].as_str() == Some(&c)))
+        .and_then(|x| x["quote"].as_str())
+        .and_then(|q| unhex32(q).ok())
+        .unwrap_or(swapvm::types::XZEC);
+    let phase = sale["phase"].as_str().unwrap_or("").to_string();
+    let mut view = SaleView { sale, quote, draw: None, open: None };
+    if phase == "drawn" || phase == "openmint" {
+        let d = crate::object_client::call(host, "zyn_saleDraw", json!({ "collection": c, "kind": "draw" }))?;
+        let won: Option<Vec<([u8; 32], Vec<u32>)>> = d.get("won").and_then(Value::as_array).and_then(|a| {
+            a.iter()
+                .map(|w| {
+                    let t = unhex32(w["ticket"].as_str()?).ok()?;
+                    let serials: Option<Vec<u32>> = w["serials"].as_array()?.iter().map(|x| x.as_u64().map(|x| x as u32)).collect();
+                    Some((t, serials?))
+                })
+                .collect()
+        });
+        if let Some(won) = won {
+            let leaves: Vec<[u8; 32]> = won.iter().map(|(t, s)| objectvm::sale::draw_leaf(t, s)).collect();
+            if Some(hex(&zyn_vm::commit::merkle_root(&leaves)).as_str()) == view.sale["draw_root"].as_str() {
+                view.draw = Some(SaleDraw { won, leaves });
+            }
+        }
+    }
+    if phase == "openmint" {
+        let o = crate::object_client::call(host, "zyn_saleDraw", json!({ "collection": c, "kind": "open" }))?;
+        let order: Option<Vec<u32>> = o.get("order").and_then(Value::as_array).and_then(|a| a.iter().map(|x| x.as_u64().map(|x| x as u32)).collect());
+        if let Some(order) = order {
+            let leaves: Vec<[u8; 32]> = order.iter().enumerate().map(|(i, s)| objectvm::sale::open_leaf(i as u32, *s)).collect();
+            if Some(hex(&zyn_vm::commit::merkle_root(&leaves)).as_str()) == view.sale["open_root"].as_str() {
+                view.open = Some(SaleOpen { order, leaves });
+            }
+        }
+    }
+    Ok(Some(view))
+}
+
+struct MyTicket {
+    id: [u8; 32],
+    nonce: [u8; 32],
+    k: u32,
+    /// A burn ticket (§145): claimed by revealing `nonce` as the secret.
+    voucher: bool,
+    index: u64,
+    claimed: bool,
+}
+
+/// This wallet's tickets in a sale, asked for by id: the first ticket of
+/// every nonce it may have used, then the rest of each buy it finds
+/// (ledger.js loadTickets).
+fn my_tickets(app: &App, host: &str, chain: u32, collection: &[u8; 32]) -> Result<Vec<MyTicket>, String> {
+    let key = app.key();
+    let me = account(&key);
+    let used: u64 = std::fs::read_to_string(nonce_path(app, chain)).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let c = hex(collection);
+    let ask = |want: Vec<([u8; 32], [u8; 32], u32, bool)>| -> Result<Vec<MyTicket>, String> {
+        let mut out = Vec::new();
+        for part in want.chunks(500) {
+            let ids: Vec<String> = part.iter().map(|w| hex(&w.0)).collect();
+            let rows = crate::object_client::call(host, "zyn_tickets", json!({ "ids": ids.join(",") }))?;
+            for r in rows.as_array().into_iter().flatten() {
+                if r["collection"].as_str() != Some(&c) {
+                    continue;
+                }
+                let Some(w) = part.iter().find(|w| Some(hex(&w.0).as_str()) == r["ticket"].as_str()) else { continue };
+                out.push(MyTicket { id: w.0, nonce: w.1, k: w.2, voucher: w.3, index: r["index"].as_u64().unwrap_or(0), claimed: r["claimed"].as_bool().unwrap_or(false) });
+            }
+        }
+        Ok(out)
+    };
+    // Bought tickets from (me, nonce, k); burn tickets from the commitment
+    // (me, nonce) a burn's memo carried (ledger.js loadTickets).
+    let tid = move |nonce: &[u8; 32], k: u32, voucher: bool| {
+        if voucher {
+            objectvm::sale::voucher_ticket_id(&objectvm::sale::voucher_commitment(&me, nonce), k)
+        } else {
+            objectvm::sale::ticket_id(&me, nonce, k)
+        }
+    };
+    let firsts = ask(
+        (0..used + 24)
+            .map(|n| market_nonce(&key, n))
+            .flat_map(|nonce| [false, true].map(|v| (tid(&nonce, 0, v), nonce, 0, v)))
+            .collect(),
+    )?;
+    let rest = ask(firsts.iter().flat_map(|t| (1..20).map(move |k| (tid(&t.nonce, k, t.voucher), t.nonce, k, t.voucher))).collect())?;
+    let mut all: Vec<MyTicket> = firsts.into_iter().chain(rest).collect();
+    all.sort_by_key(|t| t.index);
+    Ok(all)
+}
+
+/// Wait until notes a write spent are gone from this wallet's view, so the
+/// next write funds from what the chain now publishes (ledger.js waitSpent).
+fn wait_spent(app: &App, host: &str, spent: &[[u8; 32]]) -> Result<(), String> {
+    for _ in 0..60 {
+        let w = object_session(app, host)?;
+        if !w.wallet.live.iter().any(|o| spent.contains(&o.commitment)) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+    Err("the chain has not taken the last step in yet; try the rest again shortly".into())
+}
+
+/// The object ledger of the network the wallet is on. One default for both
+/// meant a mainnet wallet read the testnet's notes — and found none, which
+/// reads as an empty wallet rather than the wrong one.
+fn object_target(app: &App) -> (String, u32) {
+    let mainnet = app
+        .wallet
+        .lock()
+        .map(|w| w.network() == Network::MainNetwork)
+        .unwrap_or(false);
+    let (default_node, chain) = if mainnet {
+        (DEFAULT_OBJECT_NODE_MAINNET, OBJECT_CHAIN_MAINNET)
+    } else {
+        (DEFAULT_OBJECT_NODE, OBJECT_CHAIN)
+    };
+    let host = std::env::var("ZYN_OBJECT_NODE")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default_node.to_string());
+    (host, chain)
+}
+
+
 fn send(app: &App, to: &str, zat: u64, memo: Option<&str>, kind: &str) -> Result<String, String> {
     let mut w = app.wallet.lock().map_err(|_| "wallet busy")?;
     app.note(format!(
@@ -2111,7 +3321,8 @@ fn force_via_zcash(app: &App, intent: &Intent) -> Result<String, String> {
     let mut w = app.wallet.lock().map_err(|_| "wallet busy")?;
     app.note("forcing via Zcash: building a 0.0001 payment to the vault with the signed intent in its memo; proving takes a minute".to_string());
     let mut events = Vec::new();
-    let txid = w.send_with_memo(&app.vault, 10_000, memo, |e| {
+    let vault = app.vault_address();
+    let txid = w.send_with_memo(&vault, 10_000, memo, |e| {
         if !matches!(e, Event::Progress { .. }) {
             events.push(e)
         }
@@ -2120,7 +3331,7 @@ fn force_via_zcash(app: &App, intent: &Intent) -> Result<String, String> {
     drop(w);
     app.record(network, &events);
     let mut h = app.history(network);
-    h.push(json!({ "kind": "forced", "txid": txid, "zatoshi": 10_000u64, "height": 0, "memo": "forced intent", "to": app.vault, "at": App::now() }));
+    h.push(json!({ "kind": "forced", "txid": txid, "zatoshi": 10_000u64, "height": 0, "memo": "forced intent", "to": vault, "at": App::now() }));
     app.write_history(network, &h);
     let _ = overview(app);
     Ok(txid)
@@ -2264,9 +3475,22 @@ pub fn overview(app: &App) -> Result<Value, String> {
         let z = h["zatoshi"].as_u64().unwrap_or(0);
         h["zec"] = json!(zec(z));
     }
-    let zyn = match app.chain_mismatch() {
-        None => zyn_overview(app, network, &address)?,
-        Some(why) => json!({ "available": false, "why": why }),
+    // No AMM chain configured: say so, and let the page hide the panels that
+    // need one instead of rendering them to refuse on first click. The object
+    // ledger's panel loads on its own and is unaffected — that is where the
+    // Zyn holdings are now.
+    let zyn = if app.cfg.node.trim().is_empty() {
+        json!({
+            "available": false,
+            "object": true,
+            "why": "Swaps, pools and account transfers ran on the AMM chain, which this \
+                    wallet has no connection to. Zyn holdings are on the object ledger, below."
+        })
+    } else {
+        match app.chain_mismatch() {
+            None => zyn_overview(app, network, &address)?,
+            Some(why) => json!({ "available": false, "why": why }),
+        }
     };
     let job = app.job().map(|j| json!({ "kind": j.kind, "progress": j.progress.map(|(at, to)| json!({ "at": at, "to": to })), "started": j.started }));
     let mut o = json!({
@@ -2504,7 +3728,7 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
         // the send form accepts, so scanning needs no wallet-specific parser.
         "account_qr_svg": qr_svg(&hex(&id)),
         "memo": zyn_custody::memo::encode_text(&id),
-        "vault": app.vault,
+        "vault": app.vault_address(),
         // This account's own deposit address. Where present, deposits need no
         // memo — the address is the attribution — and the UI should show this
         // rather than the shared vault address.
@@ -2512,12 +3736,12 @@ fn zyn_overview(app: &App, network: Network, address: &str) -> Result<Value, Str
         // The same thing as a payment request, so paying from another wallet
         // is a scan rather than a careful copy.
         "deposit_uri": deposit_uri(
-            app.deposit_address().as_deref().unwrap_or(&app.vault),
+            &app.deposit_address().unwrap_or_else(|| app.vault_address()),
             app.deposit_address().is_none().then(|| zyn_custody::memo::encode_text(&id)).as_deref(),
             None,
         ),
         "deposit_qr_svg": qr_svg(&deposit_uri(
-            app.deposit_address().as_deref().unwrap_or(&app.vault),
+            &app.deposit_address().unwrap_or_else(|| app.vault_address()),
             app.deposit_address().is_none().then(|| zyn_custody::memo::encode_text(&id)).as_deref(),
             None,
         )),
@@ -2733,6 +3957,75 @@ mod deposit_uri_tests {
         assert_eq!(
             super::deposit_uri("utest1abc", None, None),
             "zcash:utest1abc?message=Zyn%20deposit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    /// The refusal a holder reads when the AMM routes have no chain.
+    ///
+    /// It replaced "Connection refused (os error 61)" against a host that had
+    /// been switched off — a fault message for a fault that does not exist.
+    /// Somebody reading that checks their firewall; what they need to know is
+    /// that swaps and pools have no chain here and their money is elsewhere.
+    #[test]
+    fn the_amm_gate_names_the_retirement_and_where_the_money_is() {
+        // The default must not name a chain that produces no epochs.
+        assert_eq!(super::DEFAULT_NODE, "", "no AMM chain by default");
+        assert_ne!(super::DEFAULT_CHAIN, 11, "chain 11 was retired");
+        assert_eq!(super::OBJECT_CHAIN, 212);
+        // And the object endpoint must be reachable from a holder's machine,
+        // which means a URL rather than the node's own loopback address.
+        assert!(
+            super::DEFAULT_OBJECT_NODE.starts_with("https://"),
+            "a desktop wallet cannot reach the sequencer's loopback address"
+        );
+    }
+
+    /// Each network pays its own vault. With one address a mainnet wallet
+    /// could only ever name the testnet vault, which the send path refuses.
+    #[test]
+    fn each_network_has_its_own_vault_and_ledger() {
+        assert!(super::DEFAULT_VAULT.starts_with("utest1"), "testnet vault");
+        assert!(super::DEFAULT_VAULT_MAINNET.starts_with("u1"), "mainnet vault");
+        assert_ne!(super::DEFAULT_VAULT, super::DEFAULT_VAULT_MAINNET);
+        assert_eq!(super::OBJECT_CHAIN, 212);
+        assert_eq!(super::OBJECT_CHAIN_MAINNET, 26460);
+        assert_ne!(super::DEFAULT_OBJECT_NODE, super::DEFAULT_OBJECT_NODE_MAINNET);
+    }
+}
+
+#[cfg(test)]
+mod curve_meta_tests {
+    /// The same bytes the browser's `encodeMeta` writes (apps/nap-web
+    /// market.js): a token made from desktop Nap must read back on Jade.
+    #[test]
+    fn meta_is_ticker_then_name_zero_padded() {
+        let m = super::curve_meta("ztest", " Zyn Test Stone ").unwrap();
+        assert_eq!(&m[..8], b"ZTEST\0\0\0");
+        assert_eq!(&m[8..22], b"Zyn Test Stone");
+        assert!(m[22..].iter().all(|b| *b == 0));
+        assert!(super::curve_meta("TOO-LONG1", "x").is_err());
+        assert!(super::curve_meta("OK", &"n".repeat(25)).is_err());
+        assert!(super::curve_meta("OK", "tab\there").is_err());
+    }
+
+    /// A picture attached from desktop Nap must pass Jade's store check: the
+    /// same hash and signature the browser wallet makes (apps/nap-web object.js).
+    #[test]
+    fn content_proof_matches_the_browser_wallet() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let nonce = [9; 32];
+        let token = objectvm::market::token_of(&crate::client::account(&key), &nonce);
+        assert_eq!(super::hex(&token), "f940d7208317055613eaa818fc603e248c6b5ab6130e36b25c8183346653dd0e");
+        let hash = super::content_hash("Jade \"é\" \n line", "");
+        assert_eq!(super::hex(&hash), "859b411c7d4e1a231e88f2178ee5ff1d4d7da6ee7ef85687fa0818bcd6418ac5");
+        let proof = super::content_proof(&key, &nonce, &token, &hash);
+        assert_eq!(proof["publicKey"], "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c");
+        assert_eq!(
+            proof["signature"],
+            "39a4b2bac06e788fadaa21e6db76afeb0db23dc249e2cc808d808e2b6e02f30b0cc7ba2e581719c4c43b3ace0f0aaffa6f9fb630ec986dd1dc8906e97f7cc10b"
         );
     }
 }

@@ -167,6 +167,12 @@ pub struct Status {
     pub forced_pending: u32,
     /// Replica: forced intents the sequencer failed to apply in time.
     pub censored: u32,
+    /// The highest op code this node answers, or `0` from a node too old to
+    /// say. Check it before asking for a newer op rather than reading
+    /// `unknown operation` and blaming the caller (§120, §127).
+    pub protocol: u32,
+    /// The node's package version, empty from a node too old to report it.
+    pub build: String,
 }
 
 /// The signed submission frame for `intent`, valid for 100 epochs from
@@ -1089,6 +1095,8 @@ impl Node {
             anchored_epoch: 0,
             verified_height: 0,
             forced_pending: 0,
+            protocol: 0,
+            build: String::new(),
             censored: 0,
         };
         if let Ok(n) = d.u32() {
@@ -1121,6 +1129,17 @@ impl Node {
             st.verified_height = d.u64().unwrap_or(0);
             st.forced_pending = d.u32().unwrap_or(0);
             st.censored = d.u32().unwrap_or(0);
+            // Absent from anything built before §127, which reads as protocol
+            // 0 — "too old to say", not "supports nothing".
+            st.protocol = d.u32().unwrap_or(0);
+            st.build = match d.u16() {
+                Ok(n) => d
+                    .take_bytes(n as usize)
+                    .ok()
+                    .and_then(|b| String::from_utf8(b.to_vec()).ok())
+                    .unwrap_or_default(),
+                Err(_) => String::new(),
+            };
         }
         Ok(st)
     }
@@ -1420,18 +1439,37 @@ impl Node {
         })
     }
 
-    fn signed_read_header(&self, k: &SigningKey, op: u8) -> Result<Encoder, String> {
+    /// The signed part of a read, without the `op` and chain a relay prepends.
+    ///
+    /// This is what [`Self::account_raw`] consumes, so it is what a gateway
+    /// must be handed: `account_raw` adds its own `OP_ACCOUNT` and chain, and
+    /// a whole frame would double them. Exactly the bytes
+    /// `id | epoch | scheme | verifying key | signature`, concatenated.
+    ///
+    /// A wallet gives this to a page so the page can prove a balance it cannot
+    /// read — the signature is over the account, so relaying it discloses that
+    /// one account and grants nothing else.
+    pub fn account_read_payload(&self, k: &SigningKey) -> Result<Vec<u8>, String> {
         let id = account(k);
         let epoch = self.status()?.epoch;
         let sig = k.sign(&read_challenge(self.chain, &id, epoch)).to_bytes();
         let mut e = Encoder::new();
-        e.u8(op)
-            .u32(self.chain)
-            .bytes(&id)
+        e.bytes(&id)
             .u64(epoch)
             .u8(Scheme::Ed25519.tag())
             .bytes(k.verifying_key().as_bytes())
             .bytes(&sig);
+        Ok(e.finish().to_vec())
+    }
+
+    /// One definition, shared: a header is the relay prefix plus that payload.
+    /// Two copies of this drifting apart would be a signature over one thing
+    /// and a claim about another.
+    fn signed_read_header(&self, k: &SigningKey, op: u8) -> Result<Encoder, String> {
+        let mut e = Encoder::new();
+        e.u8(op)
+            .u32(self.chain)
+            .bytes(&self.account_read_payload(k)?);
         Ok(e)
     }
 

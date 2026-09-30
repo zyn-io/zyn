@@ -139,8 +139,10 @@ for (const card of cards) {
     const movement = { ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12] }[event.key];
     if (!movement) return;
     event.preventDefault();
-    state.targetX += movement[0];
-    state.targetY += movement[1];
+    // The same bounds as dragging: a card nudged by keys stays in the cave.
+    const bounds = (card.closest('.specimens') || card.parentElement).getBoundingClientRect();
+    state.targetX = Math.max(-bounds.width * 0.36, Math.min(bounds.width * 0.36, state.targetX + movement[0]));
+    state.targetY = Math.max(-bounds.height * 0.26, Math.min(bounds.height * 0.26, state.targetY + movement[1]));
     card.style.zIndex = ++topLayer;
   });
 
@@ -174,3 +176,17 @@ dialog.addEventListener('click', (event) => {
 
 document.documentElement.dataset.caveReady = 'true';
 window.__cave = { ready: true, cards: cards.length, supply: 4444 };
+
+// The door's real state, from the chain: the sale on mainnet, if any.
+const door = document.querySelector('#door');
+if (door) {
+  fetch('https://zyn-rpc.cavebro.win/', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'zyn_market', params: [] }),
+    credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000),
+  }).then((r) => (r.ok ? r.json() : null)).then((b) => {
+    const sale = (b?.result?.sales || []).find((x) => x.collection === '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e');
+    const label = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' }[sale?.phase];
+    if (label) door.textContent = label;
+  }).catch(() => { /* the static text stands */ });
+}

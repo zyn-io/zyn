@@ -59,6 +59,25 @@ pub enum NotATicket {
     NoRecipient,
 }
 
+impl std::fmt::Display for NotATicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotATicket::WrongAmount { paid, expected } => write!(
+                f,
+                "paid {paid} zatoshi where the entry price is {expected} — refundable by hand"
+            ),
+            NotATicket::Unconfirmed { have, need } => {
+                write!(f, "{have} confirmation(s), needs {need}")
+            }
+            NotATicket::AfterClose { height, close } => {
+                write!(f, "arrived at height {height}, after the close at {close}")
+            }
+            NotATicket::AlreadyAdmitted => write!(f, "this outpoint is already a ticket"),
+            NotATicket::NoRecipient => write!(f, "names the zero account"),
+        }
+    }
+}
+
 /// The tickets of one sale, in the order the allocator will read them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Ledger {

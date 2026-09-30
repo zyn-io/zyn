@@ -77,6 +77,12 @@ fn fake_zebra(sent: Arc<AtomicBool>, captured: Arc<Mutex<String>>) -> SocketAddr
             let method = body["method"].as_str().unwrap_or("");
             let result = match method {
                 "getblockcount" => format!("{}", TIP),
+                // What a payout's envelope is checked against: the branch
+                // the node says the next block is under (NU6.3 here).
+                "getblockchaininfo" => format!(
+                    r#"{{"chain":"test","blocks":{},"estimatedheight":{},"consensus":{{"chaintip":"37a5165b","nextblock":"37a5165b"}}}}"#,
+                    TIP, TIP
+                ),
                 "sendrawtransaction" => {
                     *captured.lock().unwrap() =
                         body["params"][0].as_str().unwrap_or("").to_string();

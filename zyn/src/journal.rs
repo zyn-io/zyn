@@ -26,6 +26,7 @@
 //! pre-activation history. A version 1 open epoch must be sealed before an
 //! upgraded writer starts; the formats are never mixed in one file.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -70,7 +71,9 @@ pub fn files_for(
 pub struct Journal {
     dir: PathBuf,
     chain_id: u32,
-    open: Option<(u64, BufWriter<File>)>,
+    /// The epoch currently open, its writer, and the highest seq already
+    /// on disk for it — so a replay cannot write the same record twice.
+    open: Option<(u64, BufWriter<File>, BTreeMap<u64, Vec<u8>>)>,
 }
 
 impl Journal {
@@ -97,7 +100,7 @@ impl Journal {
                 "intent too large",
             ));
         }
-        if self.open.as_ref().map(|(e, _)| *e != epoch).unwrap_or(true) {
+        if self.open.as_ref().map(|(e, _, _)| *e != epoch).unwrap_or(true) {
             self.sync()?;
             let path = self.dir.join(format!("epoch-{}.intents", epoch));
             let mut f = OpenOptions::new()
@@ -125,18 +128,49 @@ impl Journal {
                     ));
                 }
             }
-            self.open = Some((epoch, BufWriter::new(f)));
+            // What is already here. A restart that replays intents calls
+            // `record` again for epochs the journal already holds, and this
+            // opened in append mode without looking — so those records were
+            // written a second time. The file then failed `read_epoch` with
+            // `OutOfOrder`, which stopped the publisher, which stopped the
+            // signers endorsing, which froze anchoring: six epochs of chain 11
+            // were unreadable this way on 21 Sep (A125).
+            //
+            // Scanned tolerantly on purpose: a file already corrupted this way
+            // must still accept new records, or the repair is a restart that
+            // cannot happen.
+            let have = records_on_disk(&path);
+            self.open = Some((epoch, BufWriter::new(f), have));
         }
-        let (_, w) = self.open.as_mut().expect("opened above");
+        let (_, w, have) = self.open.as_mut().expect("opened above");
+        if let Some(existing) = have.get(&seq) {
+            if existing.as_slice() == encoded {
+                // A replay of a record already written. Skipping is right:
+                // it is present and identical, so there is nothing for a
+                // caller to do about it.
+                return Ok(());
+            }
+            // The same sequence number carrying different bytes. Writing it
+            // would corrupt the file and skipping it would silently drop an
+            // intent, so neither is acceptable and this says so instead.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "epoch {epoch} already holds a different intent at seq {seq} — \
+                     the sequencer has assigned one sequence number twice"
+                ),
+            ));
+        }
         w.write_all(&seq.to_be_bytes())?;
         w.write_all(&(encoded.len() as u32).to_be_bytes())?;
         w.write_all(encoded)?;
+        have.insert(seq, encoded.to_vec());
         Ok(())
     }
 
     /// Flush and fsync whatever is open. Called at every seal and on shutdown.
     pub fn sync(&mut self) -> std::io::Result<()> {
-        if let Some((_, w)) = self.open.as_mut() {
+        if let Some((_, w, _)) = self.open.as_mut() {
             w.flush()?;
             w.get_ref().sync_all()?;
         }
@@ -173,6 +207,40 @@ pub enum JournalError {
 
 /// Parse one epoch file. Every read is bounds-checked; junk is refused, never
 /// interpreted.
+/// What an epoch file already holds, by sequence number.
+///
+/// Tolerant by design: it stops at the first malformed record and returns
+/// what it read. A file already corrupted this way must still be appendable,
+/// or recovering from it would need the very restart that cannot complete.
+///
+/// The *bodies* are kept, not just the highest sequence, because the two
+/// cases look identical from a sequence number alone and could not be more
+/// different. A replay writes the same record again and can be skipped. A
+/// sequencer that assigns one sequence number to two *different* intents has
+/// a real fault, and skipping there would silently drop an intent — which is
+/// how a chain's journal comes to disagree with the state it produced. On
+/// chain 11's epochs 9190-9195 the collided records were **not** identical.
+fn records_on_disk(path: &Path) -> BTreeMap<u64, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let Ok(b) = fs::read(path) else { return out };
+    if b.len() < HEADER_LEN {
+        return out;
+    }
+    let mut p = HEADER_LEN;
+    while p + 12 <= b.len() {
+        let Ok(seq) = b[p..p + 8].try_into().map(u64::from_be_bytes) else { break };
+        let Ok(len) = b[p + 8..p + 12].try_into().map(u32::from_be_bytes) else { break };
+        let len = len as usize;
+        p += 12;
+        if len > MAX_RECORD || b.len() - p < len {
+            break;
+        }
+        out.entry(seq).or_insert_with(|| b[p..p + len].to_vec());
+        p += len;
+    }
+    out
+}
+
 pub fn read_epoch(b: &[u8]) -> Result<EpochFile, JournalError> {
     if b.len() < HEADER_LEN {
         return Err(JournalError::NotAJournal);
@@ -473,5 +541,157 @@ mod tests {
         }
         let f = read_epoch(&fs::read(epoch_path(&root, 5, 0)).unwrap()).unwrap();
         assert_eq!(f.records, vec![(1, b"a".to_vec()), (2, b"b".to_vec())]);
+    }
+}
+
+#[cfg(test)]
+mod replay_is_idempotent {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("zyn-jrnl-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    /// A restart that replays intents called `record` again for epochs the
+    /// journal already held. It opened in append mode without looking, so the
+    /// records went in a second time and the file then failed `read_epoch`
+    /// with `OutOfOrder` — which stopped the publisher, which stopped the
+    /// signers endorsing, which froze anchoring. Six epochs of chain 11 were
+    /// unreadable this way on 21 Sep (A125).
+    #[test]
+    fn recording_the_same_epoch_twice_does_not_duplicate_it() {
+        let dir = tmp("dup");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        for (seq, body) in [(100u64, b"one".as_slice()), (101, b"two")] {
+            j.record(9190, seq, body).expect("record");
+        }
+        j.sync().expect("sync");
+
+        // The replay: a fresh Journal over the same directory, same records.
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        for (seq, body) in [(100u64, b"one".as_slice()), (101, b"two")] {
+            again.record(9190, seq, body).expect("record");
+        }
+        again.sync().expect("sync");
+
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        let f = read_epoch(&raw).expect("the file must still be readable");
+        assert_eq!(
+            f.records.len(),
+            2,
+            "a replayed epoch must not gain a second copy of its records"
+        );
+        assert_eq!(f.records[0].0, 100);
+        assert_eq!(f.records[1].0, 101);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// New records after a replay still land, so a restart makes progress
+    /// rather than silently dropping everything.
+    #[test]
+    fn a_replay_still_accepts_records_it_has_not_seen() {
+        let dir = tmp("grow");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 100, b"one").expect("record");
+        j.sync().expect("sync");
+
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        again.record(9190, 100, b"one").expect("replayed");
+        again.record(9190, 101, b"two").expect("new");
+        again.sync().expect("sync");
+
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        let f = read_epoch(&raw).expect("readable");
+        assert_eq!(f.records.len(), 2);
+        assert_eq!(f.records[1].0, 101);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A file already corrupted by the old behaviour must still be appendable,
+    /// or recovering from it would need the restart that cannot complete.
+    #[test]
+    fn an_already_corrupt_file_can_still_be_appended_to() {
+        let dir = tmp("corrupt");
+        let chain_dir = dir_for(&dir, 11);
+        fs::create_dir_all(&chain_dir).unwrap();
+        let path = chain_dir.join("epoch-9190.intents");
+        let mut raw = Vec::new();
+        raw.extend_from_slice(MAGIC_V2);
+        raw.extend_from_slice(&11u32.to_be_bytes());
+        raw.extend_from_slice(&9190u64.to_be_bytes());
+        for seq in [100u64, 101, 100, 101] {
+            raw.extend_from_slice(&seq.to_be_bytes());
+            raw.extend_from_slice(&3u32.to_be_bytes());
+            raw.extend_from_slice(b"abc");
+        }
+        fs::write(&path, &raw).unwrap();
+        assert_eq!(read_epoch(&raw).unwrap_err(), JournalError::OutOfOrder);
+
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 102, b"new").expect("a corrupt file still accepts");
+        j.sync().expect("sync");
+        assert!(fs::read(&path).unwrap().len() > raw.len());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod sequence_collisions {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("zyn-seqc-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    /// One sequence number carrying two *different* intents is a sequencer
+    /// fault, not a replay. Writing it corrupts the file; skipping it drops
+    /// an intent and leaves the journal disagreeing with the state it
+    /// produced. On chain 11 the collided records were not identical, and
+    /// which copy survived changed the replayed root (A126).
+    #[test]
+    fn a_different_intent_at_the_same_seq_is_refused_loudly() {
+        let dir = tmp("collide");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 100, b"the first intent").expect("first");
+        j.sync().expect("sync");
+
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        let err = again
+            .record(9190, 100, b"a DIFFERENT intent")
+            .expect_err("a collision must not be accepted quietly");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string().contains("assigned one sequence number twice"),
+            "the error must name what happened: {err}"
+        );
+
+        // And nothing was written, so the file still reads.
+        again.sync().ok();
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        let f = read_epoch(&raw).expect("still readable");
+        assert_eq!(f.records.len(), 1);
+        assert_eq!(f.records[0].1, b"the first intent");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The identical record is still a replay and still skipped, so a restart
+    /// is not turned into an error.
+    #[test]
+    fn an_identical_record_is_still_a_replay() {
+        let dir = tmp("same");
+        let mut j = Journal::open(&dir, 11).expect("journal");
+        j.record(9190, 100, b"same bytes").expect("first");
+        j.sync().expect("sync");
+        let mut again = Journal::open(&dir, 11).expect("journal");
+        again.record(9190, 100, b"same bytes").expect("a replay is fine");
+        again.record(9190, 101, b"and new ones land").expect("new");
+        again.sync().expect("sync");
+        let raw = fs::read(dir_for(&dir, 11).join("epoch-9190.intents")).expect("read");
+        assert_eq!(read_epoch(&raw).unwrap().records.len(), 2);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

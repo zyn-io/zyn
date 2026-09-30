@@ -19,6 +19,7 @@
 //!   chain-<id>/index            epoch root anchor_id txid height
 //! ```
 
+use zyn_vm::spec::MicrochainVm;
 use std::fs;
 use std::path::Path;
 
@@ -270,10 +271,39 @@ pub fn read_local(root: &Path, chain_id: u32, epoch: u64) -> Result<Bundle, Stri
     })
 }
 
+/// The first epoch a bundle must carry: the one after the anchor this one
+/// continues from. Not `anchor.epochs`: that counts the epochs the node still
+/// held pending, and a restart between a seal and its anchor drops them from
+/// memory — the journal on disk is what still has them, and a replica cannot
+/// reach the root without every one. For a chain's first anchor it is the
+/// earliest epoch the journal holds, which is genesis unless the chain began
+/// from an attested base.
+pub fn first_covered(
+    ledger: &zyn::anchor::Ledger,
+    anchor: &Anchor,
+    journal_root: &Path,
+    chain_id: u32,
+) -> u64 {
+    let last = anchor.checkpoint.epoch;
+    let counted = last.saturating_add(1).saturating_sub(anchor.epochs);
+    if anchor.previous_root != [0u8; 32] {
+        return ledger
+            .anchors()
+            .iter()
+            .rev()
+            .find(|a| a.checkpoint.state_root == anchor.previous_root && a.checkpoint.epoch < last)
+            .map(|a| a.checkpoint.epoch + 1)
+            .unwrap_or(counted);
+    }
+    (0..counted)
+        .find(|&e| zyn::journal::epoch_path(journal_root, chain_id, e).exists())
+        .unwrap_or(counted)
+}
+
 /// Assemble the bundle for an anchor the chain just confirmed, from what the
 /// node holds and the journal on disk.
-pub fn bundle_for(
-    node: &zyn::node::Node<swapvm::state::SwapState>,
+pub fn bundle_for<V: MicrochainVm>(
+    node: &zyn::node::Node<V>,
     journal_root: &Path,
     chain_id: u32,
     anchor: &Anchor,
@@ -295,11 +325,10 @@ pub fn bundle_for(
         .find(|c| c.anchor == anchor.id())
         .cloned()
         .unwrap_or_else(|| Certificate::new(anchor.id()));
-    let last = anchor.checkpoint.epoch;
-    let first = last.saturating_add(1).saturating_sub(anchor.epochs);
-    let intents = zyn::journal::files_for(journal_root, chain_id, first..=last)
+    let first = first_covered(node.ledger(), anchor, journal_root, chain_id);
+    let intents = zyn::journal::files_for(journal_root, chain_id, first..=anchor.checkpoint.epoch)
         .map_err(|e| format!("journal: {}", e))?;
-    all_sealed(&intents)?;
+    all_sealed::<V>(&intents)?;
     Ok(Bundle {
         anchor: *anchor,
         certificate,
@@ -314,12 +343,12 @@ pub fn bundle_for(
 /// the anchor, the intents, and the leaves, so signers can verify and endorse
 /// while the transaction confirms. Its certificate is whatever has been
 /// gathered so far — empty at broadcast, filled by [`bundle_for`] on settle.
-pub fn proposed_bundle(
-    node: &zyn::node::Node<swapvm::state::SwapState>,
+pub fn proposed_bundle<V: MicrochainVm>(
+    node: &zyn::node::Node<V>,
     journal_root: &Path,
     chain_id: u32,
     anchor: &Anchor,
-    snapshot: &zyn::da::Snapshot<swapvm::state::SwapState>,
+    snapshot: &zyn::da::Snapshot<V>,
     txid: &str,
 ) -> Result<Bundle, String> {
     let published = snapshot
@@ -332,11 +361,10 @@ pub fn proposed_bundle(
         .certificate_for(anchor.id())
         .cloned()
         .unwrap_or_else(|| Certificate::new(anchor.id()));
-    let last = anchor.checkpoint.epoch;
-    let first = last.saturating_add(1).saturating_sub(anchor.epochs);
-    let intents = zyn::journal::files_for(journal_root, chain_id, first..=last)
+    let first = first_covered(node.ledger(), anchor, journal_root, chain_id);
+    let intents = zyn::journal::files_for(journal_root, chain_id, first..=anchor.checkpoint.epoch)
         .map_err(|e| format!("journal: {}", e))?;
-    all_sealed(&intents)?;
+    all_sealed::<V>(&intents)?;
     Ok(Bundle {
         anchor: *anchor,
         certificate,
@@ -358,7 +386,16 @@ pub fn proposed_bundle(
 /// minutes on 8 Sep 2026 (epoch 2215: 62 bytes published, 96 on disk).
 ///
 /// Refusing here costs one pass, and the next one publishes a whole bundle.
-fn all_sealed(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
+/// Whether these journal files are each closed by a seal.
+///
+/// Public so a publisher can ask the question without building a bundle —
+/// checking on disk, before anything is served, is the cheap place to find an
+/// epoch that was never closed.
+pub fn all_sealed_public<V: MicrochainVm>(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
+    all_sealed::<V>(files)
+}
+
+fn all_sealed<V: MicrochainVm>(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
     use zyn_vm::spec::MicrochainVm;
     for (epoch, raw) in files {
         let f = zyn::journal::read_epoch(raw)
@@ -369,12 +406,12 @@ fn all_sealed(files: &[(u64, Vec<u8>)]) -> Result<(), String> {
             .and_then(|(_, bytes)| {
                 if f.version == 1 {
                     let mut d = zyn_vm::read::Decoder::new(bytes);
-                    <swapvm::state::SwapState as MicrochainVm>::decode_intent(&mut d)
+                    <V as MicrochainVm>::decode_intent(&mut d)
                 } else {
-                    zyn::verify::decode_committed_intent::<swapvm::state::SwapState>(bytes).ok()
+                    zyn::verify::decode_committed_intent::<V>(bytes).ok()
                 }
             })
-            .map(|i| matches!(i, swapvm::tx::Intent::Checkpoint))
+            .map(|i| <V as MicrochainVm>::is_seal(&i))
             .unwrap_or(false);
         if !sealed {
             return Err(format!(
@@ -643,6 +680,59 @@ mod tests {
     use swapvm::{Fixed, Params};
     use zyn::da::Snapshot;
     use zyn_vm::spec::MicrochainVm;
+
+    fn anchor_at(epoch: u64, seq: u64, previous: [u8; 32], state: u8, epochs: u64) -> Anchor {
+        Anchor {
+            checkpoint: zyn_vm::Checkpoint {
+                chain_id: 4,
+                epoch,
+                parent_root: [0; 32],
+                state_root: [state; 32],
+                intent_root: [0; 32],
+                seq,
+                intents: 1,
+                gross_volume: Fixed::ZERO,
+            },
+            previous_root: previous,
+            epochs,
+            actions: 1,
+        }
+    }
+
+    /// The node counted one epoch because a restart had emptied its pending
+    /// list; the bundle still carries every epoch since the last anchor.
+    #[test]
+    fn a_bundle_covers_every_epoch_since_the_last_anchor_whatever_the_count() {
+        let root = tmp("covered");
+        let j = zyn::journal::dir_for(&root, 4);
+        fs::create_dir_all(&j).unwrap();
+        for e in 0..=1 {
+            fs::write(zyn::journal::epoch_path(&root, 4, e), b"x").unwrap();
+        }
+        let mut ledger = zyn::anchor::Ledger::new(4);
+        let first = anchor_at(1, 10, [0; 32], 1, 1);
+        assert_eq!(first_covered(&ledger, &first, &root, 4), 0, "the first anchor starts at genesis");
+        ledger.accept_trusted_operator(first).unwrap();
+
+        let second = anchor_at(5, 20, [1; 32], 2, 1);
+        assert_eq!(first_covered(&ledger, &second, &root, 4), 2, "epochs 2..=5, not just 5");
+        // After it settles it is in the ledger too; the answer must not move.
+        ledger.accept_trusted_operator(second).unwrap();
+        assert_eq!(first_covered(&ledger, &second, &root, 4), 2);
+    }
+
+    /// A chain whose journal starts after genesis (it began from an attested
+    /// base) starts its first bundle where the journal does.
+    #[test]
+    fn a_first_anchor_starts_where_the_journal_does() {
+        let root = tmp("younger");
+        fs::create_dir_all(zyn::journal::dir_for(&root, 4)).unwrap();
+        for e in 3..=4 {
+            fs::write(zyn::journal::epoch_path(&root, 4, e), b"x").unwrap();
+        }
+        let ledger = zyn::anchor::Ledger::new(4);
+        assert_eq!(first_covered(&ledger, &anchor_at(4, 10, [0; 32], 1, 1), &root, 4), 3);
+    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("zyn-publish-{}-{}", name, std::process::id()));

@@ -54,6 +54,9 @@ export async function onRequestPost({ request, env }) {
   } catch {
     return json({ ok: false, error: 'could not read the form' }, 400);
   }
+  if (!form || typeof form !== 'object' || Array.isArray(form)) {
+    return json({ ok: false, error: 'could not read the form' }, 400);
+  }
 
   // A field positioned off-screen and left empty by anyone who can see. Checked
   // first because it costs nothing and a filled one means nothing else matters.
@@ -62,7 +65,7 @@ export async function onRequestPost({ request, env }) {
   }
 
   const handle = String(form.handle || '').trim().replace(/^@/, '');
-  const post = String(form.post || '').trim();
+  const post = String(form.post || '').trim().slice(0, 300);
   const note = String(form.note || '').trim().slice(0, MAX_NOTE);
 
   if (!HANDLE.test(handle)) {
@@ -71,7 +74,7 @@ export async function onRequestPost({ request, env }) {
   // The link is the evidence a reviewer opens. Without it the engagement
   // requirement cannot be checked at all, so it is required, not optional.
   const postMatch = post.match(
-    /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})/i,
+    /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})(?:[/?#][^\s]*)?$/i,
   );
   if (!postMatch) {
     return json(
@@ -88,7 +91,7 @@ export async function onRequestPost({ request, env }) {
 
   const proof = await checkProof(handle, form.nonce);
   if (!proof) {
-    return json({ ok: false, error: 'the dig did not check out — reload and try again' }, 400);
+    return json({ ok: false, error: 'the dig did not check out — press Apply again' }, 400);
   }
 
   const ip = request.headers.get('cf-connecting-ip') || 'unknown';

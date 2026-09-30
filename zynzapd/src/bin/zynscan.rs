@@ -1,462 +1,579 @@
-//! `zynscan` — the chain, checkable by someone who does not trust us.
+//! `zynscan` — the object ledger's epochs and transactions, readable by anyone.
 //!
-//! Serves the anchor index over HTTP: every Zyn epoch, the state root it
-//! sealed, and the Zcash transaction that carries it. "Settled in batches on
-//! Zcash" is a claim; this is the page that lets a reader follow it to a
-//! transaction they can look up in an explorer we do not run.
+//! Every intent the sequencer accepts is journaled before it is applied, one
+//! file per epoch. This replays those files through `ObjectVm` — the rules a
+//! replica uses, nothing interpreted by hand — and serves what the public may
+//! see of the result over a small read-only HTTP API:
 //!
-//! Point it at a **replica** (§40.2). A replica verified the chain from Zcash
-//! and mirrors alone and sequenced nothing, so what it serves is an argument
-//! about decentralisation rather than a view of our own claims. It will read
-//! a sequencer just as happily, and says on the page which one it got.
+//! * **Epochs**: number, sealed state root, when it sealed, how many
+//!   transactions, and whether a Zcash transaction carries it yet.
+//! * **Transactions**: sequence, epoch, the kind of operation, accepted or
+//!   refused, and how many notes it created and spent.
+//! * **Market state**: the node's own public `zyn_market` and `zyn_status`.
+//!
+//! What it does not serve is the reason it exists at tier 2 (DECISIONS
+//! §130.12, §133.4): "private from the public; we can see them". Accounts,
+//! amounts, owners and destinations of holders' operations never leave this
+//! process. Operator operations (fees, collections, curve terms, item mints'
+//! collection and serial) are public by nature and are shown whole; for a
+//! holder's operation the public learns that it happened, what kind it was,
+//! and which public object it touched (a pool, a curve token) — nothing that
+//! says who, or how much.
 //!
 //! ```text
-//!   ZYN_SCAN_LISTEN    HTTP, read-only            (0.0.0.0:8090)
-//!   ZYN_SCAN_NODE      node RPC to read           (127.0.0.1:8100, a replica)
-//!   ZYN_CHAIN_ID       the chain                  (11)
-//!   ZYN_SCAN_LIMIT     anchors to show            (200)
-//!   ZYN_SCAN_REFRESH   seconds between reads      (15)
-//!   ZYN_SCAN_EXPLORER  Zcash explorer tx base URL
+//!   ZYN_CHAIN_ID        the chain                       (required)
+//!   ZYN_SCAN_DATA       the node's data dir (journal/)  (required)
+//!   ZYN_SCAN_NODE       the node's JSON-RPC             (http://127.0.0.1:8499)
+//!   ZYN_SCAN_LISTEN     HTTP, read-only                 (127.0.0.1:8090)
+//!   ZYN_SCAN_REFRESH    seconds between reads           (5)
+//!   ZYN_SCAN_NETWORK    label shown on the page         (testnet)
+//!   ZYN_MAX_IO          the chain's I/O limit           (16, as the node)
 //! ```
 //!
-//! Nothing here can write: no key is loaded and no submit path exists. The
-//! node is read on a timer rather than per request, so a page that gets
-//! attention cannot turn into load on the chain behind it.
+//! Nothing here can write: it reads journal files and a public RPC, holds no
+//! key and has no submit path. The chain is read on a timer, not per request,
+//! so attention on the page never becomes load on the sequencer.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use zynzapd::client::{hex, AnchorView, CurveView, Node, Status};
+use objectvm::{ObjectVm, Op, Receipt};
+use serde_json::{json, Value};
+use zyn_vm::spec::MicrochainVm;
 
 fn env(k: &str, d: &str) -> String {
-    std::env::var(k).unwrap_or_else(|_| d.to_string())
+    std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| d.to_string())
 }
 
-/// What the last read of the node produced. Served to every visitor until the
-/// next one lands, so the node sees one reader however many people look.
-#[derive(Default)]
-struct Snapshot {
-    status: Option<Status>,
-    anchors: Vec<AnchorView>,
-    curves: Vec<CurveView>,
-    /// Why the last read failed, if it did. Shown rather than swallowed: a
-    /// scan that silently serves stale data is worse than one that says so.
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// What the public may see of one intent.
+
+struct Tx {
+    seq: u64,
+    epoch: u64,
+    kind: &'static str,
+    operator: bool,
+    ok: bool,
+    refusal: Option<String>,
+    created: usize,
+    spent: usize,
+    detail: Value,
+}
+
+impl Tx {
+    fn json(&self) -> Value {
+        json!({
+            "seq": self.seq, "epoch": self.epoch, "kind": self.kind, "operator": self.operator,
+            "ok": self.ok, "refusal": self.refusal, "created": self.created, "spent": self.spent,
+            "detail": self.detail,
+        })
+    }
+}
+
+/// The kind of an operation, whether only the operator may send it, and the
+/// fields of it that are public. For a holder's operation that is at most a
+/// public object id; never an account, an amount or a destination.
+fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
+    let from_receipt = |f: &dyn Fn(&Receipt) -> Option<Value>| receipts.iter().find_map(f).unwrap_or(Value::Null);
+    match op {
+        Op::Mint { .. } => ("Mint (devnet)", true, Value::Null),
+        Op::Spend { .. } => ("Transfer", false, Value::Null),
+        Op::SettleExit { index, txid, .. } => ("Exit paid", true, json!({ "index": index, "zcash_txid": hex(txid) })),
+        Op::Register { .. } => ("Register", false, Value::Null),
+        Op::Withdraw { .. } => ("Withdraw to Zcash", false, Value::Null),
+        Op::Deposit { .. } => ("Deposit", true, Value::Null),
+        Op::DepositWithFee { .. } => ("Deposit", true, Value::Null),
+        Op::PlaceOffer { .. } => ("Offer placed", false, Value::Null),
+        Op::CancelOffer { .. } => ("Offer cancelled", false, Value::Null),
+        Op::TakeOffer { .. } => ("Offer taken", false, Value::Null),
+        Op::CreatePool { .. } => (
+            "Pool created",
+            false,
+            from_receipt(&|r| match r {
+                Receipt::Pooled { pool, .. } => Some(json!({ "pool": hex(pool) })),
+                _ => None,
+            }),
+        ),
+        Op::AddLiquidity { pool, .. } => ("Liquidity added", false, json!({ "pool": hex(pool) })),
+        Op::RemoveLiquidity { pool, .. } => ("Liquidity removed", false, json!({ "pool": hex(pool) })),
+        Op::Swap { pool, .. } => ("Swap", false, json!({ "pool": hex(pool) })),
+        Op::Claim { .. } => ("Claim", false, Value::Null),
+        Op::CreateLaunch { .. } => (
+            "Launch created",
+            false,
+            from_receipt(&|r| match r {
+                Receipt::Launched { token } => Some(json!({ "token": hex(token) })),
+                _ => None,
+            }),
+        ),
+        Op::Commit { .. } => ("Launch commit", false, Value::Null),
+        Op::SetFees { bridge_bps, .. } => ("Fees set", true, json!({ "bridge_bps": bridge_bps })),
+        Op::RegisterCollection { asset, creator, quote, fee_bps, cap, .. } => (
+            "Collection registered",
+            true,
+            json!({ "collection": hex(asset), "creator": hex(creator), "quote": hex(quote), "fee_bps": fee_bps, "cap": cap }),
+        ),
+        Op::List { .. } => ("Item listed", false, Value::Null),
+        Op::MintItem { collection, serial, .. } => ("Item minted", true, json!({ "collection": hex(collection), "serial": serial })),
+        Op::Redeem { asset, .. } => ("Item redeemed", false, json!({ "collection_asset": hex(asset) })),
+        Op::CreateCurve { .. } => (
+            "Coin created",
+            false,
+            from_receipt(&|r| match r {
+                Receipt::CurveCreated { token } => Some(json!({ "token": hex(token) })),
+                _ => None,
+            }),
+        ),
+        Op::CurveTrade { token, .. } => ("Curve trade", false, json!({ "token": hex(token) })),
+        Op::SetCurveTerms { fee_bps, bond, .. } => ("Curve terms set", true, json!({ "fee_bps": fee_bps, "bond": bond.0.to_string() })),
+        Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
+            "Sale opened",
+            true,
+            json!({ "collection": hex(collection), "ticket_price": ticket_price.0.to_string(), "claim_price": claim_price.0.to_string(), "open_price": open_price.0.to_string(), "treasury_bps": treasury_bps }),
+        ),
+        // A ticket's id is its buyer's to derive; the count and the sale are public.
+        Op::BuyTickets { collection, count, .. } => ("Tickets bought", false, json!({ "collection": hex(collection), "tickets": count })),
+        Op::CloseSale { collection, zcash_height, zcash_hash, .. } => (
+            "Sale closed",
+            true,
+            json!({ "collection": hex(collection), "zcash_height": zcash_height, "zcash_block": hex(zcash_hash) }),
+        ),
+        Op::PostDraw { collection, root, .. } => ("Draw posted", true, json!({ "collection": hex(collection), "root": hex(root) })),
+        // Minted items are public (collection and serial); who claimed them is not.
+        Op::ClaimItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
+        Op::PostOpenMint { collection, root, count, .. } => ("Open mint posted", true, json!({ "collection": hex(collection), "root": hex(root), "items": count })),
+        Op::MintOpen { collection, serial, .. } => ("Open mint", false, json!({ "collection": hex(collection), "serial": serial })),
+        Op::SetVoucherCap { collection, cap, .. } => ("Burn tickets capped", true, json!({ "collection": hex(collection), "cap": cap })),
+        // A burn is public on its own chain already; which Zyn account it
+        // belongs to is not shown (the commitment hides it).
+        Op::PostVoucher { collection, burn, count, .. } => ("Burn posted", true, json!({ "collection": hex(collection), "burn": hex(burn), "tickets": count })),
+        Op::ClaimVoucherItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
+        Op::RegisterBridged { network, origin, decimals, .. } => (
+            "Bridged asset registered",
+            true,
+            json!({ "network": String::from_utf8_lossy(network), "origin": hex(origin), "decimals": decimals }),
+        ),
+        // Like a ZEC deposit: which asset arrived, not how much or for whom.
+        Op::DepositCommitted { asset, .. } => ("Bridge deposit", true, json!({ "asset": hex(asset) })),
+        Op::ClaimDeposit { asset, .. } => ("Bridge deposit claimed", false, json!({ "asset": hex(asset) })),
+        Op::Seal => ("Seal", true, Value::Null),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The index: replayed incrementally from the journal.
+
+struct Epoch {
+    n: u64,
+    root: Option<[u8; 32]>,
+    sealed_at: Option<u64>,
+    seqs: Vec<u64>,
+}
+
+struct Index {
+    chain: u32,
+    max_io: u32,
+    data: PathBuf,
+    vm: ObjectVm,
+    epochs: BTreeMap<u64, Epoch>,
+    txs: BTreeMap<u64, Tx>,
+    /// The next epoch file to read, and how many of its records are in.
+    next_epoch: u64,
+    applied_in_open: usize,
+    anchors: BTreeMap<u64, (u64, String)>,
+    market: Value,
+    status: Value,
     error: Option<String>,
     at: u64,
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+impl Index {
+    fn new(chain: u32, max_io: u32, data: PathBuf) -> Index {
+        Index {
+            chain,
+            max_io,
+            data,
+            vm: zynzapd::object_verify::fresh(chain, max_io),
+            epochs: BTreeMap::new(),
+            txs: BTreeMap::new(),
+            next_epoch: 0,
+            applied_in_open: 0,
+            anchors: BTreeMap::new(),
+            market: Value::Null,
+            status: Value::Null,
+            error: None,
+            at: 0,
+        }
+    }
 
-fn main() {
-    let listen = env("ZYN_SCAN_LISTEN", "0.0.0.0:8090");
-    let addr = env("ZYN_SCAN_NODE", "127.0.0.1:8100");
-    let chain: u32 = env("ZYN_CHAIN_ID", "11").parse().unwrap_or(11);
-    let limit: u32 = env("ZYN_SCAN_LIMIT", "200").parse().unwrap_or(200);
-    let refresh: u64 = env("ZYN_SCAN_REFRESH", "15").parse().unwrap_or(15).max(2);
-    let explorer = env(
-        "ZYN_SCAN_EXPLORER",
-        "https://testnet.zcashexplorer.app/transactions/",
-    );
+    fn reset(&mut self) {
+        let fresh = Index::new(self.chain, self.max_io, self.data.clone());
+        self.vm = fresh.vm;
+        self.epochs.clear();
+        self.txs.clear();
+        self.next_epoch = 0;
+        self.applied_in_open = 0;
+    }
 
-    let snap = Arc::new(Mutex::new(Snapshot::default()));
-    {
-        let (snap, addr) = (Arc::clone(&snap), addr.clone());
-        std::thread::spawn(move || loop {
-            let node = Node::new(&addr, chain);
-            let got = node.status().and_then(|s| {
-                node.anchors(limit)
-                    .and_then(|a| node.curves().map(|c| (s, a, c)))
-            });
-            if let Ok(mut w) = snap.lock() {
-                match got {
-                    Ok((s, mut a, c)) => {
-                        // Newest first: a reader wants the most recent
-                        // settlement, not the chain's first one.
-                        a.sort_by(|x, y| y.epoch.cmp(&x.epoch));
-                        *w = Snapshot {
-                            status: Some(s),
-                            anchors: a,
-                            curves: c,
-                            error: None,
-                            at: now(),
-                        };
-                    }
-                    // Keep what was last proved and say the read failed. The
-                    // page then shows real anchors and an honest banner.
-                    Err(e) => {
-                        w.error = Some(e);
+    /// Read whatever the journal holds past where this index is. Stops at the
+    /// open epoch; picks up its new records next time.
+    fn ingest(&mut self) -> Result<(), String> {
+        loop {
+            let path = zyn::journal::epoch_path(&self.data, self.chain, self.next_epoch);
+            let Ok(bytes) = std::fs::read(&path) else { return Ok(()) };
+            let file = zyn::journal::read_epoch(&bytes).map_err(|e| format!("epoch {}: {e:?}", self.next_epoch))?;
+            if file.version != 2 {
+                return Err(format!("epoch {} is a version {} journal; zynscan reads version 2", file.epoch, file.version));
+            }
+            if file.chain_id != self.chain || file.epoch != self.next_epoch {
+                return Err(format!("{} is not chain {} epoch {}", path.display(), self.chain, self.next_epoch));
+            }
+            let epoch_n = self.next_epoch;
+            self.epochs.entry(epoch_n).or_insert(Epoch { n: epoch_n, root: None, sealed_at: None, seqs: Vec::new() });
+            let mut sealed = false;
+            for (seq, record) in file.records.iter().skip(self.applied_in_open) {
+                let expected = self.vm.seq() + 1;
+                if *seq != expected {
+                    return Err(format!("sequence gap in epoch {epoch_n}: expected {expected}, got {seq}"));
+                }
+                let authorized = zyn_vm::verify::decode_authorized::<ObjectVm>(record, &self.vm)
+                    .map_err(|e| format!("seq {seq} does not verify: {e:?}"))?;
+                let op = authorized.into_intent();
+                let receipts = self.vm.apply_committed(*seq, &op, record);
+                let (kind, operator, detail) = describe(&op, &receipts);
+                let refusal = receipts.iter().find_map(|r| match r {
+                    Receipt::Refused(why) => Some(why.to_string()),
+                    _ => None,
+                });
+                self.txs.insert(*seq, Tx {
+                    seq: *seq,
+                    epoch: epoch_n,
+                    kind,
+                    operator,
+                    ok: refusal.is_none(),
+                    refusal,
+                    created: op.created().len(),
+                    spent: op.retired().len(),
+                    detail,
+                });
+                self.applied_in_open += 1;
+                let e = self.epochs.get_mut(&epoch_n).expect("inserted above");
+                e.seqs.push(*seq);
+                if let Some(cp) = ObjectVm::sealed(&receipts) {
+                    e.root = Some(cp.state_root);
+                    e.sealed_at = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs());
+                    sealed = true;
+                }
+            }
+            if !sealed {
+                return Ok(());
+            }
+            self.next_epoch += 1;
+            self.applied_in_open = 0;
+        }
+    }
+
+    fn refresh(&mut self, node: &str) {
+        let mut errors = Vec::new();
+        if let Err(e) = self.ingest() {
+            // A journal that no longer replays from where we were (a rewound
+            // node, a restored backup) is rebuilt from genesis rather than
+            // patched: the index must be what the files say, all of it.
+            self.reset();
+            if let Err(e2) = self.ingest() {
+                errors.push(format!("journal: {e2}"));
+            } else {
+                eprintln!("zynscan: rebuilt from genesis after: {e}");
+            }
+        }
+        match zynzapd::object_client::call(node, "zyn_status", json!({})) {
+            Ok(v) => self.status = v,
+            Err(e) => errors.push(format!("status: {e}")),
+        }
+        match zynzapd::object_client::call(node, "zyn_market", json!({})) {
+            Ok(v) => self.market = v,
+            Err(e) => errors.push(format!("market: {e}")),
+        }
+        if let Ok(Value::Array(rows)) = zynzapd::object_client::call(node, "zyn_anchors", json!({})) {
+            for r in rows {
+                if let (Some(e), Some(h), Some(t)) = (r["epoch"].as_u64(), r["height"].as_u64(), r["txid"].as_str()) {
+                    if h > 0 {
+                        self.anchors.insert(e, (h, t.to_string()));
                     }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(refresh));
-        });
+        }
+        self.error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
+        self.at = now();
     }
 
+    /// The first anchor at or after `epoch`: an anchor covers every epoch
+    /// since the one before it.
+    fn anchor_for(&self, epoch: u64) -> Value {
+        match self.anchors.range(epoch..).next() {
+            Some((e, (h, t))) => json!({ "epoch": e, "zcash_height": h, "zcash_txid": t }),
+            None => Value::Null,
+        }
+    }
+
+    fn epoch_json(&self, e: &Epoch, with_txs: bool) -> Value {
+        let txs: Vec<&Tx> = e.seqs.iter().filter_map(|s| self.txs.get(s)).filter(|t| t.kind != "Seal").collect();
+        let mut v = json!({
+            "epoch": e.n,
+            "sealed": e.root.is_some(),
+            "root": e.root.map(|r| hex(&r)),
+            "sealed_at": e.sealed_at,
+            "txs": txs.len(),
+            "refused": txs.iter().filter(|t| !t.ok).count(),
+            "anchor": self.anchor_for(e.n),
+        });
+        if with_txs {
+            v["transactions"] = Value::Array(txs.iter().map(|t| t.json()).collect());
+        }
+        v
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP.
+
+fn query(path: &str) -> (String, BTreeMap<String, String>) {
+    let (p, q) = path.split_once('?').unwrap_or((path, ""));
+    let params = q
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    (p.trim_end_matches('/').to_string(), params)
+}
+
+fn route(ix: &Index, network: &str, path: &str) -> (u16, Value) {
+    let (p, q) = query(path);
+    let num = |k: &str| q.get(k).and_then(|v| v.parse::<u64>().ok());
+    let limit = num("limit").unwrap_or(25).clamp(1, 100) as usize;
+    let user_txs = || ix.txs.values().filter(|t| t.kind != "Seal");
+    match p.as_str() {
+        "/api/summary" | "/api" => {
+            let last_sealed = ix.epochs.values().rev().find(|e| e.root.is_some());
+            (200, json!({
+                "chain": ix.chain,
+                "network": network,
+                "epoch": ix.status.get("epoch").cloned().unwrap_or(Value::Null),
+                "seq": ix.vm.seq(),
+                "sealed_epochs": ix.epochs.values().filter(|e| e.root.is_some()).count(),
+                "transactions": user_txs().count(),
+                "refused": user_txs().filter(|t| !t.ok).count(),
+                "last_root": last_sealed.and_then(|e| e.root).map(|r| hex(&r)),
+                "last_sealed_epoch": last_sealed.map(|e| e.n),
+                "last_sealed_at": last_sealed.and_then(|e| e.sealed_at),
+                "anchored_through": ix.anchors.keys().next_back(),
+                // The index's own replay against the node's word for it: equal
+                // roots at the same sequence mean the journal this page reads
+                // reproduces exactly the state the sequencer holds.
+                "replayed_root": hex(&ix.vm.state_root()),
+                "node_root": ix.status.get("state_root").cloned().unwrap_or(Value::Null),
+                "agrees": match (ix.status.get("seq").and_then(Value::as_u64), ix.status.get("state_root").and_then(Value::as_str)) {
+                    (Some(seq), Some(root)) if seq == ix.vm.seq() => Value::Bool(root == hex(&ix.vm.state_root())),
+                    _ => Value::Null,
+                },
+                "kinds": user_txs().fold(BTreeMap::<&str, u64>::new(), |mut m, t| { *m.entry(t.kind).or_default() += 1; m }),
+                "updated_at": ix.at,
+                "error": ix.error,
+                "privacy": "tier 2: accounts, amounts and owners of holders' operations are not published",
+            }))
+        }
+        "/api/epochs" => {
+            let before = num("before").unwrap_or(u64::MAX);
+            let rows: Vec<Value> = ix.epochs.range(..before).rev().take(limit).map(|(_, e)| ix.epoch_json(e, false)).collect();
+            (200, Value::Array(rows))
+        }
+        "/api/txs" => {
+            let before = num("before").unwrap_or(u64::MAX);
+            let rows: Vec<Value> = ix.txs.range(..before).rev().filter(|(_, t)| t.kind != "Seal").take(limit).map(|(_, t)| t.json()).collect();
+            (200, Value::Array(rows))
+        }
+        "/api/market" => (200, json!({ "market": ix.market, "status": ix.status })),
+        "/health" => (200, json!({ "ok": ix.error.is_none(), "updated_at": ix.at })),
+        _ => {
+            if let Some(n) = p.strip_prefix("/api/epoch/").and_then(|s| s.parse::<u64>().ok()) {
+                return match ix.epochs.get(&n) {
+                    Some(e) => (200, ix.epoch_json(e, true)),
+                    None => (404, json!({ "error": "no such epoch yet" })),
+                };
+            }
+            if let Some(n) = p.strip_prefix("/api/tx/").and_then(|s| s.parse::<u64>().ok()) {
+                return match ix.txs.get(&n) {
+                    Some(t) => {
+                        let mut v = t.json();
+                        v["anchor"] = ix.anchor_for(t.epoch);
+                        (200, v)
+                    }
+                    None => (404, json!({ "error": "no such transaction yet" })),
+                };
+            }
+            (404, json!({ "error": "not found" }))
+        }
+    }
+}
+
+fn serve(mut s: TcpStream, ix: &Arc<Mutex<Index>>, network: &str) {
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+    let mut buf = [0u8; 4096];
+    let n = s.read(&mut buf).unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..n]);
+    let mut parts = head.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let path = parts.next().unwrap_or("/");
+    let (code, body) = if method == "OPTIONS" {
+        (204, Value::Null)
+    } else if method != "GET" {
+        (405, json!({ "error": "read-only" }))
+    } else {
+        let ix = ix.lock().unwrap();
+        route(&ix, network, path)
+    };
+    let text = if body.is_null() { String::new() } else { body.to_string() };
+    let reason = match code { 200 => "OK", 204 => "No Content", 404 => "Not Found", _ => "Method Not Allowed" };
+    let _ = write!(
+        s,
+        "HTTP/1.1 {code} {reason}\r\ncontent-type: application/json\r\naccess-control-allow-origin: *\r\naccess-control-allow-methods: GET, OPTIONS\r\ncache-control: public, max-age=3\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+        text.len()
+    );
+}
+
+fn main() {
+    let chain: u32 = match std::env::var("ZYN_CHAIN_ID").ok().and_then(|v| v.parse().ok()) {
+        Some(c) => c,
+        None => {
+            eprintln!("zynscan: ZYN_CHAIN_ID is required — it names the chain to serve (26460 mainnet, 212 testnet)");
+            std::process::exit(1)
+        }
+    };
+    let data = match std::env::var("ZYN_SCAN_DATA").ok().filter(|v| !v.is_empty()) {
+        Some(d) => PathBuf::from(d),
+        None => {
+            eprintln!("zynscan: ZYN_SCAN_DATA is required — the node's data directory, which holds journal/");
+            std::process::exit(1)
+        }
+    };
+    let node = env("ZYN_SCAN_NODE", "http://127.0.0.1:8499");
+    let listen = env("ZYN_SCAN_LISTEN", "127.0.0.1:8090");
+    let network = env("ZYN_SCAN_NETWORK", "testnet");
+    let refresh: u64 = env("ZYN_SCAN_REFRESH", "5").parse().unwrap_or(5).max(1);
+    let max_io: u32 = env("ZYN_MAX_IO", "").parse().unwrap_or(zynzapd::object_verify::DEFAULT_MAX_IO);
+
+    let ix = Arc::new(Mutex::new(Index::new(chain, max_io, data)));
+    ix.lock().unwrap().refresh(&node);
+    {
+        let i = ix.lock().unwrap();
+        eprintln!(
+            "zynscan: chain {chain} ({network}) — {} epochs, {} records replayed; serving {listen}{}",
+            i.epochs.len(),
+            i.txs.len(),
+            i.error.as_ref().map(|e| format!(" (warning: {e})")).unwrap_or_default()
+        );
+    }
+    {
+        let ix = ix.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(refresh));
+            ix.lock().unwrap().refresh(&node);
+        });
+    }
     let listener = TcpListener::bind(&listen).unwrap_or_else(|e| {
-        eprintln!("zynscan: cannot bind {}: {}", listen, e);
+        eprintln!("zynscan: cannot listen on {listen}: {e}");
         std::process::exit(1)
     });
-    eprintln!(
-        "zynscan: chain {} reading {} — http://{}/",
-        chain, addr, listen
-    );
-    let cfg = Arc::new((chain, addr, explorer));
-    for stream in listener.incoming().flatten() {
-        let (snap, cfg) = (Arc::clone(&snap), Arc::clone(&cfg));
-        std::thread::spawn(move || {
-            let _ = handle(&snap, &cfg, stream);
-        });
+    for s in listener.incoming().flatten() {
+        let ix = ix.clone();
+        let network = network.clone();
+        std::thread::spawn(move || serve(s, &ix, &network));
     }
 }
 
-fn read_path(s: &mut TcpStream) -> Option<String> {
-    s.set_read_timeout(Some(std::time::Duration::from_secs(10)))
-        .ok();
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 2048];
-    loop {
-        let n = s.read(&mut tmp).ok()?;
-        if n == 0 {
-            return None;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A holder's operation says what kind it was and nothing about who or
+    /// how much: the whole privacy line of this binary, pinned.
+    #[test]
+    fn a_holders_operation_publishes_no_account_or_amount() {
+        let op = Op::CurveTrade {
+            trader: [0xA1; 32],
+            program: zyn_vm::program::curve_trade(),
+            token: [0x77; 32],
+            buy: true,
+            amount_in: zyn_vm::Fixed::whole(3),
+            min_out: zyn_vm::Fixed::ZERO,
+            inputs: vec![],
+            change: vec![],
+            nonce: [9; 32],
+        };
+        let (kind, operator, detail) = describe(&op, &[]);
+        assert_eq!(kind, "Curve trade");
+        assert!(!operator);
+        let text = detail.to_string();
+        assert!(!text.contains(&hex(&[0xA1; 32])), "the trader must not appear: {text}");
+        assert!(!text.contains("3000000000000000000"), "the amount must not appear: {text}");
+        assert!(text.contains(&hex(&[0x77; 32])), "the public token does");
+    }
+
+    #[test]
+    fn a_journal_replays_into_epochs_and_transactions() {
+        let dir = std::env::temp_dir().join(format!("zynscan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut j = zyn::journal::Journal::open(&dir, 212).unwrap();
+        let mut vm = zynzapd::object_verify::fresh(212, 16);
+        let ops = [
+            Op::SetFees { program: zyn_vm::program::configure_fees(), bridge_bps: 50 },
+            Op::Seal,
+            Op::SetCurveTerms { program: zyn_vm::program::configure_curves(), fee_bps: 100, bond: zyn_vm::Fixed::ZERO },
+        ];
+        let mut epoch = 0;
+        for op in ops {
+            let enc = zyn_vm::verify::encode_authorized::<ObjectVm>(&zyn_vm::verify::Authorized::operator(op.clone()));
+            let seq = vm.seq() + 1;
+            j.record(epoch, seq, &enc).unwrap();
+            let r = vm.apply_committed(seq, &op, &enc);
+            assert!(!ObjectVm::rejected(&r[0]), "{r:?}");
+            if ObjectVm::sealed(&r).is_some() {
+                epoch += 1;
+            }
         }
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-        // A read-only GET server needs no body at all; anything this long is
-        // not a request we serve.
-        if buf.len() > 8 << 10 {
-            return None;
-        }
+        j.sync().unwrap();
+        let mut ix = Index::new(212, 16, dir.clone());
+        ix.ingest().unwrap();
+        assert_eq!(ix.epochs.len(), 2, "one sealed epoch and the open one");
+        assert!(ix.epochs[&0].root.is_some() && ix.epochs[&1].root.is_none());
+        let (_, v) = route(&ix, "testnet", "/api/epoch/0");
+        assert_eq!(v["txs"], 1);
+        assert_eq!(v["transactions"][0]["kind"], "Fees set");
+        assert_eq!(v["transactions"][0]["detail"]["bridge_bps"], 50);
+        let (_, t) = route(&ix, "testnet", "/api/txs");
+        assert_eq!(t.as_array().unwrap().len(), 2, "seals are not listed as transactions");
+        // Picking up new records later, without replaying what it has.
+        let op = Op::SetFees { program: zyn_vm::program::configure_fees(), bridge_bps: 60 };
+        let enc = zyn_vm::verify::encode_authorized::<ObjectVm>(&zyn_vm::verify::Authorized::operator(op));
+        j.record(1, vm.seq() + 1, &enc).unwrap();
+        j.sync().unwrap();
+        ix.ingest().unwrap();
+        assert_eq!(route(&ix, "testnet", "/api/txs").1.as_array().unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
-    let head = String::from_utf8_lossy(&buf).to_string();
-    let mut req = head.lines().next()?.split_whitespace();
-    let method = req.next()?;
-    if method != "GET" && method != "HEAD" {
-        return None;
-    }
-    Some(req.next()?.to_string())
-}
-
-fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) -> std::io::Result<()> {
-    write!(
-        s,
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n\
-         Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n\
-         Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
-        status,
-        ctype,
-        body.len()
-    )?;
-    s.write_all(body)?;
-    s.flush()
-}
-
-fn handle(
-    snap: &Arc<Mutex<Snapshot>>,
-    cfg: &Arc<(u32, String, String)>,
-    mut s: TcpStream,
-) -> std::io::Result<()> {
-    let Some(path) = read_path(&mut s) else {
-        return Ok(());
-    };
-    let route = path.split('?').next().unwrap_or("/");
-    let (chain, node, explorer) = (cfg.0, cfg.1.as_str(), cfg.2.as_str());
-    let g = snap.lock().map_err(|_| std::io::Error::other("poisoned"))?;
-    match route {
-        "/healthz" => respond(
-            &mut s,
-            "200 OK",
-            "text/plain",
-            if g.status.is_some() {
-                b"ok"
-            } else {
-                b"no data"
-            },
-        ),
-        "/api/status" => respond(
-            &mut s,
-            "200 OK",
-            "application/json",
-            status_json(&g, chain, node).as_bytes(),
-        ),
-        "/api/anchors" => respond(
-            &mut s,
-            "200 OK",
-            "application/json",
-            anchors_json(&g).as_bytes(),
-        ),
-        "/api/curves" => respond(
-            &mut s,
-            "200 OK",
-            "application/json",
-            curves_json(&g).as_bytes(),
-        ),
-        "/" => respond(
-            &mut s,
-            "200 OK",
-            "text/html; charset=utf-8",
-            page(&g, chain, node, explorer).as_bytes(),
-        ),
-        _ => respond(&mut s, "404 Not Found", "text/plain", b"not found"),
-    }
-}
-
-fn status_json(g: &Snapshot, chain: u32, node: &str) -> String {
-    let Some(st) = g.status.as_ref() else {
-        return format!(
-            r#"{{"chain":{},"reading":"{}","ready":false,"error":{}}}"#,
-            chain,
-            esc_json(node),
-            g.error
-                .as_deref()
-                .map(esc_quoted)
-                .unwrap_or_else(|| "null".into())
-        );
-    };
-    format!(
-        r#"{{"chain":{},"reading":"{}","ready":true,"role":"{}","seq":{},"epoch":{},"root":"{}","anchored_epoch":{},"verified_height":{},"forced_pending":{},"censored":{},"accounts":{},"pools":{},"fetched_at":{},"error":{}}}"#,
-        chain,
-        esc_json(node),
-        if st.role == 1 { "replica" } else { "sequencer" },
-        st.seq,
-        st.epoch,
-        hex(&st.root),
-        st.anchored_epoch,
-        st.verified_height,
-        st.forced_pending,
-        st.censored,
-        st.accounts,
-        st.pools,
-        g.at,
-        g.error
-            .as_deref()
-            .map(esc_quoted)
-            .unwrap_or_else(|| "null".into())
-    )
-}
-
-fn anchors_json(g: &Snapshot) -> String {
-    let rows: Vec<String> = g
-        .anchors
-        .iter()
-        .map(|a| {
-            format!(
-                r#"{{"epoch":{},"root":"{}","anchor_id":"{}","txid":"{}","height":{}}}"#,
-                a.epoch,
-                hex(&a.root),
-                hex(&a.anchor_id),
-                esc_json(&a.txid),
-                a.height
-            )
-        })
-        .collect();
-    format!(r#"{{"anchors":[{}]}}"#, rows.join(","))
-}
-
-fn curves_json(g: &Snapshot) -> String {
-    let rows: Vec<String> = g.curves.iter().map(|c| format!(
-        r#"{{"asset":"{}","creator":"{}","symbol":"{}","display_name":"{}","metadata_hash":"{}","fee_bps":{},"phase":"{}","sold":"{}","curve_reserve":"{}","market_zec":"{}","zec_per_token":"{}","creator_fees":"{}","graduation_fees":"{}","graduated_token_liquidity":"{}","graduated_zec_liquidity":"{}","graduation_overflow":"{}","graduated_locked_lp":"{}","pool":{}}}"#,
-        hex(&c.asset), hex(&c.creator), esc_json(&c.symbol), esc_json(&c.display_name), hex(&c.metadata_hash), c.fee_bps,
-        if c.pool.is_some() { "graduated" } else { "curve" }, c.sold, c.curve_reserve, c.market_zec, c.marginal_price,
-        c.creator_fees, c.graduation_fees, c.graduated_token_liquidity, c.graduated_zec_liquidity,
-        c.graduation_overflow, c.graduated_locked_lp,
-        c.pool.map(|p| format!("\"{}\"", hex(&p))).unwrap_or_else(|| "null".into()),
-    )).collect();
-    format!(r#"{{"curves":[{}]}}"#, rows.join(","))
-}
-
-fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-/// JSON string body: the values here are hex, hostnames and node error text,
-/// so quotes and backslashes are the whole risk.
-fn esc_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', " ")
-}
-fn esc_quoted(s: &str) -> String {
-    format!("\"{}\"", esc_json(s))
-}
-fn short(s: &str, n: usize) -> String {
-    if s.len() > 2 * n {
-        format!("{}…{}", &s[..n], &s[s.len() - 6..])
-    } else {
-        s.to_string()
-    }
-}
-
-fn page(g: &Snapshot, chain: u32, node: &str, explorer: &str) -> String {
-    let (role, head) = match g.status.as_ref() {
-        Some(st) => (
-            if st.role == 1 {
-                "a verifying replica"
-            } else {
-                "the sequencer"
-            },
-            format!(
-                r#"<div class="grid">
-      <div class="stat"><span class="k">Chain</span><span class="v num">{chain}</span></div>
-      <div class="stat"><span class="k">Epoch</span><span class="v num">{epoch}</span></div>
-      <div class="stat"><span class="k">Last anchored epoch</span><span class="v num">{anch}</span></div>
-      <div class="stat"><span class="k">Anchors listed</span><span class="v num">{n}</span></div>
-      <div class="stat"><span class="k">Cave launches</span><span class="v num">{curves}</span></div>
-    </div>"#,
-                chain = chain,
-                epoch = st.epoch,
-                anch = st.anchored_epoch,
-                n = g.anchors.len(),
-                curves = g.curves.len()
-            ),
-        ),
-        None => (
-            "a node",
-            format!(
-                r#"<div class="grid"><div class="stat"><span class="k">Chain</span><span class="v num">{}</span></div></div>"#,
-                chain
-            ),
-        ),
-    };
-
-    let banner = match (g.status.as_ref(), g.error.as_deref()) {
-        (_, Some(e)) => format!(
-            r#"<p class="warn">The last read of the node failed: {}. Anything below is what was last proved, not what is true now.</p>"#,
-            esc(e)
-        ),
-        (None, None) => {
-            r#"<p class="warn">Waiting for the first read of the node.</p>"#.to_string()
-        }
-        _ => String::new(),
-    };
-
-    let rows = if g.anchors.is_empty() {
-        r#"<tr><td colspan="4" class="empty">No anchors served. A node holding no bundles refuses rather than reporting an empty chain, so this means it has none — not that nothing was ever settled.</td></tr>"#.to_string()
-    } else {
-        g.anchors.iter().map(|a| {
-            let txid = esc(&a.txid);
-            format!(
-                r#"<tr><td class="num">{epoch}</td><td class="mono" title="{root}">{root_s}</td>
-       <td class="mono"><a href="{ex}{txid}" target="_blank" rel="noopener noreferrer" title="{txid}">{txid_s}</a></td>
-       <td class="num">{height}</td></tr>"#,
-                epoch = a.epoch,
-                root = hex(&a.root), root_s = short(&hex(&a.root), 10),
-                ex = esc(explorer), txid = txid, txid_s = short(&txid, 10),
-                // The index carries 0 for an anchor whose transaction has been
-                // broadcast but not yet seen confirmed. Printing that as a
-                // height claims it settled in block zero.
-                height = if a.height == 0 { "<span class=\"pending\">broadcast</span>".to_string() } else { a.height.to_string() },
-            )
-        }).collect::<Vec<_>>().join("\n")
-    };
-
-    let curve_rows = if g.curves.is_empty() {
-        r#"<tr><td colspan="8" class="empty">No Cave launches are committed in this snapshot.</td></tr>"#.to_string()
-    } else {
-        g.curves.iter().map(|c| format!(
-            r#"<tr><td><strong>{name}</strong><br><span class="mono">{symbol}</span></td><td>{phase}</td><td class="num">{price}</td><td class="num">{reserve}</td><td class="num">{creator_fee}</td><td class="num">{graduation_fee}</td><td class="num">{overflow}</td><td class="mono" title="{asset}">{asset_s}<br><span title="{pool}">{pool_s}</span></td></tr>"#,
-            name = esc(&c.display_name), symbol = esc(&c.symbol), phase = if c.pool.is_some() { "ZynZap" } else { "curve" },
-            price = c.marginal_price, reserve = c.market_zec, creator_fee = c.creator_fees,
-            graduation_fee = c.graduation_fees, overflow = c.graduation_overflow,
-            asset = hex(&c.asset), asset_s = short(&hex(&c.asset), 8),
-            pool = c.pool.map(|p| hex(&p)).unwrap_or_default(),
-            pool_s = c.pool.map(|p| format!("pool {}", short(&hex(&p), 8))).unwrap_or_else(|| "not graduated".into()),
-        )).collect::<Vec<_>>().join("\n")
-    };
-
-    format!(
-        r#"<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>zynscan</title>
-<style>
-:root {{
-  --bg:#f7f4ea; --surface:#fff; --line:#d8d5c9; --ink:#202326; --ink-2:#555b5d; --ink-3:#7c807f;
-  --accent:#0e6f6e; --gold:#a87509; --record:#6b7385; --warn:#b5651d;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  color-scheme: light dark;
-}}
-@media (prefers-color-scheme: dark) {{ :root {{
-  --bg:#151718; --surface:#202326; --line:#414649; --ink:#f7f4ea; --ink-2:#c7c8c2; --ink-3:#919694;
-  --accent:#50bdb6; --gold:#e0a51b; --record:#abb0b2; --warn:#e6934a;
-}} }}
-* {{ box-sizing:border-box }}
-body {{ margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 var(--sans); }}
-.wrap {{ max-width:1000px; margin:0 auto; padding:28px 18px 64px }}
-h1 {{ margin:0 0 2px; font-size:25px; letter-spacing:-.02em }}
-h1 span {{ color:var(--gold) }}
-.lede {{ margin:0 0 22px; color:var(--ink-2); max-width:66ch }}
-.card {{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-bottom:20px }}
-.grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px }}
-.stat {{ display:flex; flex-direction:column; gap:2px }}
-.k {{ font-size:11.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3) }}
-.v {{ font-size:21px; font-weight:600 }}
-.num {{ font-family:var(--mono); font-variant-numeric:tabular-nums }}
-.mono {{ font-family:var(--mono); font-size:13px }}
-.src {{ margin:10px 0 0; padding-top:10px; border-top:1px solid var(--line); font-size:13px; color:var(--record) }}
-.src code {{ font-family:var(--mono) }}
-.scroll {{ overflow-x:auto }}
-table {{ width:100%; border-collapse:collapse; min-width:640px }}
-th {{ text-align:left; font-size:11.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); font-weight:500; padding:0 12px 9px 0; border-bottom:1px solid var(--line) }}
-td {{ padding:9px 12px 9px 0; border-bottom:1px solid var(--line); vertical-align:baseline }}
-td.num, th.r {{ text-align:right }}
-td:first-child, th:first-child {{ text-align:left; width:1%; white-space:nowrap; padding-right:28px }}
-tbody td:last-child, thead th:last-child {{ padding-right:0 }}
-td.num {{ color:var(--ink-2) }}
-a {{ color:var(--accent) }}
-a:focus-visible, summary:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px }}
-.empty {{ color:var(--ink-3); padding:18px 0; font-size:13.5px }}
-.pending {{ font-family:var(--sans); font-size:12px; color:var(--ink-3) }}
-.warn {{ margin:0 0 20px; padding:11px 14px; border-radius:10px; font-size:13.5px;
-  color:var(--warn); border:1px solid currentColor; background:transparent }}
-footer {{ margin-top:26px; font-size:12.5px; color:var(--ink-3) }}
-</style></head>
-<body><div class="wrap">
-  <h1>zyn<span>scan</span></h1>
-  <p class="lede">Every Zyn epoch is sealed to a state root, and that root is written into a Zcash
-  transaction. Each row below is one of those: follow the transaction into a block explorer
-  we do not run, and the settlement claim checks out without taking our word for it.</p>
-  {banner}
-  <div class="card">
-    {head}
-    <p class="src">Read from {role} at <code>{node}</code>, {age}s ago.
-    This page cannot write: it holds no key and serves no submit route.</p>
-  </div>
-  <div class="card">
-    <h2>Cave launch evidence</h2>
-    <p class="lede">Prices are explicitly ZEC.zy per token. Active reserve, fee pots, graduation overflow and the locked-LP amount come from the same replica snapshot as the state root.</p>
-    <div class="scroll"><table>
-      <thead><tr><th>Stone</th><th>Venue</th><th class="r">ZEC.zy / token</th><th class="r">Active ZEC.zy</th><th class="r">Creator fees</th><th class="r">Graduation fees</th><th class="r">POL overflow</th><th>Asset / pool</th></tr></thead>
-      <tbody>{curve_rows}</tbody>
-    </table></div>
-    <p class="src">Full fields, including immutable opening liquidity and locked LP: <a href="/api/curves">/api/curves</a>.</p>
-  </div>
-  <div class="card">
-    <div class="scroll"><table>
-      <thead><tr><th>Epoch</th><th>State root</th><th>Zcash transaction</th><th class="r">Height</th></tr></thead>
-      <tbody>
-{rows}
-      </tbody>
-    </table></div>
-  </div>
-  <footer>Also as JSON: <a href="/api/curves">/api/curves</a> · <a href="/api/anchors">/api/anchors</a> · <a href="/api/status">/api/status</a></footer>
-</div></body></html>"#,
-        banner = banner,
-        head = head,
-        role = role,
-        node = esc(node),
-        age = now().saturating_sub(g.at.max(1)).min(99_999),
-        rows = rows,
-        curve_rows = curve_rows,
-    )
 }

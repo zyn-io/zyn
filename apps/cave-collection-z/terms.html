@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="The sale terms for Cave Collection Z, published before the first deposit — with the bytes and the recipe to check them yourself." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/terms" />
+    <meta property="og:title" content="Cave Collection Z — the terms" />
+    <meta property="og:description" content="Published before the door opens. Recompute the digest yourself." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave Collection Z — the terms" />
+    <meta name="twitter:description" content="Published before the door opens. Recompute the digest yourself." />
+    <title>Cave Collection Z — the terms</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>    
+      /* Same cave, same torch. This is the mouth of the tunnel where money
+         comes in, so it is lit a little warmer than the register. */
+      .register {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px;
+        position: relative;
+        z-index: 2;
+      }
+      .register::before {
+        content: "";
+        position: absolute;
+        inset: -20% 0 auto;
+        height: 70%;
+        background: radial-gradient(
+          ellipse 44% 60% at 30% 0%,
+          rgba(244, 183, 40, 0.07),
+          transparent 68%
+        );
+        pointer-events: none;
+      }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
+
+      .ledger {
+        margin: 52px 0 0;
+        border: 1px solid var(--line);
+        box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5);
+        background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95));
+      }
+      .ledger-index {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 11px 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 8px;
+        letter-spacing: 0.19em;
+      }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
+
+      .act {
+        justify-self: start;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 13px 22px;
+        color: var(--black);
+        background: var(--zec);
+        border: 0;
+        cursor: pointer;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+      }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      /* The address is the whole point of the page, so it is the largest
+         readable thing on it and it wraps rather than truncating — a
+         truncated address that looks complete is how money goes missing. */
+      .addr {
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.4);
+        padding: 18px;
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        line-height: 1.85;
+        word-break: break-all;
+        color: var(--ink);
+        user-select: all;
+      }
+      .addr-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      /* The address and its picture are the same fact twice, so they sit
+         together and wrap together on a narrow screen. */
+      .addr-and-qr { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+      .addr-and-qr .addr { flex: 1 1 260px; margin: 0; }
+      .qr { margin: 0; display: grid; gap: 8px; justify-items: center; }
+      .qr[hidden] { display: none; }
+      .qr canvas {
+        display: block;
+        border: 1px solid var(--line);
+        background: #f0eee6;
+        padding: 8px;
+        image-rendering: pixelated;
+      }
+      .qr figcaption {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.17em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .tag.good { color: var(--acid); border-color: rgba(199, 240, 75, 0.4); }
+      .tag.warn { color: var(--zec); border-color: rgba(244, 183, 40, 0.45); }
+
+      /* A shared address with no memo silently loses money, so this is the one
+         thing on the page allowed to shout. */
+      .alarm {
+        border: 1px solid rgba(244, 183, 40, 0.5);
+        background: rgba(244, 183, 40, 0.07);
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+      .alarm h2 {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.19em;
+        text-transform: uppercase;
+        color: var(--zec);
+      }
+      .memo {
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.05vw, 12px);
+        word-break: break-all;
+        color: var(--ink);
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid var(--line);
+        padding: 12px;
+        user-select: all;
+      }
+
+      .facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+      .facts li {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 12px;
+        align-items: baseline;
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--read);
+      }
+      .facts b { color: var(--zec); font-weight: 400; font-family: var(--mono); font-size: 10px; }
+      .facts strong { color: var(--ink); font-weight: 600; }
+      .zyn-facts li { grid-template-columns: 96px 1fr; }
+      @media (max-width: 520px) { .zyn-facts li { grid-template-columns: 1fr; gap: 2px; } }
+
+      .out { margin: 0; font-family: var(--sans); font-size: 14px; line-height: 1.55; min-height: 1.2em; }
+      .out.bad { color: #ff8b6b; }
+      .out.ok { color: var(--acid); }
+
+      .smallprint {
+        margin: 34px 0 0;
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--read-dim);
+        max-width: 60ch;
+      }
+      .smallprint strong { color: var(--read); font-weight: 600; }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        margin: 32px 0 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .back:hover { color: var(--acid); }
+    
+      /* The terms page is a document, not a shopfront: wider measure, and the
+         bytes get room to be read rather than admired. */
+      .facts.terms-facts li b { min-width: 3ch; }
+      .term-table { margin: 30px 0 0; border-top: 1px solid var(--line); }
+      .term-table div {
+        display: grid;
+        grid-template-columns: 210px 1fr;
+        gap: 18px;
+        padding: 13px 0;
+        border-bottom: 1px solid var(--line);
+        align-items: baseline;
+      }
+      .term-table span {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .term-table b { font-family: var(--sans); font-size: 15px; font-weight: 400; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+      .term-table b.hash { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; color: var(--acid); }
+      @media (max-width: 680px) { .term-table div { grid-template-columns: 1fr; gap: 5px; } }
+
+      .bytes {
+        margin: 16px 0 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.32);
+        font-family: var(--mono);
+        font-size: 10px;
+        line-height: 1.9;
+        color: #b9bcb2;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      pre.recipe {
+        margin: 16px 0 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--acid);
+        background: rgba(0, 0, 0, 0.32);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.75;
+        color: #d7d8d2;
+        overflow-x: auto;
+      }
+      .not-yet {
+        margin: 34px 0 0;
+        padding: 18px 20px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--zec);
+      }
+      .not-yet h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 19px; color: var(--zec); }
+      .not-yet p { margin: 0 0 10px; font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); }
+      .not-yet p:last-child { margin-bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms" aria-current="page">Terms</a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>The terms,</span><span>before the door.</span></h1>
+
+      <p class="lede">
+        This is the whole promise Collection Z is sold under, published
+        <strong>before the first deposit</strong> — because terms published afterwards
+        are a description, not a commitment. Every number below is inside the digest,
+        and you can recompute that digest yourself from the bytes on this page.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>cave-sale-terms/v1</span>
+          <span>4,444 · <b>committed</b></span>
+        </div>
+        <div class="ledger-body">
+
+          <div class="term-table">
+            <div><span>Collection</span><b class="hash">024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e</b></div>
+            <div><span>Supply</span><b>4,444</b></div>
+            <div><span>Manifest root</span><b class="hash">0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426</b></div>
+            <div><span>Quantity</span><b>Weighted — 80% one item, 19% two, 1% three, per entry</b></div>
+            <div><span>Identity</span><b>Concealed shuffle</b></div>
+            <div><span>Close</span><b>Announced, with at least 1,152 blocks' notice</b></div>
+            <div><span>Reveal</span><b>Close + 100 blocks; announced drand round + 2,400</b></div>
+            <div><span>Entry price</span><b>1,000,000 zatoshi (0.01 ZEC)</b></div>
+            <div><span>Claim price</span><b>500,000 zatoshi</b></div>
+            <div><span>Open mint</span><b>1,330,000 zatoshi</b></div>
+            <div><span>Confirmations</span><b>6 before a deposit is an entry</b></div>
+            <div><span>Claim window</span><b>16,128 blocks after the close</b></div>
+            <div><span>Split of one entry</span><b>900,000 zatoshi to the collection's pool, 100,000 to the treasury</b></div>
+            <div><span>Treasury</span><b class="hash">b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99</b></div>
+            <div><span>Policy digest</span><b class="hash">a572a74778052829a768adb56f84404353ee5ad188b274b36b5fa58c68500b13</b></div>
+            <div><span>Terms digest</span><b class="hash">f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e</b></div>
+          </div>
+
+          <p class="smallprint" style="margin-top:18px;max-width:66ch">
+            <strong>Revised 23 Sep 2026, before the door opened.</strong> Every item gained two traits,
+            Rarity and Rarity Rank, and 3,555 Mole and Owl images were re-cut square from their source
+            boards (no streaked padding or gutter lines; 12 Moth edges repaired), and fourteen
+            near-duplicate Moles were replaced with new portraits, which changed the manifest root and so both digests. The version
+            published on 19 Sep named root <span class="hash">02b01b16…8f19</span> and terms digest
+            <span class="hash">159b454e…6267</span>; no entry was ever made against it.
+          </p>
+
+          <ul class="facts terms-facts">
+            <li><b>01</b><span>The <strong>pool</strong> is what a redeemed item is paid out of. 90% of every entry funds it.</span></li>
+            <li><b>02</b><span>Every entry references the <strong>terms digest</strong>. Anything changed after this is a different sale, not an amended one.</span></li>
+            <li><b>03</b><span>The <strong>close is announced</strong>, not fixed here — how long to run is judged by watching demand. Everything the outcome depends on is derived from it by rules already committed.</span></li>
+            <li><b>04</b><span>The <strong>reveal beats the operator</strong>: it lands on a drand round and a Zcash block that do not exist when the close is named.</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <section style="margin-top:52px">
+        <h2 style="font-family:var(--serif);font-size:26px;margin:0">How the sale runs on Zyn</h2>
+        <p class="smallprint" style="margin-top:12px;max-width:66ch">
+          <strong>Added 24 Sep 2026. The terms above are unchanged</strong> — the same bytes, the same digest,
+          the same collection, odds, prices, close and reveal. What changed is where an entry is paid:
+          on Zyn, from Nap, instead of by a Zcash deposit to the vault.
+        </p>
+        <ul class="facts zyn-facts" style="margin-top:14px;max-width:66ch">
+          <li><b>Entry</b><span>A ticket bought in Nap with <strong>ZEC.zy</strong> — ZEC you have brought into Nap — at the entry price, 0.01. It exists the moment Nap signs it. The six confirmations apply to bringing ZEC into Nap, not to the ticket.</span></li>
+          <li><b>Split</b><span>90% to the collection's pool, 10% to the treasury, recorded on the ledger as each ticket is bought.</span></li>
+          <li><b>Draw</b><span>Run once over every ticket bought before the announced close, from the announced drand round and the Zcash reveal block. Its result is posted on Zyn as a Merkle root; anyone holding the public inputs can run it again and get the same root.</span></li>
+          <li><b>Claim</b><span>A winner claims with a proof against that root, at the claim price per item, within 16,128 blocks after the close. Only the wallet that bought a ticket can claim it; nobody can be refused one the draw gave.</span></li>
+          <li><b>Open mint</b><span>After the window, what the draw handed nobody and what winners left sell at the open-mint price, in an order fixed by the draw.</span></li>
+          <li><b>Burn tickets</b><span>A promotional token on Solana may also be burned for tickets — capped, into the same draw at the same odds. They pay nothing into the pool; a winning burn ticket pays the claim price like any other.</span></li>
+        </ul>
+      </section>
+
+      <section style="margin-top:52px">
+        <h2 style="font-family:var(--serif);font-size:26px;margin:0">Check it yourself</h2>
+        <p class="smallprint" style="margin-top:12px;max-width:66ch">
+          These are the canonical bytes — <strong>187 of them</strong>, the exact input the digest is
+          taken over. Nothing else goes in.
+        </p>
+        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f7631a572a74778052829a768
+adb56f84404353ee5ad188b274b36b5fa58c68500b13024277b607ce4edbf78f
+e2855aba562096d00264729168bd0ddea71bdf5b5f1e0c56593e1b16bd513a4c
+88baf31d42602acd89db85aef2b0dcbc4e4bce108426b3e4c493bb7934927026
+0f7d2e2882b4f1a736348935493331e18c95098cfe990000000000000f424000
+0000000007a1200000000000144b500000000600003f00000003e8</div>
+        <button class="act ghost" id="copy-bytes" type="button" style="margin-top:14px">Copy the bytes</button>
+        <p class="out" id="out" role="status" aria-live="polite"></p>
+
+        <p class="smallprint" style="margin-top:26px;max-width:66ch">
+          Six lines of standard-library Python, no dependencies. The domain string and the
+          payload are each length-prefixed before hashing, so no two different documents can
+          ever hash the same way.
+        </p>
+        <pre class="recipe">from hashlib import sha256
+
+payload = bytes.fromhex(open("terms.hex").read().strip())
+domain  = b"cave.sale.terms.v1"
+h = sha256()
+h.update(len(domain).to_bytes(4, "big"));  h.update(domain)
+h.update(len(payload).to_bytes(4, "big")); h.update(payload)
+print(h.hexdigest())
+# f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e</pre>
+      </section>
+
+      <div class="not-yet">
+        <h2>What this page does not yet prove</h2>
+        <p>
+          It proves <strong>what</strong> the terms are and that this digest is taken over exactly
+          these bytes. It does <strong>not</strong> prove <em>when</em> they were written — nothing
+          inside a document can establish its own age, and this is our own web server.
+        </p>
+        <p>
+          That takes a stamp on Zcash: the terms digest written into a transaction memo, so the
+          chain dates it rather than us. <strong>That has not happened yet</strong>, and until it
+          does a careful reader should treat this page as a publication with our word on the
+          timing. We would rather say so here than have you find out by checking.
+        </p>
+      </div>
+
+      <p class="smallprint">
+        Published under <strong>cave-sale-terms/v1</strong>. The digest is what every entry
+        references, so if this page and a ticket ever disagree, the ticket is right and this
+        page is wrong.
+      </p>
+
+      <a class="back" href="/">← back to the cave</a>
+    </main>
+
+    <script type="module">
+      const bytes = document.getElementById('bytes').textContent.replace(/\s+/g, '');
+      const out = document.getElementById('out');
+      document.getElementById('copy-bytes').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(bytes);
+          out.textContent = 'Copied — ' + (bytes.length / 2) + ' bytes. Save it as terms.hex and run the recipe.';
+          out.className = 'out ok';
+        } catch {
+          out.textContent = 'Could not reach the clipboard — select the bytes and copy them.';
+          out.className = 'out bad';
+        }
+      });
+    </script>
+  </body>
+</html>

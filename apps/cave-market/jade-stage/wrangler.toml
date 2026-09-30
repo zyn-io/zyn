@@ -1,0 +1,9 @@
+# Cave Jade (cave-jade.pages.dev / launch.cavebro.win). Deploy from this
+# folder: `functions` are its Pages Functions, `dist` is the Jade build.
+name = "cave-jade"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-24"
+
+[[kv_namespaces]]
+binding = "CAVE_JADE_CONTENT"
+id = "6fec82c33ade4ebba5836456d67cdb04"

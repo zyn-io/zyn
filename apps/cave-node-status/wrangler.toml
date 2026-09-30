@@ -1,0 +1,7 @@
+# The status page. Static assets need no configuration; this exists so the
+# Functions directory is built with the site and so the project has a name.
+#
+# `ZEC_RPC_URL` is NOT set here on purpose. It is configured on the Pages
+# project itself, so the way to reach the node is not a thing in the repo.
+name = "cave-node-status"
+pages_build_output_dir = "dist"

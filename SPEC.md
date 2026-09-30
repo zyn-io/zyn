@@ -1,6 +1,15 @@
 # The Zyn Microchain VM Specification
 
-**Status:** v1 draft. Normative for `zyn-vm` 0.1.
+**Status:** v1 draft. Normative for `zyn-vm` 0.1 — which is what runs today.
+
+**Scheduled for replacement.** DECISIONS §130 adopts a private object model:
+state becomes commitments consumed and recreated, retired by nullifiers, rather
+than holder records with readable balances. That supersedes section 1 as
+specified here and is a `STATE_VERSION` bump, not an amendment. This document
+stays normative until that work (A106) lands, because it describes the chain
+that is actually running; it is not a statement that the account shape is the
+destination.
+
 **Conformance:** `zyn_vm::conformance::check` — executable, and it fails a
 broken VM (proven by `swapvm::microchain::tests::the_conformance_suite_catches_a_broken_vm`).
 
@@ -362,6 +371,13 @@ which are true of every VM.
   signatures. The spec is written so that swapping one for the other does not
   touch an application.
 
+  **And when it comes, it is a circuit rather than a zkVM** (DECISIONS §131).
+  Conservation and range are group operations needing no circuit at all;
+  transfer, split, merge, deposit and withdrawal are one membership proof
+  wearing five names. A zkVM is what buys *permissionless* programmability and
+  belongs above this layer, not under it — so keep `riscv32im` building, and
+  put the `program_id` in the transaction before a format ships without one.
+
 ---
 
 ## 6. Open questions
@@ -372,7 +388,13 @@ which are true of every VM.
    application ships rather than after.
 2. **Resource limits.** `Params` is enforced per VM, but nothing bounds how much
    work one `apply` may do. A permissionless deployment needs a metering story.
-3. **Section 1 semantics.** The spec fixes that section 1 holds holder records
+3. **Section 1 becomes objects (§130).** The exit hatch is the binding
+   constraint, and the reason this is design work rather than an edit: today a
+   holder exits by pointing at their record inside an enumerable section, and an
+   object ledger has no readable balance to point at. The replacement witness —
+   what a holder keeps, what they prove, and who verifies it — must be designed
+   before the `STATE_VERSION` bump, not discovered after it.
+4. **Section 1 semantics.** The spec fixes that section 1 holds holder records
    and that a record hashes to its leaf. It does not say what a record *means* —
    so settlement can verify inclusion but not solvency. For ZynZap the backing
    invariant closes that gap inside the VM; a general answer does not exist yet.

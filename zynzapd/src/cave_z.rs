@@ -15,13 +15,16 @@ use zyn_vm::derive::ADDRESS_SCOPE_V1;
 
 use std::collections::BTreeMap;
 
-const SYMBOL: &str = "CAVEZ";
+pub const SYMBOL: &str = "CAVEZ";
 const SUPPLY: u32 = 4_444;
 
-/// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3). Pinned
+/// The manifest root over all 4,444, from `zyn-cave-manifest` (§86.3; moved
+/// 23 Sep 2026, before any deposit, when every item gained its Rarity traits
+/// and the Moles and Owls were re-cut square from their canvases — the 19 Sep terms named
+/// `02b01b16…`, §142). Pinned
 /// rather than recomputed: the terms must commit to a root someone checked,
 /// not to whatever a rebuild happens to produce today.
-const MANIFEST_ROOT: &str = "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19";
+const MANIFEST_ROOT: &str = "0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426";
 
 /// §64.17, frozen: entry / claim / open mint, in zatoshi.
 const ENTRY: u64 = 1_000_000; // 0.01 ZEC
@@ -30,7 +33,7 @@ const OPEN_MINT: u64 = 1_330_000; // 0.0133 ZEC
 /// 10% to the treasury; the remaining 90% funds the collection and is the floor.
 const TREASURY_BPS: u16 = 1_000;
 /// Six confirmations before a deposit is a ticket.
-const CONFIRMATIONS: u32 = 6;
+pub const CONFIRMATIONS: u32 = 6;
 /// A claim may be made for about a fortnight of mainnet blocks after the close.
 const CLAIM_WINDOW: u32 = 16_128;
 
@@ -80,6 +83,20 @@ pub fn policy() -> AllocationPolicy {
             }),
         },
     }
+}
+
+/// The published policy with a testnet clock (DECISIONS §144): the same odds,
+/// shuffle, manifest and prices, but minutes of notice and reveal instead of a
+/// day and two hours, so a rehearsal of the whole sale fits in an afternoon.
+/// A different digest from the published one — it is never sold under.
+pub fn rehearsal_policy() -> AllocationPolicy {
+    let mut p = policy();
+    p.randomness.announced_close = Some(AnnouncedClose {
+        reveal_offset_blocks: 2,
+        reveal_offset_rounds: 60, // three minutes of 3 s rounds
+        min_notice_blocks: 2,
+    });
+    p
 }
 
 pub fn terms(p: &AllocationPolicy) -> SaleTerms {
@@ -133,12 +150,12 @@ mod tests {
         p.validate().expect("valid");
         assert_eq!(
             hex(&p.digest().unwrap()),
-            "12da4f1b1052660d5496207eefa0231801dcad04d6a85b77db0134883500abaf",
+            "a572a74778052829a768adb56f84404353ee5ad188b274b36b5fa58c68500b13",
             "the policy digest is published; moving it silently is the failure"
         );
         assert_eq!(
             hex(&terms(&p).digest()),
-            "159b454efe0bfe7778f58924e6e2951d7e585e918a9a7d94bbab8e69ae016267"
+            "f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e"
         );
     }
 
@@ -171,7 +188,7 @@ mod tests {
         let root = cave_randomness::manifest_root(collection_id(), &entries).unwrap();
         assert_eq!(
             hex(&root),
-            "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19",
+            "0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426",
             "the manifest the draw reads must be the one the terms committed to"
         );
         assert_eq!(root, policy().manifest_root);

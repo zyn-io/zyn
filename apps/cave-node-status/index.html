@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-node-state="loading">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070907" />
+    <meta name="description" content="A live signal from Cavebro's private Zcash mainnet node." />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; font-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <title>Cave Node / Zcash Mainnet</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/cave-mark.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="cave-light" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="https://cavebro.win" aria-label="Return to Cavebro">
+        <span class="brand-mark"><img src="./assets/cave-mark.svg" alt="" /></span>
+        <span><b>Cave</b><small>node / 01</small></span>
+      </a>
+      <div class="header-coordinate" aria-hidden="true">zebra / loopback</div>
+      <div class="gate-state"><span></span> rpc gate / sealed</div>
+    </header>
+
+    <main>
+      <section class="signal-copy" aria-labelledby="page-title">
+        <p class="eyebrow"><span>zcash mainnet</span><i></i><span>private infrastructure</span></p>
+        <h1 id="page-title">Signal<br />from <em>below.</em></h1>
+
+        <div class="live-line" role="status" aria-live="polite">
+          <span class="live-orb" aria-hidden="true"><i></i></span>
+          <div>
+            <strong data-state-label>Listening</strong>
+            <p data-status-copy>Opening a one-way signal into the cave.</p>
+          </div>
+        </div>
+
+        <p class="premise">The node speaks inward. This page carries one sanitized heartbeat out: network, height and the latest validated block.</p>
+
+        <div class="access-rule">
+          <span>public</span><b>signal</b><i></i><span>private</span><b>rpc</b>
+        </div>
+      </section>
+
+      <section class="node-chamber" aria-label="Live Zebra node state">
+        <div class="strata strata-a" aria-hidden="true"></div>
+        <div class="strata strata-b" aria-hidden="true"></div>
+        <div class="portal" aria-hidden="true">
+          <span class="portal-ring ring-a"></span>
+          <span class="portal-ring ring-b"></span>
+          <span class="portal-core"><i></i></span>
+        </div>
+
+        <div class="telemetry">
+          <div class="telemetry-head">
+            <p>validated height</p>
+            <span data-preview hidden>local preview</span>
+          </div>
+          <div class="height" data-height>—</div>
+
+          <div class="metrics">
+            <div><span>network estimate</span><strong data-estimated>—</strong></div>
+            <div><span>distance</span><strong><b data-gap>—</b> blocks</strong></div>
+            <div><span>observed</span><strong data-observed>waiting</strong></div>
+            <div><span>probe</span><strong data-latency>—</strong></div>
+          </div>
+
+          <div class="tip-card">
+            <div class="tip-heading"><span>latest validated block</span><button type="button" data-copy>Copy hash</button></div>
+            <code data-tip>waiting for the signal…</code>
+            <span class="visually-hidden" data-tip-full></span>
+          </div>
+
+          <div class="refresh">
+            <div><i data-refresh-track></i></div>
+            <span data-refresh-label>next sample / 15s</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p><span>01</span> Zebra bound to loopback</p>
+      <p><span>02</span> status fields allowlisted</p>
+      <p><span>03</span> every other door stays shut</p>
+      <a href="https://cavebro.win">cavebro.win ↗</a>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

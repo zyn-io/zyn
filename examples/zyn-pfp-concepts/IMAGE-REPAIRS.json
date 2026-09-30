@@ -1,0 +1,126 @@
+{
+ "tool": "tools/repair_slicing.py",
+ "note": "Moths only. Moles and Owls were re-cut from their canvases instead (tools/reslice_square.py, RESLICE.json), which replaced these edge repairs.",
+ "images": [
+  {
+   "image": "moth-collection-889/images/0226.png",
+   "gutter": {
+    "R": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "f0be5d63d783ebbe7b20743e769f95286e1e295f56d7a482bdcfb1fb17b9fd42",
+   "new": "1922d0f9bd7352cdce466a137da78597efd13d70bf0285aea968ba7c5dbf9c4e"
+  },
+  {
+   "image": "moth-collection-889/images/0434.png",
+   "gutter": {
+    "L": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "7f00d6c49f6aa1b8e9ed8180b87e08963a1b3e126f7064f9c1beb24a98b5a4e6",
+   "new": "eeb31c42606e9452534b29468e6468a6685ead231714e3f26d6883265d0c9a4b"
+  },
+  {
+   "image": "moth-collection-889/images/0451.png",
+   "gutter": {
+    "R": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "6e34c7663cd86e50e692f09892288407b1268d02767534e717501c3c3ff2365d",
+   "new": "f72f38e916ddf311e4017dbcdf66ccbfae705bce7acf4aabc8d4ed7a84aa45a3"
+  },
+  {
+   "image": "moth-collection-889/images/0452.png",
+   "gutter": {
+    "L": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "77d490bd1c49933fffc35e24065d030eb6f2d5acf6b93f3fd4869638f6a76a68",
+   "new": "3b72897d0fc959e5cae84af4b836fb2c6325c5868907de7f1a65136d79cba925"
+  },
+  {
+   "image": "moth-collection-889/images/0460.png",
+   "gutter": {
+    "R": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "5475e3be8200487819dab7add245527d8031cdcb0b0f647e4db10ee3aed6170c",
+   "new": "55fe43be725fd71d74be89d37d48f8fe2c7b0a7cd84fc34040f2180f8bf37f9f"
+  },
+  {
+   "image": "moth-collection-889/images/0461.png",
+   "gutter": {
+    "L": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "f9ed5fd451df48820dea80d97db5359b487297d6a5c4187cba5c2d09d344a4d5",
+   "new": "dca18903d59ebfdb8383386d7d0fdfce236c2de9f4f06e24041c940d84ea6c8f"
+  },
+  {
+   "image": "moth-collection-889/images/0487.png",
+   "gutter": {
+    "R": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "af733810830141c52a46a0131bf394fc6539818a83b1212941269aa18493c4cf",
+   "new": "488d9c91838136f56a11ba43b83d7034141507201731ec760a51aee7cb8226d4"
+  },
+  {
+   "image": "moth-collection-889/images/0506.png",
+   "gutter": {
+    "B": 3
+   },
+   "band": {},
+   "wide": false,
+   "old": "2c9f30a4d27dfbf3dd3e91652f946c1aff581a8bbb4e2d4b34ec4453e5dcbd9d",
+   "new": "c97e69328c2d717622e51755394045b8b5734d5ec9fd5c59553f31a8004f68b6"
+  },
+  {
+   "image": "moth-collection-889/images/0507.png",
+   "gutter": {
+    "B": 3
+   },
+   "band": {},
+   "wide": false,
+   "old": "7194e36da26816b783bcbe847e1a6ea0b165a8776543b271605a4603a6e4013c",
+   "new": "414ad51647dc29ca4e9970e72ddf21ceb5931efff1f27ea422a5f200dc08135e"
+  },
+  {
+   "image": "moth-collection-889/images/0509.png",
+   "gutter": {
+    "B": 3
+   },
+   "band": {},
+   "wide": false,
+   "old": "10b5be6de4b314cc20e3b26d3b91dc441c1606b4be53985103f1b163dba7a5fb",
+   "new": "e3917f59eac539b4a3f35ce3945e667c5aa9d6bb8c545eb9c63e70180030a632"
+  },
+  {
+   "image": "moth-collection-889/images/0511.png",
+   "gutter": {
+    "B": 3
+   },
+   "band": {},
+   "wide": false,
+   "old": "1f60194fa47aab5b4056655076a2b64b37d11c8d1cca9a13437285d7460db8b9",
+   "new": "8b79fe6831279b56d739c0cb6e57757cd0f50b751acda1c7c959677029723803"
+  },
+  {
+   "image": "moth-collection-889/images/0685.png",
+   "gutter": {
+    "R": 1
+   },
+   "band": {},
+   "wide": false,
+   "old": "178f84fa07561e99f7e7d157af753886944669e68bf9baf8ef2ba52dda011f4b",
+   "new": "ac013e91fda3b33dd5797afde6250ea136049dab70e42ec6e0ac2ea6e6dae3aa"
+  }
+ ]
+}

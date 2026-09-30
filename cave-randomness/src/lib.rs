@@ -799,7 +799,61 @@ pub fn allocate(
     tickets: &[TicketEvidence],
     reveal: Option<&RevealEvidence>,
 ) -> Result<AllocationBatch, Error> {
+    allocate_with(policy, manifest, tickets, reveal, None)
+}
+
+/// Allocate a sale whose close was **announced** rather than committed.
+///
+/// A policy that announces its close carries `deposit_close_zcash_height: 0`
+/// and no reveal targets — naming them up front would defeat announcing them
+/// (`validate` refuses a policy that does both). So the numbers the allocator
+/// needs are not in the policy: they are derived from the announcement, and a
+/// caller who checked its publication passes the [`ResolvedClose`] here.
+///
+/// Without this the announced form cannot be drawn at all — every ticket is
+/// refused as "confirmed after the committed close height", because the
+/// committed height is zero.
+pub fn allocate_announced(
+    policy: &AllocationPolicy,
+    manifest: &[ManifestEntry],
+    tickets: &[TicketEvidence],
+    reveal: Option<&RevealEvidence>,
+    resolved: &ResolvedClose,
+) -> Result<AllocationBatch, Error> {
+    allocate_with(policy, manifest, tickets, reveal, Some(resolved))
+}
+
+fn allocate_with(
+    policy: &AllocationPolicy,
+    manifest: &[ManifestEntry],
+    tickets: &[TicketEvidence],
+    reveal: Option<&RevealEvidence>,
+    targets: Option<&ResolvedClose>,
+) -> Result<AllocationBatch, Error> {
     policy.validate()?;
+    // The two forms must not be able to take each other's path. A committed
+    // policy drawn with a resolution would allocate against numbers nobody
+    // committed to; an announced one drawn without would measure every ticket
+    // against a close height of zero and refuse the whole sale.
+    match (&policy.randomness.announced_close, targets) {
+        (Some(_), None) => {
+            return Err(Error::InvalidPolicy(
+                "this policy announces its close; allocate_announced with the resolved targets",
+            ))
+        }
+        (None, Some(_)) => {
+            return Err(Error::InvalidPolicy(
+                "this policy commits its close; a resolution cannot override it",
+            ))
+        }
+        _ => {}
+    }
+    // Where the close and the reveal targets come from: the resolution when
+    // there is one, the policy otherwise. Read once here so no branch below can
+    // quietly consult the wrong source.
+    let close = targets
+        .map(|r| r.deposit_close_zcash_height)
+        .unwrap_or(policy.deposit_close_zcash_height);
     let manifest = validated_manifest(policy, manifest)?;
     let manifest_leaves: Vec<Hash> = manifest.iter().map(manifest_leaf).collect();
     let manifest_proofs = merkle_proofs(&manifest_leaves);
@@ -826,9 +880,30 @@ pub fn allocate(
     // is unique for a round, so verify it once per allocation replay and reject
     // conflicting bytes for that round.
     let mut beacon_cache = BTreeMap::new();
+    // A concealed shuffle has one reveal for the whole collection, and under
+    // this policy the *quantity* comes from it too — see `resolve_quantity`.
+    // Verified once here rather than per ticket, and reused for the shuffle.
+    let collection_reveal = match (policy.identity, reveal) {
+        (IdentityPolicy::ConcealedShuffle, Some(r)) => {
+            let randomness = verify_reveal(policy, targets, r)?;
+            let round = targets
+                .map(|t| t.reveal_drand_round)
+                .or(policy.randomness.reveal_drand_round)
+                .ok_or(Error::InvalidPolicy("concealed reveal round is absent"))?;
+            Some((round, randomness))
+        }
+        _ => None,
+    };
     for evidence in ordered {
         validate_identity_evidence(policy, &evidence)?;
-        let quantity = resolve_quantity(policy, policy_digest, &evidence, &mut beacon_cache)?;
+        let quantity = resolve_quantity(
+            policy,
+            policy_digest,
+            close,
+            collection_reveal,
+            &evidence,
+            &mut beacon_cache,
+        )?;
         total = total
             .checked_add(quantity as u64)
             .ok_or(Error::CapacityExceeded {
@@ -861,7 +936,7 @@ pub fn allocate(
         }
         IdentityPolicy::ConcealedShuffle => {
             let reveal = reveal.ok_or(Error::MissingEvidence("concealed reveal"))?;
-            let randomness = verify_reveal(policy, reveal)?;
+            let (_, randomness) = collection_reveal.ok_or(Error::MissingEvidence("concealed reveal"))?;
             let seed = concealed_seed(
                 policy_digest,
                 policy.manifest_root,
@@ -1014,11 +1089,13 @@ pub fn verify_quicknet_beacon(beacon: &DrandBeacon) -> Result<Hash, Error> {
 fn resolve_quantity(
     policy: &AllocationPolicy,
     policy_digest: Hash,
+    close: u32,
+    collection_reveal: Option<(u64, Hash)>,
     evidence: &TicketEvidence,
     beacon_cache: &mut BTreeMap<u64, (Vec<u8>, Hash)>,
 ) -> Result<u32, Error> {
     validate_ticket_shape(policy, policy_digest, &evidence.ticket)?;
-    if evidence.ticket.confirmed_height > policy.deposit_close_zcash_height {
+    if evidence.ticket.confirmed_height > close {
         return Err(Error::InvalidTicket(
             "deposit confirmed after the committed close height",
         ));
@@ -1051,19 +1128,36 @@ fn resolve_quantity(
                     "weighted ticket carries a requested quantity",
                 ));
             }
-            let expected = evidence
-                .ticket
-                .quantity_drand_round
-                .ok_or(Error::InvalidTicket(
-                    "weighted ticket has no quantity target round",
-                ))?;
-            validate_future_round(policy, &evidence.ticket, expected)?;
-            let beacon = evidence
-                .quantity_beacon
-                .as_ref()
-                .ok_or(Error::MissingEvidence("ticket quantity beacon"))?;
-            let randomness = verify_beacon_cached(beacon, expected, beacon_cache)?;
-            let seed = quantity_seed(policy_digest, &evidence.ticket, beacon.round, randomness)?;
+            // Under a concealed shuffle the quantity comes from the one
+            // collection-wide reveal, not from a round of the ticket's own.
+            //
+            // This is a fairness property, not a convenience: a per-ticket
+            // round resolves while the sale is still open, so a buyer would
+            // learn how many items their entry drew *before* deciding whether
+            // to buy another. The seed still varies per ticket — ticket id,
+            // txid, height and index all go into it — so one beacon gives
+            // every entry its own draw, and none of them before the close.
+            let (round, randomness) = match (evidence.ticket.quantity_drand_round, collection_reveal)
+            {
+                // No round of its own, but the collection has a reveal: seed
+                // from that. This is the only way an announced close can draw
+                // a weighted sale at all, since its tickets cannot name a
+                // round — the reveal round does not exist when they are issued.
+                (None, Some((round, randomness))) => (round, randomness),
+                _ => {
+                    let expected = evidence.ticket.quantity_drand_round.ok_or(
+                        Error::InvalidTicket("weighted ticket has no quantity target round"),
+                    )?;
+                    validate_future_round(policy, &evidence.ticket, expected)?;
+                    let beacon = evidence
+                        .quantity_beacon
+                        .as_ref()
+                        .ok_or(Error::MissingEvidence("ticket quantity beacon"))?;
+                    let randomness = verify_beacon_cached(beacon, expected, beacon_cache)?;
+                    (beacon.round, randomness)
+                }
+            };
+            let seed = quantity_seed(policy_digest, &evidence.ticket, round, randomness)?;
             let mut rng = ChaCha20Rng::from_seed(seed);
             let mut sorted = outcomes.clone();
             sorted.sort_by_key(|outcome| outcome.items);
@@ -1286,15 +1380,27 @@ fn verify_beacon_cached(
     Ok(randomness)
 }
 
-fn verify_reveal(policy: &AllocationPolicy, reveal: &RevealEvidence) -> Result<Hash, Error> {
-    let round = policy
-        .randomness
-        .reveal_drand_round
-        .ok_or(Error::InvalidPolicy("concealed reveal round is absent"))?;
-    let height = policy
-        .randomness
-        .reveal_zcash_height
-        .ok_or(Error::InvalidPolicy("concealed Zcash height is absent"))?;
+fn verify_reveal(
+    policy: &AllocationPolicy,
+    resolved: Option<&ResolvedClose>,
+    reveal: &RevealEvidence,
+) -> Result<Hash, Error> {
+    // Announced: the targets were derived from the announcement. Committed:
+    // they are in the policy. Neither form has both, and asking the policy for
+    // targets it is forbidden to carry is how the announced form was undrawable.
+    let (round, height) = match resolved {
+        Some(r) => (r.reveal_drand_round, r.reveal_zcash_height),
+        None => (
+            policy
+                .randomness
+                .reveal_drand_round
+                .ok_or(Error::InvalidPolicy("concealed reveal round is absent"))?,
+            policy
+                .randomness
+                .reveal_zcash_height
+                .ok_or(Error::InvalidPolicy("concealed Zcash height is absent"))?,
+        ),
+    };
     if reveal.zcash_height != height {
         return Err(Error::WrongRevealHeight {
             expected: height,

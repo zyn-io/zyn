@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="Take ZEC back out of the cave, to any Zcash address, signed in your own Nap." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/exit" />
+    <meta property="og:title" content="Cave — take ZEC out" />
+    <meta property="og:description" content="The door works both ways. Exits are signed in Nap, where your key is." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave — take ZEC out" />
+    <meta name="twitter:description" content="The door works both ways. Exits are signed in Nap, where your key is." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Cave — take ZEC out</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>
+      /* The tunnel mouth again, facing the other way. Cooler than the deposit
+         page on purpose: leaving should not feel like being sold to. */
+      .register { max-width: 780px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% 0 auto; height: 70%; background: radial-gradient(ellipse 44% 60% at 30% 0%, rgba(240, 238, 230, 0.045), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--ink); }
+      .lede { margin: 26px 0 0; max-width: 54ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede strong { color: var(--ink); font-weight: 600; }
+
+      .ledger { margin: 52px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--ink); font-weight: 400; }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 24px; }
+
+      .state { display: grid; gap: 18px; }
+      .state[hidden] { display: none; }
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--ink); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+
+      .balance { border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); padding: 18px; display: grid; gap: 6px; }
+      .balance .n { font-family: var(--mono); font-size: clamp(26px, 4vw, 40px); color: var(--zec); }
+      .balance .l { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+
+      .amount { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .amount input { font-family: var(--mono); font-size: 13px; padding: 12px 14px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); color: var(--ink); width: 12ch; }
+      .amount input:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+      .amount .unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+      .warn { border-left: 2px solid var(--zec); padding: 12px 16px; background: rgba(244, 183, 40, 0.06); }
+      .out { font-family: var(--sans); font-size: 14px; line-height: 1.55; color: var(--read); }
+      .out.bad { color: #e88; }
+      .out.ok { color: var(--acid); }
+      .nav { display: flex; flex-wrap: wrap; gap: 0 22px; margin: 26px 0 0; }
+      .nav a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 6px; }
+      .nav a:hover { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>Take ZEC</span><span>back out</span></h1>
+
+      <p class="lede">
+        The door works both ways. An exit sends ZEC.zy back out as ZEC, to a Zcash
+        address you name <strong>in Nap</strong> — never on this page, because an address
+        typed into a website is one a website could change.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index">
+          <span>The door out</span>
+          <span>In your <b>Nap</b></span>
+        </div>
+        <div class="ledger-body">
+          <section class="state">
+            <p class="say">
+              <strong>Exits are signed in Nap</strong>, where the key is. Open Nap, switch to
+              <strong>Zyn</strong> and choose <strong>Take ZEC out</strong>: name a Zcash address
+              and an amount, and the vault pays it once two custodians sign — usually within minutes.
+              A small bridge fee is added on top, and the Zcash network fee comes out of the amount.
+              The chain records only a commitment to the address.
+            </p>
+            <a class="act" href="https://nap.cavebro.win" rel="noreferrer">Open Nap</a>
+          </section>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="/deposit">Bring ZEC in</a>
+        <a href="/items">My shelf</a>
+        <a href="/market">The market</a>
+      </nav>
+    </main>
+
+  </body>
+</html>

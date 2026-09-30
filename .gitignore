@@ -1,6 +1,8 @@
 target/
 node_modules/
 .venv/
+__pycache__/
+*.pyc
 .DS_Store
 *.key
 *.env
@@ -29,7 +31,15 @@ apps/*/dist/
 apps/*/.wrangler/
 apps/*/.mf/
 .wrangler/
-# A vendored copy of Blender.app — 500 MB of someone else's application, with a
-# single 167 MB binary GitHub would refuse anyway.
+# A vendored copy of Blender.app (814 MB, one 167 MB binary GitHub would
+# refuse anyway), and rendered video. Tools and output, not source.
 examples/**/tools/
 **/*.app/
+
+# Secrets must never be committable from here. `*.key` and `*.env` are above.
+# Deliberately NOT `*.hex`: the published sale terms are `.hex` files whose
+# whole purpose is that a buyer can fetch and verify them (§125). A blanket
+# pattern to catch one secret would have dropped the artifact that exists to
+# be public.
+sslkey
+

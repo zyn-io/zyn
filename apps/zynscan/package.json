@@ -1,0 +1,11 @@
+{
+  "name": "zynscan",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && python3 -m http.server 4190 --bind 127.0.0.1 --directory dist",
+    "test": "node --test tests/*.test.js"
+  }
+}

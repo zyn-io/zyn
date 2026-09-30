@@ -45,6 +45,10 @@ The hierarchy, which keeps getting flattened:
 | Zyn, the execution layer | the chain, our chain, a chain we built | "chain" invites *which consensus? who validates?* — the same questions "L2" invites, and it slipped through four drafts because it sounds harmless |
 | how the VM clears / what the mechanism does | how our users trade / what traders get | **built and enabled is not in use.** Batch clearing is switched on in production and nothing has ever traded through it; describe the mechanism, never the usage |
 | Cave: a **ZEC-settled object market** powered by Zyn | private object market (as a description of today) | privacy is the destination; keep it in the future tense |
+| orders in an epoch **clear together at one price**, so there is nothing to sandwich inside a batch | MEV-proof; front-running is impossible | the sequencer still sees orders and can refuse or delay one; what it cannot do is profit from where an order sits in the batch (§137.1) |
+| who traded, provided liquidity or committed to a sale is **not shown to the public** | private trading; anonymous launches | the operator sees every intent at tier 2; say so in the same breath (§137) |
+| a launch sells **at one price to everyone**, and its pool's liquidity is locked | fair launch; rug-proof | "fair" and "rug-proof" are judgements about the creator; the mechanism is one price and locked pool shares, which is what to state |
+| the market is **built and enabled** | people are trading / launching on Zyn | built and enabled is not in use — until something has traded, describe the mechanism only |
 
 ## The privacy sentence
 

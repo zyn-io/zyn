@@ -1,0 +1,147 @@
+#!/bin/bash
+# Hand mainnet chain id 26460 from the AMM ledger to the object ledger.
+#
+# Why one id and not two: both ledgers custody the same vault from the same
+# height. Run side by side they would both credit every deposit — two ledgers
+# issuing against one backing, each passing its own solvency check because
+# each counts only what it issued — and both would build anchors from the same
+# notes. So the AMM chain stops first whatever the id, and once it has stopped,
+# 26460 is free.
+#
+# Usage:  zyn-handover-26460            check everything, change nothing
+#         zyn-handover-26460 --execute  do it
+#
+# Runs on Contabo. Touches Hetzner once, to move the mirror's old tree aside.
+set -euo pipefail
+MODE="${1:-check}"
+RETIRE_ITEMS="${2:-}"
+[ "$MODE" = "check" ] || [ "$MODE" = "--execute" ] || { echo "usage: $0 [--execute [--retire-collections]]"; exit 2; }
+
+AMM_ENV=/etc/zyn/zynzapd-mainnet.env
+OBJ_ENV=/etc/zyn/zyn-object-mainnet.env
+AMM_DATA=/var/lib/zyn/mainnet-v12
+OBJ_DATA=/var/lib/zyn/object-mainnet
+XZEC=0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201
+PROGRESS="$AMM_DATA/bridge-26460-$XZEC.progress"
+NGINX=/etc/nginx/sites-available/zyn-rpc
+HETZNER=root@168.119.53.39
+MIRROR=/var/zyn/mirror
+STAMP="$(date -u +%Y%m%d)"
+ARCHIVE="chain-26460-amm-retired-$STAMP"
+
+do_() { if [ "$MODE" = "--execute" ]; then echo "  + $*"; eval "$@"; else echo "  would: $*"; fi; }
+die() { echo "REFUSED: $*"; exit 1; }
+
+# The final value of the AMM bridge's cursor: scanned_to, a big-endian u64
+# after the 8-byte ZYNBRDG2 magic.
+amm_scanned_to() {
+  python3 - "$PROGRESS" <<'PY'
+import struct, sys
+b = open(sys.argv[1], 'rb').read()
+if b[:8] != b'ZYNBRDG2':
+    sys.exit('not a ZYNBRDG2 progress file')
+print(struct.unpack('>Q', b[8:16])[0])
+PY
+}
+
+echo "== preconditions"
+systemctl is-active --quiet zyn-object-mainnet && die "the object ledger is already running"
+grep -q '^ZYN_CHAIN_ID=26460$' "$OBJ_ENV" || die "$OBJ_ENV is not staged as 26460"
+[ -f "$PROGRESS" ] || die "no AMM bridge progress at $PROGRESS"
+for p in ironwood orchard; do [ -f "$AMM_DATA/notes-26460-$p.tree" ] || die "no AMM $p tree"; done
+[ "$(grep -c '8096' "$NGINX")" = "1" ] || die "expected exactly one reference to :8096 in $NGINX"
+# The floor is written to the config in step 4. A binary older than the floor
+# ignores it silently and scans the retired chain's deposits from the vault's
+# birth -- so the binary has to be checked, not assumed.
+grep -aq 'ZYN_BRIDGE_FROM_HEIGHT' /usr/local/bin/zyn-object-node \
+  || die "/usr/local/bin/zyn-object-node predates the bridge floor; deploy a current build first"
+ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER" "test -d $MIRROR/chain-26460 && ! test -e $MIRROR/$ARCHIVE" \
+  || die "Hetzner's mirror has no chain-26460 tree, or $ARCHIVE already exists"
+
+# The one check that decides whether this may run at all. The AMM chain must
+# hold nothing: a balance there is somebody's money on a ledger about to stop.
+if systemctl is-active --quiet zynzapd-mainnet; then
+  STATUS="$(curl -s --max-time 10 -X POST http://127.0.0.1:8096/ -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_status"}')"
+  read -r BACKING POOLS ACCOUNTS < <(printf '%s' "$STATUS" | python3 -c '
+import sys, json
+r = json.load(sys.stdin)["result"]
+print(r["backing"], r["pools"], r["accounts"])')
+  echo "  AMM 26460 holds: backing $BACKING, pools $POOLS, accounts $ACCOUNTS"
+  [ "$BACKING" = "0.0" ] || die "the AMM chain holds $BACKING of backing — somebody's money is on it"
+  [ "$POOLS" = "0" ] || die "the AMM chain has $POOLS pool(s)"
+  # Backing counts ZEC. It does not count collections: a chain can hold zero
+  # backing and hundreds of items. Retiring it stops those items being
+  # transferable -- their mint stays anchored and the journal stays on disk,
+  # but somebody has to decide that is acceptable, so it takes a flag.
+  ITEMS="$(curl -s --max-time 10 -X POST http://127.0.0.1:8096/ -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_collections"}' | python3 -c "$(cat <<'COUNT'
+import sys, json
+cs = json.load(sys.stdin)["result"]
+held = [c for c in cs if c["outstanding"]]
+print(sum(c["outstanding"] for c in cs), " ".join("%s:%d" % (c["symbol"], c["outstanding"]) for c in held))
+COUNT
+)")"
+  read -r OUTSTANDING DETAIL <<<"$ITEMS"
+  echo "  outstanding collection items: $OUTSTANDING ${DETAIL:-}"
+  if [ "$OUTSTANDING" != "0" ] && [ "$RETIRE_ITEMS" != "--retire-collections" ]; then
+    die "the AMM chain holds $OUTSTANDING collection item(s) ($DETAIL). Pass --retire-collections to retire them with it"
+  fi
+else
+  echo "  AMM 26460 already stopped"
+fi
+echo "  preconditions hold"
+
+echo "== 1. stop the AMM chain (its state and journal stay on disk)"
+do_ systemctl disable --now zynzapd-mainnet
+
+echo "== 2. where its bridge stopped — every deposit at or below it was its to credit"
+SCANNED="$(amm_scanned_to)"
+FLOOR=$((SCANNED + 1))
+echo "  AMM bridge scanned to $SCANNED; the object ledger credits from $FLOOR"
+
+echo "== 3. its note trees are this vault's trees, at the tip"
+do_ install -m 600 "$AMM_DATA/notes-26460-ironwood.tree" "$OBJ_DATA/notes-26460-ironwood.tree"
+do_ install -m 600 "$AMM_DATA/notes-26460-orchard.tree" "$OBJ_DATA/notes-26460-orchard.tree"
+
+echo "== 4. write the floor"
+do_ "sed -i '/^ZYN_BRIDGE_FROM_HEIGHT=/d' $OBJ_ENV && echo ZYN_BRIDGE_FROM_HEIGHT=$FLOOR >> $OBJ_ENV && chmod 600 $OBJ_ENV"
+
+echo "== 5. move the AMM chain's published history aside on the mirror"
+echo "  (publish paths are chain-<id>/<epoch>: the new chain's epoch 0 and index"
+echo "   would otherwise land on top of the old ones)"
+do_ "ssh -n -o BatchMode=yes $HETZNER 'mv $MIRROR/chain-26460 $MIRROR/$ARCHIVE'"
+
+echo "== 6. start the object ledger"
+do_ systemctl enable --now zyn-object-mainnet
+if [ "$MODE" = "--execute" ]; then
+  sleep 12
+  curl -s --max-time 10 -X POST http://127.0.0.1:8599/ -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"zyn_status"}' > /tmp/handover-status.json
+  python3 - /tmp/handover-status.json <<'CHECK'
+import json, sys
+r = json.load(open(sys.argv[1]))["result"]
+assert r["chain"] == 26460, "answered as chain %s" % r["chain"]
+print("  chain %s epoch %s trees %s/%s" % (r["chain"], r["epoch"], r["synced_to"], r["sync_target"]))
+CHECK
+  if ! journalctl -u zyn-object-mainnet -n 40 --no-pager -o cat | grep -q "belong to the chain this one replaced"; then
+    systemctl stop zyn-object-mainnet
+    die "the object ledger started without the bridge floor; stopped it before it credited anything"
+  fi
+  journalctl -u zyn-object-mainnet -n 40 --no-pager -o cat | grep -E "MAINNET|belong to the chain|bridge ON" | sed "s/^/  /"
+fi
+
+echo "== 7. point the public gateway's / at it"
+do_ "cp -a $NGINX /root/zyn-rpc.bak.handover-$STAMP && sed -i 's#proxy_pass http://127.0.0.1:8096/;#proxy_pass http://127.0.0.1:8599/;#' $NGINX && nginx -t && systemctl reload nginx || { cp -a /root/zyn-rpc.bak.handover-$STAMP $NGINX; echo 'nginx refused the change; restored'; exit 1; }"
+
+echo "== 8. retire the AMM gateway"
+do_ systemctl disable --now zyn-rpc-mainnet
+
+cat <<ROLLBACK
+
+== to undo, in this order
+  systemctl disable --now zyn-object-mainnet
+  cp -a /root/zyn-rpc.bak.handover-$STAMP $NGINX && nginx -t && systemctl reload nginx
+  ssh $HETZNER 'test -e $MIRROR/chain-26460 && mv $MIRROR/chain-26460 $MIRROR/chain-26460-object-aborted-$STAMP; mv $MIRROR/$ARCHIVE $MIRROR/chain-26460'
+  systemctl enable --now zynzapd-mainnet zyn-rpc-mainnet
+ROLLBACK

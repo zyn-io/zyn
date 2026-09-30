@@ -4,15 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070807" />
-    <meta name="description" content="Apply for a place in Cave Collection Z. 4,444 underground creatures, settled on ZEC." />
+    <meta name="description" content="Get told when Cave Collection Z opens. 4,444 underground creatures, settled on ZEC. The list gates nothing — anyone can buy tickets." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/whitelist" />
     <meta property="og:title" content="Cave Collection Z — the list" />
-    <meta property="og:description" content="Nothing leaves the cave early. Ask for a place." />
+    <meta property="og:description" content="Get told when the door opens. The list gates nothing — anyone can buy tickets." />
     <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Cave Collection Z — the list" />
-    <meta name="twitter:description" content="Nothing leaves the cave early. Ask for a place." />
+    <meta name="twitter:description" content="Get told when the door opens. The list gates nothing — anyone can buy tickets." />
     <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <title>Cave Collection Z — the list</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
@@ -31,7 +31,7 @@
       .register::before {
         content: "";
         position: absolute;
-        inset: -20% -30% auto;
+        inset: -20% 0 auto;
         height: 70%;
         background: radial-gradient(
           ellipse 46% 60% at 30% 0%,
@@ -201,13 +201,14 @@
     </header>
 
     <main class="register">
-      <p class="eyebrow">the list <span>·</span> collection 01 <span>·</span> read by hand</p>
-      <h1><span>Ask for</span><span>a place<i>.</i></span></h1>
+      <p class="eyebrow">the list <span>·</span> collection 01</p>
+      <h1><span>Hear when</span><span>it opens<i>.</i></span></h1>
 
       <p class="statement">
-        Nothing leaves the cave early. Places are given, not bought, and every
-        application is read by a person — there is no score, no bot, and no
-        advantage to asking twice.
+        This list gates nothing: when the door opens, anyone can buy tickets on
+        <a href="/mint">/mint</a>, and everyone is drawn at the same odds. It is how
+        we know who to tell, and who was with the cave early. Asking twice changes
+        nothing.
       </p>
 
       <div class="ledger">
@@ -260,7 +261,7 @@
       <p class="smallprint">
         We keep your <strong>X handle</strong>, the <strong>link</strong> you paste and your
         <strong>note</strong>. Nothing else — no email, no wallet address, no Zcash address.
-        A place comes with an invitation code; you connect a wallet when you use it, not now.
+        You connect a wallet only when you buy, on /mint — not here.
       </p>
 
       <a class="back" href="/">← back to the cave</a>
@@ -282,8 +283,9 @@
       const handleEl = document.getElementById('handle');
       const loadedAt = Date.now();
 
-      let solved = null;        // { handle, nonce }
-      let solving = false;
+      let solved = null;        // { handle, nonce, window }
+      let dig = null;           // the dig in flight, one at a time
+      let digHandle = '';
 
       function say(message, ok) {
         out.textContent = message;
@@ -323,24 +325,32 @@
         return null;
       }
 
-      async function startDig() {
+      const windowNow = () => Math.floor(Date.now() / 1000 / WINDOW_SECONDS);
+
+      // One dig per handle: leaving the field starts it, Apply waits for the
+      // same one rather than starting another (which used to report failure).
+      // A dig from an older window is dug again, since the register only
+      // accepts recent work.
+      function startDig() {
         const handle = handleEl.value.trim().replace(/^@/, '');
         if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
           solved = null;
           setDig('', 'waiting for a handle');
-          return;
+          return Promise.resolve();
         }
-        if (solving || (solved && solved.handle === handle)) return;
-        solving = true;
+        if (solved && solved.handle === handle && solved.window >= windowNow() - 1) return Promise.resolve();
+        if (dig && digHandle === handle) return dig;
+        digHandle = handle;
         setDig('working', 'digging');
-        const nonce = await solve(handle);
-        solving = false;
-        if (nonce === null) {
-          setDig('', 'dig failed — reload');
-          return;
-        }
-        solved = { handle, nonce };
-        setDig('done', 'through');
+        const window_ = windowNow();
+        dig = solve(handle).then((nonce) => {
+          if (digHandle !== handle) return;
+          dig = null;
+          if (nonce === null) { setDig('', 'dig failed — press Apply to try again'); return; }
+          solved = { handle, nonce, window: window_ };
+          setDig('done', 'through');
+        });
+        return dig;
       }
 
       handleEl.addEventListener('blur', startDig);
@@ -356,14 +366,12 @@
         }
         // If they typed fast and submitted before the dig finished, wait for it
         // here rather than refusing — the work is the same either way.
-        if (!solved || solved.handle !== handle) {
-          apply.disabled = true;
-          say('One moment — digging in.', true);
-          await startDig();
-        }
+        apply.disabled = true;
+        if (!solved || solved.handle !== handle || solved.window < windowNow() - 1) say('One moment — digging in.', true);
+        await startDig();
         if (!solved || solved.handle !== handle) {
           apply.disabled = false;
-          say('The dig did not finish. Reload and try again.', false);
+          say('The dig did not finish. Press Apply to try again.', false);
           return;
         }
 
@@ -387,13 +395,15 @@
             say(
               data.already
                 ? 'You are already on the register. Once is enough.'
-                : 'Recorded. Every application is read by hand — watch X for the result.',
+                : 'On the list. Watch @cavebrowin on X for when the door opens.',
               true,
             );
             form.querySelectorAll('input, textarea').forEach((el) => (el.disabled = true));
             setDig('done', 'registered');
             return;
           }
+          // Work from an older window is dug again next time, silently.
+          if (/dig/.test(data.error || '')) solved = null;
           say(data.error || 'That did not go through. Try again in a moment.', false);
           apply.disabled = false;
         } catch {

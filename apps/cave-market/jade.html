@@ -4,161 +4,193 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#031b17" />
-    <meta name="description" content="Cave Jade — pick rough tokens, watch their market open, and discover what graduates into ZynZap liquidity." />
+    <meta name="description" content="Cave Jade — make a coin in one step, trade it on its curve at one fair price per epoch, and watch it graduate into a pool nobody can pull." />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Cave Jade — The Onchain Jade Yard" />
     <meta property="og:description" content="Every coin starts rough. The market reveals the jade." />
-    <title>Cave Jade — Revealed Coins</title>
-    <link rel="stylesheet" href="/jade.css?v=20260913-jade-yard2" />
+    <title>Cave Jade</title>
+    <link rel="stylesheet" href="/jade.css?v=20260923-yard3" />
   </head>
   <body>
     <header class="yard-header">
-      <a class="yard-brand" href="/" data-route="gallery" aria-label="Cave Jade gallery">
+      <a class="yard-brand" href="/" data-route="gallery" aria-label="Cave Jade coins">
         <span class="rough-mark" aria-hidden="true"><i></i></span>
         <span><strong>Cave Jade</strong><small>the onchain jade yard</small></span>
       </a>
       <nav class="yard-nav" aria-label="Primary navigation">
-        <a href="/" data-route="gallery">Jade Gallery</a>
-        <a href="/launch" data-route="launch">Pick a Stone</a>
+        <a href="/" data-route="gallery">Coins</a>
+        <a href="/launch" data-route="launch">Create</a>
+        <a href="/portfolio" data-route="portfolio">Portfolio</a>
       </nav>
-      <button class="wallet-button" id="wallet-button" type="button"><span></span> Connect wallet</button>
+      <div class="j-header-right">
+        <span class="j-zecusd" id="zec-usd" title="ZEC price, refreshed every few minutes">ZEC —</span>
+        <button class="wallet-button" id="wallet-button" type="button"><span></span> Connect wallet</button>
+      </div>
     </header>
 
     <main>
-      <section class="gallery-view" data-view="gallery" aria-labelledby="gallery-title">
-        <header class="gallery-head">
+      <!-- Coins -->
+      <section class="j-gallery" data-view="gallery" aria-labelledby="gallery-title">
+        <header class="j-gallery-head">
           <div>
-            <p class="eyebrow">ZYN / REVEALED MARKET</p>
-            <h1 id="gallery-title">The Jade Gallery</h1>
-            <p>Coins that made it through the rough market and revealed permanent ZynZap liquidity.</p>
+            <p class="eyebrow">ZYN · BONDING CURVES · ONE PRICE PER EPOCH</p>
+            <h1 id="gallery-title">Pick a stone.</h1>
+            <p class="j-lede">Anyone makes a coin in one step. It trades at once on the same curve as every coin, each epoch at one price for everybody, and graduates into a pool nobody can pull.</p>
           </div>
-          <dl class="yard-tally">
-            <div><dt>Revealed</dt><dd id="tally-revealed">—</dd></div>
-            <div><dt>In the yard</dt><dd id="tally-trading">—</dd></div>
-            <div><dt>ZEC set</dt><dd id="tally-zec">—</dd></div>
+          <dl class="j-tally">
+            <div><dt>Coins</dt><dd id="tally-all">—</dd></div>
+            <div><dt>Graduated</dt><dd id="tally-grad">—</dd></div>
+            <div><dt>ZEC set in them</dt><dd id="tally-zec">—</dd></div>
           </dl>
         </header>
-
-        <div class="gallery-tools">
-          <div class="stage-tabs" role="tablist" aria-label="Stone stages">
-            <button class="active" type="button" data-filter="revealed" role="tab" aria-selected="true">Revealed <b id="count-revealed">—</b></button>
-            <button type="button" data-filter="trading" role="tab" aria-selected="false">Window Open <b id="count-trading">—</b></button>
-            <button type="button" data-filter="all" role="tab" aria-selected="false">All stones <b id="count-all">—</b></button>
+        <div class="j-tools">
+          <div class="j-sorts" role="tablist" aria-label="Sort coins">
+            <button type="button" role="tab" data-sort="movers" class="active" aria-selected="true">Movers</button>
+            <button type="button" role="tab" data-sort="new" aria-selected="false">New</button>
+            <button type="button" role="tab" data-sort="mcap" aria-selected="false">Market cap</button>
+            <button type="button" role="tab" data-sort="last" aria-selected="false">Last trade</button>
+            <button type="button" role="tab" data-sort="near" aria-selected="false">About to graduate</button>
+            <button type="button" role="tab" data-sort="grad" aria-selected="false">Graduated</button>
           </div>
-          <label class="gallery-search">
-            <span class="sr-only">Search coins</span>
-            <input id="gallery-search" type="search" placeholder="Search stone or ticker" autocomplete="off" />
-            <kbd>/</kbd>
-          </label>
-          <select id="gallery-sort" aria-label="Sort coins">
-            <option value="progress">Reveal progress</option>
-            <option value="price">ZEC / token</option>
-            <option value="name">Name</option>
-          </select>
+          <label class="j-search"><span class="sr-only">Search coins</span><input id="gallery-search" type="search" placeholder="Search name, ticker or address" autocomplete="off" /><kbd>/</kbd></label>
         </div>
-
-        <div class="gallery-ledger" aria-label="Coin gallery information">
-          <span>Specimen / market</span><span>ZEC / token</span><span>Progress</span><span>ZEC setting</span><span>Address</span>
-        </div>
-        <div class="coin-gallery" id="coin-gallery" aria-live="polite"></div>
-        <p class="prototype-note" id="gallery-status">Waiting for the Nap Wallet provider. No public RPC is contacted by this page.</p>
+        <div class="j-grid" id="coin-gallery" aria-live="polite"></div>
+        <p class="j-note" id="gallery-status">Reading the yard from the chain…</p>
       </section>
 
-      <section class="launch-view" data-view="launch" hidden aria-labelledby="launch-title">
-        <header class="launch-head">
-          <div>
-            <p class="eyebrow">NEW ROUGH / FIXED SUPPLY</p>
-            <h1 id="launch-title">Pick your stone.</h1>
-          </div>
-          <ol class="cut-stages" aria-label="Stone lifecycle">
-            <li class="active"><span>01</span><strong>Rough</strong><small>fixed supply enters the yard</small></li>
-            <li><span>02</span><strong>Open a window</strong><small>the curve exposes demand</small></li>
-            <li><span>03</span><strong>Reveal the jade</strong><small>liquidity moves to ZynZap</small></li>
-          </ol>
-        </header>
-
-        <div class="launch-workbench">
-          <form class="stone-form" id="stone-form" novalidate>
-            <div class="panel-label"><span>ROUGH CERTIFICATE</span><b>LOCAL DRAFT</b></div>
-            <div class="form-fields">
-              <label class="wide"><span>Stone name</span><input id="stone-name" type="text" value="Verdant Echo" maxlength="96" autocomplete="off" /></label>
-              <label><span>Ticker · exact Unicode</span><div><input id="stone-symbol" type="text" value="VECHO" autocomplete="off" /><b>≤32 bytes</b></div></label>
-              <label><span>Fixed supply</span><div><input id="stone-supply" type="text" value="1,000,000,000" readonly /><b>8 decimals</b></div></label>
-              <label><span>Trading fee</span><div><input id="stone-fee" type="number" value="1" min="0.5" max="3" step="0.01" /><b>%</b></div></label>
-              <label><span>Optional dev buy</span><div><input id="stone-dev-buy" type="number" value="0" min="0" max="50000000" step="0.00000001" /><b>tokens · max 5%</b></div></label>
-              <label><span>Maximum dev-buy cost</span><div><input id="stone-max-zec" type="number" value="0" min="0" step="0.000000000000000001" /><b>ZEC.zy</b></div></label>
-              <label class="wide"><span>Inscription</span><textarea id="stone-description" rows="4" maxlength="180">A private coordination coin looking for its market.</textarea></label>
+      <!-- Create -->
+      <section class="j-create" data-view="launch" hidden aria-labelledby="launch-title">
+        <form class="j-panel j-create-form" id="stone-form" novalidate>
+          <p class="eyebrow">CREATE A COIN</p>
+          <h1 id="launch-title">Place a stone.</h1>
+          <label><span>Name</span><input id="stone-name" type="text" maxlength="24" autocomplete="off" placeholder="Verdant Echo" /></label>
+          <label><span>Ticker</span><input id="stone-symbol" type="text" maxlength="8" autocomplete="off" placeholder="VECHO" /><small>1–8 letters or digits</small></label>
+          <label><span>Description <em>(optional)</em></span><textarea id="stone-description" rows="3" maxlength="400" placeholder="What is this stone?"></textarea></label>
+          <label class="j-file"><span>Picture <em>(optional)</em></span><input id="stone-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk here to under 300 KB before it leaves your device.</small></label>
+          <p class="j-terms" id="stone-terms">Reading this network's terms…</p>
+          <ul class="j-facts">
+            <li><b>1,000,000,000</b> supply, all sold on the curve or put in its pool — none to you unless you buy</li>
+            <li>Graduates at <b>51,098 of 80,000 lots</b> (~17 ZEC raised, ~47 ZEC market cap)</li>
+            <li>Its pool's shares are <b>locked for good</b>; nobody can pull the liquidity</li>
+          </ul>
+          <button id="launch-stone" class="j-primary" type="submit" disabled>Create coin</button>
+          <p id="stone-status" class="j-status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
+        </form>
+        <aside class="j-panel j-preview" aria-label="Preview">
+          <p class="eyebrow">PREVIEW</p>
+          <div class="j-card j-card-preview">
+            <div class="j-thumb" id="preview-thumb"><span id="preview-letter">V</span></div>
+            <div class="j-card-body">
+              <h3 id="preview-name">Unnamed stone</h3>
+              <p class="j-ticker" id="preview-symbol">STONE</p>
+              <p class="j-desc" id="preview-description">No description.</p>
+              <div class="j-bar"><i style="width:0%"></i></div>
+              <p class="j-card-meta"><span>Market cap <b>6.18 ZEC</b></span><span>just now</span></p>
             </div>
-            <div class="fixed-seal"><i aria-hidden="true">玉</i><div><strong>One stone. One supply.</strong><p>No creator mint, rebasing, or supply edits after the rough enters the yard.</p></div><b>SEALED</b></div>
-            <div class="form-actions"><button id="save-stone" type="button">Keep in satchel</button><button id="launch-stone" type="submit" disabled>Place in the yard</button></div>
-            <p id="stone-status" aria-live="polite">This draft exists only in your browser session.</p>
-          </form>
+          </div>
+        </aside>
+      </section>
 
-          <aside class="stone-preview" aria-label="Rough stone preview">
-            <div class="panel-label"><span>UNCUT SPECIMEN</span><b>PREVIEW</b></div>
-            <div class="stone-object" aria-hidden="true"><div class="stone-core"><span id="preview-letter">V</span></div><i></i><i></i><i></i></div>
-            <p id="preview-symbol">VECHO</p>
-            <h2 id="preview-name">Verdant Echo</h2>
-            <p id="preview-description">A private coordination coin looking for its market.</p>
-            <dl><div><dt>Supply</dt><dd id="preview-supply">1B</dd></div><div><dt>Quote</dt><dd>ZEC.zy</dd></div><div><dt>Stage</dt><dd>Rough</dd></div><div><dt>Cut</dt><dd>Curve v1</dd></div></dl>
-          </aside>
+      <!-- A coin -->
+      <section class="j-coin" data-view="coin" hidden aria-labelledby="coin-title">
+        <nav class="crumbs" aria-label="Breadcrumb"><a href="/" data-route="gallery">Coins</a><span>/</span><strong id="coin-crumb">—</strong></nav>
+        <header class="j-coin-head">
+          <div class="j-thumb j-thumb-lg" id="coin-thumb"><span>?</span></div>
+          <div class="j-coin-id">
+            <p class="eyebrow" id="coin-stage">—</p>
+            <h1 id="coin-title">—</h1>
+            <p class="j-coin-sub"><span id="coin-symbol">—</span> · <span id="coin-age">—</span> · <button type="button" class="j-copy" id="coin-copy" title="Copy the coin's address">—</button></p>
+          </div>
+          <div class="j-coin-cap">
+            <span>Market cap</span>
+            <strong id="coin-mcap">—</strong>
+            <b id="coin-change">—</b>
+          </div>
+        </header>
 
-          <aside class="yard-rules">
-            <div class="panel-label"><span>YARD LAW</span><b>IMMUTABLE</b></div>
-            <h2>No one knows the jade before the market does.</h2>
-            <ul>
-              <li><span>Skin</span><strong>Manifest hash onchain</strong></li>
-              <li><span>Window</span><strong>Open bonding curve</strong></li>
-              <li><span>Reveal</span><strong>660M sold · 100 ZEC FDV</strong></li>
-              <li><span>Setting</span><strong>Locked ZynZap liquidity</strong></li>
-              <li><span>Return</span><strong>Curve sells stay open</strong></li>
-            </ul>
+        <div class="j-coin-grid">
+          <div class="j-coin-main">
+            <section class="j-panel j-chart-panel" aria-label="Price chart">
+              <div class="j-chart-tools">
+                <div class="j-tf" role="group" aria-label="Candle size">
+                  <button type="button" data-tf="60">1m</button><button type="button" data-tf="300" class="active">5m</button><button type="button" data-tf="900">15m</button><button type="button" data-tf="3600">1h</button><button type="button" data-tf="14400">4h</button><button type="button" data-tf="86400">1d</button>
+                </div>
+                <div class="j-tf" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
+              </div>
+              <div class="j-chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
+              <p class="j-note" id="chart-note">Candles are market cap per epoch batch — in each epoch every buyer pays one price and every seller gets one.</p>
+            </section>
+
+            <section class="j-panel j-progress" aria-label="Bonding curve">
+              <div class="j-progress-top"><span>Bonding curve</span><b id="curve-pct">—</b></div>
+              <div class="j-bar j-bar-lg"><i id="curve-bar" style="width:0%"></i></div>
+              <p id="curve-text">—</p>
+            </section>
+
+            <section class="j-panel j-fills" aria-labelledby="fills-title">
+              <div class="j-panel-head"><h2 id="fills-title">Fills</h2><span>per epoch batch · no wallets, by design</span></div>
+              <div class="j-table-wrap"><table class="j-table"><thead><tr><th>When</th><th>Side</th><th>Tokens</th><th>ZEC</th><th>Market cap</th></tr></thead><tbody id="fills"></tbody></table></div>
+            </section>
+          </div>
+
+          <aside class="j-coin-side">
+            <section class="j-panel j-trade" aria-label="Trade">
+              <div class="j-sides"><button type="button" data-trade="buy" class="active">Buy</button><button type="button" data-trade="sell">Sell</button></div>
+              <p class="j-balance" id="trade-balance">Connect a wallet to see your balance.</p>
+              <label class="j-amount"><span class="sr-only" id="trade-label">Amount</span><input id="trade-input" inputmode="decimal" autocomplete="off" value="0.1" /><b id="trade-unit">ZEC.zy</b></label>
+              <div class="j-presets" id="trade-presets"></div>
+              <dl class="j-quote">
+                <div><dt id="trade-output-label">You get (if you are alone this epoch)</dt><dd id="trade-output">—</dd></div>
+                <div><dt>Fee</dt><dd id="trade-fee">—</dd></div>
+                <div><dt>Slippage</dt><dd><select id="trade-slip" aria-label="Slippage"><option value="100">1%</option><option value="300" selected>3%</option><option value="500">5%</option><option value="1000">10%</option></select></dd></div>
+                <div><dt>At least</dt><dd id="trade-min">—</dd></div>
+              </dl>
+              <button class="j-primary trade-submit" type="button">Connect wallet</button>
+              <p id="trade-hint" class="j-hint" role="status" aria-live="polite"></p>
+              <p id="trade-status" class="j-status" aria-live="polite">Everyone buying in an epoch pays one price, and everyone selling another; nobody can get in ahead of you.</p>
+            </section>
+
+            <section class="j-panel j-about" aria-labelledby="about-title">
+              <h2 id="about-title">About</h2>
+              <p class="j-desc" id="coin-description">No description.</p>
+              <dl class="j-facts-list">
+                <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
+                <div><dt>Price / token</dt><dd id="coin-price">—</dd></div>
+                <div><dt>ZEC set in it</dt><dd id="coin-liquidity">—</dd></div>
+                <div><dt>Graduation pot</dt><dd id="coin-pot">—</dd></div>
+                <div><dt>Fee</dt><dd id="coin-fee">—</dd></div>
+                <div><dt>Creator</dt><dd>not shown here</dd></div>
+                <div><dt>Holders</dt><dd id="coin-holders">private — only the curve's share is public</dd></div>
+              </dl>
+              <details class="j-curve-mini"><summary>The curve</summary>
+                <svg class="price-chart" viewBox="0 0 900 390" role="img" aria-label="The bonding curve and where this coin is on it">
+                  <g class="chart-grid"><path d="M54 30V342H870"/><path d="M54 264H870M54 186H870M54 108H870"/></g>
+                  <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/><path class="chart-line" d="M54 342 L870 64"/>
+                  <circle class="chart-end" id="chart-point" cx="54" cy="342" r="9"/>
+                </svg>
+                <p class="j-note">One straight line for every coin: lot i costs 7,721 + i zatoshi. The dot is where this coin is.</p>
+              </details>
+            </section>
           </aside>
         </div>
       </section>
 
-      <section class="coin-view" data-view="coin" hidden aria-labelledby="coin-title">
-        <nav class="crumbs" aria-label="Breadcrumb"><a href="/" data-route="gallery">Jade Gallery</a><span>/</span><strong id="coin-crumb">Verdant Echo</strong></nav>
-        <header class="coin-head">
-          <div class="coin-identity"><div class="mini-stone" id="coin-stone"><span>V</span></div><div><p id="coin-stage">REVEALED JADE / 08</p><h1 id="coin-title">Verdant Echo</h1><span id="coin-symbol">VECHO / ZEC.zy</span></div></div>
-          <div class="coin-quote"><span>ZEC per token</span><strong id="coin-price">—</strong><b id="coin-change">onchain state</b></div>
-        </header>
-
-        <div class="coin-market">
-          <section class="market-chart" aria-labelledby="chart-title">
-            <div class="chart-toolbar"><div><button class="active" type="button">Bonding curve</button></div><div class="timeframes"><button class="active" type="button">Full cut</button></div></div>
-            <div class="chart-summary"><span>Deterministic price path</span><strong id="chart-title">Current onchain cut.</strong></div>
-            <svg class="price-chart" viewBox="0 0 900 390" role="img" aria-labelledby="price-chart-title price-chart-desc">
-              <title id="price-chart-title">Deterministic bonding curve and current position</title><desc id="price-chart-desc">A straight jade line shows the deterministic curve from launch to graduation. A point marks current sold supply.</desc>
-              <defs><linearGradient id="jade-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#35d8a0" stop-opacity=".38"/><stop offset="1" stop-color="#35d8a0" stop-opacity="0"/></linearGradient></defs>
-              <g class="chart-grid"><path d="M54 30V342H870"/><path d="M54 264H870M54 186H870M54 108H870"/></g>
-              <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/>
-              <path class="chart-line" d="M54 342 L870 64"/>
-              <circle class="chart-end" id="chart-point" cx="54" cy="342" r="7"/>
-            </svg>
-            <div class="chart-dates"><span>0 sold</span><span id="chart-progress">0% revealed</span><span>660M sold</span></div>
-          </section>
-
-          <aside class="trade-ticket">
-            <div class="trade-tabs"><button class="active" type="button" data-trade="buy">Pick</button><button type="button" data-trade="sell">Return</button></div>
-            <label><span id="trade-label">Exact token amount</span><div><input id="trade-input" type="number" min="0" step="0.00000001" value="1000000" /><b id="trade-unit">TOKEN</b></div></label>
-            <div class="trade-rate"><span id="trade-output-label">Quote</span><strong id="trade-output">—</strong></div>
-            <dl><div><dt>Venue</dt><dd id="trade-route">Curve</dd></div><div><dt>Trading fee</dt><dd id="trade-fee">—</dd></div><div><dt>Limit</dt><dd id="trade-min">—</dd></div></dl>
-            <button class="trade-submit" type="button" disabled>Connect wallet to pick</button>
-            <p id="trade-status">Quotes come from the node through Nap Wallet; the page never contacts a public RPC.</p>
-          </aside>
-        </div>
-
-        <section class="specimen-ledger" aria-label="Coin details">
-          <article><span>Liquidity setting</span><strong id="coin-liquidity">18.4 ZEC.zy</strong><small>protocol locked</small></article>
-          <article><span>Fixed supply</span><strong id="coin-supply">1B</strong><small>mint closed</small></article>
-          <article><span>Creator</span><strong id="coin-holders">—</strong><small>account address</small></article>
-          <article><span>Asset</span><strong id="coin-block">—</strong><small>immutable identity</small></article>
-        </section>
+      <!-- Portfolio -->
+      <section class="j-portfolio" data-view="portfolio" hidden aria-labelledby="portfolio-title">
+        <p class="eyebrow">YOUR STONES</p>
+        <h1 id="portfolio-title">Portfolio</h1>
+        <p class="j-note" id="portfolio-status">Connect a wallet to see what you hold and what you made.</p>
+        <div class="j-panel"><div class="j-panel-head"><h2>Held</h2><span id="held-total">—</span></div><div class="j-table-wrap"><table class="j-table"><thead><tr><th>Coin</th><th>Tokens</th><th>Worth</th><th></th></tr></thead><tbody id="held"></tbody></table></div></div>
+        <div class="j-panel"><div class="j-panel-head"><h2>Made by you</h2><span>visible only to you</span></div><div class="j-grid j-grid-small" id="made"></div></div>
       </section>
     </main>
 
+    <dialog class="jade-wallet" id="jade-wallet" aria-labelledby="jade-wallet-title">
+      <form method="dialog"><button class="jade-wallet-x" aria-label="Close">×</button></form>
+      <p class="eyebrow">WALLET</p><h2 id="jade-wallet-title">Connect Nap.</h2>
+      <div class="jade-wallet-body"></div>
+    </dialog>
     <footer><span>Cave Jade / launch.cavebro.win</span><span>Rough → Window → Reveal</span><a href="https://cavebro.win">Cave ecosystem ↗</a></footer>
-    <script type="module" src="/jade.js?v=20260913-jade-yard2"></script>
+    <script type="module" src="/jade.js?v=20260923-yard3"></script>
   </body>
 </html>

@@ -1,0 +1,8 @@
+[Unit]
+Description=Verify the reverse tunnel %i actually reaches its sequencer
+After=network-online.target
+
+[Service]
+Type=oneshot
+# %i is "<port>-<chain>-<unit>", e.g. 8211-main-zyn-custody-tunnel-main
+ExecStart=/usr/local/bin/zyn-tunnel-watch-run %i

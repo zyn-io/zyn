@@ -14,3 +14,134 @@
 }
 .art-consent input { margin-top: 3px; flex: none; }
 .art-consent span { max-width: 62ch; }
+
+/* The select carries its own visible text; the label is for screen readers. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.network-pick select { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.network-pick select option { color: #111; }
+
+/* Coins sit above items: what the account can spend, before what it owns.
+   Same card as an item — light, not the dark cave palette the other sites use. */
+.coins { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; margin: 24px 0 60px; }
+.coin {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid #1f24282d;
+  border-radius: 14px;
+  background: #fffaf0;
+}
+.coin b { display: block; margin-top: 8px; font: 700 30px Bricolage; font-variant-numeric: tabular-nums; }
+.coin > span { font: 11px Mono; color: #747776; white-space: nowrap; }
+
+/* The withdraw card reuses the account card; its inputs sit on the dark ground. */
+.withdraw-input { display: block; width: 100%; margin: 10px 0 0; padding: 12px 13px; border: 1px solid #ffffff2d; border-radius: 8px; background: #121618; color: #fff; font: 14px Mono; }
+.withdraw-input:focus { outline: none; border-color: #e8a916; }
+#withdraw-form .primary { margin-top: 0; }
+.coin-send { padding: 4px 0; font: 700 13px Plex; color: #1f2428; }
+
+/* Zcash: the balance is the one big number on the pocket; everything else
+   reuses the account card. */
+.zec { margin-bottom: 60px; }
+.zec .section-title span.bad { color: #c95545; }
+.zec-balance { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 26px 0 4px; }
+.zec-balance b { font: 700 clamp(44px, 6vw, 72px)/1 Bricolage; font-variant-numeric: tabular-nums; }
+.zec-balance span { font: 13px Mono; margin-left: 10px; color: #a56b00; }
+.zec-detail { margin: 0; font: 12px Mono; color: #6d716f; }
+.zec-notes { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 1px; }
+.zec-notes li { display: grid; grid-template-columns: minmax(120px, auto) 1fr auto; gap: 16px; align-items: baseline; padding: 12px 2px; border-bottom: 1px solid #1f24281f; font-size: 13px; }
+.zec-notes li b { font-variant-numeric: tabular-nums; }
+.zec-notes li span { color: #6d716f; }
+.zec-notes li code { font: 11px Mono; color: #6d716f; }
+.zec-notes li.zec-empty { display: block; color: #6d716f; }
+#zec-send .primary, #zec-add .primary { margin-top: 0; }
+.zec-add textarea { resize: vertical; font: 13px/1.5 Mono; }
+@media (max-width: 800px) { .zec-notes li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ---------------------------------------------------------------------------
+   Shared layout fixes (wallet, market, bridge, connect).
+   ------------------------------------------------------------------------- */
+
+/* The header network control reads as a control, and says which chain. */
+.network { white-space: nowrap; }
+.network-pick { cursor: pointer; transition: border-color .15s; }
+.network-pick:hover { border-color: #1f242870; }
+.network-pick:focus-within { outline: 2px solid #e8a916; outline-offset: 2px; }
+.network-pick select:focus { outline: none; }
+/* The whole pill opens the list, not just the words in it. */
+.network-pick { padding-top: 0; padding-bottom: 0; }
+.network-pick select { min-height: 34px; }
+.net-chain { white-space: nowrap; }
+
+/* Refresh stays on one line, beside the heading it belongs to. */
+.topline { gap: 16px; }
+.refresh { flex: none; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; line-height: 1; }
+
+/* Section titles with a status beside them keep apart. */
+.section-title { gap: 16px; }
+.section-title span { text-align: right; }
+
+/* A coin card never outgrows its column, however long the amount. */
+.coin, .coin > div { min-width: 0; }
+.coin b { overflow-wrap: anywhere; font-size: clamp(22px, 2.3vw, 30px); line-height: 1.1; }
+.coin-send { flex: none; white-space: nowrap; }
+
+/* Quiet actions on the dark cards look like something to press. */
+.account-card .quiet { color: #e8a916; text-decoration: underline; text-underline-offset: 3px; }
+
+/* On a wide screen the rail stays in view: the nav and the lock are the
+   things reached for, and on a long pocket they drifted off screen. */
+@media (min-width: 801px) {
+  .wallet { background: linear-gradient(90deg, transparent 259px, #1f242826 259px, #1f242826 260px, transparent 260px); }
+  .wallet > .rail { position: sticky; top: 0; align-self: start; min-height: calc(100vh - 152px); border-right: 0; justify-content: flex-start; gap: 36px; }
+  .wallet > .rail > .quiet { margin-top: auto; }
+}
+
+/* Phones: every control a finger can hit, the network always visible, the
+   footer stacked rather than ragged. */
+@media (max-width: 800px) {
+  header { gap: 10px; }
+  .brand { flex: none; gap: 8px; font-size: 22px; }
+  .brand img { width: 36px; height: 36px; }
+  .network { font-size: 11px; min-width: 0; }
+  .net-chain { display: none; }
+  .brand { min-height: 40px; }
+  .network-pick { padding: 0 10px; min-height: 40px; }
+  .network-pick select { min-height: 40px; max-width: 100%; }
+  .network-pick { border-width: 0; box-shadow: inset 0 0 0 1px #1f242833; }
+  footer { flex-direction: column; gap: 6px; line-height: 1.7; }
+  .refresh { min-height: 40px; padding: 0 14px; }
+  .quiet, .coin-send, .rail nav button { min-height: 40px; }
+  .rail { gap: 12px 16px; }
+  .rail nav { display: flex; grid-column: 1 / -1; overflow-x: auto; gap: 14px; scrollbar-width: none; }
+  .rail nav button { white-space: nowrap; flex: none; }
+  .rail > .quiet { grid-column: 2; grid-row: 1; align-self: start; }
+}
+
+/* Review rows in the send dialog: a long exact amount wraps, it does not
+   push the dialog wider than the phone. */
+.review, .descriptor { grid-template-columns: auto minmax(0, 1fr); }
+.review b, .descriptor b { overflow-wrap: anywhere; text-align: right; }
+
+/* The extension's toolbar popup (index.html?popup=1) is at most 800x600 and
+   has no viewport to speak of: give it a phone's width, and the phone layout
+   follows. */
+html.in-popup, html.in-popup body { width: 400px; min-height: 580px; }
+
+/* The phone app (apps/nap-mobile) runs edge to edge: keep content clear of the
+   notch, the status bar and the home indicator. */
+html.in-app body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+/* What scrolls up passes under a solid strip, not under the clock. */
+html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; height: env(safe-area-inset-top); background: #f8f2e4; z-index: 2147483000; pointer-events: none; }
+
+/* An event tag was tapped before the wallet was open (§150). */
+.tap-note { margin: 18px 0 4px; padding: 14px 16px; border-left: 3px solid #e8a916; background: rgba(232, 169, 22, .12); border-radius: 0 10px 10px 0; font-size: 15px; line-height: 1.5; }
+
+/* The claim card stacks on a phone, so its button never runs off it. */
+@media (max-width: 800px) { .claim { flex-direction: column; align-items: stretch; } .claim button { align-self: flex-start; } }
+
+/* Biometric unlock (the phone app, §151). */
+.bio{margin-top:8px}.bio-or{text-align:center;margin:12px 0 0;font-size:13px}
+.bio-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}.bio-actions .quiet{color:#3d3000;padding:6px 0}

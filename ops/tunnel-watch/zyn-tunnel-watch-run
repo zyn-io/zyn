@@ -1,0 +1,12 @@
+#!/bin/sh
+# Split a systemd instance name into the three arguments the watcher takes.
+# Done here rather than in the unit file because systemd's %i expansion and
+# the shell's parameter substitution fight over the same characters, and a
+# quoting mistake in a unit fails silently at boot.
+set -eu
+spec="$1"
+port=${spec%%-*}
+rest=${spec#*-}
+chain=${rest%%-*}
+unit=${rest#*-}
+exec /usr/local/bin/zyn-tunnel-watch "$port" "$chain" "$unit"

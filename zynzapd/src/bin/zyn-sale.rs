@@ -50,11 +50,29 @@
 //!   ZYN_SALE_REGISTRY    path to the whitelist registry
 //!   ZYN_SALE_NODE        node RPC                        (127.0.0.1:8099)
 //!   ZYN_SALE_CHAIN       chain id                        (26460)
-//!   ZYN_SALE_COLLECTION  collection id, 64 hex
-//!   ZYN_SALE_PRICE       entry price per item, ZEC.zy    (0.01, §64.17)
+//!   (the collection id, the entry price and the symbol are NOT settings:
+//!    they come from the published terms, and an environment variable that
+//!    disagrees stops the service rather than overriding them — §113)
 //!   ZYN_SALE_CUSTODIANS  comma-separated host:port
 //!   ZYN_SALE_THRESHOLD   signatures required             (2)
 //!   ZYN_SALE_TREASURY    directory holding public.bin
+//!
+//! # `zyn-sale draw`
+//!
+//! Runs the collection-wide draw once, after the close (A98, §104-§106). It
+//! serves nothing and mints nothing: it scans the vault for entry payments up
+//! to the announced close, admits the ones that qualify, fetches and verifies
+//! the reveal beacon, and prints the assignment with its four roots.
+//!
+//! The close and reveal are read from the **published announcement**, never
+//! from the environment — see `draw::Plan::from_announcement`.
+//!
+//!   ZYN_SALE_ANNOUNCEMENT  JSON: the close announcement and its publication
+//!   ZYN_SALE_SCAN_FROM     first Zcash height to scan
+//!   ZYN_VAULT_FVK          the vault full viewing key, 96 hex (read-only)
+//!   ZYN_ZEBRA_HOST/PORT    the Zcash node            (127.0.0.1:8232)
+//!   ZYN_ZEBRA_USER/PASS    RPC credentials, if any
+//!   ZYN_BRIDGE_MAX_BLOCKS  blocks per scan step      (200)
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -133,6 +151,9 @@ struct Service {
     chain: u32,
     collection: [u8; 32],
     price: Fixed,
+    /// The published terms. The split is read from here so the pool's share is
+    /// the one buyers were promised rather than one this service decided.
+    terms: cave_randomness::SaleTerms,
     /// Serial to its committed content hash, from the same `content.json` the
     /// manifest root was computed over (§86). A mint names the content, so the
     /// service cannot invent one: a serial missing here is refused rather than
@@ -150,21 +171,64 @@ struct Service {
 }
 
 fn main() {
+    // `draw` is a different job from serving: it runs once, touches no book and
+    // signs nothing. Dispatching here rather than in a second binary keeps the
+    // manifest loader, the hex helpers and the price in one place.
+    if std::env::args().nth(1).as_deref() == Some("draw") {
+        std::process::exit(draw_command());
+    }
+    // `reconcile` needs the same configuration the service runs with — the
+    // treasury, the custodians, the terms — so it is a mode of this binary
+    // rather than a tool that would have to be told all of it again.
+    let reconciling = std::env::args().nth(1).as_deref() == Some("reconcile");
+
     let listen = env("ZYN_SALE_LISTEN", "127.0.0.1:8096");
     let book_path = std::path::PathBuf::from(env("ZYN_SALE_BOOK", "./sale.book"));
     let registry_path = std::path::PathBuf::from(env("ZYN_SALE_REGISTRY", "./whitelist.registry"));
     let chain: u32 = env("ZYN_SALE_CHAIN", "26460").parse().expect("chain id");
-    let collection = unhex32(&env("ZYN_SALE_COLLECTION", "")).unwrap_or_else(|| {
-        eprintln!("zyn-sale: set ZYN_SALE_COLLECTION to the collection id (64 hex)");
-        std::process::exit(2);
-    });
+    // Derived from the published terms, not read from the environment.
+    //
+    // §64.16: no price, recipient, split or close rule may live only in a
+    // service environment variable. It was not a style preference — admission
+    // requires the deposit to equal `policy.entry_price_zatoshi` *exactly*, so
+    // a service quoting anything else takes everyone's money and then refuses
+    // every one of them at the draw, after the close, when it cannot be undone.
+    let sale_policy = zynzapd::cave_z::policy();
+    let sale_terms = zynzapd::cave_z::terms(&sale_policy);
+    let collection = sale_policy.collection_id;
+    if let Ok(given) = std::env::var("ZYN_SALE_COLLECTION") {
+        if unhex32(&given) != Some(collection) {
+            eprintln!(
+                "zyn-sale: ZYN_SALE_COLLECTION is {} but the published terms commit {}",
+                given,
+                hex(&collection)
+            );
+            std::process::exit(2);
+        }
+    }
     // §64.17 froze this at 0.01 ZEC for entry. It is read from the environment
     // rather than hardcoded so a testnet run can differ, and printed at start
     // so a wrong one is visible before a buyer meets it rather than after.
-    let price = fixed_of(&env("ZYN_SALE_PRICE", "0.01")).unwrap_or_else(|e| {
-        eprintln!("zyn-sale: ZYN_SALE_PRICE is not a decimal amount: {}", e);
-        std::process::exit(2);
-    });
+    // One zatoshi in Fixed's 1e18 scale, so the quoted price and the admitted
+    // price are the same number in two units rather than two numbers.
+    let price = Fixed(sale_terms.entry_price_zatoshi as i128 * 10_000_000_000);
+    if let Ok(given) = std::env::var("ZYN_SALE_PRICE") {
+        match fixed_of(&given) {
+            Ok(p) if p == price => {}
+            Ok(p) => {
+                eprintln!(
+                    "zyn-sale: ZYN_SALE_PRICE is {} but the published terms commit {} ({} zatoshi) \
+                     — a buyer paying the first is refused at the draw",
+                    p, price, sale_terms.entry_price_zatoshi
+                );
+                std::process::exit(2);
+            }
+            Err(e) => {
+                eprintln!("zyn-sale: ZYN_SALE_PRICE is not a decimal amount: {}", e);
+                std::process::exit(2);
+            }
+        }
+    }
     let custodians: Vec<String> = env("ZYN_SALE_CUSTODIANS", "")
         .split(',')
         .filter(|s| !s.trim().is_empty())
@@ -195,7 +259,7 @@ fn main() {
         eprintln!("zyn-sale: {}", e);
         std::process::exit(1);
     });
-    let symbol_prefix = env("ZYN_SALE_SYMBOL_PREFIX", "CAVEZ");
+    let symbol_prefix = zynzapd::cave_z::SYMBOL.to_string();
 
     let book = Book::load(&book_path).unwrap_or_else(|e| {
         eprintln!("zyn-sale: {}", e);
@@ -221,6 +285,7 @@ fn main() {
         chain,
         collection,
         price,
+        terms: sale_terms.clone(),
         manifest,
         symbol_prefix,
         custodians,
@@ -243,6 +308,9 @@ fn main() {
         orders,
         taken
     );
+    if reconciling {
+        std::process::exit(reconcile_command(&s));
+    }
     eprintln!("zyn-sale: POST http://{}/quote  {{\"code\":\"…\",\"account\":\"64 hex\"}}", listen);
     eprintln!("zyn-sale: POST http://{}/settle {{\"code\":\"…\",\"read\":\"hex signed read\"}}", listen);
 
@@ -350,8 +418,8 @@ fn quote(s: &Service, stream: &mut TcpStream, body: &[u8]) -> std::io::Result<()
                 stream,
                 200,
                 &format!(
-                    r#"{{"reserved":true,"quantity":{},"unitPrice":"{}","total":"{}","payTo":"{}","memo":false}}"#,
-                    q.quantity, q.unit_price, q.total, address
+                    r#"{{"reserved":true,"quantity":{},"unitPrice":"{}","total":"{}","payTo":"{}","memo":false,"treasury":"{}"}}"#,
+                    q.quantity, q.unit_price, q.total, address, hex(&s.treasury)
                 ),
             )
         }
@@ -366,6 +434,13 @@ fn settle(s: &Service, stream: &mut TcpStream, body: &[u8]) -> std::io::Result<(
             400,
             r#"{"error":"code and read (a signed read from the paying account) are required"}"#,
         );
+    };
+    // The buyer's signed payment. This service holds no key of theirs, so the
+    // only way the entry can be paid is that they signed it and this relays it.
+    let payment = match field(body, "payment").map(|p| unhex(&p)) {
+        Some(Some(bytes)) => Some(bytes),
+        Some(None) => return reply(stream, 400, r#"{"error":"payment must be hex"}"#),
+        None => None,
     };
     let Some(read) = unhex(&read_hex) else {
         return reply(stream, 400, r#"{"error":"read must be hex"}"#);
@@ -400,11 +475,56 @@ fn settle(s: &Service, stream: &mut TcpStream, body: &[u8]) -> std::io::Result<(
         .unwrap_or(Fixed::ZERO);
 
     let pay = || -> Result<Fixed, String> {
-        // Payment is already on chain: the buyer sent ZEC to the address this
-        // service quoted and the vault scanner credited it. "Paying" here is
-        // therefore recognising it, not moving it — and the money stays in the
-        // account that receives the item, so nothing has to move afterwards.
-        Ok(held)
+        // The money has to leave the buyer, because the terms say where it
+        // goes: 90% to the collection's pool, which is what a redeemed item is
+        // paid out of, and 10% to the treasury. An earlier version of this
+        // recognised the balance and moved nothing, which meant a buyer kept
+        // their ZEC.zy *and* got an item, and the redemption floor every buyer
+        // is trusting was funded by nobody (§113.8).
+        //
+        // This service holds no key of the buyer's. It relays the frame their
+        // wallet signed — `submit_raw` takes the bytes untouched, because the
+        // signature commits to exactly those bytes.
+        if held < s.price {
+            return Err(format!(
+                "this account holds {} and the entry is {} — the deposit may not be credited yet",
+                held, s.price
+            ));
+        }
+        let frame = payment.as_ref().ok_or("no signed payment accompanied this settle")?;
+        s.node.submit_raw(frame).map_err(|e| format!("the payment was refused: {e}"))?;
+        Ok(s.price)
+    };
+
+    // The collection's share, as a separate step by a different signer. Split
+    // by the published terms rather than a percentage computed here, and
+    // rounding goes to the pool because the floor is what buyers are trusting.
+    //
+    // `settle` calls this only after the buyer's payment is written down, so a
+    // failure here is recoverable by `reconcile` rather than money that moved
+    // with nothing recording it.
+    let fund_pool = || -> Result<(), String> {
+        let (pool_zat, _treasury_zat) = s.terms.split(s.terms.entry_price_zatoshi);
+        let pool = Fixed(pool_zat as i128 * 10_000_000_000);
+        let epoch = s.node.status().map_err(|e| e.to_string())?.epoch;
+        let rid = s.request.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let frame = zynzapd::treasury::frame_submission_across(
+            &s.custodians,
+            &s.public,
+            s.threshold,
+            s.chain,
+            epoch,
+            &Intent::FundCollection {
+                from: s.treasury,
+                collection: s.collection,
+                amount: pool,
+            },
+            rid,
+        )?;
+        s.node
+            .submit_raw(&frame)
+            .map_err(|e| format!("the entry was paid but the pool was not funded: {e}"))?;
+        Ok(())
     };
     // A lookup, never a draw. The collection-wide allocation runs once, after
     // the reveal, over the whole ticket ledger (§104.1); settling an order
@@ -470,7 +590,7 @@ fn settle(s: &Service, stream: &mut TcpStream, body: &[u8]) -> std::io::Result<(
 
     let outcome = {
         let mut book = s.book.lock().map_err(|_| std::io::Error::other("lock poisoned"))?;
-        let r = sale::settle(&mut book, &code, account, s.price, &pay, &allocate, &mint);
+        let r = sale::settle(&mut book, &code, account, s.price, &pay, &fund_pool, &allocate, &mint);
         let _ = book.save(&s.book_path);
         r
     };
@@ -544,6 +664,12 @@ fn refused(stream: &mut TcpStream, e: Refused) -> std::io::Result<()> {
         Refused::Exhausted { .. } => (409, "that invitation has no allocation left"),
         Refused::WrongAmount { .. } => (402, "the payment has not arrived in full yet"),
         Refused::PaymentRefused => (502, "the chain refused the payment"),
+        // The buyer is not out of pocket for nothing: their payment is
+        // recorded and `zyn-sale reconcile` finishes the collection's share.
+        Refused::PoolNotFunded => (
+            503,
+            "your payment landed; the collection's share has not, and an operator will finish it",
+        ),
         Refused::NotMinting => (409, "this collection is not minting"),
     };
     reply(
@@ -604,7 +730,7 @@ mod tests {
         // it matches what zyn-cave-manifest hashed into the root.
         assert_eq!(
             hex(&m[&0]),
-            "0d6e082004c43523c551c05cb8ce0ce6b844cf06478a487e66444ac7e757acc1"
+            "13ec006b3d3f21813048be3620342cd60ba8fe9d95971c0bbccd4eb1d1714abe"
         );
     }
 
@@ -625,4 +751,272 @@ mod tests {
         assert!(load_manifest(p.to_str().unwrap()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// One zatoshi in `Fixed`'s 1e18 scale, the same constant the scanner uses.
+const ZAT: i128 = 10_000_000_000;
+
+/// The chain, through a real node and a read-only vault key.
+struct ZebraChain {
+    zebra: zyn_custody::zebra::Zebra,
+    scanner: zyn_custody::shielded::Scanner,
+}
+
+impl zynzapd::draw::Chain for ZebraChain {
+    fn tip(&self) -> Result<u64, String> {
+        self.zebra.block_count().map_err(|e| e.to_string())
+    }
+
+    fn cave_payments(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<(u64, Vec<zynzapd::reveal::Sighting>), String> {
+        let (reached, found) = self
+            .scanner
+            .cave_payments(&self.zebra, from, to)
+            // `Unattributable` is fatal by design: shielded funds arrived that
+            // nobody can be credited for, and drawing past it would allocate a
+            // sale while somebody's money sat unaccounted.
+            .map_err(|e| format!("scan {from}..={to}: {e:?}"))?;
+        let mut out = Vec::with_capacity(found.len());
+        for s in found {
+            let zatoshi = u64::try_from(s.amount.0 / ZAT)
+                .map_err(|_| format!("payment in {} is not a whole zatoshi amount", hex(&s.txid)))?;
+            out.push(zynzapd::reveal::Sighting {
+                txid: s.txid,
+                height: s.height,
+                tx_index: s.tx_index,
+                output_index: s.output_index,
+                amount_zatoshi: zatoshi,
+                payment: s.payment,
+            });
+        }
+        Ok((reached, out))
+    }
+
+    fn block_hash(&self, height: u64) -> Result<[u8; 32], String> {
+        self.zebra.block_hash(height).map_err(|e| e.to_string())
+    }
+}
+
+/// The announcement as the operator published it, plus where it landed.
+///
+/// A file rather than six environment variables, because these travel together
+/// and a verifier is handed the same object.
+fn load_announcement(
+    path: &str,
+) -> Result<(cave_randomness::CloseAnnouncement, cave_randomness::PublicationProof), String> {
+    if path.trim().is_empty() {
+        return Err("set ZYN_SALE_ANNOUNCEMENT to the published close announcement".into());
+    }
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("{}: {}", path, e))?;
+    let d: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("{}: {}", path, e))?;
+    let n = |k: &str| -> Result<u64, String> {
+        d.get(k)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| format!("{}: {} is missing or not a number", path, k))
+    };
+    let txid = d
+        .get("publication_txid")
+        .and_then(serde_json::Value::as_str)
+        .and_then(unhex32)
+        .ok_or_else(|| format!("{}: publication_txid must be 64 hex", path))?;
+    let announcement = cave_randomness::CloseAnnouncement {
+        // Bound to the policy this binary holds, not to a digest in the file:
+        // a file that could name its own policy could name a different sale.
+        policy_digest: zynzapd::cave_z::policy()
+            .digest()
+            .map_err(|e| format!("the pinned policy does not validate: {e}"))?,
+        announced_at_zcash_height: n("announced_at_zcash_height")? as u32,
+        announced_at_drand_round: n("announced_at_drand_round")?,
+        deposit_close_zcash_height: n("deposit_close_zcash_height")? as u32,
+    };
+    let proof = cave_randomness::PublicationProof {
+        txid,
+        height: n("publication_height")? as u32,
+    };
+    Ok((announcement, proof))
+}
+
+/// `zyn-sale draw` — run the collection-wide draw and report it.
+fn draw_command() -> i32 {
+    match run_draw() {
+        Ok(report) => {
+            print!("{}", report);
+            0
+        }
+        Err(e) => {
+            eprintln!("zyn-sale draw: {}", e);
+            1
+        }
+    }
+}
+
+fn run_draw() -> Result<String, String> {
+    let policy = zynzapd::cave_z::policy();
+    let terms_digest = zynzapd::cave_z::terms(&policy).digest();
+
+    let content = load_manifest(&env("ZYN_SALE_MANIFEST", ""))?;
+    let manifest = zynzapd::cave_z::manifest_from(&content);
+    // The committed root is what buyers were promised. A manifest that rebuilds
+    // a different one is a different collection, and finding that out here is
+    // far cheaper than finding it out from a buyer (§106.4).
+    let root = cave_randomness::manifest_root(policy.collection_id, &manifest)
+        .map_err(|e| format!("the manifest does not form a root: {e}"))?;
+    if root != policy.manifest_root {
+        return Err(format!(
+            "the manifest rebuilds {} but the policy commits {} — this is not that collection",
+            hex(&root),
+            hex(&policy.manifest_root)
+        ));
+    }
+
+    let (announcement, proof) = load_announcement(&env("ZYN_SALE_ANNOUNCEMENT", ""))?;
+    let scan_from: u64 = env("ZYN_SALE_SCAN_FROM", "0")
+        .parse()
+        .map_err(|_| "ZYN_SALE_SCAN_FROM must be a height".to_string())?;
+    if scan_from == 0 {
+        return Err("set ZYN_SALE_SCAN_FROM — scanning from 0 is a day of work, and \
+                    scanning from too high silently loses whoever paid early"
+            .into());
+    }
+    let plan = zynzapd::draw::Plan::from_announcement(
+        &policy,
+        &announcement,
+        &proof,
+        zynzapd::cave_z::CONFIRMATIONS,
+        scan_from,
+        terms_digest,
+    )?;
+
+    let fvk_hex = env("ZYN_VAULT_FVK", "");
+    let bytes = unhex(&fvk_hex).ok_or("ZYN_VAULT_FVK must be 96 bytes of hex")?;
+    let bytes: [u8; 96] = bytes
+        .try_into()
+        .map_err(|_| "ZYN_VAULT_FVK must be 96 bytes of hex".to_string())?;
+    let fvk = orchard::keys::FullViewingKey::from_bytes(&bytes)
+        .ok_or("ZYN_VAULT_FVK is not a valid Orchard full viewing key")?;
+    let max_blocks: u64 = env("ZYN_BRIDGE_MAX_BLOCKS", "200").parse().unwrap_or(200);
+    let chain = ZebraChain {
+        zebra: zyn_custody::zebra::Zebra::connect(
+            &env("ZYN_ZEBRA_HOST", "127.0.0.1"),
+            env("ZYN_ZEBRA_PORT", "8232")
+                .parse()
+                .map_err(|_| "ZYN_ZEBRA_PORT must be a port".to_string())?,
+            match (
+                std::env::var("ZYN_ZEBRA_USER").ok(),
+                std::env::var("ZYN_ZEBRA_PASS").ok(),
+            ) {
+                (Some(u), Some(p)) => Some((Box::leak(u.into_boxed_str()) as &str, Box::leak(p.into_boxed_str()) as &str)),
+                _ => None,
+            },
+            zyn_custody::zebra::Network::Mainnet,
+        )
+        .map_err(|e| format!("cannot reach the Zcash node: {e}"))?,
+        scanner: zyn_custody::shielded::Scanner::new(
+            zyn_custody::shielded::VaultKeys::from_full_viewing_key(fvk),
+            scan_from,
+            max_blocks,
+        ),
+    };
+
+    let get = |url: &str| -> Result<Vec<u8>, String> {
+        let r = ureq::get(url)
+            .timeout(std::time::Duration::from_secs(20))
+            .call()
+            .map_err(|e| format!("{url}: {e}"))?;
+        let mut body = Vec::new();
+        r.into_reader()
+            .read_to_end(&mut body)
+            .map_err(|e| format!("{url}: {e}"))?;
+        Ok(body)
+    };
+
+    let outcome = zynzapd::draw::execute(&plan, &policy, &manifest, &chain, &get)?;
+
+    let mut report = String::new();
+    report.push_str(&format!(
+        "close {} (reveal block {}, drand round {})\n",
+        plan.close_height, plan.reveal_zcash_height, plan.reveal_drand_round
+    ));
+    report.push_str(&format!("terms digest      {}\n", hex(&terms_digest)));
+    report.push_str(&outcome.report());
+    report.push_str("\nassignment:\n");
+    for (account, serials) in outcome.run.by_account() {
+        report.push_str(&format!(
+            "  {} -> {}\n",
+            hex(&account),
+            serials
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    Ok(report)
+}
+
+/// `zyn-sale reconcile` — find entries whose collection share never landed, and
+/// finish them.
+///
+/// The failure it repairs is silent: a buyer paid, the treasury holds their
+/// money, and the pool that backs every holder's redemption is short by one
+/// entry's 90%. Nothing surfaces that except this.
+fn reconcile_command(s: &Service) -> i32 {
+    let mut book = match s.book.lock() {
+        Ok(b) => b,
+        Err(_) => {
+            eprintln!("zyn-sale reconcile: the order book is locked");
+            return 1;
+        }
+    };
+    let owed = sale::unfunded(&book);
+    if owed.is_empty() {
+        println!("zyn-sale reconcile: every paid entry has funded the pool");
+        return 0;
+    }
+    println!("zyn-sale reconcile: {} entry(s) paid with the pool's share unfunded", owed.len());
+
+    let (pool_zat, _) = s.terms.split(s.terms.entry_price_zatoshi);
+    let pool = Fixed(pool_zat as i128 * 10_000_000_000);
+    let mut fixed = 0usize;
+    for order in &owed {
+        let fund = || -> Result<(), String> {
+            let epoch = s.node.status().map_err(|e| e.to_string())?.epoch;
+            let rid = s.request.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let frame = zynzapd::treasury::frame_submission_across(
+                &s.custodians,
+                &s.public,
+                s.threshold,
+                s.chain,
+                epoch,
+                &Intent::FundCollection {
+                    from: s.treasury,
+                    collection: s.collection,
+                    amount: pool,
+                },
+                rid,
+            )?;
+            s.node.submit_raw(&frame).map_err(|e| e.to_string())?;
+            Ok(())
+        };
+        match sale::reconcile(&mut book, order, &fund) {
+            // Stops at the first failure rather than carrying on: if the
+            // treasury cannot fund one share it will not fund the next, and a
+            // long list of identical errors buries the reason.
+            Err(e) => {
+                eprintln!("  {}: {}", hex(&order.code_hash), e);
+                eprintln!("zyn-sale reconcile: stopped after {} of {}", fixed, owed.len());
+                return 1;
+            }
+            Ok(true) => {
+                fixed += 1;
+                println!("  {} funded {}", hex(&order.code_hash), pool);
+            }
+            Ok(false) => println!("  {} was already funded", hex(&order.code_hash)),
+        }
+    }
+    println!("zyn-sale reconcile: {} of {} finished", fixed, owed.len());
+    0
 }

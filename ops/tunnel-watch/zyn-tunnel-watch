@@ -1,0 +1,71 @@
+#!/bin/sh
+# Restart a reverse tunnel whose forward has gone, even though ssh is fine.
+#
+# `ExitOnForwardFailure=yes` only covers *establishment*. If the remote
+# forward is torn down afterwards -- reaped by the server, or the port grabbed
+# by a half-dead predecessor -- ssh keeps a perfectly healthy session with no
+# forward on it, and systemd sees a running process. The unit reports active
+# for hours while the sequencer cannot reach this custodian at all. That is
+# A110, and it has cost both chains more than once.
+#
+# The only authority on whether the forward arrived is the far end, and the
+# sequencer already publishes it: its health output names each custodian by
+# the port the forward should land on. So this asks the sequencer about
+# itself rather than inspecting a local process that is not the thing in doubt.
+#
+# Usage: zyn-tunnel-watch <port> <chain> <unit>
+#
+# The chain matters: this host holds a share of *both* vaults, and the two
+# tunnels land on different sequencers. Asking the wrong one would report the
+# wrong tunnel healthy, which is worse than not asking at all.
+set -eu
+PORT="$1"; CHAIN="$2"; UNIT="$3"
+case "$CHAIN" in
+  main)    URL="https://zyn-rpc.cavebro.win/" ;;
+  testnet) URL="https://zyn-rpc.cavebro.win/testnet" ;;
+  *) echo "unknown chain: $CHAIN" >&2; exit 64 ;;
+esac
+STATE="/run/zyn-tunnel-watch.$PORT"
+
+# Two strikes before acting. One failed poll is as likely to be a blip on the
+# path to the sequencer as a broken tunnel, and restarting on a blip is its own
+# outage -- a restart races the session it just killed for the port, which is
+# how this failure mode reproduces itself.
+NEED=2
+
+body=$(curl -s -m 20 -X POST "$URL" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"zyn_status","params":[]}' 2>/dev/null || true)
+
+if [ -z "$body" ]; then
+  # The sequencer is unreachable from here. That says nothing about the
+  # tunnel, so it must not be counted as a strike.
+  exit 0
+fi
+
+down=$(printf '%s' "$body" | python3 -c '
+import sys, json
+port = sys.argv[1]
+try:
+    h = json.load(sys.stdin)["result"]["health"]
+except Exception:
+    sys.exit(2)          # unparseable: say nothing rather than guess
+for e in h:
+    if port in e.get("name", ""):
+        print("1" if e.get("down") else "0")
+        sys.exit(0)
+sys.exit(3)              # the sequencer does not know this port
+' "$PORT" 2>/dev/null) || exit 0
+
+if [ "$down" = "0" ]; then
+  rm -f "$STATE"
+  exit 0
+fi
+
+n=$(cat "$STATE" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$STATE"
+[ "$n" -lt "$NEED" ] && exit 0
+
+logger -t zyn-tunnel-watch "forward for $PORT missing on $n consecutive checks — restarting $UNIT"
+rm -f "$STATE"
+systemctl restart "$UNIT"

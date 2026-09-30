@@ -60,6 +60,14 @@ fn main() {
         return;
     }
 
+    // The canonical bytes themselves, for publication. A digest nobody can
+    // recompute is a number, not a commitment — so the bytes have to be
+    // publishable, not only their hash.
+    if std::env::args().nth(1).as_deref() == Some("bytes") {
+        println!("{}", hex(&t.canonical_bytes()));
+        return;
+    }
+
     println!("Cave Collection Z — sale policy and terms");
     println!();
     println!("collection CAVEZ   {}", hex(&p.collection_id));
@@ -103,7 +111,7 @@ mod tests {
         assert_eq!(hex(&p.collection_id), "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e");
         assert_eq!(
             hex(&p.manifest_root),
-            "02b01b16da58e0d71ae27099daba30a0a7936cdd852ee325853f679886dd8f19"
+            "0c56593e1b16bd513a4c88baf31d42602acd89db85aef2b0dcbc4e4bce108426"
         );
         assert_eq!(p.supply, 4_444);
         // The draw recorded on 9 Sep, and the reservation it forces.

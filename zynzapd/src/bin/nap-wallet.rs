@@ -83,6 +83,13 @@ fn main() {
     let listener = TcpListener::bind(&listen).expect("bind wallet UI");
     eprintln!("nap-wallet: open http://{}/", listen);
     eprintln!("nap-wallet: restricted agent API on {}", agent_listen);
+    if allowed_origins().is_empty() {
+        eprintln!(
+            "nap-wallet: ZYN_EXTENSION_ORIGINS is unset — any installed browser \
+             extension may call this wallet. Set it to the wallet extension's \
+             origin before this is somebody's real money."
+        );
+    }
     for stream in listener.incoming().flatten() {
         let app = Arc::clone(&app);
         let secret = Arc::clone(&agent_secret);
@@ -162,18 +169,60 @@ fn read_request(s: &mut TcpStream) -> Option<Request> {
     })
 }
 
+/// Compare a secret without letting the clock describe it.
+///
+/// Over loopback a timing signal is a poor channel, but `!=` on a token is
+/// the kind of thing that is free to get right and awkward to explain later.
+fn secret_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
+/// Which extension origins may call this wallet.
+///
+/// `ZYN_EXTENSION_ORIGINS` is a comma-separated allowlist of exact origins.
+/// Set it in any real deployment: without it **every** installed extension is
+/// answered, so a hostile one that asks for `127.0.0.1` host permission can
+/// drive the wallet. That is a high-privilege attacker already, which is why
+/// this is defence in depth rather than the only lock — but "our extension"
+/// is what the comment above this function always claimed, and an allowlist
+/// is what makes it true.
+fn allowed_origins() -> Vec<String> {
+    std::env::var("ZYN_EXTENSION_ORIGINS")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(|o| o.trim().trim_end_matches('/').to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn is_extension_origin(o: &str) -> bool {
+    o.starts_with("chrome-extension://")
+        || o.starts_with("moz-extension://")
+        || o.starts_with("safari-web-extension://")
+}
+
 /// An extension is the only cross-origin caller we answer.
-fn cors(origin: &Option<String>) -> String {
+fn cors_with(origin: &Option<String>, allowed: &[String]) -> String {
     match origin {
         Some(o)
-            if o.starts_with("chrome-extension://")
-                || o.starts_with("moz-extension://")
-                || o.starts_with("safari-web-extension://") =>
+            if is_extension_origin(o)
+                && (allowed.is_empty() || allowed.iter().any(|a| a == o.trim_end_matches('/'))) =>
         {
             format!("Access-Control-Allow-Origin: {}\r\nAccess-Control-Allow-Headers: Content-Type, X-Zyn\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nVary: Origin\r\n", o)
         }
         _ => String::new(),
     }
+}
+
+fn cors(origin: &Option<String>) -> String {
+    cors_with(origin, &allowed_origins())
 }
 
 fn respond(
@@ -186,6 +235,20 @@ fn respond(
     write!(s, "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n", status, ctype, body.len(), extra)?;
     s.write_all(body)?;
     s.flush()
+}
+
+/// Routes that hand back recovery material, or destroy it.
+///
+/// `/api/export` returns the mnemonic. An extension that can reach it can
+/// exfiltrate the wallet outright, which is a different order of thing from
+/// driving it — so these answer the wallet's own page only, whatever the
+/// origin allowlist says. The page has no `Origin` on a same-origin POST;
+/// an extension always sends one.
+fn same_origin_only(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/export" | "/api/export-file" | "/api/reset" | "/api/zyn-key" | "/api/zyn-key/migrate"
+    )
 }
 
 fn agent_route_allowed(method: &str, path: &str) -> bool {
@@ -238,7 +301,7 @@ fn handle(
                 b"not available on the agent service",
             );
         }
-        if req.agent_token.as_deref() != Some(agent_secret) {
+        if !req.agent_token.as_deref().is_some_and(|t| secret_eq(t, agent_secret)) {
             return respond(
                 &mut s,
                 "403 Forbidden",
@@ -268,6 +331,16 @@ fn handle(
     }
     if !req.path.starts_with("/api/") {
         return respond(&mut s, "404 Not Found", "text/plain", "", b"not here");
+    }
+    // Recovery material never crosses an origin, allowlist or not.
+    if !agent_only && same_origin_only(&req.path) && req.origin.is_some() {
+        return respond(
+            &mut s,
+            "403 Forbidden",
+            "text/plain",
+            "",
+            b"this route answers the wallet's own page only",
+        );
     }
     if !agent_only && req.method == "POST" && !req.same_origin {
         // Only the page (or an extension, after a preflight) can set a
@@ -346,5 +419,108 @@ mod agent_boundary_tests {
             assert_eq!(content_type, "font/ttf");
             assert!(body.len() > 100_000, "{path} is not the bundled font");
         }
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    const OURS: &str = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+    const THEIRS: &str = "chrome-extension://zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+    /// With an allowlist set, only the named extension is answered. A hostile
+    /// extension that asks for 127.0.0.1 permission gets no CORS headers, so
+    /// the browser refuses to hand it the response.
+    #[test]
+    fn an_allowlist_admits_only_the_named_extension() {
+        let allowed = vec![OURS.to_string()];
+        assert!(cors_with(&Some(OURS.into()), &allowed).contains(OURS));
+        assert_eq!(cors_with(&Some(THEIRS.into()), &allowed), "");
+    }
+
+    /// A trailing slash is the same origin, and should not be a way past the
+    /// allowlist.
+    #[test]
+    fn a_trailing_slash_does_not_evade_the_allowlist() {
+        let allowed = vec![OURS.to_string()];
+        assert!(!cors_with(&Some(format!("{OURS}/")), &allowed).is_empty());
+    }
+
+    /// A page is never a cross-origin caller here, allowlist or not.
+    #[test]
+    fn a_web_page_is_never_answered() {
+        for o in [
+            "https://evil.example",
+            "http://127.0.0.1:8977",
+            "null",
+            "chrome-extension:evil",
+        ] {
+            assert_eq!(cors_with(&Some(o.into()), &[]), "", "{o} must not be answered");
+            assert_eq!(
+                cors_with(&Some(o.into()), &[OURS.to_string()]),
+                "",
+                "{o} must not be answered"
+            );
+        }
+    }
+
+    /// Unset means every extension, which is the documented fallback — and
+    /// the reason startup warns about it.
+    #[test]
+    fn an_empty_allowlist_falls_back_to_any_extension() {
+        assert!(!cors_with(&Some(THEIRS.into()), &[]).is_empty());
+    }
+
+    /// The token comparison must not return early on the first wrong byte.
+    #[test]
+    fn the_agent_token_compares_in_constant_time() {
+        assert!(secret_eq("abc123", "abc123"));
+        assert!(!secret_eq("abc123", "abc124"));
+        assert!(!secret_eq("abc123", "xbc123"));
+        assert!(!secret_eq("abc123", "abc1234"));
+        assert!(!secret_eq("", "x"));
+        assert!(secret_eq("", ""));
+    }
+}
+
+#[cfg(test)]
+mod recovery_route_tests {
+    use super::*;
+
+    /// The routes that hand back or destroy recovery material.
+    #[test]
+    fn the_seed_routes_are_named() {
+        for p in [
+            "/api/export",
+            "/api/export-file",
+            "/api/reset",
+            "/api/zyn-key",
+            "/api/zyn-key/migrate",
+        ] {
+            assert!(same_origin_only(p), "{p} must be same-origin only");
+        }
+    }
+
+    /// Ordinary routes are unaffected — the extension still drives the wallet.
+    #[test]
+    fn ordinary_routes_are_not_restricted() {
+        for p in [
+            "/api/overview",
+            "/api/offers",
+            "/api/offer",
+            "/api/take",
+            "/api/withdraw",
+            "/api/transfer",
+        ] {
+            assert!(!same_origin_only(p), "{p} should stay reachable");
+        }
+    }
+
+    /// `/api/export` is the one that returns the mnemonic, so if this list is
+    /// ever trimmed, that is the entry whose loss matters most.
+    #[test]
+    fn export_is_covered() {
+        assert!(same_origin_only("/api/export"));
     }
 }
