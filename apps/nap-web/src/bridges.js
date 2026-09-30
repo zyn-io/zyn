@@ -107,7 +107,12 @@ export function checkBridgeOut(b, to, raw) {
 /// SOL.zy / ETH.zy / BTC.zy back to their chain: commit to the address,
 /// burn, then show the address to the bridge that pays it.
 export async function bridgeOut(config, identity, held, b, to, raw, bps) {
-  const address = checkBridgeOut(b, to, raw);
+  return bridgeOutTo(config, identity, held, b, checkBridgeOut(b, to, raw), raw, bps);
+}
+
+/// The same, to destination bytes already checked: an address, or a private
+/// pool note (§158.4), which the bridge inserts instead of paying.
+export async function bridgeOutTo(config, identity, held, b, address, raw, bps) {
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const fee = (raw * bps) / 10_000n;
   const { inputs, change } = fund(identity, held, unhex(b.asset, 32), raw + fee);

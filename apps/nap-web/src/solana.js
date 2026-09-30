@@ -60,6 +60,22 @@ export function depositMessage({ owner, vault, lamports, memo, blockhash }) {
   ]);
 }
 
+/// A deposit into a private pool (DECISIONS §158): the owner pays one note
+/// of the pool's size in, with the note's commitment. The system program and
+/// the pool program are read.
+export function poolDepositMessage({ owner, program, pool, commitment, blockhash }) {
+  if (!/^[0-9a-f]{64}$/.test(commitment)) throw new Error('No note commitment');
+  const keys = [owner, pool, SYSTEM_PROGRAM, program].map(solanaKey);
+  const data = [1, ...commitment.match(/../g).map((h) => parseInt(h, 16))];
+  return Uint8Array.from([
+    1, 0, 2,
+    ...shortVec(keys.length), ...keys.flatMap((k) => [...k]),
+    ...solanaKey(blockhash),
+    ...shortVec(1),
+    3, ...shortVec(3), 0, 1, 2, ...shortVec(data.length), ...data,
+  ]);
+}
+
 /// A transaction awaiting its one signature.
 export function unsigned(message) {
   const out = new Uint8Array(1 + 64 + message.length);

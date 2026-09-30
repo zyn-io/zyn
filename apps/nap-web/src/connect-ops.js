@@ -17,6 +17,7 @@ import { contentHash, contentProof, hex, nullifierOf, unhex } from './object.js'
 import * as mk from './market.js';
 import * as ledger from './ledger.js';
 import * as bridges from './bridges.js';
+import * as pool from './pool.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
 
@@ -750,6 +751,99 @@ export const METHODS = {
           await bridges.bridgeOut(ctx.config, ctx.identity, h.held, b, to, amount, st.bps);
           return { ok: true };
         },
+      };
+    },
+  },
+
+  // -------------------------------------------------------- private channel
+  // SOL through the pools (§158): fixed sizes, a zero-knowledge proof each
+  // way, spends submitted by the relayer. The site talks to Phantom for the
+  // deposit itself; Nap makes the notes and the proofs.
+
+  zyn_poolInfo: {
+    kind: 'public',
+    async run(ctx) { return { ...(await pool.info(ctx.config)), sizes: pool.SIZES }; },
+  },
+
+  zyn_poolNotes: {
+    kind: 'read',
+    async run(ctx) { return { notes: await pool.notes(ctx.config, ctx.identity) }; },
+  },
+
+  /// A fresh note to deposit into the `size` pool from any Solana wallet.
+  zyn_poolDeposit: {
+    kind: 'read',
+    async run(ctx, p) {
+      const size = Number(p?.size);
+      const i = await pool.info(ctx.config);
+      const address = (i.pools || []).find((x) => Number(x.size) === size)?.address;
+      if (!address) throw bad('Pools take 0.1, 1 or 10 SOL');
+      const note = await pool.newNote(ctx.config, ctx.identity, size, 'in');
+      return { commitment: note.commitment, size, program: i.program, pool: address };
+    },
+  },
+
+  zyn_poolToZyn: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
+      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment && x.kind === 'in');
+      if (!n) throw bad('No such note in this wallet');
+      if (n.state !== 'in pool') throw bad(n.state === 'to zyn' ? 'That note is already in Zyn' : 'That note is not in its pool yet; try again once its deposit is confirmed');
+      const sol = n.size / 1e9;
+      return {
+        title: `Move ${sol} SOL into Zyn`,
+        danger: false,
+        rows: [['From', `a ${sol} SOL note in the pool`], ['Arrives as', `${sol} SOL.zy, less the bridge fee`]],
+        note: 'Nap proves the note is one of the pool\'s without saying which; the relayer submits it, so no wallet of yours appears.',
+        run: async () => pool.toZyn(ctx.config, ctx.identity, p.commitment),
+      };
+    },
+  },
+
+  zyn_poolWithdraw: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const size = Number(p?.size);
+      if (!pool.SIZES.includes(size)) throw bad('Pools take 0.1, 1 or 10 SOL');
+      const st = await bridges.bridgeState(ctx.config);
+      const b = st.bridges.find((x) => x.key === 'sol');
+      if (!b?.live) throw bad('No SOL bridge on this network');
+      const raw = BigInt(size) * 1_000_000_000n;
+      const fee = (raw * st.bps) / 10_000n;
+      await mustHold(ctx, b.asset, raw + fee, 'SOL.zy');
+      const sol = size / 1e9;
+      return {
+        title: `Withdraw ${sol} SOL privately`,
+        danger: true,
+        rows: [['You send', `${wadText(raw)} SOL.zy`], ['Bridge fee', `${wadText(fee)} SOL.zy`], ['Becomes', `a ${sol} SOL note in the pool`]],
+        note: 'The bridge puts the note into the pool; then send it to any Solana address. Nobody, the operator included, learns that address.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const note = await pool.withdraw(ctx.config, ctx.identity, h.held, size, st.bps);
+          return { commitment: note.commitment, size };
+        },
+      };
+    },
+  },
+
+  zyn_poolSend: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
+      const to = String(p?.to || '').trim();
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to)) throw bad('That is not a Solana address');
+      const n = (await pool.notes(ctx.config, ctx.identity)).find((x) => x.commitment === p.commitment && x.kind === 'out');
+      if (!n) throw bad('No such note in this wallet');
+      if (n.state !== 'in pool') throw bad(n.state === 'sent' ? 'That note is already sent' : 'The bridge has not put that note into the pool yet');
+      const i = await pool.info(ctx.config);
+      const sol = n.size / 1e9;
+      return {
+        title: `Send ${sol} SOL to an address`,
+        danger: true,
+        rows: [['To', to], ['Relayer fee', `${Number(i.fee) / 1e9} SOL`], ['Arrives', `${(n.size - Number(i.fee)) / 1e9} SOL`]],
+        note: 'Solana shows the address receiving from the pool, not from you. Use an address never linked to the one you deposited from.',
+        run: async () => pool.sendOut(ctx.config, ctx.identity, p.commitment, to),
       };
     },
   },
