@@ -5,6 +5,9 @@
 //
 //   PHRASE_FILE=<funded testnet phrase>  POOL=<pool hex>  SELL=<asset hex>
 //   AMOUNT=0.01  IN=TESTZ.zy OUT=TGRAD  node tests/extension.e2e.mjs
+//   LEND=1 COINS='SOL\.zy'  PHRASE_FILE=~/.zyn/test-wallets/lender.phrase …
+//        also reads Zyn Lend's markets and supplies LEND_AMOUNT (0.002) SOL.zy through
+//        the extension (COINS: what the popup must show for this wallet)
 //
 // Needs a Chromium that honours --load-extension (CHROMIUM=…, default:
 // Playwright's Chrome for Testing; branded Chrome no longer loads unpacked
@@ -32,7 +35,7 @@ const sellA = pool ? pool.a === SELL : false;
 
 // A bare site that finds Nap the way every site does.
 const site = `<!doctype html><meta charset="utf-8"><title>site</title>
-<button id="find">Find</button><button id="connect">Connect</button><button id="swap">Swap</button><button id="collect">Collect</button><pre id="out"></pre>
+<button id="find">Find</button><button id="connect">Connect</button><button id="swap">Swap</button><button id="collect">Collect</button><button id="markets">Markets</button><button id="supply">Supply</button><pre id="out"></pre>
 <script type="module">
 import { discover, connect } from './nap-connect.js';
 let nap = null;
@@ -42,6 +45,8 @@ document.querySelector('#find').onclick = async () => { const list = await disco
 document.querySelector('#connect').onclick = () => connect(nap, { network: 'testnet' }).then((c) => out(c.session), (e) => out({ error: e.message }));
 document.querySelector('#swap').onclick = () => ask('zyn_swap', ${JSON.stringify({ pool: POOL, sellA, amount: AMOUNT, slippageBps: 300 })});
 document.querySelector('#collect').onclick = () => ask('zyn_collect');
+document.querySelector('#markets').onclick = () => ask('zyn_lendMarkets');
+document.querySelector('#supply').onclick = () => ask('zyn_lendSupply', { asset: '9204324e0511b4d1a90d0ff36242f044e894e1b71489d47abd824df273092ad1', amount: '${process.env.LEND_AMOUNT || '0.002'}' });
 </script>`;
 const server = createServer((req, res) => {
   if (req.url === '/nap-connect.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(readFileSync(new URL('../nap-connect.js', import.meta.url))); return; }
@@ -70,9 +75,10 @@ try {
   await popup.fill('#words', WORDS);
   await popup.fill('#keep-password', PASSWORD);
   await popup.click('#restore-form button[type=submit]');
-  await popup.waitForFunction(() => /TESTZ\.zy|TGRAD|ZEC\.zy/.test(document.querySelector('#coins')?.textContent || ''), null, { timeout: 90000 });
+  const COINS = new RegExp(process.env.COINS || 'TESTZ\\.zy');
+  await popup.waitForFunction((src) => new RegExp(src).test(document.querySelector('#coins')?.textContent || ''), COINS.source, { timeout: 90000 });
   const coins = (await popup.textContent('#coins')).replace(/\s+/g, ' ');
-  ok(/TESTZ\.zy/.test(coins) && /TGRAD/.test(coins), `the popup reads the wallet from testnet by itself: ${coins.slice(0, 90)}…`);
+  ok(COINS.test(coins), `the popup reads the wallet from testnet by itself: ${coins.slice(0, 90)}…`);
   ok(await popup.evaluate(() => document.documentElement.scrollWidth <= 400), 'the popup fits its 400px width');
   await popup.screenshot({ path: `${S}/ext-popup.png` });
   ok(await popup.evaluate(() => !!localStorage.getItem('nap.kept.v1') && !/[a-z]+ [a-z]+ [a-z]+/.test(localStorage.getItem('nap.kept.v1'))), 'the key is kept sealed on the extension, never the phrase');
@@ -101,6 +107,22 @@ try {
   await win.click('#yes');
   const session = await answer();
   ok(/^[0-9a-f]{64}$/.test(session.account || '') && session.network === 'testnet', `connected: ${String(session.account).slice(0, 12)}… on ${session.network}`);
+
+  if (process.env.LEND) {
+    await page.click('#markets');
+    const m = await answer();
+    ok(Array.isArray(m.pools) && m.pools.length === 3 && m.guarded === true, `the extension reads Zyn Lend's markets: ${m.pools?.length} pools, guarded ${m.guarded}`);
+    await page.click('#supply');
+    // A refusal (too little SOL.zy, say) comes back to the site with no card.
+    await Promise.race([win.waitForSelector('#yes', { timeout: 60000 }), page.waitForFunction(() => /error/.test(document.querySelector('#out').textContent), null, { timeout: 60000 })]);
+    if (!(await win.$('#yes'))) ok(false, `the supply was refused before a card: ${await page.textContent('#out')}`);
+    const approval = (await win.textContent('main')).replace(/\s+/g, ' ');
+    ok(/Lend SOL\.zy/.test(approval) && approval.includes(`${process.env.LEND_AMOUNT || '0.002'} SOL.zy`), `the supply is approved in the extension's window: ${approval.slice(0, 110)}…`);
+    await win.screenshot({ path: `${S}/ext-lend-approve.png` });
+    await win.click('#yes');
+    const lent = await answer();
+    ok(/^[0-9a-f]{64}$/.test(lent.source || ''), `signed in the extension and lent (${String(lent.source || lent.error).slice(0, 16)}…)`);
+  }
 
   if (POOL) {
     await page.click('#swap');
