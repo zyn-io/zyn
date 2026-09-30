@@ -514,18 +514,36 @@ export const METHODS = {
       const owed = BigInt(pos.owed);
       // "all" pays what is owed plus a little for interest until it lands;
       // the chain returns anything over.
-      const amount = p.amount === 'all' ? owed + owed / 1000n + 1n : amountOf(p.amount, 'amount');
+      const all = p.amount === 'all';
+      const amount = all ? owed + owed / 1000n + 1n : amountOf(p.amount, 'amount');
       await mustHold(ctx, pos.borrow_asset, amount, name);
+      const cn = book.name(pos.collateral_asset);
+      const collateral = BigInt(pos.collateral);
+      // Repaying everything closes the position: the collateral comes back in
+      // the same approval, as a second intent the chain applies right after.
+      const closing = all && collateral > 0n;
       return {
-        title: `Repay ${name}`,
+        title: closing ? `Repay ${name} and close` : `Repay ${name}`,
         danger: false,
-        rows: [['You pay', `${wadText(amount)} ${name}`], ['Owed now', `${wadText(owed)} ${name}`]],
+        rows: [
+          ['You pay', `${wadText(amount)} ${name}`],
+          ['Owed now', `${wadText(owed)} ${name}`],
+          ...(closing ? [['You get back', `${wadText(collateral)} ${cn}, collected into this wallet`]] : []),
+        ],
         note: 'Anything paid over what is owed comes back to this wallet.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pos.borrow_asset), amount);
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRepayIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, nonce: n, inputs, change }));
-          return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+          const source = hex(mk.lendSource(ctx.identity.account, nonce));
+          if (!closing) return { source };
+          try {
+            const back = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRemoveCollateralIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount: collateral, nonce: n }));
+            return { source, closed: true, collateral: hex(mk.lendSource(ctx.identity.account, back)) };
+          } catch (e) {
+            // The loan is repaid either way; say where the collateral is.
+            return { source, closed: false, note: `Repaid. The collateral is still in the position (${e.message}); take it out under Positions.` };
+          }
         },
       };
     },

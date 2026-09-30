@@ -95,6 +95,27 @@ const card = found ? (await page.textContent('.pos[data-id]')).replace(/\s+/g, '
 ok(found && /SOL\.zy against .*ETH\.zy/.test(card), `the position, from this wallet only: ${card.slice(0, 120)}`);
 await page.screenshot({ path: `${S}/lend-positions.png`, fullPage: true });
 
+// Close it: repay everything and take the collateral back, in one approval.
+// This also leaves the wallet as it found it, so the test can run again.
+if (found) {
+  const closing = await page.getAttribute('.pos[data-id]', 'data-id');
+  await page.click(`.pos[data-id="${closing}"] button[data-act="repay"]`);
+  await approve('close', (t) => /Repay SOL\.zy and close/.test(t) && /You get back/.test(t) && /ETH\.zy/.test(t));
+  await page.waitForFunction(() => /Repaid|refused|declined|error/i.test(document.querySelector('#toast').textContent), null, { timeout: 90000 }).catch(() => {});
+  ok(/Repaid and closed/.test(await toast()), `close: ${await toast()}`);
+  let gone = false;
+  for (let i = 0; i < 12 && !gone; i++) {
+    await page.waitForTimeout(10000);
+    await page.click('#pos-collect');
+    await page.waitForTimeout(3000);
+    await page.goto(`${APP}/#/markets`);
+    await page.goto(`${APP}/#/positions`);
+    await page.waitForTimeout(4000);
+    gone = !(await page.$(`.pos[data-id="${closing}"]`));
+  }
+  ok(gone, 'the closed position is gone and its collateral collected');
+}
+
 await b.close();
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);
