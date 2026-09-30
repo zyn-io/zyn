@@ -15,10 +15,12 @@ against the code, then add it here.**
 
 What we are building towards — the hero headline, one sentence (30 Sep 2026):
 
-> **Private finance for every asset, anchored to Zcash.**
+> **Private finance for every asset, powered by Zcash.**
 
 It names the destination, not today: the trust section beside it says the
-operator sees positions and trades now. Slogans ("ZEC has private money. Zyn
+operator sees positions and trades now. "Powered by", not "built on": ZEC,
+the vault and the anchors are Zcash's, but Zcash does not secure Zyn's state,
+and "built on" says it does. Slogans ("ZEC has private money. Zyn
 gives it applications.") belong only in landing-page sections after the hero.
 
 The hierarchy, which keeps getting flattened:
