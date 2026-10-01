@@ -6673,3 +6673,23 @@ end to end and is not affected.
 | 158.9 | **Native BTC stays transparent**, labelled. Its payouts should stop co-spending deposit coins, and exits may go to Silent Payment addresses (BIP-352) | 🟡 |
 | 158.10 | **EVM pools, one per size** (`contracts/src/pool/ZynPool.sol`, the Solana program's rules and proofs byte for byte). `sweep` lets the authority move only *free* backing — what no live note is owed, freed by spends into Zyn — to a sibling pool whose exits need it, or to the vault; what stays always covers every live note. Testnet (1 Oct), authority and relayer the pool service key `0xa91F…28F2`: Sepolia 0.01/0.1/1 ETH `0xC63c…a199` `0x2be3…fa8c` `0x6141…a6c2`; Mezo testnet 0.001/0.01/0.1 BTC `0x1950…aE08` `0x56c6…F1C6` `0x2470…17cD` | 🟡 |
 | 158.11 | **`zyn-evm-pool`, one process per chain**: credits final `ToZyn` spends (ref = H(chain, pool, nullifier hash)); inserts 48-byte pool-note exits once the pool has free backing, sweeping a sibling's if needed, else says what the vault must send; checks the pool's own `Exit` logs first, so a lost state file never inserts twice; relays spends (estimate first; asks the pool whether a note is spent or a root known, since Mezo gives no revert reason). The node routes `zyn_pool*` by `chain` (ZYN_POOL_RELAYS). Nap and Zyn Lend name channels `sol`, `eth`, `mzbtc` | 🟡 |
+
+## §159 — Anchoring on demand: exits carry the anchor (1 Oct 2026)
+
+"had a thought on mainnet anchor. what if zyn just anchor on zec everytime
+there's people bridge out their xzec? it will have to be a anchoring event
+anyways" → "Anchoring yes, build like this".
+
+On the object ledger nothing waits for an anchor: ZEC deposits are credited
+when the bridge sees them confirmed (`finality_intent` is the default no-op).
+An anchor settles the chain's history on Zcash. Until now one went out after
+every seal, each paying its fee from the vault's own reserve — which mainnet
+does not have (10,000 zat; it has never anchored).
+
+| # | Decision | |
+|---|---|---|
+| 159.1 | **A ZEC exit carries the anchor.** Exits ready to pay are offered to the next anchor; its transaction pays them alongside the anchor's self-send, the fee taken from the first exit as when an exit goes alone (one more output: ~15,000 zat instead of ~10,000). The exit settler follows that txid as its own payment and records `SettleExit` once it is buried. With riders the backing floor does not apply: the vault's own money is not spent | 🟢 |
+| 159.2 | **Exits wait for an anchor in flight**, up to 30 passes (~10 min), so it can carry them when it lands; past that, or when the anchor cannot carry them (no Ironwood note, a bundle that cannot pay the address), they are paid alone as before | 🟢 |
+| 159.3 | **Standalone anchors only after an idle interval** — `ZYN_ANCHOR_IDLE_SECS`, default 86,400 — and still only from the fee reserve (`covers_backing`). A quiet chain spends nothing; no seal proposes an anchor before the interval | 🟢 |
+| 159.4 | **An anchor that can no longer land** (expired unseen, refused on consensus) releases any exits it carried — also after a restart, from the anchor ledger's abandoned entries — so they are paid again rather than waiting on it | 🟢 |
+| 159.5 | The anchor stays its own output with its own memo, the format verifiers already read; it is not moved onto the change output | 🟢 |

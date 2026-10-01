@@ -274,6 +274,39 @@ impl ExitSettler {
         }
     }
 
+    /// Exits ready to pay, offered to the next anchor so one transaction
+    /// carries both (§159). None while a payment of this settler's is still
+    /// confirming: the next one waits on its change, as it would alone.
+    pub fn riders(&self, exits: &[objectvm::PendingExit]) -> Vec<crate::anchor::Rider> {
+        if !self.inflight.is_empty() {
+            return Vec::new();
+        }
+        payable_from(exits, &self.asset, &self.reveals)
+            .0
+            .into_iter()
+            .map(|r| crate::anchor::Rider { to: r.to, zatoshi: r.zatoshi, index: r.index })
+            .collect()
+    }
+
+    /// An anchor transaction paid these exits: follow it as this settler's
+    /// own payment, so the ledger records them once Zcash buries it.
+    pub fn carried(&mut self, txid: String, covers: Vec<u32>) {
+        eprintln!("zyn-object-node: exit payment {txid} rides on the anchor, {} exit(s)", covers.len());
+        self.inflight.push(InFlight { txid, covers });
+        self.save();
+    }
+
+    /// Anchor transactions that can no longer land: exits one carried are
+    /// payable again. Txids this settler does not follow are ignored.
+    pub fn dropped(&mut self, txids: &[String]) {
+        let before = self.inflight.len();
+        self.inflight.retain(|f| !txids.contains(&f.txid));
+        if self.inflight.len() != before {
+            eprintln!("zyn-object-node: {} exit payment(s) were on an anchor that can no longer land; paying them again", before - self.inflight.len());
+            self.save();
+        }
+    }
+
     pub fn add_reveal(&mut self, r: Reveal) {
         if !self.reveals.contains(&r) {
             self.reveals.push(r);
@@ -288,12 +321,14 @@ impl ExitSettler {
     /// `exits` is a copy of the ledger's, taken under the node lock and
     /// passed after it is released: paying reads the vault's note stores,
     /// which the note scan can hold for minutes (A162).
-    pub fn poll_once(&mut self, exits: &[objectvm::PendingExit]) -> Result<Vec<objectvm::Op>, String> {
+    /// `hold`: an anchor is on its way and will carry these exits once it
+    /// lands, so this pass pays nothing alone.
+    pub fn poll_once(&mut self, exits: &[objectvm::PendingExit], hold: bool) -> Result<Vec<objectvm::Op>, String> {
         let settled = self.follow_up()?;
         // One payment in flight at a time. The vault's notes are the input to
         // the next transaction, and building a second one against notes the
         // first already spent produces a transaction Zcash refuses.
-        if self.inflight.is_empty() {
+        if self.inflight.is_empty() && !hold {
             self.pay_next(exits)?;
         }
         Ok(settled)

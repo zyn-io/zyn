@@ -94,12 +94,27 @@ pub struct Built {
     pub pool: ValuePool,
     /// Note positions it spends, forgotten once it is final.
     pub spent: Vec<u64>,
+    /// Ledger indices of the exits this transaction also pays (riders).
+    pub carried: Vec<u32>,
+}
+
+/// A ZEC exit ready to pay, offered to the next anchor so one transaction
+/// carries both (§159): the exit's payout and the anchor's self-send share a
+/// fee, which the exit pays as it would alone.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Rider {
+    pub to: Destination,
+    pub zatoshi: u64,
+    /// The exit's ledger index.
+    pub index: u32,
 }
 
 /// Turns an anchor into a transaction. The real one proves and threshold-signs;
 /// a test's returns fixed bytes.
 pub trait Builder {
-    fn build(&mut self, anchor: &Anchor, tip: u64) -> Result<Built, String>;
+    /// `riders`: exits to pay in the same transaction, the fee taken from the
+    /// first; those the bundle cannot pay are left out of `Built::carried`.
+    fn build(&mut self, anchor: &Anchor, tip: u64, riders: &[Rider]) -> Result<Built, String>;
     /// The transaction is final: its spent notes are gone from the chain.
     fn settled(&mut self, pool: ValuePool, spent: &[u64]);
 }
@@ -293,7 +308,7 @@ impl ZcashBuilder {
 }
 
 impl Builder for ZcashBuilder {
-    fn build(&mut self, anchor: &Anchor, _tip: u64) -> Result<Built, String> {
+    fn build(&mut self, anchor: &Anchor, _tip: u64, riders: &[Rider]) -> Result<Built, String> {
         // From the node, not the caller's tip: checked against the branch the
         // node says the next block is under, from the same reply.
         let (_, env) = self.zebra.envelope(self.network)?;
@@ -311,7 +326,18 @@ impl Builder for ZcashBuilder {
         // which is the policy's cadence anyway — so "no note yet" is a wait,
         // not a fault.
         let pool = ValuePool::Ironwood;
-        if let Some(floor) = &self.backing_floor {
+        let version = env.bundle_version_for(pool).map_err(|e| e.to_string())?;
+        // Exits this bundle can pay: any address where the version allows
+        // crossing pools, else transparent ones only (as the exit settler).
+        let riders: Vec<Rider> = riders
+            .iter()
+            .filter(|r| version.default_flags().cross_address_enabled() || matches!(r.to, Destination::Transparent(_)))
+            .copied()
+            .collect();
+        // With riders the fee comes out of the first exit, as it would if the
+        // exit went alone; only a standalone anchor spends the vault's own
+        // money, and only from its fee reserve.
+        if let (Some(floor), true) = (&self.backing_floor, riders.is_empty()) {
             let mut held: u64 = 0;
             for p in [ValuePool::Orchard, ValuePool::Ironwood] {
                 let store = self.notes.of(p).lock().map_err(|_| "note store poisoned".to_string())?;
@@ -319,15 +345,26 @@ impl Builder for ZcashBuilder {
             }
             covers_backing(held, floor.load(std::sync::atomic::Ordering::SeqCst))?;
         }
-        let version = env.bundle_version_for(pool).map_err(|e| e.to_string())?;
         self.tree_matches_node(pool)?;
+        let mut payments: Vec<Payment> = riders.iter().map(|r| Payment::new(r.to, r.zatoshi)).collect();
+        payments.push(payment);
         let mut payout = {
             let store = self
                 .notes
                 .of(pool)
                 .lock()
                 .map_err(|_| "note store poisoned".to_string())?;
-            match payout::build(&store, &self.fvk, ovk.clone(), &[payment], to, version, rand::rngs::OsRng) {
+            if !riders.is_empty() {
+                // Build once to learn the fee, then take it from the first
+                // payout, so what leaves the vault is what the ledger burned.
+                let probe = payout::build(&store, &self.fvk, ovk.clone(), &payments, to, version, rand::rngs::OsRng)
+                    .map_err(|e| format!("cannot build the anchor with its exits: {e}"))?;
+                if payments[0].zatoshi <= probe.fee {
+                    return Err("the first exit cannot cover the network fee".into());
+                }
+                payments[0].zatoshi -= probe.fee;
+            }
+            match payout::build(&store, &self.fvk, ovk.clone(), &payments, to, version, rand::rngs::OsRng) {
                 Ok(p) => p,
                 Err(payout::PayoutError::Notes(_)) => {
                     return Err("waiting for a spendable Ironwood note (the last anchor's change is still confirming, or the vault needs a top-up)".into())
@@ -395,6 +432,7 @@ impl Builder for ZcashBuilder {
             expiry: u64::from(u32::from(env.expiry)),
             pool: version.value_pool(),
             spent: sealed.spent.iter().map(|n| u64::from(n.position)).collect(),
+            carried: riders.iter().map(|r| r.index).collect(),
         })
     }
 
@@ -440,6 +478,16 @@ pub struct AnchorSettler<C: Chain, B: Builder> {
     /// not among these was sent before a restart; if the node can no longer
     /// reproduce it, its epochs were lost with that process (§157.15).
     sent_here: Vec<[u8; 32]>,
+    /// Anchor only when there is a reason (§159): exits to carry, or the
+    /// node's idle interval (`anchor_due`) past. Off: anchor on every seal.
+    on_demand: bool,
+    /// Exits offered for the next anchor this pass.
+    riders: Vec<Rider>,
+    /// The transaction that took riders this pass, and which exits.
+    carried: Option<(String, Vec<u32>)>,
+    /// Anchor transactions that can no longer land (any exits they carried
+    /// are payable again).
+    dropped: Vec<String>,
 }
 
 impl<C: Chain, B: Builder> AnchorSettler<C, B> {
@@ -464,7 +512,35 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             lineage_lost: Vec::new(),
             reanchor_pending: Vec::new(),
             sent_here: Vec::new(),
+            on_demand: false,
+            riders: Vec::new(),
+            carried: None,
+            dropped: Vec::new(),
         })
+    }
+
+    /// Anchor when exits can ride along, else only once the node's idle
+    /// interval has passed (§159).
+    pub fn on_demand(mut self) -> Self {
+        self.on_demand = true;
+        self
+    }
+
+    /// Exits ready to pay, for the next anchor this pass to carry.
+    pub fn offer_riders(&mut self, riders: Vec<Rider>) {
+        self.riders = riders;
+    }
+
+    /// The transaction that took this pass's riders: the exit settler records
+    /// it as its own payment.
+    pub fn take_carried(&mut self) -> Option<(String, Vec<u32>)> {
+        self.carried.take()
+    }
+
+    /// Anchor transactions abandoned this pass: any exits one carried are
+    /// payable again.
+    pub fn take_dropped(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.dropped)
     }
 
     /// Release deposits only after a signer set endorses each anchor. The set
@@ -474,6 +550,12 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
     pub fn requiring_signatures(mut self) -> Self {
         self.signing = true;
         self
+    }
+
+    /// Every anchor transaction this settler gave up on: at start, so an exit
+    /// that rode on one before a restart is released (§159).
+    pub fn abandoned(&self) -> Vec<String> {
+        self.ledger.entries.iter().filter(|e| e.status == Status::Abandoned).map(|e| e.id.clone()).collect()
     }
 
     pub fn in_flight(&self) -> Option<&Entry> {
@@ -582,7 +664,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
     /// so a fresh txid settles the same anchor and the lineage reconnects.
     pub fn reanchor(&mut self, anchor: &Anchor) -> Result<String, String> {
         let tip = self.chain.tip()?;
-        let built = self.builder.build(anchor, tip)?;
+        let built = self.builder.build(anchor, tip, &[])?;
         let hex_tx: String = built.bytes.iter().map(|b| format!("{:02x}", b)).collect();
         let txid = self.chain.broadcast(&hex_tx)?;
         eprintln!(
@@ -772,6 +854,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
                 None if tip > self.ledger.entries[i].expiry => {
                     eprintln!("zynzapd: anchor transaction {} expired unseen at {}; the same anchor will be rebuilt", id, tip);
                     self.ledger.entries[i].status = Status::Abandoned;
+                    self.dropped.push(id.clone());
                     changed = true;
                 }
                 None => {
@@ -787,6 +870,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
                             // expiry would only delay the rebuild.
                             eprintln!("zynzapd: anchor {} refused on consensus ({}); abandoned, the same anchor will be rebuilt", id, e);
                             self.ledger.entries[i].status = Status::Abandoned;
+                            self.dropped.push(id.clone());
                             changed = true;
                         } else {
                             eprintln!("zynzapd: rebroadcast of anchor {} refused: {}", id, e);
@@ -812,16 +896,27 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
                 hex(id)
             ));
         }
+        let riders = std::mem::take(&mut self.riders);
         let proposal = {
             let mut n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
-            n.proposed().copied().or_else(|| n.propose_anchor(now))
+            // A proposal already made is carried whatever the reason. A new
+            // one, on demand, only for exits to ride or once the chain has
+            // been idle long enough.
+            let wanted = !self.on_demand || !riders.is_empty() || n.anchor_due(now);
+            n.proposed().copied().or_else(|| if wanted { n.propose_anchor(now) } else { None })
         };
         let Some(anchor) = proposal else {
             return Ok(());
         };
         let tip = self.chain.tip()?;
-        let built = match self.builder.build(&anchor, tip) {
+        let built = match self.builder.build(&anchor, tip, &riders) {
             Ok(b) => b,
+            // The exits go alone this pass rather than wait on an anchor that
+            // cannot carry them.
+            Err(e) if !riders.is_empty() => {
+                eprintln!("zynzapd: anchor for epoch {} cannot carry {} exit(s): {e}; they are paid alone", anchor.checkpoint.epoch, riders.len());
+                return Ok(());
+            }
             Err(e) => {
                 if !self.warned_unfunded {
                     eprintln!(
@@ -849,14 +944,18 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         });
         self.save()?;
         self.sent_here.push(anchor.id());
+        if !built.carried.is_empty() {
+            self.carried = Some((built.txid.clone(), built.carried.clone()));
+        }
         let hex_tx: String = built.bytes.iter().map(|b| format!("{:02x}", b)).collect();
         match self.chain.broadcast(&hex_tx) {
             Ok(txid) => eprintln!(
-                "zynzapd: anchor for epoch {} (root {}) broadcast as {} from {:?}",
+                "zynzapd: anchor for epoch {} (root {}) broadcast as {} from {:?}{}",
                 anchor.checkpoint.epoch,
                 hex(&anchor.checkpoint.state_root),
                 txid,
-                built.pool
+                built.pool,
+                if built.carried.is_empty() { String::new() } else { format!(", carrying {} exit(s)", built.carried.len()) }
             ),
             Err(e) => eprintln!("zynzapd: anchor broadcast deferred: {}", e),
         }
@@ -938,7 +1037,7 @@ mod tests {
         settled: Vec<(ValuePool, Vec<u64>)>,
     }
     impl Builder for FakeBuilder {
-        fn build(&mut self, anchor: &Anchor, tip: u64) -> Result<Built, String> {
+        fn build(&mut self, anchor: &Anchor, tip: u64, riders: &[Rider]) -> Result<Built, String> {
             if self.fail {
                 return Err("unfunded".into());
             }
@@ -949,6 +1048,7 @@ mod tests {
                 expiry: tip + 40,
                 pool: ValuePool::Ironwood,
                 spent: vec![7, 9],
+                carried: riders.iter().map(|r| r.index).collect(),
             })
         }
         fn settled(&mut self, pool: ValuePool, spent: &[u64]) {
@@ -978,6 +1078,71 @@ mod tests {
         }
         assert_eq!(n.pending().len(), 1);
         Arc::new(Mutex::new(n))
+    }
+
+    /// A node whose anchor is due only after an hour idle.
+    fn idle_node() -> SharedOf<SwapState> {
+        let n = node();
+        let mut n = Arc::try_unwrap(n).ok().unwrap().into_inner().unwrap();
+        let st = n.state().clone();
+        let policy = EpochPolicy { intents_per_epoch: 10, epochs_per_anchor: u64::MAX, max_seconds_per_epoch: 0, max_seconds_per_anchor: 3600 };
+        n = Node::resume(st, policy, Economics::flat(1), 0).with_manual_anchoring();
+        for _ in 0..10 {
+            let d = Intent::next_deposit(n.state(), [1u8; 32], XZEC, Fixed::whole(1), [0u8; 32]);
+            n.submit_operator(d, 0);
+        }
+        Arc::new(Mutex::new(n))
+    }
+
+    fn rider(index: u32) -> Rider {
+        Rider { to: Destination::Transparent(zcash_transparent::address::TransparentAddress::PublicKeyHash([index as u8; 20])), zatoshi: 50_000, index }
+    }
+
+    /// §159: on demand, a quiet chain does not anchor until it has been idle
+    /// long enough; an exit ready to pay brings the anchor forward and rides
+    /// in it, and the exit settler is told which transaction paid it.
+    #[test]
+    fn exits_ride_on_the_anchor_and_a_quiet_chain_waits_for_its_interval() {
+        let dir = tmp("ride");
+        let chain = FakeChain::default();
+        let n = idle_node();
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        s.poll_once(&n, 10).unwrap();
+        assert!(chain.0.borrow().broadcasts.is_empty(), "nothing to carry and not idle long enough: no anchor");
+        assert!(s.take_carried().is_none());
+
+        s.offer_riders(vec![rider(3), rider(5)]);
+        s.poll_once(&n, 20).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1, "the exits bring the anchor forward");
+        let (txid, covers) = s.take_carried().expect("the anchor carried the exits");
+        assert_eq!(covers, vec![3, 5]);
+        assert_eq!(s.in_flight().map(|e| e.id.clone()), Some(txid));
+
+        // A second chain, idle past its interval with nothing to carry: anchors alone.
+        let dir2 = tmp("idle");
+        let chain2 = FakeChain::default();
+        let mut s2 = AnchorSettler::new(chain2.clone(), FakeBuilder::default(), 3, &dir2, 1).unwrap().on_demand();
+        s2.poll_once(&idle_node(), 3_700).unwrap();
+        assert_eq!(chain2.0.borrow().broadcasts.len(), 1, "idle an hour: a standalone anchor");
+        assert!(s2.take_carried().is_none());
+    }
+
+    /// An anchor that can no longer land is reported, so exits it carried are
+    /// paid again rather than waiting on it for ever — also after a restart.
+    #[test]
+    fn an_abandoned_anchor_releases_the_exits_it_carried() {
+        let dir = tmp("drop");
+        let chain = FakeChain::default();
+        let n = idle_node();
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        s.offer_riders(vec![rider(4)]);
+        s.poll_once(&n, 20).unwrap();
+        let (txid, _) = s.take_carried().unwrap();
+        chain.0.borrow_mut().tip = 1_000; // past its expiry, never seen
+        s.poll_once(&n, 40).unwrap();
+        assert_eq!(s.take_dropped(), vec![txid.clone()]);
+        let again = AnchorSettler::new(chain, FakeBuilder::default(), 3, &dir, 1).unwrap();
+        assert_eq!(again.abandoned(), vec![txid], "a restart still knows it was abandoned");
     }
 
     fn tmp(name: &str) -> PathBuf {

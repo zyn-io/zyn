@@ -2318,7 +2318,10 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         std::path::Path::new(dir),
         chain,
     )
-    .ok()?;
+    .ok()?
+    // Anchors on demand (§159): with ZEC exits to carry, or once the chain has
+    // been idle ZYN_ANCHOR_IDLE_SECS since the last one.
+    .on_demand();
 
     eprintln!(
         "zyn-object-node: {} shielded deposit(s) attributed out of band",
@@ -2492,11 +2495,16 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Anchors are on demand (§159): every ZEC exit carries one, and with no
+    // exits a standalone anchor waits this long after the last. A standalone
+    // anchor's fee is the vault's own money, so it is also the cadence that
+    // spends the fee reserve.
+    let anchor_idle: u64 = env("ZYN_ANCHOR_IDLE_SECS", "86400").parse().unwrap_or(86_400);
     let policy = EpochPolicy {
         intents_per_epoch: 64,
-        epochs_per_anchor: u64::MAX, // never: this chain does not anchor
+        epochs_per_anchor: u64::MAX, // never by count
         max_seconds_per_epoch: epoch_secs,
-        max_seconds_per_anchor: 0,
+        max_seconds_per_anchor: if anchoring.is_some() { anchor_idle.max(1) } else { 0 },
     };
 
     let vm = match load(&dir, chain) {
@@ -2781,7 +2789,11 @@ fn main() {
                 // and idempotent — `propose_anchor` refuses while one is in
                 // flight — and the settler below is what turns a proposal
                 // into something Zcash has seen.
-                n.propose_anchor(now_secs());
+                // On demand (§159): the settler proposes for exits to ride;
+                // here only once the idle interval is past.
+                if n.anchor_due(now_secs()) {
+                    n.propose_anchor(now_secs());
+                }
                 // The seal belongs in the journal wherever it happens. Sealing
                 // here and recording it only on the submit path left the epoch
                 // closed in memory and open on disk, which every verifier
@@ -3003,6 +3015,15 @@ fn main() {
         // The settled-exit intents go through the same publish path every
         // other intent does, so this thread needs the published log too.
         let pub_log = Arc::clone(&pub_log);
+        // An exit that rode on an anchor abandoned before a restart is
+        // payable again.
+        if let Some(ex) = exits.as_mut() {
+            ex.dropped(&settler.abandoned());
+        }
+        // Passes an exit has waited for an anchor in flight to land and
+        // carry it; past the limit it is paid alone.
+        let mut held_for_anchor: u32 = 0;
+        const HOLD_PASSES: u32 = 30;
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
             if let Some(floor) = BACKING_FLOOR.get() {
@@ -3013,7 +3034,30 @@ fn main() {
                     floor.store(backing_zat(owed), std::sync::atomic::Ordering::SeqCst);
                 }
             }
+            // ZEC exits ready to pay ride on the next anchor (§159).
+            let mut waiting_exits = false;
+            if let Some(ex) = exits.as_mut() {
+                for r in NEW_REVEALS.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default() {
+                    ex.add_reveal(r);
+                }
+                let riders = node.lock().map(|n| ex.riders(&n.state().exits)).unwrap_or_default();
+                waiting_exits = !riders.is_empty();
+                settler.offer_riders(if settler.in_flight().is_none() { riders } else { Vec::new() });
+            }
             let polled = settler.poll_once(&node, now_secs());
+            if let Some(ex) = exits.as_mut() {
+                if let Some((txid, covers)) = settler.take_carried() {
+                    ex.carried(txid, covers);
+                }
+                let dropped = settler.take_dropped();
+                if !dropped.is_empty() {
+                    ex.dropped(&dropped);
+                }
+            }
+            // An anchor still on its way carries waiting exits when it lands;
+            // they wait for it, but not for ever.
+            let hold = waiting_exits && settler.in_flight().is_some() && held_for_anchor < HOLD_PASSES;
+            held_for_anchor = if hold { held_for_anchor + 1 } else { 0 };
             // A pass can propose, confirm or drop epochs: keep disk in step.
             if let Ok(n) = node.lock() {
                 save_anchoring(&data_dir, &n);
@@ -3076,9 +3120,6 @@ fn main() {
             // of payouts when notes are scarce -- a chain that cannot anchor
             // is one whose exits nobody can verify anyway.
             if let Some(ex) = exits.as_mut() {
-                for r in NEW_REVEALS.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default() {
-                    ex.add_reveal(r);
-                }
                 let ops = {
                     // A copy of the exits under the lock; paying after it is
                     // released, since paying waits on the note stores (A162).
@@ -3086,7 +3127,7 @@ fn main() {
                         .lock()
                         .map(|n| n.state().exits.clone())
                         .map_err(|_| "node lock poisoned".to_string())
-                        .and_then(|exits| ex.poll_once(&exits));
+                        .and_then(|exits| ex.poll_once(&exits, hold));
                     match vm_ops {
                         Ok(ops) => ops,
                         Err(e) => {
