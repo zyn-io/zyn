@@ -132,7 +132,7 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObse
   document.querySelectorAll('.reveal').forEach((el, i) => {
     if (el.getBoundingClientRect().top > innerHeight) {
       el.classList.add('pre');
-      if (el.matches('.tiles li')) el.style.transitionDelay = `${(i % 3) * 0.08}s`;
+      if (el.matches('.bento .cell')) el.style.transitionDelay = `${(i % 3) * 0.08}s`;
       io.observe(el);
     }
   });
