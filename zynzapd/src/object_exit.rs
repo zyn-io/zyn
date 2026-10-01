@@ -288,6 +288,11 @@ impl ExitSettler {
             .collect()
     }
 
+    /// Whether a payment of this settler's is still confirming.
+    pub fn paying(&self) -> bool {
+        !self.inflight.is_empty()
+    }
+
     /// An anchor transaction paid these exits: follow it as this settler's
     /// own payment, so the ledger records them once Zcash buries it.
     pub fn carried(&mut self, txid: String, covers: Vec<u32>) {

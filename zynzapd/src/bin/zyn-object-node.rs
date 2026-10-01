@@ -3020,10 +3020,6 @@ fn main() {
         if let Some(ex) = exits.as_mut() {
             ex.dropped(&settler.abandoned());
         }
-        // Passes an exit has waited for an anchor in flight to land and
-        // carry it; past the limit it is paid alone.
-        let mut held_for_anchor: u32 = 0;
-        const HOLD_PASSES: u32 = 30;
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
             if let Some(floor) = BACKING_FLOOR.get() {
@@ -3043,6 +3039,10 @@ fn main() {
                 let riders = node.lock().map(|n| ex.riders(&n.state().exits)).unwrap_or_default();
                 waiting_exits = !riders.is_empty();
                 settler.offer_riders(if settler.in_flight().is_none() { riders } else { Vec::new() });
+                // Both spend the vault's notes, and a note an unconfirmed
+                // transaction spent is still in the store: no anchor goes out
+                // while an exit payment is confirming.
+                settler.hold_sends(ex.paying());
             }
             let polled = settler.poll_once(&node, now_secs());
             if let Some(ex) = exits.as_mut() {
@@ -3054,10 +3054,12 @@ fn main() {
                     ex.dropped(&dropped);
                 }
             }
-            // An anchor still on its way carries waiting exits when it lands;
-            // they wait for it, but not for ever.
-            let hold = waiting_exits && settler.in_flight().is_some() && held_for_anchor < HOLD_PASSES;
-            held_for_anchor = if hold { held_for_anchor + 1 } else { 0 };
+            // An anchor still on its way carries waiting exits when it lands.
+            // They wait for it whatever the time: paying alone would spend the
+            // note the anchor already spent, which Zcash refuses as a double
+            // spend. An anchor in flight always ends — confirmed, or abandoned
+            // and released (§159.4).
+            let hold = waiting_exits && settler.in_flight().is_some();
             // A pass can propose, confirm or drop epochs: keep disk in step.
             if let Ok(n) = node.lock() {
                 save_anchoring(&data_dir, &n);

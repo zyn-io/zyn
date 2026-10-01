@@ -488,6 +488,9 @@ pub struct AnchorSettler<C: Chain, B: Builder> {
     /// Anchor transactions that can no longer land (any exits they carried
     /// are payable again).
     dropped: Vec<String>,
+    /// Send nothing new this pass: another payment from the same vault is
+    /// confirming, and its spent notes are still in the store.
+    hold: bool,
 }
 
 impl<C: Chain, B: Builder> AnchorSettler<C, B> {
@@ -516,6 +519,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             riders: Vec::new(),
             carried: None,
             dropped: Vec::new(),
+            hold: false,
         })
     }
 
@@ -524,6 +528,11 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
     pub fn on_demand(mut self) -> Self {
         self.on_demand = true;
         self
+    }
+
+    /// Hold new anchors while another payment from the vault confirms.
+    pub fn hold_sends(&mut self, hold: bool) {
+        self.hold = hold;
     }
 
     /// Exits ready to pay, for the next anchor this pass to carry.
@@ -897,6 +906,9 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             ));
         }
         let riders = std::mem::take(&mut self.riders);
+        if self.hold {
+            return Ok(());
+        }
         let proposal = {
             let mut n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
             // A proposal already made is carried whatever the reason. A new
@@ -1125,6 +1137,14 @@ mod tests {
         s2.poll_once(&idle_node(), 3_700).unwrap();
         assert_eq!(chain2.0.borrow().broadcasts.len(), 1, "idle an hour: a standalone anchor");
         assert!(s2.take_carried().is_none());
+
+        // While an exit payment from the vault is confirming, nothing new goes.
+        let dir3 = tmp("hold");
+        let chain3 = FakeChain::default();
+        let mut s3 = AnchorSettler::new(chain3.clone(), FakeBuilder::default(), 3, &dir3, 1).unwrap().on_demand();
+        s3.hold_sends(true);
+        s3.poll_once(&idle_node(), 3_700).unwrap();
+        assert!(chain3.0.borrow().broadcasts.is_empty(), "held: the vault's last payment is still confirming");
     }
 
     /// An anchor that can no longer land is reported, so exits it carried are
