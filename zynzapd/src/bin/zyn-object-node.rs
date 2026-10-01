@@ -1117,10 +1117,11 @@ fn handle(
                 Err(_) => err("the pool relayer is not running"),
             }
         }
-        // Deposit receipts (zyn-receipts on this host): a record of a deposit,
-        // as an NFT on the chain it came from. Forwarded as it came; the
-        // receipt service checks the deposit itself before minting.
-        "zyn_receiptInfo" | "zyn_receiptMint" => {
+        // The Zyn app's service (zyn-receipts on this host): deposit receipts
+        // (a record of a deposit, as an NFT on the chain it came from) and the
+        // keyring (an account's key sealed for each linked wallet). Forwarded
+        // as it came; the service checks everything itself.
+        "zyn_receiptInfo" | "zyn_receiptMint" | "zyn_keyringGet" | "zyn_keyringPut" | "zyn_keyringDelete" => {
             let url = std::env::var("ZYN_RECEIPTS_URL").unwrap_or_else(|_| "http://127.0.0.1:8494".into());
             let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(90)).build();
             match agent.post(&url).set("content-type", "application/json").send_string(body) {

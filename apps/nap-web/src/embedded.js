@@ -1,12 +1,17 @@
 // A Zyn account inside a site, opened with a wallet the holder already has
 // (Phantom, MetaMask, Backpack, Rabby…) instead of Nap.
 //
-// The holder signs one fixed message bound to the site's host. The signature
-// is hashed into a 24-word phrase, and the account comes from that phrase
-// exactly as Nap derives one — so the same wallet always opens the same
-// account, on any device, and the phrase can be shown and restored in Nap.
-// Signing the same message is opening the account: the message says so, and
-// names the one host it is for.
+// The holder signs one fixed message naming the domain it is for. The
+// signature is hashed into a 24-word phrase, and the account comes from that
+// phrase exactly as Nap derives one — so the same wallet always opens the
+// same account, on any device, and the phrase can be shown and restored in
+// Nap. Signing the same message is opening the account: the message says so.
+//
+// Several wallets can open one account (a Solana wallet and an Ethereum one,
+// say): the account's words are sealed for each linked wallet under a key
+// only that wallet's signature makes, and kept by the Zyn app's service
+// under an id the same signature makes (the keyring) — so nobody can look a
+// wallet up, and the service holds ciphertext only.
 //
 // The provider answers the same methods Nap Connect does, from the same
 // operations (`connect-ops.js`); writes go through the site's own approval,
@@ -15,26 +20,75 @@
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { x25519 } from '@noble/curves/ed25519.js';
-import { entropyToMnemonic } from '@scure/bip39';
+import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import * as ed from '@noble/ed25519';
+import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { deriveIdentity, forgetIdentity } from './core.js';
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
 import { objectCall, registerIntent } from './object.js';
-import { submitIntent } from './ledger.js';
+import { submitIntent, call } from './ledger.js';
+import { loadPocket, payOnZyn, resolveRecipient } from './pocket.js';
 import CONFIG from '../public/config.json';
 
 const te = new TextEncoder();
 
-/// The message a wallet signs to open its Zyn account on `host`.
-export function signText(host) {
+/// The message a wallet signs to open its Zyn account, for `domain` and its
+/// subdomains (the Zyn app and Zyn Lend open the same account).
+export function signText(domain) {
   return [
     'Open my Zyn account',
     '',
-    `This signature is the key to your Zyn account on ${host}.`,
-    `Sign this exact message only on ${host}. Anyone holding the signature can open the account.`,
+    `This signature is the key to your Zyn account on ${domain}.`,
+    `Sign this exact message only on ${domain} and its subdomains. Anyone holding the signature can open the account.`,
     '',
     'Version: 1',
   ].join('\n');
+}
+
+const label = (l, sig) => sha256(new Uint8Array([...te.encode(l), 0, ...sig]));
+const hexOf = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const bytesOf = (h) => Uint8Array.from(String(h).match(/../g) || [], (x) => parseInt(x, 16));
+
+/// Where a wallet's sealed key is kept, and the key that opens it: both
+/// from its signature, so only that wallet finds and opens its entry.
+export const keyringId = (signature) => hexOf(label('zyn-keyring.id.v1', signature));
+const wrapKey = (signature) => label('zyn-keyring.wrap.v1', signature);
+
+/// The words this signature opens: the account it is linked to, if any,
+/// else its own (`linked` says which).
+export async function wordsFor(config, signature, domain) {
+  // "Not linked" opens the wallet's own account; "cannot tell" must not, or
+  // a linked wallet would quietly open an empty account of its own. A node
+  // without a keyring yet is the first.
+  const entry = await call(config, 'zyn_keyringGet', { key: keyringId(signature) }).catch((e) => {
+    if (/does not serve zyn_keyring/.test(e.message)) return null;
+    throw new Error(`The Zyn keyring did not answer (${e.message}); try again shortly`);
+  });
+  if (entry?.blob) {
+    const blob = bytesOf(entry.blob);
+    const entropy = xchacha20poly1305(wrapKey(signature), blob.slice(0, 24)).decrypt(blob.slice(24));
+    return { words: entropyToMnemonic(entropy, wordlist), linked: true };
+  }
+  return { words: wordsFromSignature(signature, domain), linked: false };
+}
+
+/// Seal `words` (the open account's) for the wallet that made `signature`,
+/// so it opens this account from now on. Signed by the account.
+export async function link(config, identity, words, signature) {
+  const nonce = crypto.getRandomValues(new Uint8Array(24));
+  const sealed = xchacha20poly1305(wrapKey(signature), nonce).encrypt(mnemonicToEntropy(words, wordlist));
+  const blob = new Uint8Array([...nonce, ...sealed]);
+  const id = keyringId(signature);
+  const digest = sha256(new Uint8Array([...te.encode('zyn-keyring.put.v1'), ...bytesOf(id), ...blob]));
+  await call(config, 'zyn_keyringPut', { key: id, blob: hexOf(blob), account: hexOf(identity.publicKey), signature: hexOf(ed.sign(digest, identity.secretKey)) });
+}
+
+/// Undo `link` for the wallet that made `signature`.
+export async function unlink(config, identity, signature) {
+  const id = keyringId(signature);
+  const digest = sha256(new Uint8Array([...te.encode('zyn-keyring.delete.v1'), ...bytesOf(id)]));
+  await call(config, 'zyn_keyringDelete', { key: id, account: hexOf(identity.publicKey), signature: hexOf(ed.sign(digest, identity.secretKey)) });
 }
 
 /// The 24 words a signature opens: the same signature, the same words.
@@ -69,8 +123,26 @@ export async function open({ config, identity, approve, progress = () => {} }) {
       });
     },
   };
-  return { provider, session: await session(ctx), close: () => forgetIdentity(identity) };
+  return {
+    provider,
+    session: await session(ctx),
+    close: () => forgetIdentity(identity),
+    /// Everything this account holds, named: coins, items, what swaps owe.
+    pocket: () => loadPocket(config, identity),
+    /// Pay `amount` (WAD) of `asset` to another Zyn account (64 hex).
+    async send(asset, amount, to) {
+      const { to: account } = await resolveRecipient(config, identity, to, { isZec: false, isItem: false });
+      const { held } = await loadPocket(config, identity);
+      return payOnZyn(config, identity, held, asset, BigInt(amount), account);
+    },
+  };
 }
+
+/// What `identity` holds, read without opening (or registering) it.
+export const peek = (config, identity) => loadPocket(config, identity);
+
+/// The account `words` open.
+export const identityFromWords = (words) => deriveIdentity(words);
 
 /// The account a signature opens, ready for `open`.
 export function identityFromSignature(signature, host) {

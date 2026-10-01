@@ -1,6 +1,16 @@
-//! `zyn-receipts` — deposit receipts for Zyn Lend: a record, as an NFT on the
-//! chain a deposit came from, that it was made. One per deposit, minted only
-//! after the deposit is final on that chain. See `zynzapd::receipt`.
+//! `zyn-receipts` — the Zyn app's service: deposit receipts, and the keyring
+//! that lets several wallets open one Zyn account.
+//!
+//! **Receipts**: a record, as an NFT on the chain a deposit came from, that
+//! it was made. One per deposit, minted only after the deposit is final on
+//! that chain. See `zynzapd::receipt`.
+//!
+//! **Keyring**: a Zyn account's key, sealed under a key only a linked wallet
+//! can make (from its signature), stored under an id only that wallet can
+//! make (from the same signature). Nobody can look a wallet up, and the
+//! service holds ciphertext only. The first write names the account's
+//! public key and is signed by the account; replacing or removing an entry
+//! takes that same account's signature.
 //!
 //! ```text
 //!   zyn-receipts serve      answer zyn_receiptInfo / zyn_receiptMint (the node forwards them)
@@ -142,6 +152,20 @@ fn service() -> Result<Service, String> {
 }
 
 impl Service {
+    fn keyring_path(&self) -> std::path::PathBuf {
+        self.state.join("keyring.json")
+    }
+
+    fn keyring(&self) -> serde_json::Map<String, Value> {
+        std::fs::read(self.keyring_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    fn save_keyring(&self, ring: &serde_json::Map<String, Value>) -> Result<(), String> {
+        let tmp = self.keyring_path().with_extension("tmp");
+        std::fs::write(&tmp, Value::Object(ring.clone()).to_string()).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, self.keyring_path()).map_err(|e| e.to_string())
+    }
+
     fn ledger_path(&self) -> std::path::PathBuf {
         self.state.join("minted.json")
     }
@@ -185,7 +209,35 @@ impl Service {
                 println!("receipt: {key} → {out}");
                 Ok(out)
             }
-            other => Err(format!("no receipt method {other}")),
+            "zyn_keyringGet" => {
+                let id = keyring_id(body)?;
+                Ok(self.keyring().get(&id).map(|e| json!({ "blob": e["blob"] })).unwrap_or(Value::Null))
+            }
+            "zyn_keyringPut" | "zyn_keyringDelete" => {
+                let id = keyring_id(body)?;
+                let account: [u8; 32] = body["account"].as_str().and_then(unhex).and_then(|b| b.try_into().ok()).ok_or("account: the account's 32-byte public key, hex")?;
+                let sig: [u8; 64] = body["signature"].as_str().and_then(unhex).and_then(|b| b.try_into().ok()).ok_or("signature: 64 bytes of hex")?;
+                let put = body["method"] == "zyn_keyringPut";
+                let blob = if put { body["blob"].as_str().and_then(unhex).filter(|b| (40..=512).contains(&b.len())).ok_or("blob: 40 to 512 bytes of hex")? } else { Vec::new() };
+                let what = if put { keyring_put_digest(&id, &blob) } else { keyring_delete_digest(&id) };
+                let vk = ed25519_dalek::VerifyingKey::from_bytes(&account).map_err(|_| "account: not an ed25519 key")?;
+                vk.verify_strict(&what, &ed25519_dalek::Signature::from_bytes(&sig)).map_err(|_| "the account did not sign this")?;
+                let _turn = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+                let mut ring = self.keyring();
+                if let Some(e) = ring.get(&id) {
+                    if e["account"].as_str() != Some(&hex(&account)) {
+                        return Err("that wallet is linked to another account; unlink it there first".into());
+                    }
+                }
+                if put {
+                    ring.insert(id, json!({ "account": hex(&account), "blob": hex(&blob) }));
+                } else {
+                    ring.remove(&id);
+                }
+                self.save_keyring(&ring)?;
+                Ok(json!({ "ok": true }))
+            }
+            other => Err(format!("no method {other}")),
         }
     }
 
@@ -297,6 +349,30 @@ impl Service {
     }
 }
 
+fn keyring_id(body: &Value) -> Result<String, String> {
+    // `key`, not `id`: a JSON-RPC request's `id` is the request's own.
+    body["key"].as_str().filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())).map(|s| s.to_ascii_lowercase()).ok_or_else(|| "key: 32 bytes of hex".to_string())
+}
+
+/// What an account signs to store `blob` under `id` (the Zyn app signs the
+/// same bytes: `zyn-keyring.put.v1` ‖ id ‖ blob, hashed).
+fn keyring_put_digest(id: &str, blob: &[u8]) -> [u8; 32] {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"zyn-keyring.put.v1");
+    h.update(unhex(id).unwrap_or_default());
+    h.update(blob);
+    h.finalize().into()
+}
+
+fn keyring_delete_digest(id: &str) -> [u8; 32] {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"zyn-keyring.delete.v1");
+    h.update(unhex(id).unwrap_or_default());
+    h.finalize().into()
+}
+
 /// The address that signed `msg` with `personal_sign` (EIP-191).
 fn recover_personal(msg: &[u8], sig: &[u8]) -> Result<Address20, String> {
     use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
@@ -373,6 +449,39 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn svc(dir: &str) -> Service {
+        let state = std::env::temp_dir().join(format!("zyn-keyring-{dir}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        std::fs::create_dir_all(&state).unwrap();
+        Service { agent: ureq::AgentBuilder::new().build(), state, uri: String::new(), sol: None, evm: None, lock: Mutex::new(()) }
+    }
+
+    /// The keyring stores ciphertext under an id, signed by the account; only
+    /// that account replaces or removes it; anyone with the id reads it.
+    #[test]
+    fn a_link_is_written_and_removed_only_by_its_account() {
+        use ed25519_dalek::Signer as _;
+        let s = svc("link");
+        let a = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let b = ed25519_dalek::SigningKey::from_bytes(&[2; 32]);
+        let id = "ab".repeat(32);
+        let blob = vec![7u8; 72];
+        let put = |k: &ed25519_dalek::SigningKey, blob: &[u8]| json!({ "method": "zyn_keyringPut", "key": id, "blob": hex(blob), "account": hex(&k.verifying_key().to_bytes()), "signature": hex(&k.sign(&keyring_put_digest(&id, blob)).to_bytes()) });
+        assert!(s.handle(&json!({ "method": "zyn_keyringGet", "key": id })).unwrap().is_null());
+        // Signed by someone else than the account it names: refused.
+        let mut forged = put(&a, &blob);
+        forged["account"] = json!(hex(&b.verifying_key().to_bytes()));
+        assert!(s.handle(&forged).is_err());
+        s.handle(&put(&a, &blob)).unwrap();
+        assert_eq!(s.handle(&json!({ "method": "zyn_keyringGet", "key": id })).unwrap()["blob"], json!(hex(&blob)));
+        // Another account cannot take it over.
+        assert!(s.handle(&put(&b, &[9u8; 72])).unwrap_err().contains("another account"));
+        // Its own account removes it.
+        let del = json!({ "method": "zyn_keyringDelete", "key": id, "account": hex(&a.verifying_key().to_bytes()), "signature": hex(&a.sign(&keyring_delete_digest(&id)).to_bytes()) });
+        s.handle(&del).unwrap();
+        assert!(s.handle(&json!({ "method": "zyn_keyringGet", "key": id })).unwrap().is_null());
+    }
 
     /// A personal_sign signature recovers to the address that made it.
     #[test]
