@@ -3038,7 +3038,10 @@ fn main() {
                 }
                 let riders = node.lock().map(|n| ex.riders(&n.state().exits)).unwrap_or_default();
                 waiting_exits = !riders.is_empty();
-                settler.offer_riders(if settler.in_flight().is_none() { riders } else { Vec::new() });
+                // Offered whatever is in flight: the settler only sends once
+                // nothing is, which may be later this same pass (an anchor
+                // confirming now leaves the way clear for one carrying these).
+                settler.offer_riders(riders);
                 // Both spend the vault's notes, and a note an unconfirmed
                 // transaction spent is still in the store: no anchor goes out
                 // while an exit payment is confirming.
@@ -3059,7 +3062,10 @@ fn main() {
             // note the anchor already spent, which Zcash refuses as a double
             // spend. An anchor in flight always ends — confirmed, or abandoned
             // and released (§159.4).
-            let hold = waiting_exits && settler.in_flight().is_some();
+            // The pass an anchor confirms sends nothing new; the next one
+            // carries them, so they wait that pass too.
+            let just_confirmed = matches!(polled, Ok(Some(_)));
+            let hold = waiting_exits && (settler.in_flight().is_some() || just_confirmed);
             // A pass can propose, confirm or drop epochs: keep disk in step.
             if let Ok(n) = node.lock() {
                 save_anchoring(&data_dir, &n);
