@@ -1017,7 +1017,12 @@ function renderCoins() {
       const had = byAsset.get(c.asset);
       byAsset.set(c.asset, had ? { ...had, amount: (BigInt(had.amount) + BigInt(c.amount)).toString() } : { ...c });
     }
-    coins = [...byAsset.values()].map((c) => ({ ...c, shown: wadText(c.amount, 8), exact: wadText(c.amount) }));
+    // Six places, rounded down so a card never shows more than is held; the
+    // exact amount is in the title. Below that, say so rather than show 0.
+    coins = [...byAsset.values()].map((c) => {
+      const shown = wadText(c.amount, 6);
+      return { ...c, shown: shown === '0' && BigInt(c.amount) > 0n ? '< 0.000001' : shown, exact: wadText(c.amount) };
+    });
   }
 
   const deposit = assets.find((a) => a.symbol === 'ZEC.zy');

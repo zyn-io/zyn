@@ -104,7 +104,7 @@ a{display:block;text-decoration:none;color:inherit;border:1px solid #1f24281f;ba
 <a href="https://cave-market.pages.dev/"><b>Cave store</b><span>Private objects, found on Zcash</span></a>
 <a href="https://cave-jade.pages.dev/"><b>Cave Jade</b><span>Coins on bonding curves, one price per epoch</span></a>
 <a href="https://cavebro.win/mint"><b>Collection Z</b><span>Take a place in the cave</span></a>
-<a href="https://zynscan.pages.dev/"><b>ZynScan</b><span>Every Zyn transaction, replayed</span></a>
+<a href="https://scan.zyn-network.com/"><b>ZynScan</b><span>Every Zyn transaction, replayed</span></a>
 """
 
 // The WebView's origin rules cannot say "any https origin" (only "*" or one

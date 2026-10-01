@@ -85,7 +85,7 @@
 
 /* A coin card never outgrows its column, however long the amount. */
 .coin, .coin > div { min-width: 0; }
-.coin b { overflow-wrap: anywhere; font-size: clamp(22px, 2.3vw, 30px); line-height: 1.1; }
+.coin b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: clamp(22px, 2.3vw, 30px); line-height: 1.1; }
 .coin-send { flex: none; white-space: nowrap; }
 
 /* Quiet actions on the dark cards look like something to press. */
