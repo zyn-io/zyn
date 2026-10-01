@@ -1117,6 +1117,24 @@ fn handle(
                 Err(_) => err("the pool relayer is not running"),
             }
         }
+        // Deposit receipts (zyn-receipts on this host): a record of a deposit,
+        // as an NFT on the chain it came from. Forwarded as it came; the
+        // receipt service checks the deposit itself before minting.
+        "zyn_receiptInfo" | "zyn_receiptMint" => {
+            let url = std::env::var("ZYN_RECEIPTS_URL").unwrap_or_else(|_| "http://127.0.0.1:8494".into());
+            let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(90)).build();
+            match agent.post(&url).set("content-type", "application/json").send_string(body) {
+                Ok(r) => match r.into_string() {
+                    Ok(t) if serde_json::from_str::<serde_json::Value>(&t).is_ok() => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{t}}}"),
+                    _ => err("the receipt service answered something that is not JSON"),
+                },
+                Err(ureq::Error::Status(_, r)) => {
+                    let why = r.into_string().unwrap_or_default();
+                    err(why.chars().take(240).collect::<String>().as_str())
+                }
+                Err(_) => err("the receipt service is not running"),
+            }
+        }
         "zyn_bridgeReveal" => {
             let (Some(asset), Some(address), Some(salt)) = (
                 field(body, "asset").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()),

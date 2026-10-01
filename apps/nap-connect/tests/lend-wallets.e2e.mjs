@@ -81,6 +81,13 @@ await page.fill('#br-amount', '0.001'); await page.click('#br-go');
 await page.waitForFunction(() => !!window.__sent || /error|refused/i.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
 const sent = await page.evaluate(() => window.__sent);
 ok(sent && sent.from === '0x1111111111111111111111111111111111111111' && /^0x52d29193/.test(sent.data), `the ETH deposit is sent by the connected wallet with this account's code: ${JSON.stringify(sent)?.slice(0, 90)}`);
+// A deposit offers a receipt, and asking for one gets an answer from the
+// receipt service (here a refusal: the stand-in wallet's deposit is not real).
+ok(await page.isVisible('.br-receipt .rc-go'), 'a deposit offers a receipt');
+await page.click('.br-receipt .rc-go');
+await page.waitForFunction(() => (document.querySelector('.br-receipt .rc-say')?.textContent || '').trim().length > 0, null, { timeout: 60000 }).catch(() => {});
+const said = (await page.textContent('.br-receipt .rc-say')).trim();
+ok(/not succeeded|not final|not a deposit|minted/i.test(said), `the receipt service answers: ${said.slice(0, 100)}`);
 await page.screenshot({ path: `${S}/lend-evm.png` });
 // Solana opens its own account.
 await page.click('#connect'); await page.click('#w-out');

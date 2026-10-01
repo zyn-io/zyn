@@ -128,6 +128,23 @@ impl Signer {
         self.key.verifying_key().to_bytes()
     }
 
+    /// 32 bytes only this key can derive for `label`: a seed for an account
+    /// this key's service makes, the same every time it is asked.
+    pub fn derive(&self, label: &[u8]) -> [u8; 32] {
+        use sha2::Digest as _;
+        let mut h = sha2::Sha256::new();
+        h.update(b"zyn.signer-derive.v1\0");
+        h.update(self.key.to_bytes());
+        h.update(label);
+        h.finalize().into()
+    }
+
+    /// This key's signature over `msg` (one of several on a transaction).
+    pub fn sign(&self, msg: &[u8]) -> [u8; 64] {
+        use ed25519_dalek::Signer as _;
+        self.key.sign(msg).to_bytes()
+    }
+
     /// One signed transaction, payer = this key.
     pub fn transaction(&self, ixs: &[Ix], blockhash: &[u8; 32]) -> (String, Vec<u8>) {
         use ed25519_dalek::Signer as _;

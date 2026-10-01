@@ -19,6 +19,7 @@ import * as ledger from './ledger.js';
 import * as bridges from './bridges.js';
 import * as pool from './pool.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
 
 /// EIP-1193's error codes, so a site handles Nap the way it handles any wallet.
@@ -777,6 +778,23 @@ export const METHODS = {
         return { ...(await pool.info(ctx.config, c)), channel: c.key, sizes: c.sizes.map(String) };
       }
       return { channels: pool.channels(ctx.config).map((c) => ({ channel: c.key, chain: c.chain, symbol: c.symbol, asset: c.zy, sizes: c.sizes.map(String) })) };
+    },
+  },
+
+  /// The hash a private deposit receipt carries for one of this wallet's pool
+  /// notes: it commits to the note with a salt only this wallet derives, so
+  /// its holder can open it later and nobody else can match it to the deposit.
+  zyn_receiptHash: {
+    kind: 'read',
+    async run(ctx, p) {
+      if (!isHex(p?.commitment)) throw bad('commitment: 64 hex characters');
+      const chain = String(p?.chain || '');
+      if (!['sol', 'evm'].includes(chain)) throw bad('chain: sol or evm');
+      const te = new TextEncoder();
+      const c = unhex(p.commitment);
+      const salt = sha256(new Uint8Array([...te.encode('zyn-receipt.salt.v1'), ...ctx.identity.secretKey, ...c]));
+      const hash = sha256(new Uint8Array([...te.encode('zyn-receipt.private.v1'), ...te.encode(chain), ...c, ...salt]));
+      return { hash: hex(hash) };
     },
   },
 

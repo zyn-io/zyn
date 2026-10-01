@@ -67,7 +67,7 @@ use zyn_custody::solana::{base58_encode, Cluster, Rpc, TxStatus};
 use zyn_vm::spec::MicrochainVm;
 use zyn_vm::{program, Fixed};
 use zynzapd::sol_pool;
-use zynzapd::sol_bridge::{as_pool_destination, base64, decode_deposit, decode_token_deposit, fixed_of, fixed_of_units, lamports_of, pool_address, pool_events, tx_ref, units_of, NETWORK_FEE};
+use zynzapd::sol_bridge::{as_pool_destination, base64, base64_encode, decode_deposit, decode_token_deposit, fixed_of, fixed_of_units, lamports_of, pool_address, pool_events, tx_ref, units_of, NETWORK_FEE};
 
 fn env(k: &str, d: &str) -> String {
     std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| d.to_string())
@@ -221,17 +221,6 @@ fn send_raw(agent: &ureq::Agent, url: &str, tx: &[u8]) -> Result<String, String>
     r.as_str().map(String::from).ok_or_else(|| "Solana did not return a signature".into())
 }
 
-fn base64_encode(b: &[u8]) -> String {
-    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
-    for c in b.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
-        for i in 0..4 {
-            out.push(if i <= c.len() { A[(n >> (18 - 6 * i)) as usize & 63] as char } else { '=' });
-        }
-    }
-    out
-}
 
 impl Bridge {
     fn solana(&self, method: &str, params: Value) -> Result<Value, String> {

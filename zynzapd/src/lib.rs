@@ -31,6 +31,7 @@ pub mod lend_view;
 pub mod market_vectors;
 pub mod receive;
 pub mod replica;
+pub mod receipt;
 pub mod reveal;
 mod restore;
 pub mod rpc;
