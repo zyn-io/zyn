@@ -3154,7 +3154,10 @@ fn main() {
                             &data_dir.to_string_lossy(),
                             chain,
                         );
-                    if receipts.iter().any(ObjectVm::rejected) {
+                    // A settlement offered again after the ledger took the
+                    // first is refused as already settled: expected, not news.
+                    let repeat = format!("{receipts:?}").contains("already settled");
+                    if receipts.iter().any(ObjectVm::rejected) && !repeat {
                         // The vault paid and the ledger refused to record it.
                         // Loud, because the two now disagree about a debt that
                         // has actually been settled on Zcash.

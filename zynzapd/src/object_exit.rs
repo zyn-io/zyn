@@ -329,44 +329,38 @@ impl ExitSettler {
     /// `hold`: an anchor is on its way and will carry these exits once it
     /// lands, so this pass pays nothing alone.
     pub fn poll_once(&mut self, exits: &[objectvm::PendingExit], hold: bool) -> Result<Vec<objectvm::Op>, String> {
-        let settled = self.follow_up()?;
-        // One payment in flight at a time. The vault's notes are the input to
-        // the next transaction, and building a second one against notes the
-        // first already spent produces a transaction Zcash refuses.
+        let settled = self.follow_up(exits)?;
+        // One payment in flight at a time, and "in flight" lasts until the
+        // ledger has recorded it — not until Zcash buries it. `exits` is a
+        // copy taken before this pass's settlements are applied, so a payment
+        // that confirmed a moment ago still reads as owed in it: paying from
+        // that copy paid the same exit again (testnet, 27 Sep and 1 Oct).
         if self.inflight.is_empty() && !hold {
-            self.pay_next(exits)?;
+            if let Err(e) = self.pay_next(exits) {
+                // A failed payment must not take the settlements with it: they
+                // record money Zcash has already moved.
+                if settled.is_empty() {
+                    return Err(e);
+                }
+                eprintln!("zyn-object-node: exit pass: {e}");
+            }
         }
         Ok(settled)
     }
 
     /// Record what Zcash has buried deep enough to be believed.
-    fn follow_up(&mut self) -> Result<Vec<objectvm::Op>, String> {
-        let mut out = Vec::new();
-        let mut done = Vec::new();
-        for (i, f) in self.inflight.iter().enumerate() {
-            match self.zebra.confirmations(&f.txid).map_err(|e| e.to_string())? {
-                Some(depth) if depth >= self.confirmations => {
-                    let Some(txid) = unhex32(&f.txid) else {
-                        return Err(format!("broadcast txid {} is not 32 hex bytes", f.txid));
-                    };
-                    for index in &f.covers {
-                        out.push(settled(*index, txid));
-                    }
-                    eprintln!(
-                        "zyn-object-node: exit payment {} confirmed at depth {depth}, {} exit(s)",
-                        f.txid,
-                        f.covers.len()
-                    );
-                    done.push(i);
-                }
-                // Still shallow, or not in the chain yet. Neither is an error.
-                _ => {}
-            }
-        }
-        for i in done.into_iter().rev() {
-            self.inflight.remove(i);
-        }
-        if !out.is_empty() {
+    ///
+    /// A payment stays in flight until the ledger shows every exit it covers
+    /// as paid. Its settlements are offered on every pass until then — the
+    /// ledger refuses a repeat as already settled — so a pass that failed or
+    /// a restart in between never leaves an exit owed that Zcash has paid.
+    fn follow_up(&mut self, exits: &[objectvm::PendingExit]) -> Result<Vec<objectvm::Op>, String> {
+        let zebra = &self.zebra;
+        let (keep, out) = follow(&self.inflight, exits, self.confirmations, |txid| {
+            zebra.confirmations(txid).map_err(|e| e.to_string())
+        })?;
+        if keep.len() != self.inflight.len() {
+            self.inflight = keep;
             self.save();
         }
         Ok(out)
@@ -502,6 +496,37 @@ impl ExitSettler {
         );
         Ok(())
     }
+}
+
+/// The payments still to follow, and the settlements to record: a payment
+/// leaves only once the ledger shows every exit it covers as paid, and a
+/// buried one offers its open exits' settlements on every pass until then.
+pub fn follow(
+    inflight: &[InFlight],
+    exits: &[objectvm::PendingExit],
+    confirmations: u64,
+    depth_of: impl Fn(&str) -> Result<Option<u64>, String>,
+) -> Result<(Vec<InFlight>, Vec<objectvm::Op>), String> {
+    let recorded = |i: &u32| exits.get(*i as usize).is_some_and(|e| e.paid_by.is_some());
+    let keep: Vec<InFlight> = inflight.iter().filter(|f| !f.covers.iter().all(recorded)).cloned().collect();
+    let mut out = Vec::new();
+    for f in &keep {
+        match depth_of(&f.txid)? {
+            Some(depth) if depth >= confirmations => {
+                let Some(txid) = unhex32(&f.txid) else {
+                    return Err(format!("broadcast txid {} is not 32 hex bytes", f.txid));
+                };
+                let open: Vec<u32> = f.covers.iter().copied().filter(|i| !recorded(i)).collect();
+                for index in &open {
+                    out.push(settled(*index, txid));
+                }
+                eprintln!("zyn-object-node: exit payment {} confirmed at depth {depth}, {} exit(s) to record", f.txid, open.len());
+            }
+            // Still shallow, or not in the chain yet. Neither is an error.
+            _ => {}
+        }
+    }
+    Ok((keep, out))
 }
 
 fn unhex_bytes(s: &str) -> Option<Vec<u8>> {
@@ -766,6 +791,35 @@ mod inflight_tests {
         assert!(unhex32("abc").is_none());
         assert!(unhex32(&"zz".repeat(32)).is_none());
         assert_eq!(unhex32(&"ab".repeat(32)), Some([0xAB; 32]));
+    }
+
+    /// The double payment of 27 Sep and 1 Oct: a payment that confirmed was
+    /// forgotten before the ledger recorded it, so the exit — still owed in
+    /// the copy being paid from — was paid again. A payment now stays in
+    /// flight, offering its settlement every pass, until the ledger shows the
+    /// exit paid; only then is the way clear for another.
+    #[test]
+    fn a_confirmed_payment_is_followed_until_the_ledger_records_it() {
+        let tx = "ab".repeat(32);
+        let flight = vec![InFlight { txid: tx.clone(), covers: vec![0] }];
+        let owed = vec![objectvm::PendingExit { asset: [0x7a; 32], amount: from_zatoshi(3), destination: [1; 32], since_epoch: 1, paid_by: None }];
+        let deep = |_: &str| Ok(Some(10));
+
+        // Shallow: kept, nothing to record.
+        let (keep, ops) = follow(&flight, &owed, 3, |_: &str| Ok(Some(1))).unwrap();
+        assert_eq!((keep.len(), ops.len()), (1, 0));
+        // Buried: the settlement is offered, and the payment is still kept —
+        // the ledger has not recorded it yet.
+        let (keep, ops) = follow(&flight, &owed, 3, deep).unwrap();
+        assert_eq!(keep, flight, "kept until recorded, so nothing pays the exit again");
+        assert_eq!(ops, vec![settled(0, [0xAB; 32])]);
+        // Offered again on a later pass (a failed pass or a restart in between).
+        assert_eq!(follow(&flight, &owed, 3, deep).unwrap().1.len(), 1);
+        // Recorded: it leaves, and nothing more is offered.
+        let mut paid = owed.clone();
+        paid[0].paid_by = Some([0xAB; 32]);
+        let (keep, ops) = follow(&flight, &paid, 3, deep).unwrap();
+        assert!(keep.is_empty() && ops.is_empty());
     }
 }
 
