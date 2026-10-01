@@ -374,13 +374,21 @@ impl Bridge {
         for f in v.drain(..) {
             match self.rpc.signature_status(&f.signature).map_err(|e| format!("{e:?}"))? {
                 TxStatus::Finalized => {
+                    // Kept until the ledger has recorded every exit it paid:
+                    // forgotten while one still reads as owed, it is paid again.
+                    let mut refused = false;
                     for index in &f.covers {
                         let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: *index, txid: tx_ref(&f.signature) })?;
                         if r.contains("Refused") && !r.contains("already settled") {
-                            eprintln!("zyn-sol-bridge: SettleExit {index} refused — {r}");
+                            eprintln!("zyn-sol-bridge: SETTLEMENT REFUSED — exit {index} was paid by {} and the ledger will not record it: {r}. Nothing more is paid until it is.", f.signature);
+                            refused = true;
                         }
                     }
-                    println!("out: {} final — {} exit(s) settled", f.signature, f.covers.len());
+                    if refused {
+                        keep.push(f);
+                    } else {
+                        println!("out: {} final — {} exit(s) settled", f.signature, f.covers.len());
+                    }
                 }
                 TxStatus::Failed => eprintln!("zyn-sol-bridge: {} failed on Solana; its exits stay unpaid", f.signature),
                 TxStatus::Confirmed => keep.push(f),
@@ -501,11 +509,12 @@ impl Bridge {
                     TxStatus::Finalized => {
                         let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: *index, txid: tx_ref(&sig) })?;
                         if r.contains("Refused") && !r.contains("already settled") {
-                            eprintln!("zyn-sol-bridge: SettleExit {index} refused — {r}");
+                            // Kept, so the note is not inserted a second time.
+                            eprintln!("zyn-sol-bridge: SETTLEMENT REFUSED — private exit {index} is in the pool ({sig}) and the ledger will not record it: {r}");
                         } else {
                             println!("out: private exit {index} final — note in the pool ({sig})");
+                            sent.remove(&key);
                         }
-                        sent.remove(&key);
                     }
                     TxStatus::Failed => {
                         eprintln!("zyn-sol-bridge: inserting private exit {index} failed on Solana; it is tried again");

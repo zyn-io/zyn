@@ -249,13 +249,21 @@ impl Bridge {
             let txid: bitcoin::Txid = f.txid.parse().map_err(|_| "a stored txid is not a txid")?;
             match self.chain.status(&txid).map_err(|e| e.to_string())? {
                 Some(Some(h)) if tip + 1 >= h + self.confirmations => {
+                    // Kept until the ledger has recorded every exit it paid:
+                    // forgotten while one still reads as owed, it is paid again.
+                    let mut refused = false;
                     for index in &f.covers {
                         let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: *index, txid: tx_ref(&txid) })?;
                         if r.contains("Refused") && !r.contains("already settled") {
-                            eprintln!("zyn-btc-bridge: SettleExit {index} refused — {r}");
+                            eprintln!("zyn-btc-bridge: SETTLEMENT REFUSED — exit {index} was paid by {} and the ledger will not record it: {r}. Nothing more is paid until it is.", f.txid);
+                            refused = true;
                         }
                     }
-                    println!("out: {} confirmed — {} exit(s) settled", f.txid, f.covers.len());
+                    if refused {
+                        keep.push(f);
+                    } else {
+                        println!("out: {} confirmed — {} exit(s) settled", f.txid, f.covers.len());
+                    }
                 }
                 Some(_) => keep.push(f),
                 None => {

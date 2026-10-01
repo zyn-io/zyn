@@ -324,11 +324,8 @@ impl Bridge {
                     return Ok(()); // executed; waiting for finality
                 }
                 let txid: [u8; 32] = unhex(&tx).and_then(|b| b.try_into().ok()).ok_or("a transaction hash is not 32 bytes")?;
-                for index in p["covers"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
-                    let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: index as u32, txid })?;
-                    if r.contains("Refused") && !r.contains("already settled") {
-                        eprintln!("zyn-eth-bridge: SettleExit {index} refused — {r}");
-                    }
+                if !self.settle(&p["covers"], txid, &tx)? {
+                    return Ok(()); // kept: nothing is proposed until the ledger records it
                 }
                 println!("out: {tx} executed by the Safe and final — {} exit(s) settled", p["covers"].as_array().map_or(0, Vec::len));
                 std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
@@ -393,6 +390,21 @@ impl Bridge {
         Ok(())
     }
 
+    /// Record a final payment's exits. False when the ledger refused one: the
+    /// payment is then kept and retried, never forgotten — forgotten while an
+    /// exit still reads as owed, it would be paid again.
+    fn settle(&self, covers: &Value, txid: [u8; 32], tx: &str) -> Result<bool, String> {
+        let mut ok = true;
+        for index in covers.as_array().into_iter().flatten().filter_map(Value::as_u64) {
+            let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: index as u32, txid })?;
+            if r.contains("Refused") && !r.contains("already settled") {
+                eprintln!("zyn-eth-bridge: SETTLEMENT REFUSED — exit {index} was paid by {tx} and the ledger will not record it: {r}. Nothing more is paid until it is.");
+                ok = false;
+            }
+        }
+        Ok(ok)
+    }
+
     fn inflight_path(&self) -> std::path::PathBuf {
         self.state.join("inflight.json")
     }
@@ -429,11 +441,8 @@ impl Bridge {
             eprintln!("zyn-eth-bridge: {tx} reverted; its exits stay unpaid");
         } else {
             let txid: [u8; 32] = unhex(&tx).and_then(|b| b.try_into().ok()).ok_or("a stored hash is not 32 bytes")?;
-            for index in f["covers"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
-                let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: index as u32, txid })?;
-                if r.contains("Refused") && !r.contains("already settled") {
-                    eprintln!("zyn-eth-bridge: SettleExit {index} refused — {r}");
-                }
+            if !self.settle(&f["covers"], txid, &tx)? {
+                return Ok(true); // kept: nothing is paid until the ledger records it
             }
             println!("out: {tx} final — {} exit(s) settled", f["covers"].as_array().map_or(0, Vec::len));
         }
