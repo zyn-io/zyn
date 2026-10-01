@@ -4,6 +4,7 @@
 // approved in Nap, which shows the numbers the chain will use.
 //
 //   PHRASE_FILE=~/.zyn/test-wallets/bidder.phrase node tests/lend.e2e.mjs
+//   (NOTES=1 also requires private notes: a wallet that has deposited privately)
 //
 // The wallet needs a little SOL.zy and ETH.zy (testnet-wallet.local.mjs).
 
@@ -161,9 +162,12 @@ await page.check('input[name="br-channel"][value="private"]');
 await page.check('#br-asset input[value="sol"]');
 await page.waitForSelector('input[name="br-size"]');
 ok(/Deposit 1 SOL with Phantom/.test(await page.textContent('#br-go')), `private deposit offers the pool sizes: ${await page.textContent('#br-go')}`);
+// Notes are found again from the phrase. A wallet that has deposited
+// privately (the lender) lists them; one that never has shows none.
 await page.waitForFunction(() => document.querySelectorAll('.br-note').length > 0, null, { timeout: 60000 }).catch(() => {});
 const notesText = (await page.textContent('#br-note-list').catch(() => '')).replace(/\s+/g, ' ');
-ok(/spent|sent|moved into Zyn/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120)}`);
+if (process.env.NOTES) ok(/spent|sent|moved into Zyn/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120)}`);
+else ok(!/undefined|NaN/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120) || 'none for this wallet'}`);
 await page.check('#br-asset input[value="eth"]');
 ok(/Deposit 0\.1 ETH with MetaMask/.test(await page.textContent('#br-go')), `private ETH offers Sepolia's pool sizes: ${await page.textContent('#br-go')}`);
 // Private BTC through Mezo opens with the Mezo Buildathon (15 Oct).

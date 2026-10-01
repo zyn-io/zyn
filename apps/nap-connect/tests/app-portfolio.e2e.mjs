@@ -1,4 +1,4 @@
-// The Zyn app: sign in with an Ethereum wallet, see the portfolio, link a
+// Zyn Lend's portfolio: sign in with an Ethereum wallet, see the portfolio, link a
 // Solana wallet to the same account, then sign in with the Solana wallet
 // alone and find the same account. Stand-in wallets (Wallet Standard and
 // EIP-6963) sign deterministically.
@@ -8,7 +8,7 @@
 // KEYRING=http://127.0.0.1:8595 sends the keyring calls to a local
 // zyn-receipts instead of the node (everything else goes to the node).
 import { chromium } from 'playwright-core';
-const APP = process.env.APP || 'https://app.zyn-network.com';
+const APP = process.env.APP || 'https://lend.zyn-network.com';
 const KEYRING = process.env.KEYRING || '';
 const S = process.env.SHOTS || '/tmp';
 let failed = 0;
