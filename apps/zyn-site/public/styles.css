@@ -160,23 +160,11 @@ h1, h2, p { margin: 0; }
 .index { background: var(--mineral); color: var(--ink); padding: clamp(56px, 7vw, 96px) 0 clamp(72px, 9vw, 120px); position: relative; }
 .index-head { max-width: var(--max); margin: 0 auto clamp(36px, 5vw, 60px); padding: 0 var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; }
 .index-head p { color: var(--ink-2); max-width: 46ch; }
+.index .index-head { margin-bottom: 0; }
+.index .build { display: grid; gap: 22px; }
+.index .button { background: var(--ink); color: var(--mineral); }
+.index .button:hover { background: var(--jade); color: var(--mineral); }
 /* six apps, 3 x 2: each a live capture over its name */
-.tiles { list-style: none; margin: 0 auto; padding: 0 var(--gutter); max-width: var(--max); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(16px, 2vw, 28px); }
-.tile { position: relative; display: grid; grid-template-rows: auto 1fr; background: #fbfaf6; box-shadow: 0 0 0 1px var(--mineral-3), 0 24px 48px -32px rgba(10, 26, 21, 0.35); clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%); transition: transform .45s cubic-bezier(.2, .7, .1, 1), box-shadow .45s; }
-.tile:hover { transform: translateY(-4px); box-shadow: 0 0 0 1px var(--jade), 0 34px 60px -30px rgba(10, 26, 21, 0.45); }
-.tile-shot { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: var(--ink); border-bottom: 1px solid var(--mineral-3); }
-.tile-shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; transition: transform .8s cubic-bezier(.2, .7, .1, 1); }
-.tile:hover .tile-shot img { transform: scale(1.04); }
-.tile-body { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: 22px 22px 26px; }
-.tile-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.tile h3 { margin: 0; font: 800 clamp(24px, 2.2vw, 30px)/1 var(--display); font-stretch: 122%; letter-spacing: -0.025em; }
-.tile h3 a { color: var(--ink); text-decoration: none; }
-.tile h3 a::after { content: ''; position: absolute; inset: 0; z-index: 1; }
-.tile .where { font: 500 10.5px/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--jade); }
-.tile p { font-size: 15px; line-height: 1.55; color: var(--ink-2); }
-.tile .inline { position: relative; z-index: 2; color: var(--jade); text-underline-offset: 3px; }
-.tile-go { position: relative; z-index: 2; justify-self: start; font: 500 13px/1 var(--mono); color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--jade); padding-bottom: 3px; }
-.tile-go span { color: var(--jade); }
 
 /* ---------------------------------------------------------------- trust + hallmarks */
 .trust { background: var(--mineral); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); max-width: var(--max); margin: 0 auto; padding: clamp(92px, 9vw, 120px) var(--gutter) clamp(32px, 4vw, 56px); }
@@ -227,7 +215,6 @@ h1, h2, p { margin: 0; }
 .product::before { content: ''; position: absolute; z-index: -1; left: 0; right: 0; top: 18%; height: 70%; background: radial-gradient(50% 50% at 62% 50%, rgba(19, 160, 126, 0.13), transparent 70%); pointer-events: none; }
 .reveal { transition: transform .9s cubic-bezier(.2, .7, .1, 1), opacity .9s cubic-bezier(.2, .7, .1, 1); }
 .reveal.pre { opacity: 0.001; transform: translateY(28px); }
-.tiles li.reveal.pre { transform: translateY(24px); }
 
 /* ---------------------------------------------------------------- footer */
 .foot { position: relative; overflow: hidden; padding: clamp(56px, 7vw, 88px) var(--gutter) 0; background: var(--obsidian); }
@@ -249,14 +236,12 @@ h1, h2, p { margin: 0; }
   .product-head, .showcase, .api { grid-template-columns: 1fr; }
   .window { transform: none; }
   .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .trust { grid-template-columns: 1fr; }
   .faq { grid-template-columns: 1fr; }
   .faq-head { position: static; }
   .seam { height: 64px; }
 }
 @media (max-width: 560px) {
-  .tiles { grid-template-columns: 1fr; }
   /* clear the fixed header when a section settles at the top */
   .strata, .product, .api, .index, .faq { padding-top: 88px; }
   .menu { display: inline-block; }

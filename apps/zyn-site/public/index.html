@@ -28,8 +28,8 @@
     <button class="menu" id="menu" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
     <nav aria-label="Sections" id="nav">
       <a href="#strata">Ledger</a>
-      <a href="#product">Product</a>
-      <a href="#index">Apps</a>
+      <a href="#product">Flagships</a>
+      <a href="#index">Build</a>
       <a href="#trust">Trust</a>
       <a href="#faq">FAQ</a>
       <a class="nav-open" href="https://nap.cavebro.win/">Open Nap</a>
@@ -60,7 +60,7 @@
     <section id="strata" class="strata">
       <div class="strata-copy">
         <h2 data-cubes="section">Sealed on Zyn.<br>Anchored in Zcash.</h2>
-        <p>Every epoch seals the ledger into one state root, laid down on top of the last. The operator writes those roots into ordinary Zcash transactions, so each anchored layer is pinned to a Zcash block that anyone can look up.</p>
+        <p>Every epoch seals the ledger into one state root, laid down on top of the last. The operator writes those roots into ordinary Zcash transactions, so each anchored layer is pinned to a Zcash block that anyone can look up. Every ZEC withdrawal carries one; otherwise one goes out at most once a day.</p>
         <div class="switch" role="tablist" aria-label="Network">
           <button role="tab" aria-selected="true" data-net="testnet">Testnet</button>
           <button role="tab" aria-selected="false" data-net="mainnet">Mainnet</button>
@@ -78,23 +78,23 @@
 
     <section id="product" class="product">
       <div class="product-head">
-        <h2 data-cubes="section">It runs. Open any of it.</h2>
-        <p>These are the live apps, captured from their public addresses on testnet. Nothing here is a mockup.</p>
+        <h2 data-cubes="section">Our flagships</h2>
+        <p>The apps the Zyn team runs, captured from their live addresses.</p>
       </div>
       <div class="showcase reveal">
-        <ol class="tabs" role="tablist" aria-label="Apps">
-          <li><button role="tab" aria-selected="true" data-shot="zynscan" data-url="zynscan.pages.dev" data-href="https://zynscan.pages.dev/?network=testnet"><b>ZynScan</b><span>Every transaction, replayed from the journal and checked against the node's root.</span></button></li>
-          <li><button role="tab" aria-selected="false" data-shot="bridge" data-url="nap.cavebro.win/bridge" data-href="https://nap.cavebro.win/bridge"><b>Nap Bridge</b><span>ETH in on mainnet as a capped pilot; SOL, ETH and BTC on testnet. Each deposit under a one-time code.</span></button></li>
-          <li><button role="tab" aria-selected="false" data-shot="jade" data-url="cave-jade.pages.dev" data-href="https://cave-jade.pages.dev/?network=testnet"><b>Jade</b><span>Coins on a bonding curve, one price per epoch.</span></button></li>
-          <li><button role="tab" aria-selected="false" data-shot="collection" data-url="cavebro.win" data-href="https://cavebro.win/"><b>Collection Z</b><span>4,444 pixel creatures, sealed under one root.</span></button></li>
+        <ol class="tabs" role="tablist" aria-label="Flagships">
+          <li><button role="tab" aria-selected="true" data-shot="lend" data-url="lend.zyn-network.com" data-href="https://lend.zyn-network.com/"><b>Zyn Lend</b><span>Lend ZEC, ETH or SOL and borrow one against another. Rates and rounded pool totals are public; positions are not. Testnet.</span></button></li>
+          <li><button role="tab" aria-selected="false" data-shot="bridge" data-url="lend.zyn-network.com/#/bridge" data-href="https://lend.zyn-network.com/#/bridge"><b>Bridge</b><span>SOL, ETH and BTC in and out, transparent or private: fixed-size notes in a pool and a zero-knowledge proof each way. ZEC through a 2-of-3 threshold vault; ETH on mainnet as a 0.01 ETH pilot.</span></button></li>
+          <li><button role="tab" aria-selected="false" data-shot="nap" data-url="nap.cavebro.win" data-href="https://nap.cavebro.win/"><b>Nap Wallet</b><span>Shielded ZEC and Zyn assets in one wallet, in the browser. Mainnet and testnet.</span></button></li>
+          <li><button role="tab" aria-selected="false" data-shot="cave" data-url="cavebro.win" data-href="https://cavebro.win/"><b>Cave</b><span>Collection Z, the Cave store and the Jade launchpad. Mainnet.</span></button></li>
         </ol>
         <figure class="window">
-          <a class="bar" id="shot-link" href="https://zynscan.pages.dev/?network=testnet"><span class="lock" aria-hidden="true"></span><span id="shot-url">zynscan.pages.dev</span><span class="open">Open ↗</span></a>
+          <a class="bar" id="shot-link" href="https://lend.zyn-network.com/"><span class="lock" aria-hidden="true"></span><span id="shot-url">lend.zyn-network.com</span><span class="open">Open ↗</span></a>
           <div class="screen">
-            <img class="shot is-on" data-shot="zynscan" src="/assets/shots/zynscan.webp" width="1600" height="1000" alt="ZynScan on testnet: latest transactions and epochs, each settled on Zcash">
-            <img class="shot" data-shot="bridge" src="/assets/shots/bridge.webp" width="1600" height="1000" alt="Nap Bridge: SOL, ETH and BTC, private on Zyn" loading="lazy">
-            <img class="shot" data-shot="jade" src="/assets/shots/jade.webp" width="1600" height="1000" alt="Cave Jade launchpad: coins on bonding curves" loading="lazy">
-            <img class="shot" data-shot="collection" src="/assets/shots/collection.webp" width="1600" height="1000" alt="Cave Collection Z: 4,444 items, sealed" loading="lazy">
+            <img class="shot is-on" data-shot="lend" src="/assets/shots/lend.webp" width="1600" height="1000" alt="Zyn Lend on testnet: ZEC, ETH and SOL markets with rates and pool totals">
+            <img class="shot" data-shot="bridge" src="/assets/shots/bridge.webp" width="1600" height="1000" alt="The bridge in Zyn Lend: a private ETH deposit of a fixed size" loading="lazy">
+            <img class="shot" data-shot="nap" src="/assets/shots/nap.webp" width="1600" height="1000" alt="Nap Wallet: a testnet wallet's pocket with its shielded Zcash address" loading="lazy">
+            <img class="shot" data-shot="cave" src="/assets/shots/cave.webp" width="1600" height="1000" alt="Cave Collection Z" loading="lazy">
           </div>
         </figure>
       </div>
@@ -118,58 +118,11 @@
     <section id="index" class="index">
       <div class="index-head">
         <h2 data-cubes="section">Built on Zyn</h2>
-        <p>Cave is the first consumer app on Zyn: Collection Z, the Cave store and the Jade launchpad. Zyn Lend lends and borrows ZEC, ETH and SOL. Nap is the wallet all of them talk to. Every screen below is a live capture.</p>
+        <div class="build">
+          <p>Zyn is not open for outside apps yet. An app runs as part of the node rather than being deployed by anyone, so each one is added with the team.</p>
+          <p class="actions"><a class="button" href="mailto:contact@zyn-network.com">Contact the team</a></p>
+        </div>
       </div>
-      <ul class="tiles">
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://nap.cavebro.win/" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-nap.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://nap.cavebro.win/">Nap Wallet</a></h3><span class="where">Mainnet · Testnet</span></div>
-            <p>Shielded ZEC and Zyn notes side by side. In the browser now; the extension and phone apps are waiting on store review.</p>
-            <a class="tile-go" href="https://nap.cavebro.win/" aria-label="Open Nap Wallet">nap.cavebro.win <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://lend.zyn-network.com/" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-lend.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://lend.zyn-network.com/">Zyn Lend</a></h3><span class="where">Testnet</span></div>
-            <p>Lend ZEC, ETH or SOL and borrow one against another. Rates and rounded pool totals are public; who lends, who borrows and how much are not, though the operator sees them. Positions past their line are sold in a batch auction.</p>
-            <a class="tile-go" href="https://lend.zyn-network.com/" aria-label="Open Zyn Lend">lend.zyn-network.com <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://cave-jade.pages.dev/" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-jade.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://cave-jade.pages.dev/">Jade</a></h3><span class="where">Mainnet</span></div>
-            <p>Coins start on a bonding curve and graduate into a market pool. Reserves and fees are published on ZynScan.</p>
-            <a class="tile-go" href="https://cave-jade.pages.dev/" aria-label="Open Jade">cave-jade.pages.dev <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://cavebro.win/" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-collection.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://cavebro.win/">Collection Z</a></h3><span class="where">Mainnet</span></div>
-            <p>4,444 pixel creatures: 2,222 Moles, 1,333 Owls and 889 Moths, frozen under one root. Traded in the <a class="inline" href="https://cave-market.pages.dev/">Cave store</a>, every write signed in your wallet.</p>
-            <a class="tile-go" href="https://cavebro.win/" aria-label="Open Collection Z">cavebro.win <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://nap.cavebro.win/bridge" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-bridge.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://nap.cavebro.win/bridge">Bridge</a></h3><span class="where">ZEC mainnet · ETH pilot · others testnet</span></div>
-            <p>ZEC in and out through a 2-of-3 threshold vault. ETH on Ethereum mainnet as a pilot capped at 0.01 ETH, its vault held by a 2-of-3 Safe. SOL, ETH and BTC on test networks (Solana devnet, Sepolia, Bitcoin signet), their test keys on a single machine.</p>
-            <a class="tile-go" href="https://nap.cavebro.win/bridge" aria-label="Open Bridge">nap.cavebro.win/bridge <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-        <li class="tile reveal">
-          <a class="tile-shot" href="https://zynscan.pages.dev/" tabindex="-1" aria-hidden="true"><img src="/assets/shots/tile-zynscan.webp" width="960" height="600" alt="" loading="lazy"></a>
-          <div class="tile-body">
-            <div class="tile-top"><h3><a href="https://zynscan.pages.dev/">ZynScan</a></h3><span class="where">Mainnet · Testnet</span></div>
-            <p>An explorer that replays each network's journal and compares every root with the node's.</p>
-            <a class="tile-go" href="https://zynscan.pages.dev/" aria-label="Open ZynScan">zynscan.pages.dev <span aria-hidden="true">→</span></a>
-          </div>
-        </li>
-      </ul>
     </section>
 
     <div class="trust-wrap">
@@ -226,7 +179,7 @@
           </details>
           <details class="qa">
             <summary>What does anchored mean?</summary>
-            <p>Each sealed epoch has a state root. The operator writes that root into an ordinary Zcash transaction, so it is timestamped in a Zcash block anyone can look up, and it cannot later be rewritten without contradicting that block. Zcash stores the commitment; it does not check the state behind it.</p>
+            <p>Each sealed epoch has a state root. The operator writes that root into an ordinary Zcash transaction, so it is timestamped in a Zcash block anyone can look up, and it cannot later be rewritten without contradicting that block. Zcash stores the commitment; it does not check the state behind it. The anchor rides in the same transaction as a ZEC withdrawal's payout; with no withdrawals, one goes out at most once a day, paid from the operator's fee reserve.</p>
           </details>
           <details class="qa">
             <summary>What if the operator stops or refuses my transaction?</summary>
@@ -234,11 +187,11 @@
           </details>
           <details class="qa">
             <summary>Are the SOL, ETH and BTC bridges live?</summary>
-            <p>ETH is live on Ethereum mainnet as a pilot: at most 0.01 ETH in total, and deposits past that are refunded by hand rather than credited. Its vault contract is unaudited and answers to a 2-of-3 Safe held by the Zyn team, whose owners approve every payout (so sending out can take hours) and could move what the vault holds. SOL, ETH and BTC also run on test networks (Solana devnet, Ethereum Sepolia, Bitcoin signet) with their test keys on a single machine, to show the design: a one-time deposit code instead of your account, and an exit address only the paying bridge sees.</p>
+            <p>ETH is live on Ethereum mainnet as a pilot: at most 0.01 ETH in total, and deposits past that are refunded by hand rather than credited. Its vault contract is unaudited and answers to a 2-of-3 Safe held by the Zyn team, whose owners approve every payout (so sending out can take hours) and could move what the vault holds. SOL, ETH and BTC also run on test networks (Solana devnet, Ethereum Sepolia, Bitcoin signet) with their test keys on a single machine, through two channels. The transparent one takes any amount; the other chain shows the address and the amount. The private one takes fixed sizes into a pool and moves them with a zero-knowledge proof each way, so the other chain shows a note entering or leaving the pool, not which one is yours. Its testnet proving keys come from a one-party setup and are for testing only.</p>
           </details>
           <details class="qa">
             <summary>Can I build my own app on Zyn?</summary>
-            <p>Not by deploying a contract. Zyn is a programmable architecture, but applications are compiled into the node rather than uploaded by anyone. What runs today is listed above.</p>
+            <p>Not by deploying a contract. Zyn is a programmable architecture, but applications are compiled into the node rather than uploaded by anyone, so each one is added with the team. <a href="#index">Contact the team</a> if you want to build on Zyn.</p>
           </details>
       </div>
     </section>
@@ -251,7 +204,7 @@
       <p>Zyn is an application execution layer built for Zcash.<br>Testnet coins are for trying things out and are worth nothing.</p>
       <nav aria-label="Zyn apps">
         <a href="https://nap.cavebro.win/">Nap Wallet</a>
-        <a href="https://zynscan.pages.dev/">ZynScan</a>
+        <a href="https://scan.zyn-network.com/">ZynScan</a>
         <a href="https://cavebro.win/">Collection Z</a>
         <a href="https://cave-jade.pages.dev/">Jade</a>
         <a href="https://lend.zyn-network.com/">Lend</a>

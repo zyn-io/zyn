@@ -26,7 +26,7 @@ async function get(net, path) {
   return r.json();
 }
 
-const epochLink = (net, n) => `https://zynscan.pages.dev/epoch/${int(n)}${net === 'testnet' ? '?network=testnet' : ''}`;
+const epochLink = (net, n) => `https://scan.zyn-network.com/epoch/${int(n)}${net === 'testnet' ? '?network=testnet' : ''}`;
 
 function drawPins() {
   const core = $('core');
@@ -111,7 +111,7 @@ async function show(net) {
 document.querySelectorAll('.switch button').forEach((b) => b.addEventListener('click', () => show(b.dataset.net)));
 addEventListener('resize', () => drawPins());
 
-// The product showcase: one real screen at a time.
+// The flagships: one real screen at a time.
 const tabs = [...document.querySelectorAll('.tabs button')];
 function pick(btn) {
   tabs.forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
