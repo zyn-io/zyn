@@ -783,3 +783,85 @@ fn the_nodes_switch_on_a_guarded_chain_with_old_eth_risk() {
     let back = ObjectVm::decode(&c.vm.encode()).unwrap();
     assert_eq!(back.state_root(), c.vm.state_root());
 }
+
+// ------------------------------------------------------------- BOLD (§162)
+
+/// One deposit through the bridge and its claim: `whole` in, less the
+/// bridge fee, as a note of `who`'s.
+fn bridge_in(c: &mut Chain, who: AccountId, asset: [u8; 32], whole: i64) {
+    use objectvm::bridge::{deposit_commitment, deposit_key};
+    let secret = c.fresh();
+    let commitment = deposit_commitment(&who, &secret);
+    let external_ref = c.fresh();
+    c.ok(Op::DepositCommitted { program: program::deposit(), asset, gross: Fixed::whole(whole), external_ref, commitment });
+    let amount = c.vm.market.waiting[&deposit_key(&commitment, &asset)].amount;
+    let output = c.note(who, asset, amount);
+    c.ok(Op::ClaimDeposit { owner: who, program: program::claim(), secret, asset, output });
+}
+
+/// BOLD.zy listed on a ledger already under rules v2 — once it exists, not
+/// before — then lent, and borrowed against ETH.zy (and ETH.zy against it)
+/// through Zyn's ETH/BOLD pool. Priced at its traded value: a depeg
+/// liquidates like any other fall.
+#[test]
+fn bold_lists_under_rules_v2_and_lends_against_eth() {
+    use objectvm::bridge::asset_of;
+    let mut c = v2();
+    let sepolia = b"eip155:11155111".to_vec();
+    let test_bold: Vec<u8> = (0..20).map(|i| u8::from_str_radix(&"d58c9e3eebe83fda55d59c186e86b37aa5d0f79a"[2 * i..2 * i + 2], 16).unwrap()).collect();
+    let eth = asset_of(&sepolia, b"");
+    let bold = asset_of(&sepolia, &test_bold);
+    assert_eq!(hex(&bold), "8c1a1b0616cef63250e9f5bab8b20908320cc47ead0f60215a229d34b5c93ac2");
+    for origin in [Vec::new(), test_bold.clone()] {
+        c.ok(Op::RegisterBridged { program: program::bridge_register(), network: sepolia.clone(), origin, decimals: 18 });
+    }
+    let risk = zyn_lend::params::v2::BOLD;
+    let list = |asset: [u8; 32], r: zyn_lend::Risk| Op::LendList { program: program::lend_list(), asset, max_ltv_bps: r.max_ltv_bps, liquidation_bps: r.liquidation_bps, penalty_bps: r.penalty_bps };
+    // Registered, never deposited: nothing to lend yet (the node waits for it).
+    assert_eq!(c.refused(list(bold, risk)), "only an asset that exists and was not made here can be lent");
+    for who in [ALICE, BOB, CAROL, DAVE] {
+        bridge_in(&mut c, who, bold, 1_000_000);
+        bridge_in(&mut c, who, eth, 300);
+    }
+    // Zyn's ETH/BOLD pool: 200 ETH to 800,000 BOLD.
+    let (ia, mut ch) = c.fund(DAVE, eth, Fixed::whole(200));
+    let (ib, chb) = c.fund(DAVE, bold, Fixed::whole(800_000));
+    ch.extend(chb);
+    let nonce = c.fresh();
+    let (a, b, amount_a, amount_b) = if eth < bold { (eth, bold, 200, 800_000) } else { (bold, eth, 800_000, 200) };
+    c.ok(Op::CreatePool { provider: DAVE, program: program::add_liquidity(), asset_a: a, asset_b: b, amount_a: Fixed::whole(amount_a), amount_b: Fixed::whole(amount_b), fee_bps: 30, inputs: [ia, ib].concat(), change: ch, nonce });
+    // Rules v2 refuse BOLD at numbers that do not fit under the floor.
+    assert_eq!(c.refused(list(bold, zyn_lend::Risk { liquidation_bps: 7_900, ..risk })), "under rules v2 a liquidated debt and its penalty must fit under the auction floor");
+    c.ok(list(bold, risk));
+    c.ok(list(eth, zyn_lend::params::v2::ETH));
+    c.limits(bold, 5_000, 2_500, 1);
+    c.limits(eth, 10, 5, 1);
+    assert_eq!(c.vm.market.lend.listed[&bold].risk, risk);
+    let post = |c: &mut Chain, eth_usd: i128, bold_micro: i128| {
+        let at = c.now() + 1;
+        c.ok(Op::LendPrices { program: program::lend_prices(), at, prices: vec![(eth, usd(eth_usd)), (bold, Fixed(bold_micro * WAD / 1_000_000))] });
+    };
+    post(&mut c, 4_000, 995_800);
+    // Alice lends BOLD, Dave lends ETH.
+    let src = c.supply(ALICE, bold, 3_000);
+    c.claim(ALICE, &[src]);
+    let src = c.supply(DAVE, eth, 5);
+    c.claim(DAVE, &[src]);
+    // Bob borrows 2,000 BOLD on 1 ETH ($4,000): 49.8%, under ETH's 72%.
+    let bob = c.open(BOB, eth, Fixed::whole(1), bold, Fixed::whole(2_000)).unwrap();
+    c.claim(BOB, &[bob]);
+    assert_eq!(c.open(BOB, eth, Fixed::whole(1), bold, Fixed::whole(600)), Err("this pool is at its borrowing cap"), "2,500 BOLD borrow cap");
+    // Carol borrows 0.5 ETH on 3,000 BOLD ($2,987): 67%, under BOLD's 75%.
+    assert!(c.open(CAROL, bold, Fixed::whole(3_000), eth, Fixed(WAD * 3 / 4)).is_err(), "75% of $2,987 is less than 0.75 ETH");
+    let carol = c.open(CAROL, bold, Fixed::whole(3_000), eth, Fixed(WAD / 2)).unwrap();
+    c.claim(CAROL, &[carol]);
+    c.seal();
+    assert!(c.vm.market.lend.positions.contains_key(&carol));
+    // BOLD trades at 85 cents: $2,550 behind a $2,000 debt is 78.4%, past
+    // BOLD's 78% line. A constant dollar would never have seen it.
+    post(&mut c, 4_000, 850_000);
+    post(&mut c, 4_000, 850_000);
+    c.seal();
+    assert!(c.vm.market.lend.lots.contains_key(&carol), "liquidated on BOLD's own price");
+    assert!(c.vm.market.lend.positions.contains_key(&bob), "Bob's BOLD debt got cheaper, not riskier");
+}

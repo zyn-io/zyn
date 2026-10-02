@@ -217,6 +217,154 @@ pub fn deposit_ref(chain_id: u64, vault: &Address20, asset: u32, index: u64) -> 
 }
 
 // ---------------------------------------------------------------------------
+// Several vault assets in one bridge (§162). Withdrawals share the vault's
+// one nonce, so one process pays every asset the vault holds.
+
+/// One vault asset this bridge carries: the vault's id for it, the token
+/// (`None` for the chain's own coin) and the Zyn asset it is bridged as.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Carried {
+    pub id: u32,
+    pub token: Option<Address20>,
+    pub zyn: Hash,
+}
+
+impl Carried {
+    pub fn new(network: &[u8], id: u32, token: Option<Address20>) -> Carried {
+        Carried { id, token, zyn: objectvm::bridge::asset_of(network, &Carried::origin_of(token)) }
+    }
+
+    fn origin_of(token: Option<Address20>) -> Vec<u8> {
+        token.map_or(Vec::new(), |t| t.to_vec())
+    }
+
+    /// What `RegisterBridged` names as the origin: the raw 20-byte token
+    /// address, or nothing for the chain's own coin (§66.13).
+    pub fn origin(&self) -> Vec<u8> {
+        Carried::origin_of(self.token)
+    }
+}
+
+/// `ZYN_ETH_ASSETS`: `1=native,2=0x…` — the vault's id, then `native` or the
+/// token's address. Ids and tokens each appear once.
+pub fn parse_assets(spec: &str, network: &[u8]) -> Result<Vec<Carried>, String> {
+    let mut out: Vec<Carried> = Vec::new();
+    for kv in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (id, token) = kv.split_once('=').ok_or_else(|| format!("ZYN_ETH_ASSETS entry {kv:?} is not id=native or id=0x…"))?;
+        let id: u32 = id.trim().parse().map_err(|_| format!("ZYN_ETH_ASSETS: {id:?} is not a vault asset id"))?;
+        let token = match token.trim() {
+            t if t.eq_ignore_ascii_case("native") => None,
+            t => {
+                let raw = t.strip_prefix("0x").filter(|h| h.len() == 40).and_then(|h| (0..20).map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok()).collect::<Option<Vec<u8>>>());
+                Some(raw.and_then(|b| <Address20>::try_from(b).ok()).filter(|a| *a != [0u8; 20]).ok_or_else(|| format!("ZYN_ETH_ASSETS: {t:?} is not a token address"))?)
+            }
+        };
+        if out.iter().any(|c| c.id == id || c.token == token) {
+            return Err(format!("ZYN_ETH_ASSETS names vault asset {id} or its token twice"));
+        }
+        out.push(Carried::new(network, id, token));
+    }
+    if out.is_empty() {
+        return Err("ZYN_ETH_ASSETS names no asset".into());
+    }
+    Ok(out)
+}
+
+/// The carried asset a `Deposited` log's vault id belongs to.
+pub fn carried(list: &[Carried], vault_asset: u32) -> Option<&Carried> {
+    list.iter().find(|c| c.id == vault_asset)
+}
+
+/// Calldata for `assets(uint32)`: `(token, decimals, registered)`.
+pub fn assets_call(id: u32) -> Vec<u8> {
+    let mut out = selector("assets(uint32)").to_vec();
+    out.extend_from_slice(&word_u(id as u128));
+    out
+}
+
+/// What the vault says of one of its asset ids.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct VaultAsset {
+    pub token: Option<Address20>,
+    pub decimals: u8,
+    pub registered: bool,
+}
+
+pub fn decode_vault_asset(ret: &[u8]) -> Option<VaultAsset> {
+    if ret.len() != 96 || ret[..12].iter().any(|b| *b != 0) || ret[32..63].iter().any(|b| *b != 0) || ret[64..95].iter().any(|b| *b != 0) || ret[95] > 1 {
+        return None;
+    }
+    let token: Address20 = ret[12..32].try_into().ok()?;
+    Some(VaultAsset { token: (token != [0u8; 20]).then_some(token), decimals: ret[63], registered: ret[95] == 1 })
+}
+
+/// Calldata for `registerAsset(uint32 asset, address token)` (the vault's admin only).
+pub fn register_asset_call(id: u32, token: &Address20) -> Vec<u8> {
+    let mut out = selector("registerAsset(uint32,address)").to_vec();
+    out.extend_from_slice(&word_u(id as u128));
+    out.extend_from_slice(&word_addr(token));
+    out
+}
+
+pub fn admin_call() -> Vec<u8> {
+    selector("admin()").to_vec()
+}
+
+pub fn decimals_call() -> Vec<u8> {
+    selector("decimals()").to_vec()
+}
+
+pub fn balance_of_call(who: &Address20) -> Vec<u8> {
+    let mut out = selector("balanceOf(address)").to_vec();
+    out.extend_from_slice(&word_addr(who));
+    out
+}
+
+/// A WAD amount in the token's own units, as the vault's `_fromWad` pays it:
+/// `None` where that would drop dust (the vault reverts the whole batch).
+pub fn token_units(wad: u128, decimals: u8) -> Option<u128> {
+    match decimals {
+        18 => Some(wad),
+        d if d > 18 => wad.checked_mul(10u128.checked_pow((d - 18) as u32)?),
+        d => {
+            let unit = 10u128.pow((18 - d) as u32);
+            (wad % unit == 0).then_some(wad / unit)
+        }
+    }
+}
+
+/// One revealed exit, as the bridge has it from `zyn_bridgeExits`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Exit {
+    pub index: u64,
+    pub to: Address20,
+    pub vault_asset: u32,
+    /// The vault's decimals for that asset.
+    pub decimals: u8,
+    /// WAD, as Zyn holds it and as the vault's `Payout` takes it.
+    pub amount: u128,
+}
+
+/// One payout batch over every carried asset, at most `per_tx` long, in the
+/// order given, with the exits it covers. An exit the vault could not pay
+/// exactly is left out (and said), not allowed to revert the batch.
+pub fn batch(exits: &[Exit], per_tx: usize) -> (Vec<Payout>, Vec<u64>, Vec<u64>) {
+    let (mut payouts, mut covers, mut inexact) = (Vec::new(), Vec::new(), Vec::new());
+    for e in exits {
+        if payouts.len() == per_tx {
+            break;
+        }
+        if e.amount == 0 || token_units(e.amount, e.decimals).filter(|u| *u > 0).is_none() {
+            inexact.push(e.index);
+            continue;
+        }
+        payouts.push(Payout { to: e.to, asset: e.vault_asset, amount: e.amount });
+        covers.push(e.index);
+    }
+    (payouts, covers, inexact)
+}
+
+// ---------------------------------------------------------------------------
 // A legacy (EIP-155) transaction: enough for the bridge to call its vault.
 
 fn rlp_bytes(b: &[u8]) -> Vec<u8> {
@@ -352,5 +500,126 @@ mod tests {
         data[63] = 4;
         assert_eq!(decode_deposited(&[deposited_topic(), [9; 32], asset], &data), Some(([9; 32], 1, 5u128.pow(18), 4)));
         assert_eq!(decode_deposited(&[[0; 32], [9; 32], asset], &data), None);
+    }
+
+    const TEST_BOLD: &str = "0xD58C9e3EeBE83fda55D59C186E86b37aa5d0f79a";
+    const SEPOLIA: &[u8] = b"eip155:11155111";
+
+    fn bold() -> Address20 {
+        unhex20(TEST_BOLD)
+    }
+
+    fn unhex20(s: &str) -> Address20 {
+        let s = s.trim_start_matches("0x");
+        (0..20).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap()).collect::<Vec<_>>().try_into().unwrap()
+    }
+
+    #[test]
+    fn the_assets_spec_names_eth_and_bold_and_their_zyn_ids() {
+        let a = parse_assets(&format!("1=native, 2={TEST_BOLD}"), SEPOLIA).unwrap();
+        assert_eq!(a.len(), 2);
+        assert_eq!((a[0].id, a[0].token), (1, None));
+        assert_eq!(hex(&a[0].zyn), "56737e143259c754d165074ad15058139bc0b116f5a22b2f3d50129a2a7a24a6", "ETH.zy (Sepolia)");
+        assert_eq!((a[1].id, a[1].token), (2, Some(bold())));
+        assert_eq!(hex(&a[1].zyn), "8c1a1b0616cef63250e9f5bab8b20908320cc47ead0f60215a229d34b5c93ac2", "BOLD.zy (Sepolia)");
+        // The old single-asset default.
+        assert_eq!(parse_assets("1=native", SEPOLIA).unwrap(), vec![a[0]]);
+        // Mainnet BOLD is a different asset from the test token's.
+        let main = parse_assets("2=0x6440f144b7e50D6a8439336510312d2F54beB01D", b"eip155:1").unwrap();
+        assert_eq!(hex(&main[0].zyn), "ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f");
+        for bad in ["", "1", "x=native", "1=0x12", "1=native,1=0x6440f144b7e50D6a8439336510312d2F54beB01D", "1=native,2=native", "2=0x0000000000000000000000000000000000000000"] {
+            assert!(parse_assets(bad, SEPOLIA).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_deposit_is_credited_as_its_vault_assets_zyn_asset() {
+        let a = parse_assets(&format!("1=native,2={TEST_BOLD}"), SEPOLIA).unwrap();
+        let log = |asset: u8, index: u8| {
+            let mut t = [0u8; 32];
+            t[31] = asset;
+            let mut data = vec![0u8; 64];
+            data[16..32].copy_from_slice(&(250 * 10u128.pow(18)).to_be_bytes());
+            data[63] = index;
+            decode_deposited(&[deposited_topic(), [7; 32], t], &data).unwrap()
+        };
+        let (_, asset, wad, index) = log(2, 0);
+        let c = carried(&a, asset).unwrap();
+        assert_eq!(c.zyn, a[1].zyn, "vault asset 2 is BOLD.zy");
+        assert_eq!((wad, index), (250 * 10u128.pow(18), 0));
+        assert_eq!(carried(&a, log(1, 0).1).unwrap().zyn, a[0].zyn);
+        assert!(carried(&a, log(3, 0).1).is_none(), "an asset not carried is not credited");
+        // Each asset's deposits are counted by its own index: ETH's 0 and BOLD's 0 differ.
+        let vault = [0xe1; 20];
+        assert_ne!(deposit_ref(11155111, &vault, 1, 0), deposit_ref(11155111, &vault, 2, 0));
+    }
+
+    #[test]
+    fn registering_bold_names_the_raw_token_address() {
+        let a = parse_assets(&format!("1=native,2={TEST_BOLD}"), SEPOLIA).unwrap();
+        assert_eq!(a[0].origin(), Vec::<u8>::new());
+        assert_eq!(a[1].origin(), bold().to_vec());
+        assert_eq!(a[1].origin().len(), 20);
+        assert!(objectvm::bridge::valid_origin(SEPOLIA, &a[1].origin()));
+        assert_eq!(objectvm::bridge::asset_of(SEPOLIA, &a[1].origin()), a[1].zyn);
+        // registerAsset(2, TestBold), as cast calldata-encodes it.
+        let call = register_asset_call(2, &bold());
+        assert_eq!(&call[..4], &selector("registerAsset(uint32,address)"));
+        assert_eq!(call.len(), 4 + 64);
+        assert_eq!(call[4 + 31], 2);
+        assert_eq!(&call[4 + 32 + 12..], &bold());
+    }
+
+    #[test]
+    fn the_vaults_asset_record_reads_back() {
+        let mut ret = vec![0u8; 96];
+        ret[12..32].copy_from_slice(&bold());
+        ret[63] = 18;
+        ret[95] = 1;
+        assert_eq!(decode_vault_asset(&ret), Some(VaultAsset { token: Some(bold()), decimals: 18, registered: true }));
+        let native = { let mut r = vec![0u8; 96]; r[63] = 18; r[95] = 1; r };
+        assert_eq!(decode_vault_asset(&native), Some(VaultAsset { token: None, decimals: 18, registered: true }));
+        assert_eq!(decode_vault_asset(&[0u8; 96]), Some(VaultAsset { token: None, decimals: 0, registered: false }));
+        assert_eq!(decode_vault_asset(&[0u8; 64]), None);
+    }
+
+    #[test]
+    fn amounts_scale_as_the_vault_pays_them() {
+        assert_eq!(token_units(5 * 10u128.pow(17), 18), Some(5 * 10u128.pow(17)));
+        assert_eq!(token_units(1_500_000 * 10u128.pow(12), 6), Some(1_500_000), "1.5 of a 6-decimal token");
+        assert_eq!(token_units(10u128.pow(12) + 1, 6), None, "dust the vault would revert on");
+        assert_eq!(token_units(3, 20), Some(300));
+    }
+
+    #[test]
+    fn one_batch_pays_eth_and_bold_together() {
+        let to_a = [0xAA; 20];
+        let to_b = [0xBB; 20];
+        let exits = [
+            Exit { index: 4, to: to_a, vault_asset: 1, decimals: 18, amount: 2 * 10u128.pow(16) },
+            Exit { index: 5, to: to_b, vault_asset: 2, decimals: 18, amount: 125 * 10u128.pow(18) },
+            Exit { index: 6, to: to_b, vault_asset: 3, decimals: 6, amount: 10u128.pow(12) + 1 },
+            Exit { index: 7, to: to_a, vault_asset: 2, decimals: 18, amount: 10u128.pow(18) },
+        ];
+        let (payouts, covers, inexact) = batch(&exits, 8);
+        assert_eq!(covers, vec![4, 5, 7]);
+        assert_eq!(inexact, vec![6]);
+        assert_eq!(payouts[1], Payout { to: to_b, asset: 2, amount: 125 * 10u128.pow(18) });
+        let (p2, c2, _) = batch(&exits, 2);
+        assert_eq!((p2.len(), c2), (2, vec![4, 5]));
+        // The withdraw call carries each payout's own asset id, in order.
+        let call = withdraw_call(9, 3, &payouts, &[1u8; 130]);
+        let word = |i: usize| &call[4 + 32 * i..4 + 32 * (i + 1)];
+        assert_eq!(word(4)[31], 3, "three payouts");
+        for (k, p) in payouts.iter().enumerate() {
+            assert_eq!(&word(5 + 3 * k)[12..], &p.to);
+            assert_eq!(word(6 + 3 * k)[31] as u32, p.asset);
+            assert_eq!(&word(7 + 3 * k)[16..], &p.amount.to_be_bytes());
+        }
+        // The digest binds every payout's asset: BOLD paid as ETH is another digest.
+        let mut swapped = payouts.clone();
+        swapped[1].asset = 1;
+        let vault = [0xe1; 20];
+        assert_ne!(withdrawal_digest(11155111, &vault, 9, 3, &payouts), withdrawal_digest(11155111, &vault, 9, 3, &swapped));
     }
 }

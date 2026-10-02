@@ -1,20 +1,28 @@
-//! `zyn-eth-bridge` — ETH in and out of the object ledger as ETH.zy
-//! (DECISIONS §146).
+//! `zyn-eth-bridge` — ETH and the vault's tokens in and out of the object
+//! ledger as ETH.zy, BOLD.zy, … (DECISIONS §146, §162).
 //!
 //! ```text
-//!   zyn-eth-bridge status     the vault, its balance, what Zyn has issued
-//!   zyn-eth-bridge register   RegisterBridged for this chain's ETH (once)
+//!   zyn-eth-bridge status     the vault, each asset's balance, what Zyn has issued
+//!   zyn-eth-bridge register   RegisterBridged for every carried asset not yet registered
+//!   zyn-eth-bridge register-vault-asset <id> <token>
+//!                             the vault's registerAsset(id, token), sent by the gas payer
+//!                             (the vault's admin on Sepolia)
 //!   zyn-eth-bridge once       credit new deposits, pay revealed exits, stop
 //!   zyn-eth-bridge run        the same, every ZYN_ETH_POLL seconds
 //! ```
 //!
-//! **In:** `ZynVault.depositNative(commitment, asset)` emits `Deposited`;
-//! each finalized one becomes a `DepositCommitted`, recorded once by the
-//! vault's own per-asset index. **Out:** a `Withdraw` of ETH.zy commits to
-//! `keccak(address ‖ salt)`; once revealed, this signs the vault's withdrawal
-//! digest with `threshold` of the `ZynSigners` owners' keys — after checking
-//! the contract computes the same digest — sends it, and records `SettleExit`
-//! with the transaction hash once it is final. One payment in flight at a time.
+//! **One process carries every vault asset** (`ZYN_ETH_ASSETS`), because
+//! withdrawals share the vault's one nonce. **In:** `depositNative` or an
+//! ERC-20 `deposit` emits `Deposited`; each finalized one becomes a
+//! `DepositCommitted` of that vault asset's Zyn asset, recorded once by the
+//! vault's own per-asset index — and only once the vault's record of the id
+//! names the token this bridge was told it is. **Out:** a `Withdraw` commits
+//! to `keccak(address ‖ salt)`; once revealed, this signs the vault's
+//! withdrawal digest — one batch over every carried asset, amounts in WAD as
+//! the vault scales them — with `threshold` of the `ZynSigners` owners' keys,
+//! after checking the contract computes the same digest; sends it, and
+//! records `SettleExit` with the transaction hash once it is final. One
+//! payment in flight at a time.
 //!
 //! **Safe mode (§155), the only mode on mainnet:** when the vault's signer is
 //! a Safe (`ZYN_ETH_SAFE`), this holds no signing keys and pays no gas. It
@@ -31,7 +39,8 @@
 //!   ZYN_ETH_RPC         Ethereum JSON-RPC                                (required)
 //!   ZYN_ETH_CHAIN_ID    the chain                                   (11155111, Sepolia)
 //!   ZYN_ETH_VAULT       the ZynVault address                             (required)
-//!   ZYN_ETH_ASSET_ID    the vault's id for native ETH                          (1)
+//!   ZYN_ETH_ASSETS      the vault assets carried: id=native|id=0x<token>,…   (1=native)
+//!   ZYN_ETH_ASSET_ID    the native id when ZYN_ETH_ASSETS is unset (older env)  (1)
 //!   ZYN_ETH_KEYS        files, each one owner's hex key, comma-separated (required)
 //!   ZYN_ETH_THRESHOLD   owners needed                                          (2)
 //!   ZYN_ETH_PAYER       file with the hex key that pays gas                (required)
@@ -42,18 +51,18 @@
 //!   ZYN_ETH_PROPOSER    file with the proposer's hex key            (Safe mode)
 //!   ZYN_ETH_SAFE_API    Safe transaction service  (api.safe.global/tx-service/…)
 //!   ZYN_ETH_SAFE_API_KEY  its API key, sent as a bearer token         (none)
-//!   ZYN_ETH_CAP_WEI     most this bridge will ever have issued        (no cap)
+//!   ZYN_ETH_CAP_WEI     most this bridge will ever have issued of ETH  (no cap;
+//!                       a capped bridge carries ETH alone)
 //! ```
 
 use std::time::Duration;
 
 use k256::ecdsa::SigningKey;
-use objectvm::bridge::asset_of;
 use objectvm::{ObjectVm, Op};
 use serde_json::{json, Value};
 use zyn_vm::spec::MicrochainVm;
 use zyn_vm::{program, Fixed};
-use zynzapd::eth_bridge::{self as eth, Payout, Tx};
+use zynzapd::eth_bridge::{self as eth, Carried, Exit, Tx, VaultAsset};
 
 /// Payouts per withdrawal transaction.
 const PER_TX: usize = 8;
@@ -86,9 +95,8 @@ struct Bridge {
     rpc: String,
     chain_id: u64,
     vault: eth::Address20,
-    vault_asset: u32,
     network: Vec<u8>,
-    asset: [u8; 32],
+    assets: Vec<Carried>,
     keys: Vec<SigningKey>,
     threshold: usize,
     payer: SigningKey,
@@ -134,6 +142,14 @@ fn bridge() -> Result<Bridge, String> {
         c => Some(c.parse::<u128>().map_err(|_| "ZYN_ETH_CAP_WEI must be a whole number of wei")?),
     };
     let network = format!("eip155:{chain_id}").into_bytes();
+    let spec = match env("ZYN_ETH_ASSETS", "") {
+        s if s.is_empty() => format!("{}=native", env("ZYN_ETH_ASSET_ID", "1")),
+        s => s,
+    };
+    let assets = eth::parse_assets(&spec, &network)?;
+    if cap.is_some() && assets.iter().any(|a| a.token.is_some()) {
+        return Err("ZYN_ETH_CAP_WEI caps ETH in wei; a capped bridge carries ETH alone".into());
+    }
     let state = std::path::PathBuf::from(env("ZYN_ETH_STATE", "/var/lib/zyn/eth-bridge"));
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     Ok(Bridge {
@@ -141,9 +157,8 @@ fn bridge() -> Result<Bridge, String> {
         rpc,
         chain_id,
         vault,
-        vault_asset: env("ZYN_ETH_ASSET_ID", "1").parse().map_err(|_| "ZYN_ETH_ASSET_ID must be a number".to_string())?,
-        asset: asset_of(&network, b""),
         network,
+        assets,
         keys,
         threshold: env("ZYN_ETH_THRESHOLD", "2").parse().map_err(|_| "ZYN_ETH_THRESHOLD must be a number".to_string())?,
         payer,
@@ -169,8 +184,46 @@ impl Bridge {
     }
 
     fn call(&self, data: &[u8]) -> Result<Vec<u8>, String> {
-        let r = self.eth("eth_call", json!([{ "to": format!("0x{}", hex(&self.vault)), "data": format!("0x{}", hex(data)) }, "latest"]))?;
+        self.call_to(&self.vault, data)
+    }
+
+    fn call_to(&self, to: &eth::Address20, data: &[u8]) -> Result<Vec<u8>, String> {
+        let r = self.eth("eth_call", json!([{ "to": format!("0x{}", hex(to)), "data": format!("0x{}", hex(data)) }, "latest"]))?;
         unhex(r.as_str().unwrap_or("")).ok_or_else(|| "eth_call answered something that is not hex".to_string())
+    }
+
+    /// What the vault says of a carried asset's id — refused outright when
+    /// it names another token than this bridge was told: crediting or paying
+    /// under the wrong id would issue or pay the wrong asset.
+    fn vault_asset(&self, c: &Carried) -> Result<VaultAsset, String> {
+        let v = eth::decode_vault_asset(&self.call(&eth::assets_call(c.id))?).ok_or_else(|| format!("assets({}) answered oddly", c.id))?;
+        if v.registered && v.token != c.token {
+            return Err(format!(
+                "the vault's asset {} is {} but ZYN_ETH_ASSETS says {} — REFUSING to carry it",
+                c.id,
+                v.token.map_or("native".into(), |t| format!("0x{}", hex(&t))),
+                c.token.map_or("native".into(), |t| format!("0x{}", hex(&t)))
+            ));
+        }
+        Ok(v)
+    }
+
+    /// The token's own decimals, or 18 for the chain's coin.
+    fn token_decimals(&self, c: &Carried) -> Result<u8, String> {
+        let Some(t) = c.token else { return Ok(18) };
+        let r = self.call_to(&t, &eth::decimals_call())?;
+        (r.len() == 32 && r[..31].iter().all(|b| *b == 0)).then(|| r[31]).ok_or_else(|| format!("0x{}.decimals() answered oddly", hex(&t)))
+    }
+
+    /// What the vault holds of a carried asset, in its own units.
+    fn held(&self, c: &Carried) -> Result<u128, String> {
+        match c.token {
+            None => qty(&self.eth("eth_getBalance", json!([format!("0x{}", hex(&self.vault)), "latest"]))?).ok_or_else(|| "no balance".to_string()),
+            Some(t) => {
+                let r = self.call_to(&t, &eth::balance_of_call(&self.vault))?;
+                (r.len() == 32 && r[..16].iter().all(|b| *b == 0)).then(|| u128::from_be_bytes(r[16..].try_into().unwrap())).ok_or_else(|| "balanceOf answered oddly".to_string())
+            }
+        }
     }
 
     fn final_block(&self) -> Result<u64, String> {
@@ -192,8 +245,11 @@ impl Bridge {
         let head = self.final_block()?;
         let mut from: u64 = std::fs::read_to_string(&cursor).ok().and_then(|s| s.trim().parse().ok()).unwrap_or_else(|| head.saturating_sub(5_000));
         // What is issued, kept current through this pass so two deposits in one
-        // pass cannot both slip under the cap.
-        let mut issued = if self.cap.is_some() { self.issued()? } else { 0 };
+        // pass cannot both slip under the cap (which only a bridge carrying ETH
+        // alone has).
+        let mut issued = if self.cap.is_some() { self.issued(&self.assets[0].zyn)? } else { 0 };
+        // Each carried asset's id checked against the vault once per pass.
+        let mut checked: Vec<u32> = Vec::new();
         while from <= head {
             let to = (from + 4_999).min(head);
             let logs = self.eth(
@@ -204,8 +260,13 @@ impl Bridge {
                 let topics: Vec<[u8; 32]> = l["topics"].as_array().into_iter().flatten().filter_map(|t| unhex(t.as_str()?)?.try_into().ok()).collect();
                 let data = unhex(l["data"].as_str().unwrap_or("")).unwrap_or_default();
                 let Some((commitment, asset, wad, index)) = eth::decode_deposited(&topics, &data) else { continue };
-                if asset != self.vault_asset {
+                let Some(carried) = eth::carried(&self.assets, asset) else {
+                    eprintln!("zyn-eth-bridge: deposit {index} of vault asset {asset} — not carried here (ZYN_ETH_ASSETS), NOT credited");
                     continue;
+                };
+                if !checked.contains(&asset) {
+                    self.vault_asset(carried)?;
+                    checked.push(asset);
                 }
                 if let Some(cap) = self.cap {
                     if issued.saturating_add(wad) > cap {
@@ -215,7 +276,7 @@ impl Bridge {
                 }
                 let r = self.submit(&Op::DepositCommitted {
                     program: program::deposit(),
-                    asset: self.asset,
+                    asset: carried.zyn,
                     gross: Fixed(wad as i128),
                     external_ref: eth::deposit_ref(self.chain_id, &self.vault, asset, index),
                     commitment,
@@ -227,7 +288,7 @@ impl Bridge {
                 if r.contains("Refused") {
                     return Err(format!("deposit {index}: the ledger refused it — {}", r.chars().take(160).collect::<String>()));
                 }
-                println!("in:  deposit {index} — {wad} wei waiting for {}", hex(&commitment));
+                println!("in:  deposit {index} of vault asset {asset} — {wad} (WAD) waiting for {}", hex(&commitment));
             }
             from = to + 1;
             std::fs::write(&cursor, from.to_string()).map_err(|e| format!("{}: {e}", cursor.display()))?;
@@ -235,16 +296,42 @@ impl Bridge {
         Ok(())
     }
 
-    /// What Zyn has issued of this bridge's ETH, in wei (Fixed has 18 decimals).
-    fn issued(&self) -> Result<u128, String> {
+    /// What Zyn has issued of a bridged asset, in WAD (Fixed has 18 decimals).
+    fn issued(&self, zyn: &[u8; 32]) -> Result<u128, String> {
         let bridged = zynzapd::object_client::call(&self.node, "zyn_bridged", json!({}))?;
         Ok(bridged
             .as_array()
             .into_iter()
             .flatten()
-            .find(|r| r["asset"].as_str() == Some(&hex(&self.asset)))
+            .find(|r| r["asset"].as_str() == Some(&hex(zyn)))
             .and_then(|r| r["issued"].as_str().and_then(|i| i.parse::<u128>().ok()))
             .unwrap_or(0))
+    }
+
+    /// Every revealed, unpaid exit of every carried asset the vault has
+    /// registered, oldest first, batched: what one withdrawal pays.
+    fn next_batch(&self) -> Result<(Vec<eth::Payout>, Vec<u64>), String> {
+        let mut exits = Vec::new();
+        for c in &self.assets {
+            let v = self.vault_asset(c)?;
+            let rows = zynzapd::object_client::call(&self.node, "zyn_bridgeExits", json!({ "token": self.token()?, "asset": hex(&c.zyn) }))?;
+            for r in rows.as_array().into_iter().flatten() {
+                let (Some(index), Some(to)) = (r["index"].as_u64(), r["to"].as_str()) else { continue };
+                let Some(amount) = r["amount"].as_str().and_then(|a| a.parse::<u128>().ok()).filter(|a| *a > 0) else { continue };
+                let Some(to) = unhex(to).and_then(|b| <[u8; 20]>::try_from(b).ok()) else { continue };
+                if !v.registered {
+                    eprintln!("zyn-eth-bridge: exit {index} waits — the vault has not registered asset {} yet", c.id);
+                    continue;
+                }
+                exits.push(Exit { index, to, vault_asset: c.id, decimals: v.decimals, amount });
+            }
+        }
+        exits.sort_by_key(|e| e.index);
+        let (payouts, covers, inexact) = eth::batch(&exits, PER_TX);
+        for i in inexact {
+            eprintln!("zyn-eth-bridge: exit {i} is not a whole number of the token's units — the vault would revert; NOT paid");
+        }
+        Ok((payouts, covers))
     }
 
     /// A deposit past the pilot's cap: not credited, recorded once with its
@@ -341,19 +428,7 @@ impl Bridge {
             return Ok(());
         }
 
-        let rows = zynzapd::object_client::call(&self.node, "zyn_bridgeExits", json!({ "token": self.token()?, "asset": hex(&self.asset) }))?;
-        let mut payouts = Vec::new();
-        let mut covers = Vec::new();
-        for r in rows.as_array().into_iter().flatten() {
-            let (Some(index), Some(to)) = (r["index"].as_u64(), r["to"].as_str()) else { continue };
-            let Some(amount) = r["amount"].as_str().and_then(|a| a.parse::<u128>().ok()).filter(|a| *a > 0) else { continue };
-            let Some(to) = unhex(to).and_then(|b| <[u8; 20]>::try_from(b).ok()) else { continue };
-            payouts.push(Payout { to, asset: self.vault_asset, amount });
-            covers.push(index);
-            if payouts.len() == PER_TX {
-                break;
-            }
-        }
+        let (payouts, covers) = self.next_batch()?;
         if payouts.is_empty() {
             return Ok(());
         }
@@ -362,7 +437,7 @@ impl Bridge {
         let data = eth::withdraw_as_signer_call(nonce, epoch, &payouts);
         let vault_hex = eth::checksummed(&self.vault);
         // Simulate it as the Safe first: owners are only asked to approve a
-        // payout the vault would accept (right nonce, enough ETH, known asset).
+        // payout the vault would accept (right nonce, enough funds, known asset).
         self.eth("eth_call", json!([{ "from": safe_hex, "to": vault_hex, "data": format!("0x{}", hex(&data)) }, "latest"]))
             .map_err(|e| format!("the payout would fail if the Safe executed it — not proposing: {e}"))?;
         // The Safe's next free nonce: past what is executed and what is queued.
@@ -381,7 +456,7 @@ impl Bridge {
             "safeTxGas": "0", "baseGas": "0", "gasPrice": "0", "gasToken": zero, "refundReceiver": zero,
             "nonce": safe_nonce, "contractTransactionHash": format!("0x{}", hex(&safe_tx_hash)),
             "sender": eth::checksummed(&eth::address_of(proposer)), "signature": format!("0x{}", hex(&signature)),
-            "origin": format!("Zyn bridge: pay out {} ETH.zy withdrawal(s)", payouts.len()),
+            "origin": format!("Zyn bridge: pay out {} withdrawal(s)", payouts.len()),
         });
         let record = json!({ "safe_tx_hash": format!("0x{}", hex(&safe_tx_hash)), "safe_nonce": safe_nonce, "vault_nonce": nonce, "covers": covers, "body": body });
         std::fs::write(self.proposal_path(), serde_json::to_vec_pretty(&record).unwrap()).map_err(|e| e.to_string())?;
@@ -451,19 +526,7 @@ impl Bridge {
     }
 
     fn pay(&self) -> Result<(), String> {
-        let rows = zynzapd::object_client::call(&self.node, "zyn_bridgeExits", json!({ "token": self.token()?, "asset": hex(&self.asset) }))?;
-        let mut payouts = Vec::new();
-        let mut covers = Vec::new();
-        for r in rows.as_array().into_iter().flatten() {
-            let (Some(index), Some(to)) = (r["index"].as_u64(), r["to"].as_str()) else { continue };
-            let Some(amount) = r["amount"].as_str().and_then(|a| a.parse::<u128>().ok()).filter(|a| *a > 0) else { continue };
-            let Some(to) = unhex(to).and_then(|b| <[u8; 20]>::try_from(b).ok()) else { continue };
-            payouts.push(Payout { to, asset: self.vault_asset, amount });
-            covers.push(index);
-            if payouts.len() == PER_TX {
-                break;
-            }
-        }
+        let (payouts, covers) = self.next_batch()?;
         if payouts.is_empty() {
             return Ok(());
         }
@@ -493,6 +556,71 @@ impl Bridge {
         Ok(())
     }
 
+    /// `RegisterBridged` for every carried asset Zyn does not know yet: the
+    /// origin is the raw token address (none for ETH), with the decimals the
+    /// vault scales it by.
+    fn register(&self) -> Result<(), String> {
+        let bridged = zynzapd::object_client::call(&self.node, "zyn_bridged", json!({}))?;
+        for c in &self.assets {
+            if bridged.as_array().into_iter().flatten().any(|r| r["asset"].as_str() == Some(&hex(&c.zyn))) {
+                println!("register: vault asset {} ({}) is registered already", c.id, hex(&c.zyn));
+                continue;
+            }
+            let v = self.vault_asset(c)?;
+            let decimals = if v.registered { v.decimals } else { self.token_decimals(c)? };
+            let r = self.submit(&Op::RegisterBridged { program: program::bridge_register(), network: self.network.clone(), origin: c.origin(), decimals })?;
+            println!("register: vault asset {} as {} — {}", c.id, hex(&c.zyn), r.chars().take(160).collect::<String>());
+        }
+        Ok(())
+    }
+
+    /// The vault's `registerAsset(id, token)`, sent and signed by the gas
+    /// payer — which must be the vault's admin. Add-only on the contract.
+    fn register_vault_asset(&self, id: u32, token: eth::Address20) -> Result<(), String> {
+        if self.safe.is_some() {
+            return Err("in Safe mode the vault's admin registers assets from Safe{Wallet}, not this bridge".into());
+        }
+        let c = Carried::new(&self.network, id, Some(token));
+        let v = eth::decode_vault_asset(&self.call(&eth::assets_call(id))?).ok_or("assets() answered oddly")?;
+        if v.registered {
+            return if v.token == Some(token) {
+                println!("vault: asset {id} is 0x{} already ({} decimals)", hex(&token), v.decimals);
+                Ok(())
+            } else {
+                Err(format!("the vault's asset {id} is taken by {}", v.token.map_or("native ETH".into(), |t| format!("0x{}", hex(&t)))))
+            };
+        }
+        let payer = eth::address_of(&self.payer);
+        let admin = self.call(&eth::admin_call())?;
+        if admin.len() != 32 || admin[12..] != payer {
+            return Err(format!("the vault's admin is 0x{}, not the gas payer 0x{} — only the admin may register", hex(admin.get(12..).unwrap_or(&[])), hex(&payer)));
+        }
+        let decimals = self.token_decimals(&c)?;
+        let data = eth::register_asset_call(id, &token);
+        let from = format!("0x{}", hex(&payer));
+        let to = format!("0x{}", hex(&self.vault));
+        let gas = qty(&self.eth("eth_estimateGas", json!([{ "from": from, "to": to, "data": format!("0x{}", hex(&data)) }]))?).ok_or("no gas estimate")?;
+        let price = qty(&self.eth("eth_gasPrice", json!([]))?).ok_or("no gas price")?;
+        let nonce = qty(&self.eth("eth_getTransactionCount", json!([from, "pending"]))?).ok_or("no account nonce")?;
+        let raw = Tx { nonce: nonce as u64, gas_price: price * 12 / 10, gas: (gas * 13 / 10) as u64, to: self.vault, value: 0, data, chain_id: self.chain_id }.signed(&self.payer)?;
+        let tx = format!("0x{}", hex(&zyn_vm::eip712::keccak(&[&raw])));
+        self.eth("eth_sendRawTransaction", json!([format!("0x{}", hex(&raw))]))?;
+        println!("vault: registerAsset({id}, 0x{}) sent — {tx}", hex(&token));
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_secs(5));
+            let receipt = self.eth("eth_getTransactionReceipt", json!([tx]))?;
+            if receipt.is_null() {
+                continue;
+            }
+            if qty(&receipt["status"]) != Some(1) {
+                return Err(format!("{tx} reverted"));
+            }
+            println!("vault: asset {id} registered ({decimals} decimals) — Zyn asset {}", hex(&c.zyn));
+            return Ok(());
+        }
+        Err(format!("{tx} not mined after five minutes; check it before sending again"))
+    }
+
     fn once(&self) -> Result<(), String> {
         self.deposits()?;
         if self.safe.is_some() {
@@ -506,15 +634,21 @@ impl Bridge {
 }
 
 fn main() {
-    let cmd = std::env::args().nth(1).unwrap_or_else(|| "status".into());
+    let args: Vec<String> = std::env::args().collect();
+    let cmd = args.get(1).cloned().unwrap_or_else(|| "status".into());
     let result = bridge().and_then(|b| match cmd.as_str() {
         "status" => {
-            let bal = qty(&b.eth("eth_getBalance", json!([format!("0x{}", hex(&b.vault)), "latest"]))?).unwrap_or(0);
-            let bridged = zynzapd::object_client::call(&b.node, "zyn_bridged", json!({}))?;
-            let issued = bridged.as_array().into_iter().flatten().find(|r| r["asset"].as_str() == Some(&hex(&b.asset))).map(|r| r["issued"].as_str().unwrap_or("?").to_string());
             println!("network  {}", String::from_utf8_lossy(&b.network));
-            println!("asset    {}", hex(&b.asset));
-            println!("vault    0x{}  ({bal} wei, withdrawal nonce {})", hex(&b.vault), b.vault_nonce()?);
+            println!("vault    0x{}  (withdrawal nonce {})", hex(&b.vault), b.vault_nonce()?);
+            let bridged = zynzapd::object_client::call(&b.node, "zyn_bridged", json!({}))?;
+            for c in &b.assets {
+                let issued = bridged.as_array().into_iter().flatten().find(|r| r["asset"].as_str() == Some(&hex(&c.zyn))).map(|r| r["issued"].as_str().unwrap_or("?").to_string());
+                let v = b.vault_asset(c)?;
+                let what = c.token.map_or("native".into(), |t| format!("0x{}", hex(&t)));
+                println!("asset {}  {what} → {}", c.id, hex(&c.zyn));
+                println!("  vault  {}", if v.registered { format!("registered, {} decimals, holds {}", v.decimals, b.held(c)?) } else { "NOT registered — run `register-vault-asset`".into() });
+                println!("  issued {}", issued.map_or("not registered on Zyn — run `register`".into(), |i| format!("{i} (WAD)")));
+            }
             if let Some(safe) = b.safe {
                 let proposer = eth::checksummed(&eth::address_of(b.proposer.as_ref().unwrap()));
                 let listed = b.safe_get(&format!("/api/v2/delegates/?safe={}&delegate={proposer}", eth::checksummed(&safe)))?.and_then(|v| v["count"].as_u64()).unwrap_or(0) > 0;
@@ -526,14 +660,14 @@ fn main() {
                 println!("owners   {} key(s) here, {} needed", b.keys.len(), b.threshold);
                 println!("payer    0x{}", hex(&eth::address_of(&b.payer)));
             }
-            println!("issued   {}", issued.map_or("not registered — run `register`".into(), |i| format!("{i} wei")));
             println!("in flight {}", b.inflight().is_some());
             Ok(())
         }
-        "register" => {
-            let r = b.submit(&Op::RegisterBridged { program: program::bridge_register(), network: b.network.clone(), origin: Vec::new(), decimals: 18 })?;
-            println!("register: {}", r.chars().take(160).collect::<String>());
-            Ok(())
+        "register" => b.register(),
+        "register-vault-asset" => {
+            let id: u32 = args.get(2).and_then(|a| a.parse().ok()).ok_or("usage: register-vault-asset <id> <0x token>")?;
+            let token: eth::Address20 = args.get(3).and_then(|t| unhex(t)).and_then(|t| t.try_into().ok()).ok_or("usage: register-vault-asset <id> <0x token>")?;
+            b.register_vault_asset(id, token)
         }
         "once" => b.once(),
         "run" => {
@@ -545,7 +679,7 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(every));
             }
         }
-        other => Err(format!("unknown command {other}: status | register | once | run")),
+        other => Err(format!("unknown command {other}: status | register | register-vault-asset | once | run")),
     });
     if let Err(e) = result {
         eprintln!("zyn-eth-bridge {cmd}: {e}");

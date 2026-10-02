@@ -6730,3 +6730,17 @@ price age and auctions in epochs; the Coinbase feed had never answered
 | 161.1 | **Jade is Zyn's launchpad, not a Cave product.** It lives in `apps/jade`, serves at jade.zyn-network.com (Pages project `zyn-jade`, the same content store), and wears Zyn's stone: Lend's header, type and colours. Cave keeps the NFT store. Supersedes 69.30–69.31 and the site named in 141.9. |
 | 161.2 | **Plain copy.** Coins, Create a coin, Portfolio; no yard or stones. How the curve works sits behind an "i". The coin nearest graduation is shown first, with what is left to raise. |
 | 161.3 | **No build step.** `public/` is what is served, as Lend's is; the curve arithmetic is still pinned against Nap's by `apps/jade/tests`. |
+
+## §162 — BOLD.zy on testnet (2 Oct 2026)
+
+§68 named BOLD as Zyn's USD stable because no issuer can freeze it. Testnet
+first, through the Sepolia vault ETH.zy already uses.
+
+| # | Decision | |
+|---|---|---|
+| 162.1 | **The test token is `TestBold`** `0xD58C9e3EeBE83fda55D59C186E86b37aa5d0f79a` on Sepolia (18 decimals, open `mint`; `contracts/src/testnet/TestBold.sol`), BOLD's stand-in. It is vault asset **2** of `ZynVault` `0xe17b…f27` (1 is ETH), and on Zyn **BOLD.zy (Sepolia)** = `bridged("eip155:11155111", <TestBold, 20 raw bytes>)` = `8c1a1b06…5c93ac2`. Mainnet BOLD.zy stays `ddf2b7ec…627f250f` (68.1); a test token can never pass for it | 🔒 |
+| 162.2 | **One `zyn-eth-bridge` carries every vault asset** (`ZYN_ETH_ASSETS=1=native,2=0x…`; unset means `1=native`), because withdrawals share the vault's one nonce. A deposit is credited as its vault id's Zyn asset by that id's own index, and only while the vault's record of the id names the configured token; one batch pays exits of every asset, amounts in WAD as the vault scales them, and an exit the vault could not pay exactly is held back rather than revert the batch. `register` registers each carried asset on Zyn (origin = the raw token address, decimals from the vault); `register-vault-asset <id> <token>` sends the vault's add-only `registerAsset` from the gas payer, which is the Sepolia vault's admin. A capped bridge (mainnet's) carries ETH alone | ✅ |
+| 162.3 | **BOLD's price is its traded value:** CoinGecko `liquity-bold` and DefiLlama `ethereum:0x6440…B01D` (refused when its own `timestamp` is over an hour old), two within 2% of their median as for every asset (160.12). Coinbase and Kraken do not list BOLD and are not asked. Never a constant dollar (68.2): a depeg moves positions like any other price | ✅ |
+| 162.4 | **Risk under rules v2 only: 75 / 78 / 5** (max LTV / line / penalty; 78 × 1.05 = 81.9 ≤ 82). No v1 numbers; no other asset's change. Same v2 curve. Testnet limits `BOLD=5000:2500:1` | ✅ |
+| 162.5 | **Listing after activation is an ordinary `LendList`** (pinned in `objectvm/tests/lend_v2.rs`: a v2 ledger lists BOLD.zy, lends it, lends against ETH.zy and ETH.zy against it through an ETH/BOLD pool, and liquidates when BOLD trades at 85¢). The ledger lends only an asset it has issued, so the node lists BOLD (and sets its limits) within a price round of its first deposit, rather than writing a refusal at start. No new op: old histories replay unchanged, and the replica needs no upgrade | ✅ |
+| 162.6 | **Borrowing BOLD against ETH (or the reverse) needs Zyn's ETH.zy/BOLD.zy pool** — the depth limit (160.7) and the price check (157.4) read it. Seeding that pool is the next step | ⏳ |

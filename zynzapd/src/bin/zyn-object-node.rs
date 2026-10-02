@@ -2004,6 +2004,75 @@ fn bridge_pass(
 /// subtle enough (which epoch a record belongs to, the seal that must follow
 /// it, the flush that must not be skipped) that a second implementation is a
 /// second set of those bugs.
+/// Zyn Lend: list one asset named in ZYN_LEND_ASSETS at the design's risk
+/// (zyn_lend::params; under rules v2 its v2 numbers, and an asset listed at
+/// other numbers is listed again — that changes its risk, never its pool),
+/// then set its limits if they differ from the chain's. False while the asset
+/// does not exist on Zyn yet: the ledger lends only what it has issued, and a
+/// refusal would only fill the journal.
+#[allow(clippy::too_many_arguments)]
+fn lend_list_named(
+    sym: &str,
+    asset: &[u8; 32],
+    rules_v2: bool,
+    limits: Option<objectvm::lend::Limits>,
+    node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
+    pub_log: &Arc<Mutex<Published>>,
+    dir: &str,
+    chain: u32,
+) -> bool {
+    use objectvm::zyn_lend::params;
+    let risk = match (sym, rules_v2) {
+        ("ZEC", false) => params::ZEC,
+        ("ETH", false) => params::ETH,
+        ("SOL", false) => params::SOL,
+        ("ZEC", true) => params::v2::ZEC,
+        ("ETH", true) => params::v2::ETH,
+        ("SOL", true) => params::v2::SOL,
+        ("BOLD", true) => params::v2::BOLD,
+        (other, v2) => {
+            eprintln!("zyn-object-node: no lending risk defined for {other} under rules {}; not listed", if v2 { 2 } else { 1 });
+            return true;
+        }
+    };
+    let (have, issued) = match node.lock() {
+        Ok(n) => (n.state().market.lend.listed.get(asset).map(|l| l.risk), n.state().issued.contains_key(asset)),
+        Err(_) => return false,
+    };
+    if have.is_none() && !issued {
+        return false;
+    }
+    if have.is_none() || (rules_v2 && have != Some(risk)) {
+        let op = Op::LendList {
+            program: zyn_vm::program::lend_list(),
+            asset: *asset,
+            max_ltv_bps: risk.max_ltv_bps,
+            liquidation_bps: risk.liquidation_bps,
+            penalty_bps: risk.penalty_bps,
+        };
+        for r in apply_operator(&op, node, journal, pub_log, dir, chain) {
+            match r {
+                objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: listing {sym} for lending refused: {why}"),
+                _ => eprintln!("zyn-object-node: {sym} listed for lending"),
+            }
+        }
+    }
+    let Some(want) = limits else { return true };
+    let have = node.lock().ok().and_then(|n| n.state().market.lend.limits.get(asset).copied());
+    if have == Some(want) {
+        return true;
+    }
+    let op = Op::LendLimits { program: zyn_vm::program::lend_list(), asset: *asset, collateral_cap: want.collateral_cap, borrow_cap: want.borrow_cap, min_borrow_usd: want.min_borrow_usd };
+    for r in apply_operator(&op, node, journal, pub_log, dir, chain) {
+        match r {
+            objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending limits for {sym} refused: {why}"),
+            _ => eprintln!("zyn-object-node: lending limits set for {sym} (guarded)"),
+        }
+    }
+    true
+}
+
 fn apply_operator(
     op: &Op,
     node: &Arc<Mutex<Node<ObjectVm>>>,
@@ -2690,11 +2759,12 @@ fn main() {
     }
 
     // Zyn Lend's prices: at start and then every ZYN_LEND_PRICE_SECS (30),
-    // for each listed asset the median of Coinbase, Kraken and CoinGecko,
-    // posted with the time. Interest accrues to that time. At least two
+    // for each listed asset the median of Coinbase, Kraken and CoinGecko
+    // (BOLD: CoinGecko and DefiLlama — feeds::lending_sources), posted with
+    // the time. Interest accrues to that time. At least two
     // sources must agree within 2% of their median, or that asset posts
     // nothing that round (and goes stale after five minutes under rules v2).
-    //   ZYN_LEND_ASSETS  ZEC=<asset hex>,ETH=<asset hex>,SOL=<asset hex>
+    //   ZYN_LEND_ASSETS  ZEC=<asset hex>,ETH=<asset hex>,SOL=<asset hex>,BOLD=<asset hex>
     //   ZYN_LEND_RULES   2 switches the chain to rules v2 (§160), once
     if let Ok(spec) = std::env::var("ZYN_LEND_ASSETS") {
         let assets: Vec<(String, [u8; 32])> = spec
@@ -2709,67 +2779,34 @@ fn main() {
         // risk, never its pool) — before the switch, which requires them.
         let rules_v2 = std::env::var("ZYN_LEND_RULES").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0) >= objectvm::lend::RULES_V2
             || node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(false);
-        // List what is named and not listed yet, at the design's risk
-        // (zyn_lend::params). Listing again would only reset the risk, so an
-        // asset already listed at these numbers is left as it is.
-        for (sym, asset) in &assets {
-            use objectvm::zyn_lend::params;
-            let risk = match (sym.as_str(), rules_v2) {
-                ("ZEC", false) => params::ZEC,
-                ("ETH", false) => params::ETH,
-                ("SOL", false) => params::SOL,
-                ("ZEC", true) => params::v2::ZEC,
-                ("ETH", true) => params::v2::ETH,
-                ("SOL", true) => params::v2::SOL,
-                (other, _) => {
-                    eprintln!("zyn-object-node: no lending risk defined for {other}; not listed");
-                    continue;
-                }
-            };
-            let have = node.lock().ok().and_then(|n| n.state().market.lend.listed.get(asset).map(|l| l.risk));
-            if have.is_some() && (!rules_v2 || have == Some(risk)) {
-                continue;
-            }
-            let op = Op::LendList {
-                program: zyn_vm::program::lend_list(),
-                asset: *asset,
-                max_ltv_bps: risk.max_ltv_bps,
-                liquidation_bps: risk.liquidation_bps,
-                penalty_bps: risk.penalty_bps,
-            };
-            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
-                match r {
-                    objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: listing {sym} for lending refused: {why}"),
-                    _ => eprintln!("zyn-object-node: {sym} listed for lending"),
-                }
-            }
-        }
         // Caps and the smallest loan per asset (guarded lending). The first
         // set turns guarded mode on for good; a set equal to the chain's is
         // not sent again.
         //   ZYN_LEND_LIMITS  SOL=<collateral cap>:<borrow cap>:<min loan $>,…
+        let mut limits: std::collections::BTreeMap<String, objectvm::lend::Limits> = std::collections::BTreeMap::new();
         if let Ok(spec) = std::env::var("ZYN_LEND_LIMITS") {
             let whole = |v: &str| v.trim().parse::<f64>().ok().filter(|x| *x >= 0.0).and_then(|x| zynzapd::feeds::to_fixed(x.max(1e-18)));
             for kv in spec.split(',') {
                 let Some((sym, rest)) = kv.split_once('=') else { continue };
+                let sym = sym.trim().to_uppercase();
                 let parts: Vec<&str> = rest.split(':').collect();
-                let (Some(asset), [c, b, m]) = (assets.iter().find(|(s, _)| s == &sym.trim().to_uppercase()).map(|(_, a)| *a), parts.as_slice()) else {
+                let (true, [c, b, m]) = (assets.iter().any(|(s, _)| s == &sym), parts.as_slice()) else {
                     eprintln!("zyn-object-node: ZYN_LEND_LIMITS entry {kv:?} not understood");
                     continue;
                 };
                 let (Some(c), Some(b), Some(m)) = (whole(c), whole(b), whole(m)) else { continue };
-                let want = objectvm::lend::Limits { collateral_cap: c, borrow_cap: b, min_borrow_usd: m };
-                let have = node.lock().ok().and_then(|n| n.state().market.lend.limits.get(&asset).copied());
-                if have == Some(want) {
-                    continue;
-                }
-                let op = Op::LendLimits { program: zyn_vm::program::lend_list(), asset, collateral_cap: c, borrow_cap: b, min_borrow_usd: m };
-                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
-                    match r {
-                        objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending limits for {sym} refused: {why}"),
-                        _ => eprintln!("zyn-object-node: lending limits set for {sym} (guarded)"),
-                    }
-                }
+                limits.insert(sym, objectvm::lend::Limits { collateral_cap: c, borrow_cap: b, min_borrow_usd: m });
+            }
+        }
+        // List what is named and not listed yet, at the design's risk
+        // (zyn_lend::params), then set its limits. An asset Zyn has not issued
+        // yet — a bridged one before its first deposit — cannot be listed; it
+        // waits, and the price thread lists it once it exists.
+        let mut waiting: Vec<(String, [u8; 32])> = Vec::new();
+        for (sym, asset) in &assets {
+            if !lend_list_named(sym, asset, rules_v2, limits.get(sym).copied(), &node, &journal, &pub_log, &dir, chain) {
+                eprintln!("zyn-object-node: {sym} is not issued on Zyn yet; listed for lending once it is");
+                waiting.push((sym.clone(), *asset));
             }
         }
         // Rules v2, once: guarded mode must already be on (the limits above).
@@ -2816,19 +2853,20 @@ fn main() {
                 if !std::mem::take(&mut first) {
                     std::thread::sleep(std::time::Duration::from_secs(every));
                 }
+                waiting.retain(|(sym, asset)| !lend_list_named(sym, asset, rules_v2, limits.get(sym).copied(), &node, &journal, &pub_log, &dir, chain));
                 let listed: Vec<[u8; 32]> = node.lock().map(|n| n.state().market.lend.listed.keys().copied().collect()).unwrap_or_default();
                 if listed.is_empty() {
                     continue;
                 }
-                let gecko = |s: &str| match s {
-                    "ZEC" => "zcash",
-                    "ETH" => "ethereum",
-                    "SOL" => "solana",
-                    "BTC" => "bitcoin",
-                    other => other,
-                }
-                .to_string();
-                http.prime(&assets.iter().map(|(s, _)| gecko(s)).collect::<Vec<_>>());
+                let gecko: Vec<String> = assets
+                    .iter()
+                    .flat_map(|(s, _)| zynzapd::feeds::lending_sources(s))
+                    .filter_map(|src| match src {
+                        Source::CoinGecko(id) => Some(id),
+                        _ => None,
+                    })
+                    .collect();
+                http.prime(&gecko);
                 let mut prices = Vec::new();
                 for (sym, asset) in &assets {
                     if !listed.contains(asset) {
@@ -2837,7 +2875,7 @@ fn main() {
                     // Coinbase and Kraken take the bare symbol; the request
                     // adds the quote currency.
                     let mut samples = Vec::new();
-                    for src in [Source::Coinbase(sym.clone()), Source::Kraken(sym.clone()), Source::CoinGecko(gecko(sym))] {
+                    for src in zynzapd::feeds::lending_sources(sym) {
                         match http.fetch(&src) {
                             Ok(x) => samples.push(x),
                             Err(e) => say(format!("{sym}/{}", src.name()), format!("lending price source {} for {sym} failed: {}", src.name(), e.chars().take(160).collect::<String>())),

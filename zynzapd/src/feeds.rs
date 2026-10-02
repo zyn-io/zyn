@@ -20,6 +20,7 @@
 //! |---|---|---|
 //! | Coinbase | crypto and the big stables | `api.coinbase.com/v2/prices/X-USD/spot` |
 //! | CoinGecko | crypto, RWA tokens (tokenised treasuries, gold) | `api.coingecko.com/api/v3/simple/price` |
+//! | DefiLlama | tokens by chain and address (BOLD); refused when over an hour old | `coins.llama.fi/prices/current/<chain:address>` |
 //! | Nasdaq | stocks and ETFs (last sale, delayed) | `api.nasdaq.com/api/quote/X/info?assetclass=stocks` |
 //! | Yahoo | stocks and ETFs, fallback | `query1.finance.yahoo.com/v8/finance/chart/X` |
 //! | Frankfurter (ECB) | fiat | `api.frankfurter.app/latest?from=EUR&to=USD` |
@@ -55,6 +56,9 @@ pub enum Source {
     CoinGecko(String),
     /// A bare symbol (`ZEC`); the request adds `USD` (BTC is `XBT` there).
     Kraken(String),
+    /// A token by `<chain>:<address>` (`ethereum:0x6440…`). Its answer
+    /// carries the time it was priced; over an hour old is refused.
+    DefiLlama(String),
     Nasdaq(String),
     Yahoo(String),
     Frankfurter(String),
@@ -74,6 +78,7 @@ impl Source {
             Source::Coinbase(_) => "coinbase",
             Source::CoinGecko(_) => "coingecko",
             Source::Kraken(_) => "kraken",
+            Source::DefiLlama(_) => "defillama",
             Source::Nasdaq(_) => "nasdaq",
             Source::Yahoo(_) => "yahoo",
             Source::Frankfurter(_) => "frankfurter",
@@ -83,8 +88,8 @@ impl Source {
         }
     }
 
-    /// `coinbase:BTC`, `coingecko:bitcoin`, `nasdaq:AAPL`, `yahoo:AAPL`,
-    /// `frankfurter:EUR`, `constant:1`.
+    /// `coinbase:BTC`, `coingecko:bitcoin`, `defillama:ethereum:0x…`,
+    /// `nasdaq:AAPL`, `yahoo:AAPL`, `frankfurter:EUR`, `constant:1`.
     pub fn parse(s: &str) -> Option<Source> {
         let (kind, id) = s.split_once(':')?;
         let id = id.trim().to_string();
@@ -92,6 +97,7 @@ impl Source {
             "coinbase" => Source::Coinbase(id),
             "coingecko" => Source::CoinGecko(id),
             "kraken" => Source::Kraken(id),
+            "defillama" if id.contains(':') => Source::DefiLlama(id),
             "nasdaq" => Source::Nasdaq(id),
             "yahoo" => Source::Yahoo(id),
             "frankfurter" => Source::Frankfurter(id),
@@ -168,6 +174,7 @@ pub fn default_map() -> BTreeMap<String, Vec<Source>> {
         m.insert(sym.into(), vec![cg(gecko)]);
     }
     m.insert("PAXG".into(), vec![cb("PAXG"), cg("pax-gold")]);
+    m.insert("BOLD".into(), bold_sources());
     // Fiat.
     for f in ["EUR", "GBP", "JPY", "CHF", "CAD", "AUD"] {
         m.insert(f.into(), vec![Source::Frankfurter(f.into())]);
@@ -191,6 +198,33 @@ pub fn default_map() -> BTreeMap<String, Vec<Source>> {
     add_tokenized(&mut m, ROBINHOOD_RPC);
     m
 }
+
+/// Liquity V2's BOLD on Ethereum (DECISIONS §68.1).
+pub const BOLD_MAINNET: &str = "0x6440f144b7e50D6a8439336510312d2F54beB01D";
+
+/// Where BOLD's price comes from: CoinGecko and DefiLlama, at its traded
+/// value — never a constant dollar (§68.2). Coinbase and Kraken do not list it.
+pub fn bold_sources() -> Vec<Source> {
+    vec![Source::CoinGecko("liquity-bold".into()), Source::DefiLlama(format!("ethereum:{BOLD_MAINNET}"))]
+}
+
+/// Where Zyn Lend prices one listed symbol (DECISIONS §160.12, §162): Coinbase,
+/// Kraken and CoinGecko for the coins; CoinGecko and DefiLlama for BOLD,
+/// which neither exchange lists. Two must agree either way.
+pub fn lending_sources(sym: &str) -> Vec<Source> {
+    let gecko = match sym {
+        "ZEC" => "zcash",
+        "ETH" => "ethereum",
+        "SOL" => "solana",
+        "BTC" => "bitcoin",
+        "BOLD" => return bold_sources(),
+        other => other,
+    };
+    vec![Source::Coinbase(sym.to_string()), Source::Kraken(sym.to_string()), Source::CoinGecko(gecko.to_string())]
+}
+
+/// DefiLlama answers older than this are refused.
+pub const DEFILLAMA_MAX_AGE_SECS: u64 = 3_600;
 
 pub const ROBINHOOD_RPC: &str = "https://rpc.mainnet.chain.robinhood.com";
 const TOKENIZED: &str = include_str!("../data/tokenized-stocks.tsv");
@@ -479,6 +513,24 @@ pub fn parse_coingecko(body: &str, id: &str) -> Result<f64, String> {
         .ok_or_else(|| format!("no usd price for {}", id))
 }
 
+/// `coins.llama.fi/prices/current/<coin>`: `coins[<coin>].price`, refused
+/// when its `timestamp` is more than an hour before `now`. DefiLlama may
+/// answer under a lower-cased address, so the coin is matched without case.
+pub fn parse_defillama(body: &str, coin: &str, now: u64) -> Result<f64, String> {
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let c = v
+        .get("coins")
+        .and_then(|c| c.as_object())
+        .and_then(|c| c.iter().find(|(k, _)| k.eq_ignore_ascii_case(coin)).map(|(_, x)| x))
+        .ok_or_else(|| format!("no price for {coin}"))?;
+    let price = c.get("price").and_then(|p| p.as_f64()).ok_or("no price")?;
+    let at = c.get("timestamp").and_then(|t| t.as_u64()).ok_or("no timestamp")?;
+    if now.saturating_sub(at) > DEFILLAMA_MAX_AGE_SECS {
+        return Err(format!("stale: priced {} s ago", now.saturating_sub(at)));
+    }
+    Ok(price)
+}
+
 /// Nasdaq's quote: `data.primaryData.lastSalePrice` as `"$319.97"`.
 pub fn parse_nasdaq(body: &str) -> Result<f64, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
@@ -664,6 +716,11 @@ impl Fetcher for Http {
                 "https://api.kraken.com/0/public/Ticker?pair={}USD",
                 if sym == "BTC" { "XBT" } else { sym.as_str() }
             ))?),
+            Source::DefiLlama(coin) => parse_defillama(
+                &get(&format!("https://coins.llama.fi/prices/current/{coin}"))?,
+                coin,
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+            ),
             Source::CoinGecko(id) => parse_coingecko(
                 &get(&format!(
                     "https://api.coingecko.com/api/v3/simple/price?ids={}&vs_currencies=usd",
@@ -1041,6 +1098,7 @@ mod tests {
                 Source::Coinbase(s)
                 | Source::Kraken(s)
                 | Source::CoinGecko(s)
+                | Source::DefiLlama(s)
                 | Source::Nasdaq(s)
                 | Source::Yahoo(s)
                 | Source::Frankfurter(s) => format!("{}:{}", source.name(), s),
@@ -1317,5 +1375,39 @@ mod tests {
         // never `ZEC-USD`, which asked for ZEC-USD-USD and got a 400 (§160).
         assert_eq!(Source::parse("coinbase:ZEC"), Some(Source::Coinbase("ZEC".into())));
         assert_eq!(Source::parse("kraken:ETH"), Some(Source::Kraken("ETH".into())));
+    }
+
+    #[test]
+    fn bold_is_priced_by_coingecko_and_defillama_at_its_traded_value() {
+        let want = vec![
+            Source::CoinGecko("liquity-bold".into()),
+            Source::DefiLlama("ethereum:0x6440f144b7e50D6a8439336510312d2F54beB01D".into()),
+        ];
+        assert_eq!(lending_sources("BOLD"), want);
+        assert_eq!(default_map()["BOLD"], want);
+        assert!(!lending_sources("BOLD").iter().any(|s| matches!(s, Source::Coinbase(_) | Source::Kraken(_) | Source::Constant(_))));
+        assert_eq!(
+            lending_sources("ETH"),
+            vec![Source::Coinbase("ETH".into()), Source::Kraken("ETH".into()), Source::CoinGecko("ethereum".into())]
+        );
+        assert_eq!(
+            Source::parse("defillama:ethereum:0x6440f144b7e50D6a8439336510312d2F54beB01D"),
+            Some(Source::DefiLlama("ethereum:0x6440f144b7e50D6a8439336510312d2F54beB01D".into()))
+        );
+        assert_eq!(Source::parse("defillama:bold"), None, "a coin is chain:address");
+        // A small depeg is a price, not an error: both readers inside 2% agree.
+        assert!((aggregate_quorum(vec![0.9998, 0.9958], 0.02, 2).unwrap() - 0.9978).abs() < 1e-9);
+        assert_eq!(aggregate_quorum(vec![0.9998], 0.02, 2), None, "one source alone is not a price");
+    }
+
+    #[test]
+    fn defillama_parses_and_an_hour_old_answer_is_refused() {
+        let coin = "ethereum:0x6440f144b7e50D6a8439336510312d2F54beB01D";
+        let body = r#"{"coins":{"ethereum:0x6440f144b7e50d6a8439336510312d2f54beb01d":{"decimals":18,"symbol":"BOLD","price":0.9958,"timestamp":1759400000,"confidence":0.99}}}"#;
+        assert_eq!(parse_defillama(body, coin, 1_759_400_000 + 60), Ok(0.9958));
+        assert_eq!(parse_defillama(body, coin, 1_759_400_000 + 3_600), Ok(0.9958));
+        assert!(parse_defillama(body, coin, 1_759_400_000 + 3_601).unwrap_err().contains("stale"));
+        assert!(parse_defillama(r#"{"coins":{}}"#, coin, 0).is_err());
+        assert!(parse_defillama(r#"{"coins":{"ethereum:0x6440f144b7e50D6a8439336510312d2F54beB01D":{"price":1.0}}}"#, coin, 0).is_err(), "no timestamp, no price");
     }
 }

@@ -6892,7 +6892,7 @@ dependencies = [
 [[package]]
 name = "zyn-lend"
 version = "0.1.0"
-source = "git+https://github.com/zyn-io/zyn-lend.git?rev=a6f1b70e029f8085f26d45d6b20621a2aa83cd0f#a6f1b70e029f8085f26d45d6b20621a2aa83cd0f"
+source = "git+https://github.com/zyn-io/zyn-lend.git?rev=44a954bf9baa7ffa91cd850ef4592688ef8b3383#44a954bf9baa7ffa91cd850ef4592688ef8b3383"
 dependencies = [
  "uint",
 ]
