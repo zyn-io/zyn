@@ -718,7 +718,7 @@ function renderLaunchpad() {
   const jade = config.launchpadUrl ? new URL(config.launchpadUrl) : null;
   const trading = state.curves.filter((c) => !c.graduated).length;
   $('#view').innerHTML = `${heading('Launchpad')}
-  ${jade ? `<div class="mk-empty mk-jade"><p><b>Bonding-curve launches are on Cave Jade.</b>${tip('Anyone can create a token. It trades at once on a bonding curve, at one price per epoch, and graduates into a locked pool that trades here.')} ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
+  ${jade ? `<div class="mk-empty mk-jade"><p><b>Bonding-curve launches are on Jade.</b>${tip('Anyone can create a token. It trades at once on a bonding curve, at one price per epoch, and graduates into a locked pool that trades here.')} ${state.curves.length ? `${trading} on a curve, ${state.curves.length - trading} graduated.` : ''}</p><a class="mk-act" href="${esc(jade.href)}" target="_blank" rel="noopener">Open Cave Jade →</a></div>` : ''}
   <h2 class="mk-sub">Fixed-price sales${tip('Everyone who commits before the close pays the same price.')}</h2>
   <section class="mk-list">${launches.length ? launches.map(launchCard).join('') : `<div class="mk-empty"><p>${loaded ? 'No sales yet. Start the first one below.' : 'Reading the sales…'}</p></div>`}</section>
   ${createLaunchForm()}`;

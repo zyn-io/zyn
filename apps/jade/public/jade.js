@@ -1,13 +1,14 @@
-// Cave Jade — the launchpad (DECISIONS §141).
+// Jade — Zyn's launchpad (DECISIONS §141).
 //
 // Reads come from the chain's public RPC: curves, prices, per-epoch fills —
-// anyone can walk the yard without a wallet. Pictures and descriptions come
+// anyone can browse without a wallet. Pictures and descriptions come
 // from this site's own store, attached by each coin's creator with a proof.
 // Everything that moves value goes through Nap (Nap Connect), which shows the
 // holder what the chain says and asks them to approve it in Nap's window.
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 import { createChart } from './vendor/lightweight-charts.js';
+import { installTips } from './tip.js';
 
 const XZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 
@@ -105,7 +106,7 @@ function decodeMeta(hexMeta) {
   const name = text(b.subarray(8));
   const zeros = (from, to) => b.subarray(from, to).every((x) => x === 0);
   const good = /^[A-Z0-9]{1,8}$/.test(symbol) && name && /^[\x20-\x7e]+$/.test(name) && zeros(symbol.length, 8) && zeros(8 + name.length, 32);
-  return good ? { symbol, name } : { symbol: '?', name: 'Unnamed stone' };
+  return good ? { symbol, name } : { symbol: '?', name: 'Unnamed coin' };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,9 +267,34 @@ const coinCard = (c) => {
     </a>`;
 };
 
+/// The coin nearest graduation, with what is left to raise.
+function renderSpotlight() {
+  const box = $('#spotlight');
+  const open = curves.filter((c) => !c.graduated && c.sold > 0).sort((a, b) => progress(b) - progress(a));
+  const c = open[0];
+  if (!c || search.value.trim()) { box.hidden = true; return; }
+  const left = cost(c.sold, CURVE.graduateAt - c.sold);
+  const k = content.get(c.token);
+  box.hidden = false;
+  box.innerHTML = `<a class="j-spot" href="${withNet(`/coin/${c.token}`)}">
+      <div class="j-thumb j-thumb-lg">${thumbInner(c)}</div>
+      <div class="j-spot-body">
+        <p class="eyebrow">Closest to graduating</p>
+        <h2>${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></h2>
+        ${k && k !== 'loading' && k.description ? `<p class="j-desc">${esc(k.description)}</p>` : ''}
+      </div>
+      <div class="j-spot-figs">
+        <div><span>Market cap</span><b>${esc(capBoth(mcap(c)))}</b></div>
+        <div><span>To graduate</span><b>~${wad(left, 2)} ZEC</b></div>
+      </div>
+      <div class="j-spot-bar"><div class="j-bar j-bar-lg"><i style="width:${(progress(c) * 100).toFixed(1)}%"></i></div><span>${(progress(c) * 100).toFixed(1)}% bonded</span></div>
+    </a>`;
+}
+
 function renderGallery() {
+  renderSpotlight();
   const list = sorted();
-  $('#coin-gallery').innerHTML = list.length ? list.map(coinCard).join('') : `<div class="j-empty">${curves.length ? 'No coins match.' : 'The yard is empty. <a href="/launch">Place the first stone.</a>'}</div>`;
+  $('#coin-gallery').innerHTML = list.length ? list.map(coinCard).join('') : `<div class="j-empty">${curves.length ? 'No coins match.' : 'No coins yet. <a href="/launch">Create the first one.</a>'}</div>`;
   $('#tally-all').textContent = curves.length;
   $('#tally-grad').textContent = curves.filter((c) => c.graduated).length;
   $('#tally-zec').textContent = `${wad(curves.reduce((s, c) => s + zecSet(c), 0n), 4)} ZEC`;
@@ -303,14 +329,23 @@ function ensureChart() {
   const el = $('#chart');
   chart = createChart(el, {
     autoSize: true,
-    layout: { background: { color: 'transparent' }, textColor: '#3d4a44', fontFamily: 'Jade Sans, sans-serif' },
-    grid: { vertLines: { color: 'rgba(6,17,14,.06)' }, horzLines: { color: 'rgba(6,17,14,.06)' } },
-    timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(6,17,14,.18)' },
-    rightPriceScale: { borderColor: 'rgba(6,17,14,.18)' },
+    layout: { background: { color: 'transparent' }, textColor: '#8a9691', fontFamily: 'Geist Mono, ui-monospace, monospace' },
+    grid: { vertLines: { color: 'rgba(242,241,235,.04)' }, horzLines: { color: 'rgba(242,241,235,.05)' } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(242,241,235,.09)' },
+    rightPriceScale: { borderColor: 'rgba(242,241,235,.09)' },
     crosshair: { mode: 0 },
   });
-  candles = chart.addCandlestickSeries({ upColor: '#08705c', downColor: '#c0463a', borderVisible: false, wickUpColor: '#08705c', wickDownColor: '#c0463a', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usd ? usd : 1)) , minMove: 1e-9 } });
-  volume = chart.addHistogramSeries({ priceScaleId: '', priceFormat: { type: 'volume' }, color: 'rgba(8,112,92,.25)' });
+  candles = chart.addCandlestickSeries({ upColor: '#35e6ae', downColor: '#e8794f', borderVisible: false, wickUpColor: '#35e6ae', wickDownColor: '#e8794f', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usd ? usd : 1)) , minMove: 1e-9 },
+    // A quiet coin moves a hair: show at least ±2% around it, not a hair blown up to the full height.
+    autoscaleInfoProvider: (base) => {
+      const a = base();
+      if (!a?.priceRange) return a;
+      const { minValue: lo, maxValue: hi } = a.priceRange;
+      const mid = (lo + hi) / 2;
+      const half = Math.max((hi - lo) / 2, Math.abs(mid) * 0.02);
+      return { ...a, priceRange: { minValue: mid - half, maxValue: mid + half } };
+    } });
+  volume = chart.addHistogramSeries({ priceScaleId: '', priceFormat: { type: 'volume' }, color: 'rgba(53,230,174,.18)', lastValueVisible: false, priceLineVisible: false });
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 }
 
@@ -338,8 +373,10 @@ function drawChart() {
   }
   const rows = [...buckets.values()].sort((a, b) => a.time - b.time);
   candles.setData(rows.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
-  volume.setData(rows.map((r) => ({ time: r.time, value: r.vol, color: r.close >= r.open ? 'rgba(8,112,92,.3)' : 'rgba(192,70,58,.3)' })));
-  chart.timeScale().fitContent();
+  volume.setData(rows.map((r) => ({ time: r.time, value: r.vol, color: r.close >= r.open ? 'rgba(53,230,174,.22)' : 'rgba(232,121,79,.22)' })));
+  // Few candles stay candle-sized; many fit the width.
+  if (rows.length > 40) chart.timeScale().fitContent();
+  else { chart.timeScale().applyOptions({ barSpacing: 14, rightOffset: 6 }); chart.timeScale().scrollToRealTime(); }
 }
 
 function renderFills() {
@@ -356,7 +393,7 @@ async function renderCoin(token, fresh = false) {
   const c = curves.find((x) => x.token === token);
   if (!c) {
     currentCoin = null;
-    $('#coin-title').textContent = curves.length ? 'Coin not found' : 'Reading the yard…';
+    $('#coin-title').textContent = curves.length ? 'Coin not found' : 'Reading coins…';
     // Nothing of the last coin stays on screen under this one's address.
     for (const id of ['coin-crumb', 'coin-symbol', 'coin-age', 'coin-mcap', 'coin-change', 'coin-price', 'coin-liquidity', 'coin-pot', 'coin-fee', 'coin-holders', 'curve-pct', 'curve-text', 'trade-output', 'trade-fee', 'trade-min', 'trade-balance']) { const el = $(`#${id}`); if (el) el.textContent = '—'; }
     $('#coin-description').textContent = curves.length
@@ -373,7 +410,7 @@ async function renderCoin(token, fresh = false) {
     tradeSide = 'buy';
     $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === 'buy'));
     $('#trade-input').value = '0.1';
-    $('#trade-status').textContent = orderStatus.get(token) || 'Everyone buying in an epoch pays one price, and everyone selling another; nobody can get in ahead of you.';
+    $('#trade-status').textContent = orderStatus.get(token) || 'One price per epoch for every buyer, another for every seller.';
   }
   const s = stats.get(token) || {};
   $('#coin-crumb').textContent = c.name;
@@ -387,7 +424,7 @@ async function renderCoin(token, fresh = false) {
   const ch = change24(c);
   $('#coin-change').textContent = `${changeText(ch)} 24h`;
   $('#coin-change').className = ch == null ? '' : ch >= 0 ? 'up' : 'down';
-  $('#coin-price').textContent = `${num(price(c)).toExponential(4)} ZEC`;
+  $('#coin-price').textContent = `${num(price(c)).toLocaleString('en-US', { maximumSignificantDigits: 4, maximumFractionDigits: 20 })} ZEC`;
   $('#coin-liquidity').textContent = `${wad(zecSet(c), 4)} ZEC.zy ${c.graduated ? 'in its pool' : 'in its curve'}`;
   $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ZEC.zy`;
   $('#coin-fee').textContent = c.graduated ? `${poolOf(c)?.fee_bps ?? 30} bps, kept by the pool` : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
@@ -400,7 +437,7 @@ async function renderCoin(token, fresh = false) {
     : `${wad(c.reserve, 4)} ZEC.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold), 3)} ZEC.zy of buying to graduate · it graduates at ~47 ZEC market cap${usd ? ` (${usdText(47 * usd)})` : ''}`;
   $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
   $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
-  document.title = `${c.symbol} ${capText(mcap(c))} — Cave Jade`;
+  document.title = `${c.symbol} ${capText(mcap(c))} — Jade`;
   const k = await loadContent(token);
   if (currentCoin?.token !== token) return;
   $('#coin-thumb').innerHTML = thumbInner(c);
@@ -598,7 +635,7 @@ async function pickWallet() {
   body.innerHTML = '<p>Looking for Nap…</p>';
   const list = await discover({ web: NAP });
   body.innerHTML = list.map((w, i) => `<button type="button" class="jade-wallet-option" data-i="${i}"><b>${esc(w.info.name)}</b><small>${esc(w.info.detail || '')}</small></button>`).join('')
-    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shares your Zyn account and a Zcash address with this page, and lets it read what you hold of these coins — never your keys. Every trade is approved in Nap; settled trades are collected into your wallet automatically.</p>';
+    + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shares your Zyn account, a Zcash address and your holdings of these coins with this page — never your keys. Every trade is approved in Nap.</p>';
   body.querySelectorAll('[data-i]').forEach((b) => {
     b.onclick = async () => {
       const status = body.querySelector('.jade-wallet-status');
@@ -640,7 +677,9 @@ async function loadMine() {
 $('#wallet-button').addEventListener('click', pickWallet);
 
 function renderWallet() {
-  $('#wallet-button').innerHTML = wallet ? `<span></span> ${esc(short(wallet.session.account, 5))}` : '<span></span> Connect wallet';
+  const b = $('#wallet-button');
+  b.textContent = wallet ? short(wallet.session.account, 5) : 'Connect wallet';
+  b.classList.toggle('on', !!wallet);
 }
 
 // ---------------------------------------------------------------------------
@@ -672,12 +711,12 @@ function renderPortfolio() {
 // ---------------------------------------------------------------------------
 // Create.
 
-const form = $('#stone-form');
-const nameInput = $('#stone-name');
-const symbolInput = $('#stone-symbol');
-const descInput = $('#stone-description');
-const imageInput = $('#stone-image');
-const launchButton = $('#launch-stone');
+const form = $('#create-form');
+const nameInput = $('#create-name');
+const symbolInput = $('#create-symbol');
+const descInput = $('#create-description');
+const imageInput = $('#create-image');
+const launchButton = $('#create-go');
 let imageData = '';
 const validSymbol = (v) => /^[A-Z0-9]{1,8}$/.test(v);
 const validName = (v) => v.length >= 1 && v.length <= 24 && v === v.trim() && /^[\x20-\x7e]+$/.test(v);
@@ -707,12 +746,12 @@ imageInput.addEventListener('change', async () => {
   if (f) {
     if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
       imageInput.value = '';
-      $('#stone-status').textContent = 'A picture is a PNG, JPEG, WebP or GIF.';
+      $('#create-status').textContent = 'A picture is a PNG, JPEG, WebP or GIF.';
     } else if (f.size > 15 * 1024 * 1024) {
       imageInput.value = '';
-      $('#stone-status').textContent = 'That picture is over 15 MB; choose a smaller one.';
+      $('#create-status').textContent = 'That picture is over 15 MB; choose a smaller one.';
     } else {
-      try { imageData = await shrink(f); } catch (e) { imageInput.value = ''; $('#stone-status').textContent = e.message === 'That picture will not shrink under 300 KB' ? e.message : 'That file could not be read as a picture.'; }
+      try { imageData = await shrink(f); } catch (e) { imageInput.value = ''; $('#create-status').textContent = e.message === 'That picture will not shrink under 300 KB' ? e.message : 'That file could not be read as a picture.'; }
     }
   }
   renderPreview();
@@ -720,21 +759,21 @@ imageInput.addEventListener('change', async () => {
 
 function renderPreview() {
   const typed = symbolInput.value.trim().toUpperCase();
-  const symbol = typed || 'STONE';
+  const symbol = typed || 'COIN';
   // The placeholder shows in the preview; it is not a ticker anyone chose.
   const ok = validSymbol(typed) && validName(nameInput.value);
-  $('#preview-name').textContent = nameInput.value.trim() || 'Unnamed stone';
+  $('#preview-name').textContent = nameInput.value.trim() || 'Unnamed coin';
   $('#preview-symbol').textContent = symbol;
   $('#preview-description').textContent = descInput.value.trim() || 'No description.';
   $('#preview-thumb').innerHTML = imageData ? `<img src="${esc(imageData)}" alt="" />` : `<span id="preview-letter">${esc(symbol[0] || '?')}</span>`;
   launchButton.disabled = !ok || creating;
   const bond = BigInt(terms.bond || '0');
-  $('#stone-terms').textContent = terms.set
+  $('#create-terms').textContent = terms.set
     ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
   if (creating) return;
-  if (!ok) $('#stone-status').textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
-  else if (!/Created|refused|picture|Picture|attach/.test($('#stone-status').textContent)) $('#stone-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
+  if (!ok) $('#create-status').textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
+  else if (!/Created|refused|picture|Picture|attach/.test($('#create-status').textContent)) $('#create-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
 }
 
 form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', renderPreview));
@@ -757,7 +796,7 @@ form.addEventListener('submit', async (event) => {
   if (!validSymbol(symbol) || !validName(nameInput.value)) return renderPreview();
   creating = true;
   launchButton.disabled = true;
-  const status = $('#stone-status');
+  const status = $('#create-status');
   let token = null;
   try {
     const description = descInput.value.trim();
@@ -818,12 +857,12 @@ function render() {
 function syncRoute({ scroll = true } = {}) {
   const route = pathRoute();
   Object.entries(views).forEach(([name, view]) => { view.hidden = name !== route.view; });
-  $$('.yard-nav [data-route]').forEach((link) => {
+  $$('.tabs [data-route]').forEach((link) => {
     if (link.dataset.route === route.view || (route.view === 'coin' && link.dataset.route === 'gallery')) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
   document.body.dataset.route = route.view;
-  if (route.view !== 'coin') document.title = { gallery: 'Cave Jade', launch: 'Create a coin — Cave Jade', portfolio: 'Portfolio — Cave Jade' }[route.view];
+  if (route.view !== 'coin') document.title = { gallery: 'Jade', launch: 'Create a coin — Jade', portfolio: 'Portfolio — Jade' }[route.view];
   if (route.view === 'coin') renderCoin(route.token, true); else render();
   if (route.view === 'portfolio') loadMine().then(renderPortfolio);
   if (scroll) window.scrollTo({ top: 0, behavior: 'instant' });
@@ -837,13 +876,14 @@ const history_push = (path) => window.history.pushState({}, '', path + location.
 
 document.addEventListener('click', (event) => {
   const link = event.target.closest('a[href^="/"]');
-  if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  // The network pill loads the other chain: a full page load, not a route.
+  if (!link || link.id === 'net' || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   navigate(link.getAttribute('href'));
 });
 window.addEventListener('popstate', () => syncRoute());
 
-// Live: a coin page every 5 seconds (epochs are about 10), the yard every 20.
+// Live: a coin page every 5 seconds (epochs are about 10), the list every 20.
 setInterval(async () => {
   if (document.hidden) return;
   const route = pathRoute();
@@ -859,6 +899,13 @@ setInterval(async () => {
 }, 5_000);
 setInterval(() => { if (!document.hidden && pathRoute().view !== 'coin') loadMarket(); }, 20_000);
 setInterval(loadUsd, 300_000);
+
+// The network pill: what this page reads, and a link to the other one.
+const net = $('#net');
+net.textContent = NETWORK === 'testnet' ? 'Testnet' : 'Mainnet';
+net.href = NETWORK === 'testnet' ? '/' : '/?network=testnet';
+net.title = NETWORK === 'testnet' ? 'Switch to mainnet' : 'Switch to testnet';
+installTips();
 
 syncRoute({ scroll: false });
 loadMarket();

@@ -6722,3 +6722,11 @@ price age and auctions in epochs; the Coinbase feed had never answered
 | 160.12 | **Prices from three sources, two must agree:** Coinbase (bare symbol — the doubled `-USD` is fixed), Kraken, CoinGecko; within 2% of their median; a failing source is logged at most every 10 min. The first post goes out at start | ✅ |
 | 160.13 | **Public figures:** cash + borrowed − reserve = supplied on one step; utilization from exact figures, rounded up to 1% (a loan never shows 0%), rates from it; insurance to two figures of its own size; `zyn_lendMarkets` serves only the last seal's figures, refreshed at every seal and kept across restarts. New fields for the app: `rules`, `curve`, `auction`, `price_max_age_secs`, `depth_limit_bps`, `pairs[]` (room under the depth limit), per pool `price_at`/`price_fresh`/`held_price`/`held_posts`/`withdraw_paused`/`supply_paused`/`collateral_room`, per lot `rate`/`opened_at`/`floor_at`/`backstop_at`/`min_bid`/`bids_full`/`outbid_above`, per position `repay_max_partial` | ✅ |
 | 160.14 | **Testnet only.** Mainnet 26460 lists no lending and does not set `ZYN_LEND_RULES` | ✅ |
+
+## §161 — Jade moves under Zyn (2 Oct 2026)
+
+| # | Decision |
+|---|---|
+| 161.1 | **Jade is Zyn's launchpad, not a Cave product.** It lives in `apps/jade`, serves at jade.zyn-network.com (Pages project `zyn-jade`, the same content store), and wears Zyn's stone: Lend's header, type and colours. Cave keeps the NFT store. Supersedes 69.30–69.31 and the site named in 141.9. |
+| 161.2 | **Plain copy.** Coins, Create a coin, Portfolio; no yard or stones. How the curve works sits behind an "i". The coin nearest graduation is shown first, with what is left to raise. |
+| 161.3 | **No build step.** `public/` is what is served, as Lend's is; the curve arithmetic is still pinned against Nap's by `apps/jade/tests`. |

@@ -3,46 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#031b17" />
-    <meta name="description" content="Cave Jade — make a coin in one step, trade it on its curve at one fair price per epoch, and watch it graduate into a pool nobody can pull." />
+    <meta name="theme-color" content="#06110e" />
+    <meta name="description" content="Jade is Zyn's launchpad: create a coin in one step, trade it on its bonding curve at one price per epoch, and it graduates into a locked pool." />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Cave Jade — The Onchain Jade Yard" />
-    <meta property="og:description" content="Every coin starts rough. The market reveals the jade." />
-    <title>Cave Jade</title>
-    <link rel="stylesheet" href="/jade.css?v=20260923-yard3" />
+    <meta property="og:title" content="Jade — Zyn's launchpad" />
+    <meta property="og:description" content="Create a coin in one step. One curve, one price per epoch, a locked pool at graduation." />
+    <title>Jade</title>
+    <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/jade.css?v=20261002-zyn1" />
   </head>
   <body>
-    <header class="yard-header">
-      <a class="yard-brand" href="/" data-route="gallery" aria-label="Cave Jade coins">
-        <span class="rough-mark" aria-hidden="true"><i></i></span>
-        <span><strong>Cave Jade</strong><small>the onchain jade yard</small></span>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="top">
+      <a class="lockup" href="/" data-route="gallery" aria-label="Jade coins">
+        <img src="/assets/zyn-mark-alpha-96.webp" srcset="/assets/zyn-mark-alpha-96.webp 1x, /assets/zyn-mark-alpha-192.webp 2x" width="34" height="34" alt="" />
+        <span>ZYN</span><span class="lockup-app">Jade</span>
       </a>
-      <nav class="yard-nav" aria-label="Primary navigation">
+      <nav class="tabs" aria-label="Primary navigation">
         <a href="/" data-route="gallery">Coins</a>
         <a href="/launch" data-route="launch">Create</a>
         <a href="/portfolio" data-route="portfolio">Portfolio</a>
       </nav>
-      <div class="j-header-right">
+      <div class="top-right">
         <span class="j-zecusd" id="zec-usd" title="ZEC price, refreshed every few minutes">ZEC —</span>
-        <button class="wallet-button" id="wallet-button" type="button"><span></span> Connect wallet</button>
+        <a class="net" id="net" href="?network=testnet" title="Switch network">Mainnet</a>
+        <button class="connect" id="wallet-button" type="button">Connect wallet</button>
       </div>
     </header>
 
     <main>
       <!-- Coins -->
       <section class="j-gallery" data-view="gallery" aria-labelledby="gallery-title">
-        <header class="j-gallery-head">
+        <header class="intro">
           <div>
-            <p class="eyebrow">ZYN · BONDING CURVES · ONE PRICE PER EPOCH</p>
-            <h1 id="gallery-title">Pick a stone.</h1>
-            <p class="j-lede">Anyone makes a coin in one step. It trades at once on the same curve as every coin, each epoch at one price for everybody, and graduates into a pool nobody can pull.</p>
+            <p class="eyebrow">Zyn Jade</p>
+            <h1 class="display" id="gallery-title">Coins</h1>
+            <p class="lede">Create a coin in one step. Every coin trades on the same curve and graduates into a locked pool.<button type="button" class="tip" data-tip="Each epoch (about 10 seconds) every buyer pays one price and every seller gets one, so nobody can get in ahead of you. At 51,098 of 80,000 lots (about 17 ZEC raised) the coin graduates: the rest of the supply and everything raised open a pool whose shares nobody holds." aria-label="How Jade works" aria-expanded="false">i</button></p>
           </div>
-          <dl class="j-tally">
+          <dl class="ledger">
             <div><dt>Coins</dt><dd id="tally-all">—</dd></div>
             <div><dt>Graduated</dt><dd id="tally-grad">—</dd></div>
-            <div><dt>ZEC set in them</dt><dd id="tally-zec">—</dd></div>
+            <div class="wide"><dt>ZEC in curves</dt><dd id="tally-zec">—</dd></div>
           </dl>
         </header>
+
+        <section class="j-spotlight" id="spotlight" hidden aria-label="Closest to graduating"></section>
+
         <div class="j-tools">
           <div class="j-sorts" role="tablist" aria-label="Sort coins">
             <button type="button" role="tab" data-sort="movers" class="active" aria-selected="true">Movers</button>
@@ -55,34 +62,34 @@
           <label class="j-search"><span class="sr-only">Search coins</span><input id="gallery-search" type="search" placeholder="Search name, ticker or address" autocomplete="off" /><kbd>/</kbd></label>
         </div>
         <div class="j-grid" id="coin-gallery" aria-live="polite"></div>
-        <p class="j-note" id="gallery-status">Reading the yard from the chain…</p>
+        <p class="j-note" id="gallery-status">Reading coins from the chain…</p>
       </section>
 
       <!-- Create -->
       <section class="j-create" data-view="launch" hidden aria-labelledby="launch-title">
-        <form class="j-panel j-create-form" id="stone-form" novalidate>
-          <p class="eyebrow">CREATE A COIN</p>
-          <h1 id="launch-title">Place a stone.</h1>
-          <label><span>Name</span><input id="stone-name" type="text" maxlength="24" autocomplete="off" placeholder="Verdant Echo" /></label>
-          <label><span>Ticker</span><input id="stone-symbol" type="text" maxlength="8" autocomplete="off" placeholder="VECHO" /><small>1–8 letters or digits</small></label>
-          <label><span>Description <em>(optional)</em></span><textarea id="stone-description" rows="3" maxlength="400" placeholder="What is this stone?"></textarea></label>
-          <label class="j-file"><span>Picture <em>(optional)</em></span><input id="stone-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk here to under 300 KB before it leaves your device.</small></label>
-          <p class="j-terms" id="stone-terms">Reading this network's terms…</p>
+        <form class="j-panel j-create-form" id="create-form" novalidate>
+          <p class="eyebrow">Create</p>
+          <h1 class="display display-s" id="launch-title">Create a coin</h1>
+          <label><span>Name</span><input id="create-name" type="text" maxlength="24" autocomplete="off" placeholder="Verdant Echo" /></label>
+          <label><span>Ticker</span><input id="create-symbol" type="text" maxlength="8" autocomplete="off" placeholder="VECHO" /><small>1–8 letters or digits</small></label>
+          <label><span>Description <em>(optional)</em></span><textarea id="create-description" rows="3" maxlength="400" placeholder="What is it?"></textarea></label>
+          <label class="j-file"><span>Picture <em>(optional)</em></span><input id="create-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk to under 300 KB on your device first.</small></label>
+          <p class="j-terms" id="create-terms">Reading this network's terms…</p>
           <ul class="j-facts">
-            <li><b>1,000,000,000</b> supply, all sold on the curve or put in its pool — none to you unless you buy</li>
-            <li>Graduates at <b>51,098 of 80,000 lots</b> (~17 ZEC raised, ~47 ZEC market cap)</li>
-            <li>Its pool's shares are <b>locked for good</b>; nobody can pull the liquidity</li>
+            <li><b>1,000,000,000</b> supply, all sold on the curve or put in its pool. You get none unless you buy.</li>
+            <li>Graduates at <b>51,098 of 80,000 lots</b> (~17 ZEC raised, ~47 ZEC market cap).</li>
+            <li>Pool shares are <b>locked for good</b>; nobody can pull the liquidity.</li>
           </ul>
-          <button id="launch-stone" class="j-primary" type="submit" disabled>Create coin</button>
-          <p id="stone-status" class="j-status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
+          <button id="create-go" class="j-primary" type="submit" disabled>Create coin</button>
+          <p id="create-status" class="j-status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
         </form>
-        <aside class="j-panel j-preview" aria-label="Preview">
-          <p class="eyebrow">PREVIEW</p>
+        <aside class="j-preview" aria-label="Preview">
+          <p class="eyebrow">Preview</p>
           <div class="j-card j-card-preview">
             <div class="j-thumb" id="preview-thumb"><span id="preview-letter">V</span></div>
             <div class="j-card-body">
-              <h3 id="preview-name">Unnamed stone</h3>
-              <p class="j-ticker" id="preview-symbol">STONE</p>
+              <h3 id="preview-name">Unnamed coin</h3>
+              <p class="j-ticker" id="preview-symbol">COIN</p>
               <p class="j-desc" id="preview-description">No description.</p>
               <div class="j-bar"><i style="width:0%"></i></div>
               <p class="j-card-meta"><span>Market cap <b>6.18 ZEC</b></span><span>just now</span></p>
@@ -118,7 +125,7 @@
                 <div class="j-tf" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
               </div>
               <div class="j-chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
-              <p class="j-note" id="chart-note">Candles are market cap per epoch batch — in each epoch every buyer pays one price and every seller gets one.</p>
+              <p class="j-note" id="chart-note">Market cap per epoch<button type="button" class="tip" data-tip="Each candle is built from epoch batches: in every epoch all buyers pay one price and all sellers get one, so each batch is one point." aria-label="About the chart" aria-expanded="false">i</button></p>
             </section>
 
             <section class="j-panel j-progress" aria-label="Bonding curve">
@@ -128,7 +135,7 @@
             </section>
 
             <section class="j-panel j-fills" aria-labelledby="fills-title">
-              <div class="j-panel-head"><h2 id="fills-title">Fills</h2><span>per epoch batch · no wallets, by design</span></div>
+              <div class="j-panel-head"><h2 id="fills-title">Fills</h2><span>per epoch batch<button type="button" class="tip" data-tip="Fills show each epoch's batch, not who traded: Zyn does not publish which accounts bought or sold." aria-label="About fills" aria-expanded="false">i</button></span></div>
               <div class="j-table-wrap"><table class="j-table"><thead><tr><th>When</th><th>Side</th><th>Tokens</th><th>ZEC</th><th>Market cap</th></tr></thead><tbody id="fills"></tbody></table></div>
             </section>
           </div>
@@ -147,7 +154,7 @@
               </dl>
               <button class="j-primary trade-submit" type="button">Connect wallet</button>
               <p id="trade-hint" class="j-hint" role="status" aria-live="polite"></p>
-              <p id="trade-status" class="j-status" aria-live="polite">Everyone buying in an epoch pays one price, and everyone selling another; nobody can get in ahead of you.</p>
+              <p id="trade-status" class="j-status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
             </section>
 
             <section class="j-panel j-about" aria-labelledby="about-title">
@@ -156,11 +163,11 @@
               <dl class="j-facts-list">
                 <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
                 <div><dt>Price / token</dt><dd id="coin-price">—</dd></div>
-                <div><dt>ZEC set in it</dt><dd id="coin-liquidity">—</dd></div>
+                <div><dt>ZEC in it</dt><dd id="coin-liquidity">—</dd></div>
                 <div><dt>Graduation pot</dt><dd id="coin-pot">—</dd></div>
                 <div><dt>Fee</dt><dd id="coin-fee">—</dd></div>
-                <div><dt>Creator</dt><dd>not shown here</dd></div>
-                <div><dt>Holders</dt><dd id="coin-holders">private — only the curve's share is public</dd></div>
+                <div><dt>Creator</dt><dd>not shown</dd></div>
+                <div><dt>Holders</dt><dd id="coin-holders">private</dd></div>
               </dl>
               <details class="j-curve-mini"><summary>The curve</summary>
                 <svg class="price-chart" viewBox="0 0 900 390" role="img" aria-label="The bonding curve and where this coin is on it">
@@ -168,7 +175,7 @@
                   <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/><path class="chart-line" d="M54 342 L870 64"/>
                   <circle class="chart-end" id="chart-point" cx="54" cy="342" r="9"/>
                 </svg>
-                <p class="j-note">One straight line for every coin: lot i costs 7,721 + i zatoshi. The dot is where this coin is.</p>
+                <p class="j-note">Lot i costs 7,721 + i zatoshi, for every coin. The dot is this coin.</p>
               </details>
             </section>
           </aside>
@@ -177,8 +184,8 @@
 
       <!-- Portfolio -->
       <section class="j-portfolio" data-view="portfolio" hidden aria-labelledby="portfolio-title">
-        <p class="eyebrow">YOUR STONES</p>
-        <h1 id="portfolio-title">Portfolio</h1>
+        <p class="eyebrow">Zyn Jade</p>
+        <h1 class="display display-s" id="portfolio-title">Portfolio</h1>
         <p class="j-note" id="portfolio-status">Connect a wallet to see what you hold and what you made.</p>
         <div class="j-panel"><div class="j-panel-head"><h2>Held</h2><span id="held-total">—</span></div><div class="j-table-wrap"><table class="j-table"><thead><tr><th>Coin</th><th>Tokens</th><th>Worth</th><th></th></tr></thead><tbody id="held"></tbody></table></div></div>
         <div class="j-panel"><div class="j-panel-head"><h2>Made by you</h2><span>visible only to you</span></div><div class="j-grid j-grid-small" id="made"></div></div>
@@ -187,10 +194,18 @@
 
     <dialog class="jade-wallet" id="jade-wallet" aria-labelledby="jade-wallet-title">
       <form method="dialog"><button class="jade-wallet-x" aria-label="Close">×</button></form>
-      <p class="eyebrow">WALLET</p><h2 id="jade-wallet-title">Connect Nap.</h2>
+      <p class="eyebrow">Wallet</p><h2 id="jade-wallet-title">Connect wallet</h2>
       <div class="jade-wallet-body"></div>
     </dialog>
-    <footer><span>Cave Jade / launch.cavebro.win</span><span>Rough → Window → Reveal</span><a href="https://cavebro.win">Cave ecosystem ↗</a></footer>
-    <script type="module" src="/jade.js?v=20260923-yard3"></script>
+    <footer class="foot">
+      <p>Jade runs on Zyn, an application layer for Zcash.</p>
+      <nav aria-label="Zyn apps">
+        <a href="https://zyn-network.com/">Zyn</a>
+        <a href="https://lend.zyn-network.com/">Lend</a>
+        <a href="https://nap.zyn-network.com/">Nap Wallet</a>
+        <a href="https://scan.zyn-network.com/">ZynScan</a>
+      </nav>
+    </footer>
+    <script type="module" src="/jade.js?v=20261002-zyn1"></script>
   </body>
 </html>

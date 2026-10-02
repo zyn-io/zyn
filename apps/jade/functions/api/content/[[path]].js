@@ -9,7 +9,7 @@
 //   GET  /api/content/<token>   -> { description, image } | {} (nothing attached) | 451 (hidden)
 //   POST /api/content/<token>   { content: {description, image}, proof: {publicKey, nonce, signature} }
 
-import { contentHash, hex, unhex, verifyContentProof } from '../../../../../nap-web/src/object.js';
+import { contentHash, hex, unhex, verifyContentProof } from '../../../../nap-web/src/object.js';
 
 const MAX_IMAGE = 420_000; // a data URL of about 300 KB
 const MAX_DESCRIPTION = 400;
@@ -19,7 +19,7 @@ const json = (body, status = 200, cache = 'no-store') =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': cache, 'x-content-type-options': 'nosniff' } });
 
 export async function onRequest({ request, env, params }) {
-  const store = env.CAVE_JADE_CONTENT;
+  const store = env.JADE_CONTENT;
   if (!store) return json({ error: 'content is not configured here' }, 503);
   const token = (Array.isArray(params.path) ? params.path[0] : params.path || '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(token)) return json({ error: 'a token is 64 hex characters' }, 400);

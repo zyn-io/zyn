@@ -1,7 +1,7 @@
-// Cave Jade end to end on testnet: the yard reads a curve token from the
+// Jade end to end on testnet: the list reads a curve token from the
 // public chain with no wallet; a buy goes through Nap in the browser.
 //
-//   JADE=http://localhost:4180 (built Jade, SPA fallback)   NAP=http://localhost:4179 (nap-web preview)
+//   JADE=http://localhost:4391 (wrangler pages dev public, in apps/jade)   NAP=http://localhost:4179 (nap-web preview)
 //   TOKEN=<64-hex curve token on testnet>   PHRASE_FILE=<a funded testnet wallet's phrase>
 //   node tests/jade.e2e.mjs
 import { chromium } from 'playwright-core';
@@ -22,8 +22,8 @@ const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('jade error:', e.message));
 await page.goto(`${JADE}/?network=testnet&nap=${NAP}`);
 await page.waitForSelector(`[data-coin="${TOKEN}"]`, { timeout: 20000 });
-ok(await page.textContent(`[data-coin="${TOKEN}"]`).then((t) => t.includes(NAME)) && /ZEC/.test(await page.textContent(`[data-coin="${TOKEN}"] .j-card-cap`)), `the yard lists ${SYM} with its market cap, from the public chain, without a wallet`);
-await page.screenshot({ path: `${S}/jade-yard.png` });
+ok(await page.textContent(`[data-coin="${TOKEN}"]`).then((t) => t.includes(NAME)) && /ZEC/.test(await page.textContent(`[data-coin="${TOKEN}"] .j-card-cap`)), `the list lists ${SYM} with its market cap, from the public chain, without a wallet`);
+await page.screenshot({ path: `${S}/jade-coins.png` });
 await page.click(`[data-coin="${TOKEN}"]`);
 await page.waitForSelector(`#coin-title:has-text("${NAME}")`);
 await page.waitForFunction(() => /ZEC/.test(document.querySelector('#coin-mcap').textContent));

@@ -26,7 +26,7 @@
       "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
       "lightdUrl": "/zec/mainnet",
       "zecBirthday": 3440000,
-      "launchpadUrl": "https://cave-jade.pages.dev/",
+      "launchpadUrl": "https://jade.zyn-network.com/",
       "attendUrl": "/attend",
       "bridges": {
         "eth": {
@@ -54,7 +54,7 @@
       "collections": [],
       "lightdUrl": "/zec/testnet",
       "zecBirthday": 4320000,
-      "launchpadUrl": "https://cave-jade.pages.dev/?network=testnet",
+      "launchpadUrl": "https://jade.zyn-network.com/?network=testnet",
       "bridges": {
         "sol": {
           "network": "solana-devnet",
@@ -96,6 +96,6 @@
   "zecAsset": "0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201",
   "lightdUrl": "/zec/mainnet",
   "zecBirthday": 3440000,
-  "launchpadUrl": "https://cave-jade.pages.dev/",
+  "launchpadUrl": "https://jade.zyn-network.com/",
   "attendUrl": "/attend"
 }

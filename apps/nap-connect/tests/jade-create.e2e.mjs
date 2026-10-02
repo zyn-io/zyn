@@ -1,21 +1,21 @@
-// Cave Jade, creating a coin end to end on testnet: the form with a picture,
+// Jade, creating a coin end to end on testnet: the form with a picture,
 // Nap's approval, the coin on chain, and its picture attached to the site's
 // content store under the creator's proof.
 //
-//   JADE=https://cave-jade.pages.dev NAP=https://nap.zyn-network.com
+//   JADE=https://jade.zyn-network.com NAP=https://nap.zyn-network.com
 //   PHRASE_FILE=<a testnet wallet's phrase>  IMAGE=<a png>  node tests/jade-create.e2e.mjs
 import { chromium } from 'playwright-core';
 import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 
-const JADE = process.env.JADE || 'https://cave-jade.pages.dev';
+const JADE = process.env.JADE || 'https://jade.zyn-network.com';
 const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const IMAGE = process.env.IMAGE;
 const S = process.env.SHOTS || '/tmp';
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const stamp = Date.now().toString(36).slice(-4).toUpperCase();
-const NAME = `E2E Stone ${stamp}`;
+const NAME = `E2E Coin ${stamp}`;
 const SYMBOL = `E2E${stamp}`.slice(0, 8);
 
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -35,16 +35,16 @@ await page.waitForFunction(() => !/Connect wallet/.test(document.querySelector('
 ok(true, 'connected');
 
 // Fill the form, picture included; the page shrinks it before anything leaves.
-await page.fill('#stone-name', NAME);
-await page.fill('#stone-symbol', SYMBOL);
-await page.fill('#stone-description', 'Made by the end-to-end test. Safe to ignore.');
-await page.setInputFiles('#stone-image', IMAGE);
+await page.fill('#create-name', NAME);
+await page.fill('#create-symbol', SYMBOL);
+await page.fill('#create-description', 'Made by the end-to-end test. Safe to ignore.');
+await page.setInputFiles('#create-image', IMAGE);
 await page.waitForFunction(() => document.querySelector('#preview-thumb img'), null, { timeout: 10000 }).catch(() => {});
 ok(await page.locator('#preview-thumb img').count() === 1, 'the preview shows the picture');
-ok(await page.isEnabled('#launch-stone'), 'the create button is enabled for a valid ticker and name');
+ok(await page.isEnabled('#create-go'), 'the create button is enabled for a valid ticker and name');
 
 // Create: Nap shows the coin and the picture, and names the site.
-await page.click('#launch-stone');
+await page.click('#create-go');
 await popup.waitForSelector('#yes', { timeout: 60000 });
 const approval = await popup.textContent('main');
 ok(approval.includes(SYMBOL) && approval.includes(new URL(JADE).host), `Nap shows ${SYMBOL} and names the site`);
@@ -52,8 +52,8 @@ ok(await popup.locator('main img').count() >= 1, 'Nap shows the picture it is ab
 await popup.screenshot({ path: `${S}/jade-create-approve.png` });
 await popup.click('#yes');
 // "Created." starts the success line; the idle hint also contains the word, lower case.
-await page.waitForFunction(() => { const t = document.querySelector('#stone-status').textContent; return t.startsWith('Created') || /refused|rejected|not enough|failed|did not/i.test(t); }, null, { timeout: 120000 }).catch(() => {});
-const status = await page.textContent('#stone-status');
+await page.waitForFunction(() => { const t = document.querySelector('#create-status').textContent; return t.startsWith('Created') || /refused|rejected|not enough|failed|did not/i.test(t); }, null, { timeout: 120000 }).catch(() => {});
+const status = await page.textContent('#create-status');
 ok(status.startsWith('Created'), `created: ${status}`);
 ok(/Picture and description attached/.test(status), 'the picture was attached under the creator\'s proof');
 

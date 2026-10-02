@@ -2640,17 +2640,15 @@ nothing to replay yet: no DA bundle exists until the first anchor, which waits
 on a funded vault.
 Without terms mainnet curves charge nothing and need no bond.
 
-**Jade** builds with `npm run build:launchpad` (to `apps/cave-market/dist`,
-which the store build also uses — build one, deploy it, then the other) and
-deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
+**Jade** (Zyn's launchpad, `apps/jade`, jade.zyn-network.com) has no build step: `cd apps/jade && npm run deploy` (Pages project `zyn-jade`). `?network=testnet` reads chain 212.
 
-### Cave Jade: deploy, content store, history (23 Sep 2026)
+### Jade: deploy, content store, history (moved under Zyn 2 Oct 2026)
 
-- **Deploy** from `apps/cave-market/jade-stage` (its `wrangler.toml` binds KV `CAVE_JADE_CONTENT`, id `6fec82c33ade4ebba5836456d67cdb04`; `functions/` are the Pages Functions): `node scripts/build-launchpad.mjs && cd jade-stage && npx wrangler@4.40.0 pages deploy dist --project-name cave-jade --branch main`.
-- **Content** lives at KV `c:<token>`. To hide a token's picture and description: `npx wrangler@4.40.0 kv key put --namespace-id 6fec82c33ade4ebba5836456d67cdb04 hide:<token> 1 --remote`; delete that key to show it again.
-- **Local:** `npx wrangler@4.40.0 pages dev dist --port 8788 --kv CAVE_JADE_CONTENT` in `jade-stage`; a local node has no CORS, so put a proxy in front of it and open `/?network=testnet&rpc=http://127.0.0.1:<proxy>` (the `rpc`/`nap` overrides work on localhost only).
+- **Deploy** from `apps/jade` (its `wrangler.toml` binds KV `JADE_CONTENT`, id `6fec82c33ade4ebba5836456d67cdb04` — the store Cave Jade used; `functions/` are the Pages Functions): `wrangler pages deploy public --project-name zyn-jade --branch main`. The old `cave-jade` project only redirects here.
+- **Content** lives at KV `c:<token>`. To hide a token's picture and description: `npx wrangler@4.40.0 kv key put --namespace-id 6fec82c33ade4ebba5836456d67cdb04 hide:<token> 1 --remote`; delete that key to show it again
+- **Local:** `wrangler pages dev public --port 4391` in `apps/jade`, then open `/?network=testnet` (a local node needs a CORS proxy and `&rpc=http://127.0.0.1:<proxy>`).
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
-- **Live e2e:** `JADE=… NAP=https://nap.zyn-network.com TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
+- **Live e2e:** `JADE=https://jade.zyn-network.com NAP=https://nap.zyn-network.com TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
 ## 5f-duodevicies. End-to-end suites on the public testnet (25 Sep 2026)
 
@@ -2658,8 +2656,8 @@ Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chro
 
 | Product | Test | Covers | Last pass |
 |---|---|---|---|
-| Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on cave-jade, Nap approval, content attached | 25 Sep, 12/12 |
-| Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | yard, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
+| Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on Jade, Nap approval, content attached | 25 Sep, 12/12 |
+| Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | coin list, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
 | DEX | `dex.e2e.mjs` (`A`, `B`, `SELL`, amounts) | open a pool (or use the A/B pool), collect shares, batch swap, add/remove liquidity, collect each | 25 Sep, 9/9 on SOL.zy/ETH.zy and on the graduated TGRAD/TESTZ.zy pool |
 | Extension | `extension.e2e.mjs` (`PHRASE_FILE`, `POOL`, `SELL`, `IN`, `OUT`) | the standalone extension: popup restores and reads testnet, a site finds it, connects in its window, a swap approved and collected, reopen after close | 25 Sep, 12/12 |
 | DEX via a site | `swap.e2e.mjs` (`POOL`, `SELL`, `AMOUNT`, `IN`, `OUT`) | a bare site asks Nap Connect for `zyn_swap`; Nap's approval names both sides; auto-collect | 25 Sep, 4/4 on TGRAD/TESTZ.zy |

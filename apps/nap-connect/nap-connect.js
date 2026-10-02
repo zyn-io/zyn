@@ -40,7 +40,7 @@
 //   zyn_lendRepay {position, amount | 'all'},
 //   zyn_lendAddCollateral {position, amount},
 //   zyn_lendRemoveCollateral {position, amount | 'all'},
-//   zyn_lendBid {lot, pay}
+//   zyn_lendBid {lot, pay}, zyn_lendInsure {asset, amount} (rules v2: a gift to the pool's insurance)
 //     (Zyn Lend; assets are ledger addresses, amounts decimal strings. What
 //     lending pays arrives as claims — collect with zyn_collect.)
 //

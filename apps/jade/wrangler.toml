@@ -1,9 +1,11 @@
-# Cave Jade (cave-jade.pages.dev / launch.cavebro.win). Deploy from this
-# folder: `functions` are its Pages Functions, `dist` is the Jade build.
-name = "cave-jade"
-pages_build_output_dir = "dist"
+# Jade (jade.zyn-network.com), Zyn's launchpad. Deploy from this folder:
+#   wrangler pages deploy public --project-name zyn-jade --branch main
+# `functions` are its Pages Functions; `public` is the page as served.
+name = "zyn-jade"
+pages_build_output_dir = "public"
 compatibility_date = "2025-09-24"
 
+# Pictures and descriptions coin creators attach (the store Cave Jade used).
 [[kv_namespaces]]
-binding = "CAVE_JADE_CONTENT"
+binding = "JADE_CONTENT"
 id = "6fec82c33ade4ebba5836456d67cdb04"

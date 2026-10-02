@@ -14,7 +14,7 @@ export async function onRequest({ request }) {
   ];
   for (const [url, pick] of sources) {
     try {
-      const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'cave-jade/1 (+https://launch.cavebro.win)' } });
+      const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'zyn-jade/1 (+https://jade.zyn-network.com)' } });
       const v = Number(pick(await r.json()));
       if (Number.isFinite(v) && v > 0) { usd = v; break; }
     } catch { /* the next source */ }

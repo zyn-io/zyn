@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const jade = await readFile(new URL('../jade.js', import.meta.url), 'utf8');
+const jade = await readFile(new URL('../public/jade.js', import.meta.url), 'utf8');
 const mk = await import('../../nap-web/src/market.js').catch(() => null);
 const SKIP = mk ? false : 'apps/nap-web is not checked out beside this app';
 
@@ -77,9 +77,7 @@ test('the fixes from the 27 Sep review stay in', () => {
 });
 
 test('the page ships the same Nap Connect as the source', async () => {
-  const src = await readFile(new URL('../nap-connect.js', import.meta.url), 'utf8');
+  const src = await readFile(new URL('../public/nap-connect.js', import.meta.url), 'utf8');
   const shared = await readFile(new URL('../../nap-connect/nap-connect.js', import.meta.url), 'utf8').catch(() => null);
-  if (shared) assert.equal(src, shared, 'apps/cave-market/nap-connect.js is the shared nap-connect.js');
-  const built = await readFile(new URL('../jade-stage/dist/nap-connect.js', import.meta.url), 'utf8').catch(() => null);
-  if (built) assert.equal(built, src, 'jade-stage/dist carries it too — run scripts/build-launchpad.mjs before deploying');
+  if (shared) assert.equal(src, shared, 'apps/jade/public/nap-connect.js is the shared nap-connect.js');
 });

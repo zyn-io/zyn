@@ -5,13 +5,13 @@
 // refused before Nap is asked, and nothing may read NaN or undefined.
 //
 //   PHRASE_FILE=<a funded testnet wallet>  node tests/pools-launch.e2e.mjs
-//   (JADE=https://cave-jade.pages.dev NAP=https://nap.zyn-network.com)
+//   (JADE=https://jade.zyn-network.com NAP=https://nap.zyn-network.com)
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { unlockNap } from './unlock.mjs';
 
-const JADE = process.env.JADE || 'https://cave-jade.pages.dev';
+const JADE = process.env.JADE || 'https://jade.zyn-network.com';
 const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const CHROMIUM = process.env.CHROMIUM || `${homedir()}/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
@@ -97,7 +97,7 @@ await page.screenshot({ path: `${S}/jade-not-listed.png`, fullPage: true });
 
 // The create form's limits (nothing is submitted: every case must be refused on the page).
 await page.goto(`${JADE}/launch?network=testnet&nap=${NAP}`, { waitUntil: 'domcontentloaded' });
-await page.waitForSelector('#stone-form');
+await page.waitForSelector('#create-form');
 const txt = `${S}/not-an-image.txt`; writeFileSync(txt, 'hello');
 const big = `${S}/big.png`; writeFileSync(big, Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(3 * 1024 * 1024)]));
 for (const [label, fill] of [
@@ -108,16 +108,16 @@ for (const [label, fill] of [
   ['text as image', { name: 'Test', symbol: 'TST', image: txt }],
   ['3 MB image', { name: 'Test', symbol: 'TST', image: big }],
 ]) {
-  await page.fill('#stone-name', fill.name || '');
-  await page.fill('#stone-symbol', fill.symbol || '');
-  if (fill.image) await page.setInputFiles('#stone-image', fill.image); else await page.setInputFiles('#stone-image', []);
+  await page.fill('#create-name', fill.name || '');
+  await page.fill('#create-symbol', fill.symbol || '');
+  if (fill.image) await page.setInputFiles('#create-image', fill.image); else await page.setInputFiles('#create-image', []);
   const before = popup && !popup.isClosed() ? await popup.textContent('main').catch(() => '') : '';
-  await page.click('#launch-stone').catch(() => {});
+  await page.click('#create-go').catch(() => {});
   await page.waitForTimeout(1500);
   let asked = false;
   if (popup && !popup.isClosed() && (await popup.$('#yes'))) { asked = true; await popup.click('#no').catch(() => {}); }
   else if (popup && !popup.isClosed() && (await popup.textContent('main').catch(() => '')) !== before) asked = true;
-  const said = await page.textContent('#stone-status');
+  const said = await page.textContent('#create-status');
   ok(!asked, `jade create, ${label}: refused on the page (${said.trim().slice(0, 80) || 'no message'})`);
   ok(clean(said), `jade create, ${label}: no NaN/undefined`);
 }
