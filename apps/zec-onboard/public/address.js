@@ -125,12 +125,12 @@ export const DESCRIBE = {
   },
   unified: {
     pool: 'Shielded (usually)',
-    seen: 'Payments are private when the address includes a shielded receiver, which every wallet in this guide adds.',
+    seen: 'The chain does not show this address when it is paid through its shielded receiver, which wallets use whenever they can. A payment from a transparent address still shows its amount.',
     nap: 'Nap can pay it, with a memo.',
   },
   sapling: {
     pool: 'Shielded (Sapling)',
-    seen: 'Private. An older shielded address type.',
+    seen: 'The chain does not show this address. An older shielded address type.',
     nap: 'Nap cannot pay a Sapling address. Ask for a unified (u1…) address instead.',
   },
   tex: {

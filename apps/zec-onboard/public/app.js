@@ -137,7 +137,7 @@ function lookUp() {
     return;
   }
   const url = EXPLORER[state.net](tx);
-  out.innerHTML = `<a href="${esc(url)}" target="_blank" rel="noopener">Open in the ${state.net === 'test' ? 'testnet' : 'mainnet'} explorer</a>. A shielded payment shows its fee and its size, and nothing about the sender, the receiver or the amount.`;
+  out.innerHTML = `<a href="${esc(url)}" target="_blank" rel="noopener">Open in the ${state.net === 'test' ? 'testnet' : 'mainnet'} explorer</a>. A payment between two shielded addresses shows its time, fee and size, and nothing about the sender, the receiver or the amount.`;
 }
 $('#tx-form').addEventListener('submit', (ev) => { ev.preventDefault(); lookUp(); });
 $('#txid').addEventListener('paste', () => setTimeout(lookUp));

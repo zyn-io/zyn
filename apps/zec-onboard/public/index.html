@@ -135,14 +135,14 @@
         <div class="step-text">
           <h2 id="s4-h"><span class="n">4</span>Receive</h2>
           <p>Your shielded address starts with <code class="m">u1</code><code class="t">utest1</code>. This is the one to give people.
-            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About unified addresses">i</button><span class="bubble" role="note" hidden>A unified address bundles receivers for Zcash's pools in one string. Nap's holds only a shielded receiver, so every payment to it is private.</span></span>
+            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About unified addresses">i</button><span class="bubble" role="note" hidden>A unified address bundles receivers for Zcash's pools in one string. Nap's holds only a shielded receiver, so the chain never shows this address. A payment that comes from a transparent address still shows its amount.</span></span>
           </p>
           <ol class="do">
             <li>Open <b>Receive</b>. The shielded address is shown first, with a QR code.</li>
             <li>Copy it or show the QR to whoever pays you.</li>
             <li>They can add a memo of up to 512 bytes. Only you can read it; it shows in your activity.</li>
           </ol>
-          <p>Sharing a shielded address is safe: payments to it do not show on the chain.</p>
+          <p>Sharing a shielded address is safe: the chain never shows it as the receiver of a payment.</p>
           <button type="button" class="done" data-step="4" aria-pressed="false">Mark step 4 done</button>
         </div>
         <figure class="shot"><img src="/shots/receive-u.webp" alt="Nap's receive screen with the shielded address and QR code" width="390" height="770" loading="lazy"></figure>
@@ -151,7 +151,7 @@
       <section class="step sh" id="s5" data-step="5" aria-labelledby="s5-h">
         <div class="step-text">
           <h2 id="s5-h"><span class="n">5</span>Send a shielded payment</h2>
-          <p>From one shielded address to another, nothing but the fee is visible.</p>
+          <p>From one shielded address to another, the chain shows only that a transaction happened, when, and its fee.</p>
           <ol class="do">
             <li>Open <b>Send</b> and paste a <code class="m">u1…</code><code class="t">utest1…</code> address. No one to pay? Use your own.</li>
             <li>Enter an amount and, if you like, a memo.</li>
