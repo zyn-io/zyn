@@ -78,12 +78,12 @@
             <li>Open <a href="https://nap.zyn-network.com" rel="noopener">nap.zyn-network.com</a>.<span class="t"> Pick <b>Testnet</b> in the network menu at the top.</span></li>
             <li>Choose <b>Create a new wallet</b>.</li>
             <li>Write the 24 words on paper, in order. Tick the box once they are saved.</li>
-            <li>Set a password. It opens the wallet on this device; the 24 words restore it anywhere.</li>
+            <li>Set a password so Nap keeps the wallet on this device. The 24 words restore it anywhere.</li>
           </ol>
           <p class="warn">Anyone with your 24 words can spend your ZEC, and nobody can recover them for you. Keep them offline: no screenshots, no cloud notes, no chat.</p>
           <button type="button" class="done" data-step="1" aria-pressed="false">Mark step 1 done</button>
         </div>
-        <figure class="shot"><img src="/shots/create.png" alt="Nap's new wallet screen with the 24 words and the confirmation box" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/create.webp" alt="Nap's new wallet screen with the 24 words and the confirmation box" width="390" height="844" loading="lazy"></figure>
       </section>
 
       <section class="step" id="s2" data-step="2" aria-labelledby="s2-h">
@@ -110,7 +110,7 @@
           <p class="warn">A transparent address is public, like a Bitcoin address. Anyone can see what it receives, from whom, and its balance. Use it to receive from the exchange, then shield.</p>
           <button type="button" class="done" data-step="2" aria-pressed="false">Mark step 2 done</button>
         </div>
-        <figure class="shot"><img src="/shots/shield-receive-t.png" alt="Nap's receive screen showing the transparent address and its QR code" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/shield-receive-t.webp" alt="Nap's receive screen showing the transparent address and its QR code" width="390" height="770" loading="lazy"></figure>
       </section>
 
       <section class="step sh" id="s3" data-step="3" aria-labelledby="s3-h">
@@ -118,24 +118,24 @@
           <h2 id="s3-h"><span class="n">3</span>Shield</h2>
           <p>Shielding moves your ZEC from the transparent address into the shielded pool, where amounts and addresses are encrypted.</p>
           <ol class="do">
-            <li>Once the ZEC arrives, Nap shows it as a separate <b>Transparent</b> balance with a <b>Shield</b> button.</li>
-            <li>Press <b>Shield</b>, check the fee, and confirm.</li>
+            <li>Once the ZEC arrives, Nap shows it on its own line, <b>Transparent · public</b>, with a <b>Shield</b> button.</li>
+            <li>Press <b>Shield</b>. Check the fee (0.00015 ZEC for one incoming payment) and confirm.</li>
             <li>Nap builds a zero-knowledge proof. It takes about half a minute; keep the tab open.
               <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About the proof">i</button><span class="bubble" role="note" hidden>The proof shows the network the transaction is valid without revealing what is inside it. Your device makes it; nothing secret leaves the device.</span></span>
             </li>
-            <li>After the next block, the ZEC shows in your shielded balance.</li>
+            <li>After a few blocks, about five minutes, the ZEC shows in your shielded balance.</li>
           </ol>
           <p>This is your first shielded transaction. The chain shows the transparent address and the amount going in, but not where it went.</p>
           <button type="button" class="done" data-step="3" aria-pressed="false">Mark step 3 done</button>
         </div>
-        <figure class="shot"><img src="/shots/shield-balance.png" alt="Nap showing a transparent balance with a Shield button" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/shield-balance.webp" alt="Nap showing a transparent balance with a Shield button" width="390" height="844" loading="lazy"></figure>
       </section>
 
       <section class="step sh" id="s4" data-step="4" aria-labelledby="s4-h">
         <div class="step-text">
           <h2 id="s4-h"><span class="n">4</span>Receive</h2>
           <p>Your shielded address starts with <code class="m">u1</code><code class="t">utest1</code>. This is the one to give people.
-            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About unified addresses">i</button><span class="bubble" role="note" hidden>A unified address bundles receivers for Zcash's pools in one string. Nap's includes an Orchard receiver, the newest shielded pool, so payments to it are private.</span></span>
+            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About unified addresses">i</button><span class="bubble" role="note" hidden>A unified address bundles receivers for Zcash's pools in one string. Nap's holds only a shielded receiver, so every payment to it is private.</span></span>
           </p>
           <ol class="do">
             <li>Open <b>Receive</b>. The shielded address is shown first, with a QR code.</li>
@@ -145,7 +145,7 @@
           <p>Sharing a shielded address is safe: payments to it do not show on the chain.</p>
           <button type="button" class="done" data-step="4" aria-pressed="false">Mark step 4 done</button>
         </div>
-        <figure class="shot"><img src="/shots/receive-u.png" alt="Nap's receive screen with the shielded address and QR code" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/receive-u.webp" alt="Nap's receive screen with the shielded address and QR code" width="390" height="770" loading="lazy"></figure>
       </section>
 
       <section class="step sh" id="s5" data-step="5" aria-labelledby="s5-h">
@@ -165,7 +165,7 @@
           </form>
           <button type="button" class="done" data-step="5" aria-pressed="false">Mark step 5 done</button>
         </div>
-        <figure class="shot"><img src="/shots/send.png" alt="Nap's send form with a shielded address, an amount and a memo" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/send.webp" alt="Nap's send form with a shielded address, an amount and a memo" width="390" height="540" loading="lazy"></figure>
       </section>
 
       <section class="step" id="s6" data-step="6" aria-labelledby="s6-h">
@@ -185,7 +185,7 @@
           </form>
           <button type="button" class="done" data-step="6" aria-pressed="false">Mark step 6 done</button>
         </div>
-        <figure class="shot"><img src="/shots/unshield.png" alt="Nap's send form with a transparent address and no memo field" width="390" height="844" loading="lazy"></figure>
+        <figure class="shot"><img src="/shots/unshield.webp" alt="Nap's send form with a transparent address and no memo field" width="390" height="540" loading="lazy"></figure>
       </section>
 
       <section class="finish" id="finish" aria-labelledby="finish-h">
@@ -207,7 +207,7 @@
 </main>
 
 <footer class="foot">
-  <p>Screens are from Nap Wallet. Explorer links open <span class="m">mainnet.zcashexplorer.app</span><span class="t">testnet.zcashexplorer.app</span>. This page stores your ticks in this browser only.</p>
+  <p>Screens are from Nap Wallet on testnet. Explorer links open <span class="m">mainnet.zcashexplorer.app</span><span class="t">testnet.zcashexplorer.app</span>. This page stores your ticks in this browser only.</p>
 </footer>
 </body>
 </html>
