@@ -185,3 +185,21 @@ html.in-app body::after { content: ''; position: fixed; inset: 0 0 auto 0; heigh
   .onboard .promise { display: flex; }
   .onboard .lede { margin-bottom: 28px; }
 }
+
+/* Transparent ZEC: the one balance anyone can see, so it is set apart from
+   the shielded figure and tinted as public, with Shield beside it. */
+.zec-transparent { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0 4px; padding: 14px 16px; border: 1px solid #c9554566; border-radius: 12px; background: #c955450d; }
+.zec-transparent[hidden] { display: none; }
+.zec-transparent b { display: block; font: 700 22px Bricolage; font-variant-numeric: tabular-nums; }
+.zec-t-label { display: block; font: 11px Mono; letter-spacing: .06em; color: #a5412f; margin-bottom: 4px; }
+.zec-transparent .primary { width: auto; margin: 0; gap: 14px; padding: 13px 18px; }
+.zec-seg { display: flex; gap: 6px; margin-top: 24px; }
+.zec-seg button { flex: 1; border: 1px solid #1f242833; background: none; border-radius: 999px; padding: 10px 12px; font-size: 13px; color: #4d5255; }
+.zec-seg button[aria-pressed='true'] { background: #202529; border-color: #202529; color: #f8f2e4; font-weight: 700; }
+.zec-seg + .account-card { margin-top: 12px; }
+.account-card.public span { color: #ff9c8a; }
+.account-card .public-line { color: #ff9c8a; font-weight: 600; font-size: 14px; }
+#shield-dialog .txid { font: 11px/1.6 Mono; overflow-wrap: anywhere; }
+#shield-dialog textarea { width: 100%; margin-top: 9px; border: 1px solid #ffffff2d; background: #121618; color: #fff; padding: 14px; border-radius: 8px; font: 13px/1.5 Mono; outline: none; resize: vertical; }
+#shield-dialog .muted.bad, #shield-state.bad { color: #ff8f83; }
+.withdraw-input:disabled { opacity: .5; cursor: not-allowed; }

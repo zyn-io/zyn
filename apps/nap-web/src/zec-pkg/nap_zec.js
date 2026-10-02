@@ -92,6 +92,21 @@ export class ZecWallet {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v3;
     }
+    /**
+     * Build, prove and sign the sweep of the outputs last read. Slow.
+     * @param {number} tip
+     * @param {number} branch
+     * @returns {Uint8Array}
+     */
+    buildShield(tip, branch) {
+        const ret = wasm.zecwallet_buildShield(this.__wbg_ptr, tip, branch);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
     confirmSent() {
         const ret = wasm.zecwallet_confirmSent(this.__wbg_ptr);
         if (ret[1]) {
@@ -185,6 +200,18 @@ export class ZecWallet {
         }
     }
     /**
+     * Give the wallet its transparent key, 32 bytes.
+     * @param {Uint8Array} secret
+     */
+    setTransparent(secret) {
+        const ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.zecwallet_setTransparent(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {Uint8Array}
      */
     state() {
@@ -221,11 +248,66 @@ export class ZecWallet {
         return ret[0] >>> 0;
     }
     /**
+     * Read a UTXOS body, leaving out the outpoints in `exclude` (a JSON
+     * array of `txid:index`). Returns `{address, total, fee, net, count,
+     * utxos}` as JSON, amounts in zatoshi.
+     * @param {Uint8Array} body
+     * @param {string} exclude
+     * @returns {string}
+     */
+    takeUtxos(body, exclude) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passArray8ToWasm0(body, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(exclude, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.zecwallet_takeUtxos(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
      * @param {number} i
      * @returns {Uint8Array}
      */
     transactionRequest(i) {
         const ret = wasm.zecwallet_transactionRequest(this.__wbg_ptr, i);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * The transparent address, or undefined without a key.
+     * @returns {string | undefined}
+     */
+    transparentAddress() {
+        const ret = wasm.zecwallet_transparentAddress(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    utxosRequest() {
+        const ret = wasm.zecwallet_utxosRequest(this.__wbg_ptr);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -362,6 +444,31 @@ export function spendingKeyFromPhrase(phrase, passphrase, network, account) {
     const ptr2 = passStringToWasm0(network, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
     const ret = wasm.spendingKeyFromPhrase(ptr0, len0, ptr1, len1, ptr2, len2, account);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
+ * The transparent secret key for a recovery phrase, to seal. See
+ * [`crate::transparent_key_from_phrase`].
+ * @param {string} phrase
+ * @param {string} passphrase
+ * @param {string} network
+ * @param {number} account
+ * @returns {Uint8Array}
+ */
+export function transparentKeyFromPhrase(phrase, passphrase, network, account) {
+    const ptr0 = passStringToWasm0(phrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(network, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.transparentKeyFromPhrase(ptr0, len0, ptr1, len1, ptr2, len2, account);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

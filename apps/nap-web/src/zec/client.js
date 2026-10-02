@@ -117,13 +117,47 @@ async function saveState(sk, network, state) {
   }
 }
 
+// --- Shields in flight ------------------------------------------------------
+//
+// The block server lists a transparent output until a block spends it, so
+// for the minute or two after a shield the outputs it swept still show. They
+// are remembered here, for an hour, and left out. Outpoints are public chain
+// data about a public address, but they still say this browser shielded, so
+// they live only in this tab's memory and sessionStorage, not on disk.
+
+const SHIELD_KEY = 'nap.zec.shielding.v1';
+const SHIELD_TTL = 60 * 60 * 1000;
+const shieldStore = () => { try { return globalThis.sessionStorage || null; } catch { return null; } };
+let shieldMemory = {};
+
+function shieldRecords() {
+  const store = shieldStore();
+  let all = shieldMemory;
+  try { if (store) all = JSON.parse(store.getItem(SHIELD_KEY) || '{}'); } catch { /* memory only */ }
+  const now = Date.now();
+  for (const net of Object.keys(all)) all[net] = (all[net] || []).filter((r) => r.until > now);
+  return all;
+}
+
+export function pendingOutpoints(network) {
+  return (shieldRecords()[network] || []).flatMap((r) => r.outpoints);
+}
+
+export function rememberShield(network, outpoints) {
+  const all = shieldRecords();
+  all[network] = [...(all[network] || []), { outpoints, until: Date.now() + SHIELD_TTL }];
+  shieldMemory = all;
+  try { shieldStore()?.setItem(SHIELD_KEY, JSON.stringify(all)); } catch { /* memory only */ }
+}
+
 // --- The account ------------------------------------------------------------
 
 /// One network's Zcash wallet. `open` resumes or seeds; `sync` and `send`
 /// report progress through `onStep` and keep the state as they go.
 export class ZecAccount {
-  constructor({ sk, network, url, birthday }) {
+  constructor({ sk, tsk = null, network, url, birthday }) {
     this.sk = sk;
+    this.tsk = tsk;
     this.network = network;
     this.url = url;
     this.birthday = birthday;
@@ -143,7 +177,7 @@ export class ZecAccount {
   async peek() {
     await ask('endpoint', [this.url]);
     const state = await loadState(this.sk, this.network);
-    this.view = await ask('open', [this.sk, this.network, state]);
+    this.view = await ask('open', [this.sk, this.network, state, this.tsk]);
     return this.view;
   }
 
@@ -167,6 +201,22 @@ export class ZecAccount {
   async send(to, zatoshi, memo, onStep) {
     this.view = await ask('send', [to, zatoshi, memo], (s) => { if (s.state) this.keep(s.state); onStep?.(s); });
     this.keep(this.view.state);
+    return this.view;
+  }
+
+  /// What is on the transparent address: `{address, total, fee, net, count,
+  /// utxos}` in zatoshi. Outputs a recent shield spent are left out until the
+  /// chain mines it.
+  async transparent() {
+    return ask('transparent', [pendingOutpoints(this.network)]);
+  }
+
+  /// Sweep the transparent address into the shielded balance. `onStep` hears
+  /// the catch-up, then `{proving: true}`.
+  async shield(onStep) {
+    this.view = await ask('shield', [pendingOutpoints(this.network)], (s) => { if (s.state) this.keep(s.state); onStep?.(s); });
+    this.keep(this.view.state);
+    rememberShield(this.network, this.view.shielded.utxos.map((u) => u.outpoint));
     return this.view;
   }
 

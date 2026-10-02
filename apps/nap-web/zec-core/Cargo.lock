@@ -1283,7 +1283,9 @@ dependencies = [
  "rustls-pki-types",
  "serde_json",
  "wasm-bindgen",
+ "zcash_primitives",
  "zcash_protocol",
+ "zcash_transparent",
  "zip32",
  "zyn-custody",
 ]

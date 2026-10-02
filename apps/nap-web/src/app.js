@@ -4,6 +4,7 @@ import { PROGRAM as OBJECT_PROGRAM, scan as scanObjects, objectCall, registerInt
 import { decodeMeta, fund as fundFrom, lendAsset } from './market.js';
 import { bridgedName, loadBridged } from './ledger.js';
 import { bridgePage } from './bridges.js';
+import { activity, logActivity } from './pocket.js';
 import { checkedEpoch, cancelOfferIntent, deriveCollectionAccount, XZEC, deriveIdentity, forgetIdentity, hex, newMnemonic, openSealedWallet, parseAmount, placeOfferIntent, readableAmount, rpc, sealWallet, signedFrame, signedRead, transferFrame, unhex, WAD } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { parsePaymentRequest } from './zip321.js';
@@ -454,7 +455,7 @@ function wallet(message = '') {
       <section class="activity"><div class="section-title"><h2>Deposit ZEC</h2></div><div class="account-card" id="deposit-card"><div><span>Your Zcash deposit address</span><code id="deposit-address">Asking the node…</code><p class="muted" id="deposit-note">Arrives as ZEC.zy.${tip('Send shielded ZEC here. No memo needed; this address is yours alone.')}</p><button class="quiet" id="copy-deposit" hidden>Copy address</button> <button class="quiet" id="deposit-from-zec">Pay it from my ZEC →</button></div><canvas id="deposit-qr" width="164" height="164"></canvas></div></section>
       ${config.kind === 'object' ? `<section class="activity"><div class="section-title"><h2>Withdraw ZEC</h2></div><form class="account-card" id="withdraw-form"><div><span>Send ZEC.zy back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">Fees${tip('The chain records only a commitment to the address. The vault pays it once two custodians sign. The Zcash network fee comes out of the amount; any bridge fee is added on top.')}</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>` : ''}
     </section>
-  </main><dialog id="send-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><h2>Recovery</h2><p>Restore this phrase, passphrase and account index in any Nap to recover <code>${account}</code>. Nap does not store the phrase.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
+  </main><dialog id="send-dialog"></dialog><dialog id="shield-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><h2>Recovery</h2><p>Restore this phrase, passphrase and account index in any Nap to recover <code>${account}</code>. Nap does not store the phrase.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
   QRCode.toCanvas(root.querySelector('#qr'), account, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
   void loadDepositAddress(identity);
   root.querySelector('#withdraw-form')?.addEventListener('submit', async (e) => {
@@ -529,7 +530,9 @@ function zecSection() {
   }
   return `<section class="zec" id="zec"><div class="section-title"><h2>Zcash</h2><span id="zec-sync">Opening…</span></div>
     <div class="zec-balance"><div><b id="zec-total">—</b><span>ZEC</span></div><p id="zec-detail" class="zec-detail">Shielded. Only this phrase can see it.</p></div>
-    <div class="account-card"><div><span>Your Zcash address</span><code id="zec-address">Opening…</code><p class="muted">Shielded${tip('Pay it from any Zcash wallet or exchange that sends shielded. What arrives is visible only to this phrase.')}</p><button class="quiet" id="zec-copy" hidden>Copy address</button></div><canvas id="zec-qr" width="164" height="164"></canvas></div>
+    <div class="zec-transparent" id="zec-t" hidden><div><span class="zec-t-label">Transparent · public</span><b id="zec-t-amount">—</b></div><button class="primary" type="button" id="zec-shield">Shield <span>→</span></button></div>
+    <div class="zec-seg" role="group" aria-label="Receive"><button type="button" data-addr="shielded" aria-pressed="true">Shielded address</button><button type="button" data-addr="transparent" aria-pressed="false">Transparent address</button></div>
+    <div class="account-card" id="zec-receive"><div><span id="zec-address-label">Your Zcash address</span><code id="zec-address">Opening…</code><p class="muted" id="zec-address-note">Shielded${tip('Pay it from any Zcash wallet or exchange that sends shielded. What arrives is visible only to this phrase.')}</p><button class="quiet" id="zec-copy" hidden>Copy address</button></div><canvas id="zec-qr" width="164" height="164"></canvas></div>
     <form class="account-card" id="zec-send"><div><span>Send ZEC</span>
       <label class="visually-hidden" for="zec-to">Zcash address</label><input id="zec-to" class="withdraw-input" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…">
       <label class="visually-hidden" for="zec-amount">Amount</label><input id="zec-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC">
@@ -556,21 +559,146 @@ function renderZec(v) {
   if (v.balance.inFlight) parts.push(`${zecText(v.balance.inFlight)} ZEC on its way (change from a send, back after 3 blocks)`);
   if (v.balance.orchard && v.balance.ironwood) parts.push(`Ironwood ${zecText(v.balance.ironwood)} · Orchard ${zecText(v.balance.orchard)}`);
   root.querySelector('#zec-detail').textContent = parts.join(' · ') || 'Shielded. Only this phrase can see it.';
-  const address = root.querySelector('#zec-address');
-  address.textContent = v.address;
-  root.querySelector('#zec-copy').hidden = false;
-  if (zecQrFor !== v.address || !root.querySelector('#zec-qr').dataset.drawn) {
-    zecQrFor = v.address;
-    QRCode.toCanvas(root.querySelector('#zec-qr'), v.address, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
-    root.querySelector('#zec-qr').dataset.drawn = '1';
-  }
+  renderZecAddress(v);
   root.querySelector('#zec-go').disabled = held === 0;
   if (v.syncedTo >= 0) zecStatus(`synced to block ${v.syncedTo.toLocaleString('en-US')}`);
   const notes = root.querySelector('#zec-notes');
-  notes.innerHTML = v.notes.length
-    ? v.notes.slice(0, 12).map((n) => `<li><b>${escapeHtml(zecText(n.zatoshi))} ZEC</b><span>received at block ${Number(n.height).toLocaleString('en-US')}</span><code>${escapeHtml(short(n.txid))}</code></li>`).join('')
+  const shieldLog = activity(config, identity).filter((a) => a.kind === 'shield').slice(0, 6);
+  const shields = shieldLog.map((a) => `<li><b>${escapeHtml(a.amount)} ZEC</b><span>shielded from transparent</span><code>${escapeHtml(short(a.tx || ''))}</code></li>`);
+  // A shield's note is listed once, as the shield.
+  const shieldTx = new Set(shieldLog.map((a) => a.tx));
+  const received = v.notes.filter((n) => !shieldTx.has(n.txid)).slice(0, 12).map((n) => `<li><b>${escapeHtml(zecText(n.zatoshi))} ZEC</b><span>received at block ${Number(n.height).toLocaleString('en-US')}</span><code>${escapeHtml(short(n.txid))}</code></li>`);
+  notes.innerHTML = shields.length || received.length
+    ? [...shields, ...received].join('')
     : `<li class="zec-empty">Nothing received since block ${Number(v.birthday).toLocaleString('en-US')}. <button type="button" class="quiet" id="zec-rescan">Scan from an earlier block…</button></li>`;
   root.querySelector('#zec-rescan')?.addEventListener('click', zecRescan);
+}
+
+// Receive: the shielded address by default; the transparent one for
+// exchanges that pay only transparent, said to be public where it shows.
+let zecAddressMode = 'shielded';
+function renderZecAddress(v = zecAccount?.view) {
+  if (!v || !root.querySelector('#zec-receive')) return;
+  const t = zecAddressMode === 'transparent';
+  root.querySelectorAll('.zec-seg [data-addr]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.addr === zecAddressMode)));
+  const text = t ? v.transparent : v.address;
+  const card = root.querySelector('#zec-receive');
+  card.classList.toggle('public', t);
+  root.querySelector('#zec-address-label').textContent = t ? 'Your transparent address' : 'Your Zcash address';
+  root.querySelector('#zec-address-note').innerHTML = t
+    ? `<b class="public-line">Payments to this address are public.</b>${tip('Use it for exchanges that only pay transparent addresses. When the ZEC arrives, press Shield to move it into your shielded balance.')}`
+    : `Shielded${tip('Pay it from any Zcash wallet or exchange that sends shielded. What arrives is visible only to this phrase.')}`;
+  const address = root.querySelector('#zec-address');
+  const qr = root.querySelector('#zec-qr');
+  if (t && !text) {
+    address.innerHTML = 'Needs your recovery phrase once. <button type="button" class="quiet" id="zec-t-add">Add transparent address…</button>';
+    root.querySelector('#zec-t-add').onclick = addTransparent;
+    root.querySelector('#zec-copy').hidden = true;
+    qr.hidden = true;
+    return;
+  }
+  qr.hidden = false;
+  address.textContent = text;
+  root.querySelector('#zec-copy').hidden = false;
+  if (zecQrFor !== text || !qr.dataset.drawn) {
+    zecQrFor = text;
+    QRCode.toCanvas(qr, text, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
+    qr.dataset.drawn = '1';
+  }
+}
+
+// The transparent balance: one UTXOS question to the block server, which
+// names this public address (never the shielded one). Asked after each sync.
+let zecPlan = null;
+async function zecTransparent() {
+  const account = zecAccount, current = generation;
+  if (!account?.tsk) return;
+  try {
+    const plan = await account.transparent();
+    if (current !== generation || zecAccount !== account) return;
+    zecPlan = plan;
+    const row = root.querySelector('#zec-t');
+    if (!row) return;
+    row.hidden = !(plan.total > 0);
+    root.querySelector('#zec-t-amount').textContent = `${zecText(plan.total)} ZEC`;
+    const go = root.querySelector('#zec-shield');
+    go.disabled = !(plan.net > 0);
+    go.title = plan.total > 0 && !plan.net ? `Less than the ${zecText(plan.fee)} ZEC fee` : '';
+  } catch { /* the next sync asks again */ }
+}
+
+function shieldDialog() {
+  const plan = zecPlan;
+  const dialog = root.querySelector('#shield-dialog');
+  if (!plan?.net || !zecAccount) return;
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">SHIELD</p><h2>Shield</h2>
+    <div class="review"><span>Transparent</span><b>${escapeHtml(zecText(plan.total))} ZEC</b><span>Network fee</span><b>${escapeHtml(zecText(plan.fee))} ZEC</b><span>You receive</span><b>${escapeHtml(zecText(plan.net))} ZEC</b><span>Arrives as</span><b>shielded ZEC</b></div>
+    <p class="muted" id="shield-state" role="status">Moves everything on your transparent address into your shielded balance.${tip('Proving takes about half a minute on this device; keep the tab open. The fee is ZIP-317: one input and two shielded actions.')}</p>
+    <button class="primary" id="shield-go">Shield ${escapeHtml(zecText(plan.net))} ZEC <span>→</span></button>`;
+  dialog.querySelector('.x').onclick = () => dialog.close();
+  dialog.querySelector('#shield-go').onclick = async () => {
+    const go = dialog.querySelector('#shield-go'), state = dialog.querySelector('#shield-state');
+    const account = zecAccount, current = generation;
+    go.disabled = true; dialog.querySelector('.x').disabled = true;
+    go.innerHTML = 'Shielding… <span></span>';
+    state.classList.remove('bad');
+    try {
+      const view = await account.shield((s) => {
+        if (s.proving) state.textContent = 'Proving… about half a minute. Keep this tab open.';
+        else if (s.to) state.textContent = `Catching up: ${Number(s.at).toLocaleString('en-US')} of ${Number(s.to).toLocaleString('en-US')}`;
+      });
+      if (current !== generation) return;
+      // Both views list it: Activity here and in the compact wallet.
+      logActivity(config, identity, { kind: 'shield', title: 'Shielded ZEC', symbol: 'ZEC', amount: zecText(view.shielded.net), tx: view.txid });
+      dialog.querySelector('.review').innerHTML = `<span>Shielded</span><b>${escapeHtml(zecText(view.shielded.net))} ZEC</b><span>Transaction</span><b><code class="txid">${escapeHtml(view.txid)}</code></b>`;
+      state.textContent = 'Sent. It shows in your shielded balance in a few blocks (about 5 minutes).';
+      go.innerHTML = 'Done <span>→</span>'; go.disabled = false; dialog.querySelector('.x').disabled = false;
+      go.onclick = () => dialog.close();
+      renderZec(view);
+      zecPlan = null; root.querySelector('#zec-t').hidden = true;
+      void zecTransparent();
+    } catch (e) {
+      state.textContent = e.message; state.classList.add('bad');
+      go.innerHTML = 'Try again <span>→</span>'; go.disabled = false; dialog.querySelector('.x').disabled = false;
+    }
+  };
+  dialog.showModal();
+}
+
+/// A wallet kept before Nap had transparent keys: the phrase, once, to add them.
+function addTransparent() {
+  const dialog = root.querySelector('#shield-dialog');
+  const kept = !!keptWallet();
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">TRANSPARENT ADDRESS</p><h2>Add it</h2><p class="muted">Enter your recovery phrase once.${tip(`This device was set up before Nap had a transparent address, so it does not hold that key${kept ? '. Your device password seals it with the rest' : ''}.`)}</p>
+    <form id="t-add"><label>Recovery phrase<textarea id="t-add-words" rows="3" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea></label>
+    <label>Passphrase<input id="t-add-pass" type="password" autocomplete="off" placeholder="Blank if unused"></label>
+    ${kept ? '<label>This device\'s password<input id="t-add-device" type="password" autocomplete="current-password"></label>' : ''}
+    <button class="primary" type="submit">Add <span>→</span></button><p class="error" role="alert"></p></form>`;
+  dialog.querySelector('.x').onclick = () => dialog.close();
+  dialog.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const button = dialog.querySelector('.primary'), error = dialog.querySelector('.error');
+    button.disabled = true; error.textContent = '';
+    try {
+      const words = dialog.querySelector('#t-add-words').value;
+      const passphrase = dialog.querySelector('#t-add-pass').value;
+      const check = deriveIdentity(words, passphrase, identity.accountIndex);
+      const same = check.accountHex === identity.accountHex;
+      forgetIdentity(check);
+      if (!same) throw new Error('That phrase opens a different wallet than this one.');
+      const keys = await deriveZecKeys(words, passphrase, identity.accountIndex);
+      const device = dialog.querySelector('#t-add-device');
+      if (device) await openSealedWallet(keptWallet(), device.value);
+      identity.zec.transparent = keys.transparent;
+      if (device && !keepWallet(await sealWallet(identity, receiving, device.value, identity.accountIndex))) throw new Error('Could not save to this device; the address works until you lock.');
+      if (hasSession) await saveSession(identity, receiving);
+      dialog.close();
+      zecAddressMode = 'transparent';
+      wallet('Transparent address added.');
+      refresh(false);
+    } catch (err) { error.textContent = err.message; button.disabled = false; }
+  };
+  dialog.showModal();
 }
 
 async function zecStart() {
@@ -578,7 +706,7 @@ async function zecStart() {
   if (!identity.zec) return;
   if (!config.lightdUrl) { zecStatus('no block server for this network', true); return; }
   const net = zecNetwork(), current = generation;
-  const account = new ZecAccount({ sk: identity.zec[net], network: net, url: config.lightdUrl, birthday: config.zecBirthday });
+  const account = new ZecAccount({ sk: identity.zec[net], tsk: identity.zec.transparent?.[net] || null, network: net, url: config.lightdUrl, birthday: config.zecBirthday });
   zecAccount = account;
   try {
     zecStatus('opening…');
@@ -586,6 +714,9 @@ async function zecStart() {
     zecFresh = false;
     if (current !== generation || zecAccount !== account) return;
     renderZec(view);
+    // Before the scan, which can take minutes for a restored phrase: money
+    // waiting on the transparent address shows at once.
+    await zecTransparent();
     await zecSync();
   } catch (e) {
     if (current === generation) zecStatus(e.message, true);
@@ -604,7 +735,7 @@ async function zecSync() {
         if (e.kind === 'received') note(`Received ${zecText(e.zatoshi)} ZEC${e.memo ? ` — “${e.memo}”` : ''}.`);
       }
     });
-    if (current === generation && zecAccount === account) renderZec(view);
+    if (current === generation && zecAccount === account) { renderZec(view); void zecTransparent(); }
   } catch (e) {
     if (current === generation) zecStatus(e.message, true);
   } finally {
@@ -661,11 +792,22 @@ function bindZec() {
   if (!form) return;
   root.querySelector('#zec-copy').onclick = async () => {
     await navigator.clipboard.writeText(root.querySelector('#zec-address').textContent);
-    note('Zcash address copied.');
+    note(zecAddressMode === 'transparent' ? 'Transparent address copied.' : 'Zcash address copied.');
   };
+  root.querySelectorAll('.zec-seg [data-addr]').forEach((b) => { b.onclick = () => { zecAddressMode = b.dataset.addr; renderZecAddress(); }; });
+  root.querySelector('#zec-shield').onclick = shieldDialog;
   const go = root.querySelector('#zec-go');
   const disarm = () => { delete go.dataset.armed; go.innerHTML = 'Review <span>→</span>'; };
   form.querySelectorAll('input').forEach((el) => { el.oninput = disarm; });
+  // A transparent recipient takes no memo: the field says so rather than
+  // refusing at Review.
+  const memoField = root.querySelector('#zec-memo');
+  root.querySelector('#zec-to').addEventListener('input', (e) => {
+    const t = /^t[a-z0-9]{3,}$/i.test(e.target.value.trim());
+    memoField.disabled = t;
+    if (t) memoField.value = '';
+    memoField.placeholder = t ? 'No memo: transparent address' : 'Memo (optional, shielded addresses only)';
+  });
   // A ZIP-321 request (a shop's QR, a "zcash:" link) pasted as the recipient
   // fills in the whole payment, which the holder still reviews.
   root.querySelector('#zec-to').addEventListener('input', (e) => {

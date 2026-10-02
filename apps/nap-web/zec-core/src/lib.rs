@@ -21,10 +21,11 @@ use orchard::ValuePool;
 use serde_json::{json, Value};
 use zcash_protocol::consensus::{Network, NetworkConstants, Parameters};
 use zyn_custody::compact::{self, CompactBlock, Hit};
-use zyn_custody::lightd::{decode, unwrap_reply, NET_MAINNET, NET_TESTNET};
+use zyn_custody::lightd::{decode, request, unwrap_reply, Utxo, NET_MAINNET, NET_TESTNET};
 use zyn_custody::notes::{HeldNote, NoteStore};
 use zyn_custody::payout::{self, Destination, Envelope, Payment};
 use zyn_custody::shielded::VaultKeys;
+use zyn_custody::transparent::{self, Receiver};
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -60,6 +61,27 @@ pub fn spending_key_from_phrase(
         .map_err(|e| format!("cannot derive the Zcash account: {e}"))?;
     Ok(*sk.to_bytes())
 }
+
+/// The transparent secret key at BIP-44 `m/44'/coin_type'/account'/0/0` of
+/// a BIP-39 phrase: the desktop's receiver (`zynzapd::wallet::receiver`) and
+/// the path other Zcash wallets derive from the same words, so funds at this
+/// address can always be swept elsewhere. The page seals these 32 bytes
+/// beside the Orchard key; the phrase itself is not kept.
+pub fn transparent_key_from_phrase(
+    phrase: &str,
+    passphrase: &str,
+    network: Network,
+    account: u32,
+) -> Result<[u8; 32], String> {
+    let words = bip39::Mnemonic::parse_in(bip39::Language::English, phrase.trim())
+        .map_err(|e| format!("invalid recovery phrase: {e}"))?;
+    let seed = words.to_seed(passphrase);
+    let r = Receiver::derive(&network, &seed, account, 0)
+        .ok_or("cannot derive the transparent key")?;
+    Ok(r.secret().secret_bytes())
+}
+
+const NO_TRANSPARENT: &str = "this wallet has no transparent key yet";
 
 /// One thing a sync saw.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,6 +130,11 @@ fn pool_name(p: ValuePool) -> &'static str {
     }
 }
 
+/// An output as `txid:index`, the txid as explorers show it.
+fn outpoint(u: &Utxo) -> String {
+    format!("{}:{}", txid_hex(&u.txid), u.index)
+}
+
 /// The txid as explorers show it: byte-reversed hex.
 pub fn txid_hex(txid: &[u8; 32]) -> String {
     txid.iter().rev().map(|b| format!("{b:02x}")).collect()
@@ -153,6 +180,11 @@ pub struct Wallet {
     unsent: Option<(ValuePool, Vec<HeldNote>)>,
     /// Building a proving key takes seconds; keep the ones built.
     proving: Vec<(BundleVersion, ProvingKey)>,
+    /// The transparent receiver, when the page has its key.
+    transparent: Option<Receiver>,
+    /// The outputs the last UTXOS reply listed, less those already being
+    /// shielded: exactly what [`Self::build_shield`] sweeps.
+    utxos: Vec<Utxo>,
 }
 
 impl Wallet {
@@ -172,7 +204,87 @@ impl Wallet {
             pending: None,
             unsent: None,
             proving: Vec::new(),
+            transparent: None,
+            utxos: Vec::new(),
         })
+    }
+
+    /// Give the wallet its transparent key (from [`transparent_key_from_phrase`]).
+    pub fn set_transparent(&mut self, secret: [u8; 32]) -> Result<(), String> {
+        self.transparent = Some(Receiver::from_secret(secret).ok_or("not a valid transparent key")?);
+        self.utxos.clear();
+        Ok(())
+    }
+
+    /// The transparent address (`t1…`, or `tm…` on testnet), when there is a key.
+    pub fn transparent_address(&self) -> Option<String> {
+        self.transparent
+            .as_ref()
+            .map(|r| r.encoded(self.network.network_type()))
+    }
+
+    /// A UTXOS request for this wallet's transparent address. The one request
+    /// that names an address (`lightd` explains the cost); it names only this
+    /// public one, never the shielded address or a key.
+    pub fn utxos_request(&self) -> Result<Vec<u8>, String> {
+        Ok(request::utxos(&self.transparent_address().ok_or(NO_TRANSPARENT)?))
+    }
+
+    /// Read a UTXOS body. `exclude` lists outpoints (`txid:index`, txid as
+    /// explorers show it) a shield already spent that the chain has not mined
+    /// yet, so they are neither shown nor swept twice. Returns what is there
+    /// and what sweeping it would land, from `transparent::plan`.
+    pub fn take_utxos(&mut self, body: &[u8], exclude: &[String]) -> Result<Value, String> {
+        self.transparent.as_ref().ok_or(NO_TRANSPARENT)?;
+        let mut list = decode::utxos(body).map_err(|e| e.to_string())?;
+        list.retain(|u| !exclude.contains(&outpoint(u)));
+        let plan = transparent::plan(&list);
+        let out = json!({
+            "address": self.transparent_address(),
+            "total": plan.total,
+            "fee": if list.is_empty() { 0 } else { plan.fee },
+            "net": if list.is_empty() { 0 } else { plan.net },
+            "count": plan.count,
+            "utxos": list.iter().map(|u| json!({"outpoint": outpoint(u), "value": u.value, "height": u.height})).collect::<Vec<_>>(),
+        });
+        self.utxos = list;
+        Ok(out)
+    }
+
+    /// Build, prove and sign the sweep of every output [`Self::take_utxos`]
+    /// last read into one shielded note at this wallet's own address. Slow,
+    /// like a payment. Nothing in the note stores changes: the note arrives
+    /// through the next sync like any other.
+    ///
+    /// Into **Ironwood** whenever the branch has it: from NU6.3 the Orchard
+    /// value balance cannot go negative, so value cannot enter Orchard at all
+    /// and the network refuses a t→Orchard sweep (DECISIONS §45.6). Orchard
+    /// is used only under a branch that predates Ironwood.
+    pub fn build_shield(&mut self, tip: u64, branch: u32) -> Result<Vec<u8>, String> {
+        let receiver = self.transparent.as_ref().ok_or(NO_TRANSPARENT)?;
+        if self.utxos.is_empty() {
+            return Err("nothing on the transparent address to shield".into());
+        }
+        let env = Envelope::next(self.network, tip, branch).map_err(|e| e.to_string())?;
+        let version = env
+            .bundle_version_for(ValuePool::Ironwood)
+            .or_else(|_| env.bundle_version_for(ValuePool::Orchard))
+            .map_err(|e| e.to_string())?;
+        let to = self.fvk.address_at(0u32, Scope::External);
+        let ovk = Some(self.fvk.to_ovk(Scope::External));
+        let sealed = transparent::shield(
+            &[receiver],
+            &self.utxos,
+            to,
+            &self.fvk,
+            &SpendAuthorizingKey::from(&self.sk),
+            ovk,
+            version,
+            &env,
+            rand::rngs::OsRng,
+        )
+        .map_err(|e| format!("cannot shield: {e}"))?;
+        Ok(sealed.bytes)
     }
 
     pub fn network(&self) -> Network {
@@ -595,6 +707,110 @@ mod tests {
             hex(&spending_key_from_phrase(WORDS, "", Network::TestNetwork, 0).unwrap()),
             "13548ce4ac2ec6cc6b93a8f66f50ddce51e9e156cc084d3cef279873446f1b1b"
         );
+    }
+
+    /// The transparent key is BIP-44 `m/44'/coin'/0'/0/0` of the BIP-39 seed:
+    /// the same receiver `zyn_custody::transparent::Receiver::derive` gives
+    /// desktop Nap for these words. The addresses are pinned so a change to
+    /// either side shows here; `tests/zec.test.mjs` checks the same two
+    /// against an independent BIP-32 implementation.
+    #[test]
+    fn the_transparent_key_is_bip44_account_zero_index_zero() {
+        let seed = bip39::Mnemonic::parse_in(bip39::Language::English, WORDS).unwrap().to_seed("");
+        for (net, addr) in [
+            (Network::MainNetwork, MAIN_T),
+            (Network::TestNetwork, TEST_T),
+        ] {
+            let k = transparent_key_from_phrase(WORDS, "", net, 0).unwrap();
+            let derived = Receiver::derive(&net, &seed, 0, 0).unwrap();
+            assert_eq!(k, derived.secret().secret_bytes());
+            let mut w = Wallet::new(spending_key_from_phrase(WORDS, "", net, 0).unwrap(), net).unwrap();
+            assert_eq!(w.transparent_address(), None);
+            assert!(w.utxos_request().is_err());
+            w.set_transparent(k).unwrap();
+            assert_eq!(w.transparent_address().as_deref(), Some(addr));
+        }
+        assert_ne!(
+            transparent_key_from_phrase(WORDS, "", Network::MainNetwork, 1).unwrap(),
+            transparent_key_from_phrase(WORDS, "", Network::MainNetwork, 0).unwrap(),
+            "account 1 is another address"
+        );
+    }
+
+    const MAIN_T: &str = "t1dUDJ62ANtmebE8drFg7g2MWYwXHQ6Xu3F";
+    const TEST_T: &str = "tmBsTi2xWTjUdEXnuTceL7fecEQKeWaPDJd";
+
+    fn p2pkh(addr: &str, net: Network) -> Vec<u8> {
+        let a = payout::transparent_address(addr, net).unwrap();
+        let zcash_transparent::address::TransparentAddress::PublicKeyHash(h) = a else { panic!() };
+        let mut s = vec![0x76, 0xa9, 0x14];
+        s.extend_from_slice(&h);
+        s.extend_from_slice(&[0x88, 0xac]);
+        s
+    }
+
+    fn testnet_wallet() -> Wallet {
+        let net = Network::TestNetwork;
+        let mut w = Wallet::new(spending_key_from_phrase(WORDS, "", net, 0).unwrap(), net).unwrap();
+        w.set_transparent(transparent_key_from_phrase(WORDS, "", net, 0).unwrap()).unwrap();
+        let mut empty = vec![0u8; 32];
+        empty.extend_from_slice(&0u32.to_le_bytes());
+        w.seed(4_380_000, &empty, &empty).unwrap();
+        w
+    }
+
+    /// What is on the address, less what a shield already spent, and what
+    /// sweeping it would land: the fee is ZIP-317's for the inputs plus two
+    /// padded shielded actions.
+    #[test]
+    fn utxos_are_planned_and_a_pending_shield_is_left_out() {
+        let mut w = testnet_wallet();
+        let script = p2pkh(TEST_T, Network::TestNetwork);
+        let u = |i: u8, value| Utxo { txid: [i; 32], index: i as u32, value, height: 4_380_010, script: script.clone() };
+        let body = unwrap_reply(&zyn_custody::lightd::reply::utxos(&[u(1, 100_000), u(2, 50_000)])).unwrap();
+        let all = w.take_utxos(&body, &[]).unwrap();
+        assert_eq!(all["total"], 150_000);
+        assert_eq!(all["count"], 2);
+        assert_eq!(all["fee"], 20_000);
+        assert_eq!(all["net"], 130_000);
+        let first = all["utxos"][0]["outpoint"].as_str().unwrap().to_string();
+        assert_eq!(first, format!("{}:1", "01".repeat(32)));
+        let rest = w.take_utxos(&body, &[first]).unwrap();
+        assert_eq!(rest["total"], 50_000);
+        assert_eq!(rest["fee"], 15_000);
+        let none = w.take_utxos(&unwrap_reply(&zyn_custody::lightd::reply::utxos(&[])).unwrap(), &[]).unwrap();
+        assert_eq!((none["total"].as_u64(), none["fee"].as_u64(), none["net"].as_u64()), (Some(0), Some(0), Some(0)));
+        const NU6_3: u32 = 0x37a5_165b;
+        assert!(w.build_shield(4_380_100, NU6_3).unwrap_err().contains("nothing"));
+    }
+
+    /// A real sweep: built, proved and signed into one Ironwood note at the
+    /// wallet's own address, with the transparent input spent and the fee
+    /// left to the miner. Dust the fee would eat is refused before proving.
+    #[test]
+    fn a_shield_sweeps_into_ironwood_at_our_own_address() {
+        use zcash_primitives::transaction::Transaction;
+        let mut w = testnet_wallet();
+        let script = p2pkh(TEST_T, Network::TestNetwork);
+        const NU6_3: u32 = 0x37a5_165b;
+        let dust = Utxo { txid: [3; 32], index: 0, value: 9_000, height: 4_380_010, script: script.clone() };
+        w.take_utxos(&unwrap_reply(&zyn_custody::lightd::reply::utxos(&[dust])).unwrap(), &[]).unwrap();
+        assert!(w.build_shield(4_380_100, NU6_3).unwrap_err().contains("fee"));
+
+        let coin = Utxo { txid: [4; 32], index: 1, value: 100_000, height: 4_380_010, script };
+        w.take_utxos(&unwrap_reply(&zyn_custody::lightd::reply::utxos(&[coin])).unwrap(), &[]).unwrap();
+        let raw = w.build_shield(4_380_100, NU6_3).unwrap();
+        let tx = Transaction::read(&raw[..], zcash_protocol::consensus::BranchId::try_from(NU6_3).unwrap()).unwrap();
+        let t = tx.transparent_bundle().expect("a transparent input");
+        assert_eq!(t.vin.len(), 1);
+        assert!(t.vout.is_empty(), "nothing stays transparent");
+        assert!(tx.orchard_bundle().is_none(), "nothing enters Orchard");
+        let iw = tx.ironwood_bundle().expect("an Ironwood bundle");
+        assert_eq!(i64::from(*iw.value_balance()), -85_000, "100,000 in, 15,000 fee");
+        // The note is ours: our own viewing key decrypts it.
+        let scanned = w.keys.scan_actions_lenient(&raw, *tx.txid().as_ref(), 4_380_101).unwrap();
+        let mine: u64 = scanned.actions.iter().filter_map(|a| a.ours.as_ref()).map(|n| n.value().inner()).sum();
+        assert_eq!(mine, 85_000);
     }
 
     #[test]

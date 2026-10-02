@@ -127,6 +127,11 @@ export function exportKeys(identity, receiving) {
     // cracked record costs these too, which is why sealing is opt-in.
     zm: identity.zec?.mainnet ? hex(identity.zec.mainnet) : undefined,
     zt: identity.zec?.testnet ? hex(identity.zec.testnet) : undefined,
+    // The transparent keys (BIP-44 m/44'/coin'/account'/0/0), for receiving
+    // from exchanges and shielding. Absent from records sealed before Nap
+    // had them; the wallet then asks for the phrase once to add them.
+    tm: identity.zec?.transparent?.mainnet ? hex(identity.zec.transparent.mainnet) : undefined,
+    tt: identity.zec?.transparent?.testnet ? hex(identity.zec.transparent.testnet) : undefined,
   };
 }
 
@@ -187,6 +192,7 @@ export function importKeys(bundle, accountIndex = 0) {
   // Likewise the Zcash keys: a record sealed before the browser held ZEC
   // opens without them, and the wallet asks for the phrase once to add them.
   if (bundle.zm && bundle.zt) identity.zec = { mainnet: unhex(bundle.zm, 32), testnet: unhex(bundle.zt, 32) };
+  if (identity.zec && bundle.tm && bundle.tt) identity.zec.transparent = { mainnet: unhex(bundle.tm, 32), testnet: unhex(bundle.tt, 32) };
   const receiving = (bundle.r || []).map((r) => ({
     ...identityFromSecretKey(unhex(r.k, 32), accountIndex),
     collection: unhex(r.c, 32),
@@ -343,4 +349,6 @@ export function forgetIdentity(identity) {
   identity?.secretKey?.fill(0);
   identity?.zec?.mainnet?.fill(0);
   identity?.zec?.testnet?.fill(0);
+  identity?.zec?.transparent?.mainnet?.fill(0);
+  identity?.zec?.transparent?.testnet?.fill(0);
 }

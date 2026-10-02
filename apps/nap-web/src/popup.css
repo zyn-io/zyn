@@ -236,3 +236,21 @@ details.more[open] summary { margin-bottom: 10px; }
 .seg.two-seg { grid-template-columns: 1fr 1fr; }
 button.row:disabled { opacity: .45; cursor: default; }
 button.row:disabled:hover { background: none; }
+
+/* ---- transparent ZEC and Shield -------------------------------------- */
+/* The one balance anyone can see: set apart from the shielded figure. */
+.t-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 9px 10px 9px 14px; border: 1px solid #ff8f8340; border-radius: 12px; background: #ff8f830d; text-align: left; }
+.t-line i { display: block; font: normal 10.5px Mono; letter-spacing: .06em; color: var(--bad); }
+.t-line b { font: 700 16px Bricolage; font-variant-numeric: tabular-nums; }
+.t-line .btn { width: auto; padding: 9px 16px; }
+.seg.four-seg { grid-template-columns: 1fr 1fr; }
+.public-line { color: var(--bad); font-weight: 600; }
+.screen.public .address { border-color: #ff8f8340; }
+/* The "i" bubble (tip.js), in the popup's colours. */
+.tip { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 0 0 6px; padding: 0; vertical-align: 1px; border: 1px solid currentColor; border-radius: 50%; background: none; color: inherit; opacity: .6; font: italic 700 10px/1 Georgia, serif; cursor: pointer; }
+.tip:hover, .tip[aria-expanded='true'] { opacity: 1; }
+.tip-bubble { position: absolute; z-index: 100; padding: 11px 13px; border-radius: 10px; background: #0d1012; color: var(--text); font: 12.5px/1.5 Plex, system-ui, sans-serif; box-shadow: 0 0 0 1px var(--line-strong), 0 14px 40px #0008; }
+.field input:disabled { opacity: .5; cursor: not-allowed; }
+/* The glow above sits 80px past the right edge: `clip` (not just `hidden`)
+   keeps a focus or scrollIntoView from sliding the whole wallet sideways. */
+.pop { overflow: clip; }

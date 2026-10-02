@@ -41,26 +41,42 @@ export function engine(zec, post) {
       tip,
       balance: JSON.parse(w.balance()),
       notes: JSON.parse(w.notes()),
+      transparent: w.transparentAddress() ?? null,
     };
   }
+
+  /// What sits on the transparent address, less `exclude` (outpoints a
+  /// shield already spent that the chain has not mined yet).
+  const utxos = async (exclude) => {
+    const w = need();
+    return JSON.parse(w.takeUtxos(await call(w.utxosRequest()), JSON.stringify(exclude || [])));
+  };
 
   return {
     /// Both networks' spending keys for a phrase: the words are chain
     /// independent, and switching network must not cost a restore.
+    /// The transparent keys (BIP-44, index 0) ride along under `transparent`.
     derive(phrase, passphrase, account) {
       return {
         mainnet: zec.spendingKeyFromPhrase(phrase, passphrase, 'mainnet', account),
         testnet: zec.spendingKeyFromPhrase(phrase, passphrase, 'testnet', account),
+        transparent: {
+          mainnet: zec.transparentKeyFromPhrase(phrase, passphrase, 'mainnet', account),
+          testnet: zec.transparentKeyFromPhrase(phrase, passphrase, 'testnet', account),
+        },
       };
     },
 
     /// Open the wallet for `sk` on `net`, resuming `state` when it reads.
     /// A state that does not read (another network, a damaged record) is
     /// dropped: it costs a rescan, never the money.
-    open(sk, net, state) {
+    /// `tsk`, the transparent key, is optional: a wallet kept before Nap
+    /// had one opens without it, and shows no transparent address.
+    open(sk, net, state, tsk) {
       wallet?.free();
       network = net;
       wallet = new zec.ZecWallet(sk, net);
+      if (tsk) wallet.setTransparent(tsk);
       let resumed = false;
       if (state) {
         try { wallet.loadState(state); resumed = true; } catch { /* rescan */ }
@@ -112,6 +128,28 @@ export function engine(zec, post) {
       const txid = zec.decodeSent(await call(zec.sendRequest(raw)));
       w.confirmSent();
       return { ...summary(i.tip), txid, state: w.state() };
+    },
+
+    /// `{address, total, fee, net, count, utxos}`, zatoshi.
+    transparent(exclude) {
+      return utxos(exclude);
+    },
+
+    /// Sweep the transparent address into one shielded note of this wallet:
+    /// read the outputs afresh, prove, broadcast. Returns the summary with
+    /// `txid` and `shielded` (the plan that was swept). No scan first: a
+    /// sweep spends no notes, so a wallet still catching up can shield, and
+    /// the note it makes arrives through the next sync.
+    async shield(exclude, onStep = () => {}) {
+      const w = need();
+      const plan = await utxos(exclude);
+      if (!plan.count) throw new Error('Nothing on the transparent address to shield');
+      if (!plan.net) throw new Error(`${plan.total} zatoshi does not cover the ${plan.fee} zatoshi fee`);
+      const i = await info();
+      onStep({ proving: true });
+      const raw = w.buildShield(i.tip, i.branch);
+      const txid = zec.decodeSent(await call(zec.sendRequest(raw)));
+      return { ...summary(i.tip), txid, shielded: plan, state: w.state() };
     },
 
     summary: () => summary(),

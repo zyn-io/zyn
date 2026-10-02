@@ -17,7 +17,10 @@ import { parsePaymentRequest } from './zip321.js';
 import { bridgePage, handoffUrl } from './bridges.js';
 import { activity, bridgeOut, bridgesOf, bridgeState, btcDepositAddress, checkBridgeOut, chooseNetwork, claimDeposits, collectOwed, depositAddress, depositCode, loadConfig, loadPocket, logActivity, payOnZyn, placeSwap, quoteSwap, resolveRecipient, revealBridgeExits, revealExits, withdrawZec } from './pocket.js';
 import { endSession, loadSession, saveSession } from './session.js';
+import { installTips, tip } from './tip.js';
 import './popup.css';
+
+installTips();
 
 const pop = document.querySelector('#pop');
 const KEPT_KEY = 'nap.kept.v1';
@@ -46,6 +49,7 @@ let pocket = null; // { epoch, coins, items, held }
 let pocketError = '';
 let zec = null; // ZecAccount
 let zecView = null;
+let zecPlan = null; // what is on the transparent address, and what shielding it lands
 let zecState = ''; // a short status line
 let tab = 'tokens';
 let zecFresh = false; // a wallet made just now has nothing to scan back for
@@ -332,7 +336,7 @@ function lock() {
 function begin(opened) {
   identity = opened.identity;
   receiving = opened.receiving || [];
-  pocket = null; pocketError = ''; zecView = null; zecState = '';
+  pocket = null; pocketError = ''; zecView = null; zecPlan = null; zecState = '';
   generation++;
   home();
   refresh();
@@ -352,6 +356,7 @@ function home() {
         <span class="label"><i class="shield"></i>Shielded ZEC</span>
         <div class="amount" id="zec-amount">—</div>
         <div class="sub" id="zec-sub">Opening your Zcash wallet…</div>
+        <div class="t-line hidden" id="zec-t"><span><i>Transparent · public</i><b id="zec-t-amount"></b></span><button class="btn" id="zec-shield">Shield</button></div>
       </section>
       <nav class="actions">
         <button class="act" id="a-receive"><span>${ICON.receive}</span>Receive</button>
@@ -372,6 +377,7 @@ function home() {
   $('#net').onclick = networkMenu;
   $('#menu').onclick = mainMenu;
   $('#a-receive').onclick = () => receive();
+  $('#zec-shield').onclick = () => shieldReview();
   $('#a-send').onclick = () => sendPick();
   $('#a-swap').onclick = () => swap();
   $('#a-bridge').onclick = () => bridge();
@@ -397,6 +403,25 @@ function renderZec() {
   const pending = zecView?.balance.inFlight ? ` · ${zecText(zecView.balance.inFlight)} on its way` : '';
   sub.textContent = zecState ? `${zecState}${pending}` : pending.slice(3);
   sub.classList.toggle('bad', /unreachable|failed|error|not /i.test(zecState));
+  const t = $('#zec-t');
+  if (t) {
+    t.classList.toggle('hidden', !(zecPlan?.total > 0));
+    if (zecPlan) $('#zec-t-amount').textContent = `${zecText(zecPlan.total)} ZEC`;
+    $('#zec-shield').disabled = !(zecPlan?.net > 0);
+  }
+}
+
+// The transparent balance: one UTXOS question naming this public address
+// (never the shielded one), asked after each sync.
+async function readTransparent() {
+  const account = zec, g = generation;
+  if (!account?.tsk) return;
+  try {
+    const plan = await account.transparent();
+    if (g !== generation || zec !== account) return;
+    zecPlan = plan;
+    renderZec();
+  } catch { /* asked again after the next sync */ }
 }
 
 function renderPanel() {
@@ -438,8 +463,9 @@ function itemsHtml() {
 }
 
 function activityHtml() {
-  const mine = activity(config, identity).map((a) => `<li class="row"><span class="tok" data-sym="${esc(a.symbol || '?')}">${a.kind === 'in' ? '↓' : '↑'}</span><span class="who"><b>${esc(a.title)}</b><span>${esc(a.to ? `to ${short(a.to, 8, 6)}` : '')}</span></span><span class="val"><b>${esc(a.amount || '')}</b><span>${esc(new Date(a.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}</span></span></li>`);
-  const received = (zecView?.notes || []).slice(0, 20).map((n) => `<li class="row"><span class="tok" data-sym="ZEC">↓</span><span class="who"><b>Received ZEC</b><span>block ${Number(n.height).toLocaleString('en-US')}</span></span><span class="val"><b>+${esc(zecText(n.zatoshi))}</b><span class="teal">shielded</span></span></li>`);
+  const mine = activity(config, identity).map((a) => `<li class="row"><span class="tok" data-sym="${esc(a.symbol || '?')}">${a.kind === 'out' ? '↑' : '↓'}</span><span class="who"><b>${esc(a.title)}</b><span>${esc(a.to ? `to ${short(a.to, 8, 6)}` : a.kind === 'shield' ? 'from transparent' : '')}</span></span><span class="val"><b>${esc(a.kind === 'shield' ? `+${a.amount}` : a.amount || '')}</b><span>${esc(new Date(a.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}</span></span></li>`);
+  const shieldTx = new Set(activity(config, identity).filter((a) => a.kind === 'shield').map((a) => a.tx));
+  const received = (zecView?.notes || []).filter((n) => !shieldTx.has(n.txid)).slice(0, 20).map((n) => `<li class="row"><span class="tok" data-sym="ZEC">↓</span><span class="who"><b>Received ZEC</b><span>block ${Number(n.height).toLocaleString('en-US')}</span></span><span class="val"><b>+${esc(zecText(n.zatoshi))}</b><span class="teal">shielded</span></span></li>`);
   const all = [...mine, ...received];
   return all.length ? `<ul class="rows">${all.join('')}</ul>` : '<div class="empty"><b>Nothing yet.</b>Sends from this wallet and ZEC it receives show up here. Zyn keeps no public history of your account — that is the point.</div>';
 }
@@ -499,12 +525,14 @@ async function startZec() {
   if (!identity.zec || !config.lightdUrl) { renderZec(); return; }
   const g = generation;
   const net = config.zcashPrefix === 'u1' ? 'mainnet' : 'testnet';
-  const account = new ZecAccount({ sk: identity.zec[net], network: net, url: config.lightdUrl, birthday: config.zecBirthday });
+  const account = new ZecAccount({ sk: identity.zec[net], tsk: identity.zec.transparent?.[net] || null, network: net, url: config.lightdUrl, birthday: config.zecBirthday });
   zec = account;
   try {
     zecView = await account.peek(); // what this device already knows: instant
     if (g !== generation) return;
     zecState = 'catching up…'; renderZec(); if (tab !== 'items') renderPanel();
+    // Before the scan, which can take minutes for a restored phrase.
+    await readTransparent();
     zecView = await account.open({ fresh: zecFresh });
     zecFresh = false;
     zecView = await account.sync((s) => {
@@ -514,6 +542,7 @@ async function startZec() {
     });
     if (g !== generation) return;
     zecState = zecView.syncedTo >= 0 ? `synced · block ${Number(zecView.syncedTo).toLocaleString('en-US')}` : '';
+    void readTransparent();
   } catch (e) {
     if (g !== generation) return;
     zecState = e.message === 'Failed to fetch' ? 'block server unreachable' : e.message;
@@ -547,7 +576,7 @@ function networkMenu() {
 
 function switchTo(id) {
   config = chooseNetwork(config, id);
-  generation++; clearTimeout(timer); stopZec(); zec = null; zecView = null; zecState = ''; pocket = null; pocketError = '';
+  generation++; clearTimeout(timer); stopZec(); zec = null; zecView = null; zecPlan = null; zecState = ''; pocket = null; pocketError = '';
   home(); refresh(); startZec();
   toast(`Switched to ${config.network}`);
 }
@@ -589,8 +618,8 @@ function recovery() {
 // Receive.
 
 function receive(which = identity.zec ? 'zcash' : 'zyn') {
-  const s = screen('Receive', `<div class="seg" role="group">
-      ${identity.zec ? '<button data-r="zcash">Zcash</button>' : ''}<button data-r="deposit">ZEC → Zyn</button><button data-r="zyn">Zyn account</button>
+  const s = screen('Receive', `<div class="seg${identity.zec ? ' four-seg' : ''}" role="group">
+      ${identity.zec ? '<button data-r="zcash">Shielded address</button><button data-r="transparent">Transparent address</button>' : ''}<button data-r="deposit">ZEC → Zyn</button><button data-r="zyn">Zyn account</button>
     </div>
     <div class="qr"><canvas></canvas></div>
     <div class="address" id="r-address">…</div>
@@ -606,6 +635,11 @@ function receive(which = identity.zec ? 'zcash' : 'zyn') {
         if (!zecView) throw new Error('Your Zcash wallet is still opening.');
         text = zecView.address; what = 'Zcash address';
         hint.textContent = `A shielded ${config.zcash} address. Pay it from any Zcash wallet; only you can see what arrives.`;
+      } else if (kind === 'transparent') {
+        if (!zecView) throw new Error('Your Zcash wallet is still opening.');
+        if (!zecView.transparent) throw new Error('This device was set up before Nap had a transparent address. Add it in the full view with your recovery phrase.');
+        text = zecView.transparent; what = 'Transparent address';
+        hint.innerHTML = `<b class="public-line">Payments to this address are public.</b>${tip('Use it for exchanges that only pay transparent addresses. When the ZEC arrives, press Shield on the home screen to move it into your shielded balance.')}`;
       } else if (kind === 'deposit') {
         hint.textContent = 'Asking Zyn for your deposit address…';
         text = await depositAddress(config, identity); what = 'Deposit address';
@@ -616,6 +650,7 @@ function receive(which = identity.zec ? 'zcash' : 'zyn') {
         hint.textContent = 'For Zyn tokens and items from another Zyn wallet. Not a Zcash address — ZEC sent here is lost.';
       }
     } catch (e) { hint.textContent = e.message; hint.classList.add('bad'); addr.textContent = 'Unavailable'; return; }
+    s.classList.toggle('public', kind === 'transparent');
     hint.classList.remove('bad');
     addr.textContent = text;
     await QRCode.toCanvas(canvas, text, { width: 336, margin: 1, color: { dark: '#15181b', light: '#f8f2e4' } });
@@ -624,6 +659,48 @@ function receive(which = identity.zec ? 'zcash' : 'zyn') {
   };
   s.querySelectorAll('[data-r]').forEach((b) => { b.onclick = () => show(b.dataset.r); });
   show(which);
+}
+
+// ---------------------------------------------------------------------------
+// Shield: everything on the transparent address into the shielded balance.
+
+function shieldReview() {
+  const plan = zecPlan;
+  if (!plan?.net || !zec) return;
+  const s = screen('Shield', `
+    <div class="big-amount"><b>${esc(zecText(plan.net))}</b><span>ZEC, shielded</span></div>
+    <div class="review">
+      <span>Transparent</span><b>${esc(zecText(plan.total))} ZEC</b>
+      <span>Network fee</span><b>${esc(zecText(plan.fee))} ZEC</b>
+      <span>You receive</span><b>${esc(zecText(plan.net))} ZEC</b>
+      <span>Arrives as</span><b>shielded ZEC</b>
+    </div>
+    <p class="hint">Moves everything on your transparent address into your shielded balance.${tip('Proving takes about half a minute; keep this window open. The fee is ZIP-317: one per transparent input plus two shielded actions.')}</p>
+    <p class="hint" id="h-state" role="status"></p>`, '<button class="btn" id="h-go">Shield</button><button class="btn ghost" id="h-cancel">Cancel</button>');
+  $('#h-cancel', s).onclick = () => s.remove();
+  $('#h-go', s).onclick = async () => {
+    const go = $('#h-go', s), state = $('#h-state', s), g = generation, account = zec;
+    go.disabled = true; $('#h-cancel', s).disabled = true; $('#s-back', s).disabled = true;
+    go.textContent = 'Shielding…'; state.classList.remove('bad');
+    try {
+      zecView = await account.shield((st) => {
+        if (st.proving) state.textContent = 'Proving… about half a minute. Keep this window open.';
+        else if (st.to) state.textContent = `Catching up: ${Number(st.at).toLocaleString('en-US')} / ${Number(st.to).toLocaleString('en-US')}`;
+      });
+      if (g !== generation) return;
+      logActivity(config, identity, { kind: 'shield', title: 'Shielded ZEC', symbol: 'ZEC', amount: zecText(zecView.shielded.net), tx: zecView.txid });
+      $('.review', s).innerHTML = `<span>Shielded</span><b>${esc(zecText(zecView.shielded.net))} ZEC</b><span>Transaction</span><b class="mono">${esc(zecView.txid)}</b>`;
+      state.textContent = 'Sent. It shows in your shielded balance in a few blocks (about 5 minutes).'; state.classList.add('ok');
+      go.textContent = 'Done'; go.disabled = false; go.onclick = () => s.remove();
+      $('#h-cancel', s).classList.add('hidden'); $('#s-back', s).disabled = false;
+      zecPlan = null; renderZec(); if (tab === 'activity') renderPanel();
+      void readTransparent();
+    } catch (x) {
+      if (g !== generation) return;
+      state.textContent = x.message; state.classList.add('bad');
+      go.disabled = false; go.textContent = 'Try again'; $('#h-cancel', s).disabled = false; $('#s-back', s).disabled = false;
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -901,6 +978,12 @@ function sendForm(opt, prefill = {}) {
   });
   $('#f-to', s).addEventListener('input', (e) => {
     const v = e.target.value.trim();
+    const memo = $('#f-memo', s);
+    if (memo) {
+      const t = /^t[a-z0-9]{3,}$/i.test(v);
+      memo.disabled = t; if (t) memo.value = '';
+      memo.placeholder = t ? 'No memo: transparent address' : '';
+    }
     if (!zcash || !/^zcash:/i.test(v)) return;
     try {
       const r = parsePaymentRequest(v);

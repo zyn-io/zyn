@@ -32,6 +32,21 @@ pub fn spending_key_from_phrase(
         .map_err(err)
 }
 
+/// The transparent secret key for a recovery phrase, to seal. See
+/// [`crate::transparent_key_from_phrase`].
+#[wasm_bindgen(js_name = transparentKeyFromPhrase)]
+pub fn transparent_key_from_phrase(
+    phrase: &str,
+    passphrase: &str,
+    network: &str,
+    account: u32,
+) -> Result<Vec<u8>, JsError> {
+    let net = crate::network_named(network).map_err(err)?;
+    crate::transparent_key_from_phrase(phrase, passphrase, net, account)
+        .map(|k| k.to_vec())
+        .map_err(err)
+}
+
 /// A reply frame's body, or the server's refusal as an error.
 #[wasm_bindgen(js_name = replyBody)]
 pub fn reply_body(reply: &[u8]) -> Result<Vec<u8>, JsError> {
@@ -108,6 +123,42 @@ impl ZecWallet {
 
     pub fn address(&self) -> String {
         self.0.address()
+    }
+
+    /// Give the wallet its transparent key, 32 bytes.
+    #[wasm_bindgen(js_name = setTransparent)]
+    pub fn set_transparent(&mut self, secret: &[u8]) -> Result<(), JsError> {
+        let key: [u8; 32] = secret
+            .try_into()
+            .map_err(|_| JsError::new("a transparent key is 32 bytes"))?;
+        self.0.set_transparent(key).map_err(err)
+    }
+
+    /// The transparent address, or undefined without a key.
+    #[wasm_bindgen(js_name = transparentAddress)]
+    pub fn transparent_address(&self) -> Option<String> {
+        self.0.transparent_address()
+    }
+
+    #[wasm_bindgen(js_name = utxosRequest)]
+    pub fn utxos_request(&self) -> Result<Vec<u8>, JsError> {
+        self.0.utxos_request().map_err(err)
+    }
+
+    /// Read a UTXOS body, leaving out the outpoints in `exclude` (a JSON
+    /// array of `txid:index`). Returns `{address, total, fee, net, count,
+    /// utxos}` as JSON, amounts in zatoshi.
+    #[wasm_bindgen(js_name = takeUtxos)]
+    pub fn take_utxos(&mut self, body: &[u8], exclude: &str) -> Result<String, JsError> {
+        let exclude: Vec<String> = serde_json::from_str(if exclude.is_empty() { "[]" } else { exclude })
+            .map_err(|e| JsError::new(&format!("exclude is a JSON list: {e}")))?;
+        self.0.take_utxos(body, &exclude).map(|v| v.to_string()).map_err(err)
+    }
+
+    /// Build, prove and sign the sweep of the outputs last read. Slow.
+    #[wasm_bindgen(js_name = buildShield)]
+    pub fn build_shield(&mut self, tip: f64, branch: u32) -> Result<Vec<u8>, JsError> {
+        self.0.build_shield(whole(tip, "height")?, branch).map_err(err)
     }
 
     #[wasm_bindgen(js_name = hasState)]
