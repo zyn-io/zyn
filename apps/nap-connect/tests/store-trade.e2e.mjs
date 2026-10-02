@@ -45,7 +45,7 @@ async function chooseNap(p, page, optionSel) {
   const before = new Set(p.ctx.pages());
   await page.click(`${optionSel}:has-text("Nap in the browser")`);
   const fresh = await p.ctx.waitForEvent('page', { timeout: 8000 }).catch(() => null);
-  const nap = fresh || p.ctx.pages().find((x) => !before.has(x) || /nap\.cavebro\.win|connect/.test(x.url()));
+  const nap = fresh || p.ctx.pages().find((x) => !before.has(x) || /nap\.zyn-network\.com|connect/.test(x.url()));
   p.popup = nap;
   await unlockNap(nap, p.words);
   await nap.waitForSelector('#yes', { timeout: 30000 }).then(() => nap.click('#yes')).catch(() => {});

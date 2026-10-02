@@ -52,7 +52,7 @@ test('the whole journey is reachable', () => {
     assert.ok(walletCalls.includes(m), `the store carries ${m}`);
   }
   assert.match(zstore, /chain\('zyn_offers'\)/, 'the market reads the public book');
-  for (const page of [deposit, exit]) assert.match(page, /href="https:\/\/nap\.cavebro\.win"/, 'deposit and exit hand off to Nap');
+  for (const page of [deposit, exit]) assert.match(page, /href="https:\/\/nap\.zyn-network\.com"/, 'deposit and exit hand off to Nap');
   for (const page of [items, item, market]) assert.match(page, /<script type="module" src="\/zstore\.js/);
 });
 
