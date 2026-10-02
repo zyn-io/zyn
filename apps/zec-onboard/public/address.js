@@ -126,7 +126,7 @@ export const DESCRIBE = {
   unified: {
     pool: 'Shielded (usually)',
     seen: 'The chain does not show this address when it is paid through its shielded receiver, which wallets use whenever they can. A payment from a transparent address still shows its amount.',
-    nap: 'Nap can pay it, with a memo.',
+    nap: 'Nap can pay it through its shielded receiver, with a memo.',
   },
   sapling: {
     pool: 'Shielded (Sapling)',

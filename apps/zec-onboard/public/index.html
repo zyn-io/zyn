@@ -32,7 +32,7 @@
   <section class="hero">
     <div class="hero-text">
       <h1>From zero to your first shielded ZEC transaction.</h1>
-      <p class="lede">Six steps: set up a wallet, get ZEC, shield it, receive, send, and unshield. About twenty minutes, plus waiting for blocks.</p>
+      <p class="lede">Six steps: set up a wallet, get ZEC, shield it, receive, send, and unshield. About twenty minutes once you have an exchange account, plus waiting for blocks.</p>
       <p class="lede small"><span class="m">You need a phone or computer and a little money to buy ZEC.</span><span class="t">On testnet you need nothing: the faucet gives you coins.</span></p>
     </div>
     <figure class="film" aria-labelledby="film-cap">
@@ -46,7 +46,7 @@
   <section class="chain-row">
     <figure class="chain" aria-labelledby="chain-cap">
       <figcaption id="chain-cap">What the chain sees
-        <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About this table">i</button><span class="bubble" role="note" hidden>Every Zcash transaction is public on the blockchain. Shielded parts are encrypted: only the wallets involved can read the addresses, the amount and the memo. Hatched cells are what an observer cannot see.</span></span>
+        <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About this table">i</button><span class="bubble" role="note" hidden>Every Zcash transaction is recorded on the blockchain. In the shielded parts the chain shows no addresses, and only the sender and the receiver can read the amount and the memo. Hatched cells are what an observer cannot see.</span></span>
       </figcaption>
       <table>
         <thead><tr><th scope="col">Step</th><th scope="col">From</th><th scope="col">To</th><th scope="col">Amount</th></tr></thead>
@@ -85,8 +85,8 @@
             <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="Other wallets">i</button><span class="bubble" role="note" hidden>Any shielded Zcash wallet follows the same steps, for example Zodl, YWallet, Zingo! or Noir. The buttons have slightly different names. A list by platform is at the end of this page.</span></span>
           </p>
           <ol class="do">
-            <li>Open <a href="https://nap.zyn-network.com" rel="noopener">nap.zyn-network.com</a>.<span class="t"> Pick <b>Testnet</b> in the network menu at the top.</span></li>
-            <li>Choose <b>Create a new wallet</b>.</li>
+            <li>Open <a href="https://nap.zyn-network.com" rel="noopener">nap.zyn-network.com</a>.<span class="t"> Pick the testnet network in the menu at the top right.</span></li>
+            <li>Choose <b>Create new</b>.</li>
             <li>Write the 24 words on paper, in order. Tick the box once they are saved.</li>
             <li>Set a password so Nap keeps the wallet on this device. The 24 words restore it anywhere.</li>
           </ol>
@@ -150,7 +150,7 @@
           <ol class="do">
             <li>Open <b>Receive</b>. The shielded address is shown first, with a QR code.</li>
             <li>Copy it or show the QR to whoever pays you.</li>
-            <li>They can add a memo of up to 512 bytes. Only you can read it; it shows in your activity.</li>
+            <li>They can add a memo of up to 512 bytes. Only you and the sender can read it; it shows in your activity.</li>
           </ol>
           <p>Sharing a shielded address is safe: the chain never shows it as the receiver of a payment.</p>
           <button type="button" class="done" data-step="4" aria-pressed="false">Mark step 4 done</button>
@@ -161,7 +161,7 @@
       <section class="step sh" id="s5" data-step="5" aria-labelledby="s5-h">
         <div class="step-text">
           <h2 id="s5-h"><span class="n">5</span>Send a shielded payment</h2>
-          <p>From one shielded address to another, the chain shows only that a transaction happened, when, and its fee.</p>
+          <p>From one shielded address to another, the chain shows only that a transaction happened, when, its size and its fee.</p>
           <ol class="do">
             <li>Open <b>Send</b> and paste a <code class="m">u1…</code><code class="t">utest1…</code> address. No one to pay? Use your own.</li>
             <li>Enter an amount and, if you like, a memo.</li>
@@ -184,10 +184,10 @@
           <p>Sending to a transparent address, for example an exchange deposit address to sell, takes ZEC out of the shielded pool.</p>
           <ol class="do">
             <li>Open <b>Send</b> and paste the <code class="m">t1…</code><code class="t">tm…</code> address. Check it below first if you are unsure what it is.</li>
-            <li>Enter the amount. Memos only reach shielded addresses, so there is no memo field.</li>
+            <li>Enter the amount. Memos only reach shielded addresses, so Nap turns the memo field off.</li>
             <li>Review and confirm.</li>
           </ol>
-          <p class="warn">The amount and the receiving address become public. Your shielded balance and where the ZEC came from stay private. Unshield only what you are moving.</p>
+          <p class="warn">The amount and the receiving address become public. Your shielded balance and where the ZEC came from stay private. Unshield only what you are moving: unshielding the same amount you shielded, soon after, can link the two.</p>
           <form class="tool" id="addr-form" autocomplete="off">
             <label for="addr">Check an address</label>
             <div class="row"><input id="addr" spellcheck="false" placeholder="t1…, u1…, zs1…, tex1…"><button type="submit">Check</button></div>
@@ -235,11 +235,11 @@
             <li><a href="https://zucchinifi.xyz/" rel="noopener">Zucchini</a></li>
           </ul></div>
           <div><h3>Hardware</h3><ul class="links">
-            <li><a href="https://shop.keyst.one" rel="noopener">Keystone</a></li>
-            <li><a href="https://www.ledger.com/coin/wallet/zcash" rel="noopener">Ledger</a></li>
+            <li><a href="https://shop.keyst.one" rel="noopener">Keystone</a>, with Zodl</li>
+            
           </ul></div>
         </div>
-        <p class="warn">Trust Wallet, Exodus, Coinomi, SafePal, Trezor, Brave Wallet and other multi-coin wallets hold transparent ZEC only. They cannot shield. Send from them to the transparent address of a shielded wallet, then shield there.</p>
+        <p class="warn">Trust Wallet, Exodus, Coinomi, SafePal, Trezor and many other multi-coin wallets hold transparent ZEC only. They cannot shield. Send from them to the transparent address of a shielded wallet, then shield there.</p>
         <p class="fine">More wallets, with the pools each supports: <a href="https://zechub.wiki/wallets" rel="noopener">ZecHub's wallet directory</a>.</p>
       </section>
     </div>
