@@ -313,3 +313,6 @@ main { position: relative; z-index: 1; flex: 1; width: 100%; max-width: var(--ma
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 .j-primary:disabled { background: var(--stone-3); color: var(--steel); opacity: 1; }
+.jade-wallet-get { font-size: 13.5px; color: var(--steel) !important; }
+.jade-wallet-get a { color: var(--jade-3); text-decoration: none; }
+.jade-wallet-get a:hover { text-decoration: underline; }

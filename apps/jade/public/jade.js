@@ -8,7 +8,7 @@
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 import { createChart } from './vendor/lightweight-charts.js';
-import { installTips } from './tip.js';
+import { installTips, tip } from './tip.js';
 
 const XZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 
@@ -26,6 +26,9 @@ const NETWORK = params.get('network') === 'testnet' ? 'testnet' : 'mainnet';
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const RPC = (LOCAL && params.get('rpc')) || (NETWORK === 'testnet' ? 'https://zyn-rpc.cavebro.win/object' : 'https://zyn-rpc.cavebro.win/');
 const NAP = (LOCAL && params.get('nap')) || NAP_WEB;
+/// Nap's Chrome extension, from its GitHub releases: the newest build, and its install steps.
+const NAP_EXTENSION = 'https://github.com/zyn-io/nap-wallet/releases/latest/download/nap-wallet-chrome.zip';
+const NAP_RELEASE = 'https://github.com/zyn-io/nap-wallet/releases/latest';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -635,6 +638,7 @@ async function pickWallet() {
   body.innerHTML = '<p>Looking for Nap…</p>';
   const list = await discover({ web: NAP });
   body.innerHTML = list.map((w, i) => `<button type="button" class="jade-wallet-option" data-i="${i}"><b>${esc(w.info.name)}</b><small>${esc(w.info.detail || '')}</small></button>`).join('')
+    + (list.some((w) => !w.provider?.isNapWeb) ? '' : `<p class="jade-wallet-get"><a href="${NAP_EXTENSION}" rel="noopener">Get Nap for Chrome</a> · <a href="${NAP_RELEASE}" target="_blank" rel="noopener">how to install</a>${tip('Download the zip and unzip it. Open chrome://extensions, turn on Developer mode, click Load unpacked and choose the folder. Works in Chrome, Brave, Edge and Arc.')}</p>`)
     + '<p class="jade-wallet-status" role="status"></p><p class="jade-wallet-fine">Connecting shares your Zyn account, a Zcash address and your holdings of these coins with this page — never your keys. Every trade is approved in Nap.</p>';
   body.querySelectorAll('[data-i]').forEach((b) => {
     b.onclick = async () => {
