@@ -843,7 +843,7 @@ async function bridge() {
     s.querySelectorAll('[data-bt]').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.bt === bridgeTab)); b.onclick = () => { bridgeTab = b.dataset.bt; draw(); }; });
     const panel = $('#b-panel', s);
     if (bridgeTab === 'in') {
-      panel.innerHTML = `<div class="pick">${st.bridges.map((b) => `<button class="row" data-in="${b.key}" ${b.live ? '' : 'disabled'}><span class="tok" data-sym="${esc(b.symbol)}">${esc(b.symbol.slice(0, 1))}</span><span class="who"><b>${esc(b.symbol)} → ${esc(b.zy)}</b><span>from ${esc(b.chainName)}${b.capWei ? ' · pilot' : ''}</span></span><span class="val"><span class="${b.live ? 'teal' : ''}">${b.live ? ({ btc: 'any wallet', eth: 'MetaMask', sol: 'Phantom' })[b.key] : 'not yet'}</span></span></button>`).join('')}</div>
+      panel.innerHTML = `<div class="pick">${st.bridges.map((b) => `<button class="row" data-in="${b.key}" ${b.live ? '' : 'disabled'}><span class="tok" data-sym="${esc(b.symbol)}">${esc(b.symbol.slice(0, 1))}</span><span class="who"><b>${esc(b.symbol)} → ${esc(b.zy)}</b><span>from ${esc(b.chainName)}${b.capWei ? ' · pilot' : ''}</span></span><span class="val"><span class="${b.live ? 'teal' : ''}">${b.live ? (b.evm ? 'MetaMask' : ({ btc: 'any wallet', sol: 'Phantom' })[b.key]) : 'not yet'}</span></span></button>`).join('')}</div>
         <p class="hint">Each deposit carries a one-time code from this wallet, not your account, and arrives as a private note. Nap claims it for you.</p>`;
       panel.querySelectorAll('.tok[data-sym]').forEach((el) => tokenDisc(el, el.dataset.sym));
       panel.querySelectorAll('[data-in]').forEach((b) => { b.onclick = () => bridgeIn(st.bridges.find((x) => x.key === b.dataset.in), st); });
@@ -870,9 +870,9 @@ async function bridgeIn(b, st) {
     } catch (e) { $('#bi-hint', s).textContent = e.message; $('#bi-hint', s).classList.add('bad'); $('#bi-addr', s).textContent = 'Unavailable'; }
     return;
   }
-  const app = b.key === 'eth' ? 'MetaMask' : 'Phantom';
+  const app = b.evm ? 'MetaMask' : 'Phantom';
   const s = screen(`Deposit ${b.symbol}`, `<div class="big-amount"><b>${esc(app)}</b><span>finishes this deposit</span></div>
-    <p class="hint">${esc(app)} can't reach ${IN_APP ? 'this app' : 'a browser extension'}, so the deposit is made on Nap's bridge page with your one-time code already filled in. What you send arrives here as ${esc(b.zy)} once ${esc(b.chainName)} finalizes it${b.key === 'eth' ? ' (about 15 minutes)' : ''}.</p>
+    <p class="hint">${esc(app)} can't reach ${IN_APP ? 'this app' : 'a browser extension'}, so the deposit is made on Nap's bridge page with your one-time code already filled in. What you send arrives here as ${esc(b.zy)} once ${esc(b.chainName)} finalizes it${b.evm ? ' (about 15 minutes)' : ''}.</p>${b.token ? `<p class="hint">Two steps in ${esc(app)}: approve the vault for the amount, then deposit.</p>` : ''}
     ${b.capWei ? `<div class="warn"><b>Pilot.</b> At most ${esc(wadText(BigInt(b.capWei)))} ETH in total${b.issued !== null ? ` (${esc(wadText(BigInt(b.capWei) > b.issued ? BigInt(b.capWei) - b.issued : 0n))} left)` : ''}. The vault is held by a ${esc(b.custody || 'multisig')}, whose owners approve every payout; the contract is not audited.</div>` : ''}
     ${IN_APP ? `<p class="hint">Open the link in ${esc(app)}'s own browser (its browse tab), or on a computer with ${esc(app)} installed.</p><div class="address" id="bi-link">…</div>` : ''}
     <p class="hint" id="bi-err" role="alert"></p>`,
@@ -891,7 +891,7 @@ function bridgeOutForm(b, st) {
   const fee = st.bps;
   const s = screen(`Send ${b.zy} out`, `
     <div class="big-amount"><b>${esc(wadText(b.have))}</b><span>${esc(b.zy)} available</span></div>
-    <label class="field"><span>To (${esc(b.chainName)})</span><textarea id="bo-to" rows="2" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${b.key === 'eth' ? '0x…' : b.key === 'btc' ? (b.chain === 'bitcoin' ? 'bc1…' : 'tb1…') : 'Solana address'}"></textarea></label>
+    <label class="field"><span>To (${esc(b.chainName)})</span><textarea id="bo-to" rows="2" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${b.evm ? '0x…' : b.key === 'btc' ? (b.chain === 'bitcoin' ? 'bc1…' : 'tb1…') : 'Solana address'}"></textarea></label>
     <label class="field"><span>Amount</span><span class="inline"><input id="bo-amt" inputmode="decimal" autocomplete="off" placeholder="0.0"><button type="button" id="bo-max">MAX</button></span></label>
     <p class="hint" id="bo-err" role="alert">${fee ? `A ${Number(fee) / 100}% bridge fee is added on top. ` : ''}${b.key === 'sol' ? 'The 0.000005 SOL network fee comes out of the amount.' : b.key === 'btc' ? 'The Bitcoin network fee comes out of the amount.' : b.capWei ? 'Paid once two of the vault Safe’s owners approve it — this can take hours.' : 'Paid once Ethereum finalizes it.'}</p>`,
     '<button class="btn" id="bo-go">Review</button>');

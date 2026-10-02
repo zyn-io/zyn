@@ -8,6 +8,13 @@
 import { chromium } from 'playwright-core';
 const APP = process.env.APP || 'https://lend.zyn-network.com';
 const S = process.env.SHOTS || '/tmp';
+// What the chain has of BOLD.zy (§68) right now: the page must draw either way.
+const BOLD_ID = '8c1a1b0616cef63250e9f5bab8b20908320cc47ead0f60215a229d34b5c93ac2';
+const rpc = async (method) => (await (await fetch(process.env.RPC || 'https://zyn-rpc.cavebro.win/object', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }) })).json()).result;
+const boldPool = ((await rpc('zyn_lendMarkets').catch(() => ({})))?.pools || []).some((p) => p.asset === BOLD_ID);
+// BOLD_LISTED=1 has the page see BOLD.zy listed before the bridge does, to try the deposit steps.
+const boldListed = !!process.env.BOLD_LISTED || ((await rpc('zyn_bridged').catch(() => [])) || []).some((r) => r.asset === BOLD_ID);
+console.log(`      (the chain ${boldPool ? 'has' : 'has no'} BOLD pool; the bridge ${boldListed ? 'lists' : 'does not list'} BOLD.zy)`);
 let failed = 0;
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) failed++; };
 const b = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -31,7 +38,10 @@ await ctx.addInitScript(() => {
         const v = (h[0] & 1) + (window.__vlow ? 0 : 27);
         return '0x' + [...h.slice(0, 64), v].map((x) => x.toString(16).padStart(2, '0')).join('');
       }
-      if (method === 'eth_sendTransaction') { window.__sent = params[0]; return '0x' + 'ab'.repeat(32); }
+      if (method === 'eth_sendTransaction') { window.__sent = params[0]; (window.__sends ||= []).push(params[0]); return '0x' + 'ab'.repeat(32); }
+      // ERC-20 reads (BOLD): plenty held, nothing approved yet; every transaction mined.
+      if (method === 'eth_call') return params[0].data.startsWith('0x70a08231') ? '0x' + (10n ** 24n).toString(16) : '0x0';
+      if (method === 'eth_getTransactionReceipt') return { status: '0x1' };
       throw Object.assign(new Error('unsupported ' + method), { code: 4200 });
     },
   };
@@ -45,10 +55,29 @@ await ctx.addInitScript(() => {
   } };
   window.addEventListener('wallet-standard:app-ready', (e) => e.detail.register(sol));
 });
+if (process.env.BOLD_LISTED) {
+  await ctx.route('https://zyn-rpc.cavebro.win/object', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    const r = await fetch(route.request().url(), { method: 'POST', headers: { 'content-type': 'application/json' }, body: route.request().postData() });
+    const out = await r.json();
+    if (body.method === 'zyn_bridged' && Array.isArray(out.result) && !out.result.some((x) => x.asset === BOLD_ID)) out.result.push({ asset: BOLD_ID, network: 'eip155:11155111', origin: 'd58c9e3eebe83fda55d59c186e86b37aa5d0f79a', decimals: 18, issued: '0' });
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
+  });
+}
 const page = await ctx.newPage();
 const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`${APP}/#/markets`);
 await page.waitForTimeout(1500);
+// BOLD.zy is the fourth market, with its price risk said on the card. Until
+// the chain opens a BOLD pool the card says so instead of showing figures.
+await page.waitForFunction(() => document.querySelectorAll('.core').length === 4 && /\d/.test(document.querySelector('#t-epoch')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
+await page.waitForTimeout(1500);
+const boldCard = (await page.textContent('.core[aria-label="BOLD.zy market"]').catch(() => '')).replace(/\s+/g, ' ');
+ok(/Liquity BOLD, bridged to Zyn/.test(boldCard) && /BOLD can trade away from \$1; it is priced at its market value\./.test(boldCard), `BOLD.zy is a market: ${boldCard.slice(0, 90)}`);
+ok(/borrow up to 75%, liquidated at 78%/.test(boldCard) || /borrow up to \d+%/.test(boldCard), `BOLD's risk is shown: ${(boldCard.match(/As collateral[^.]*/) || [''])[0]}`);
+ok(/\$\d\.\d{4}|—/.test(boldCard.slice(0, 40)), `BOLD is priced at its traded value, to four places: ${boldCard.slice(0, 30)}`);
+ok(boldPool !== /Pool not open yet/.test(boldCard), `the BOLD card ${boldPool ? 'shows its pool' : 'says the pool is not open yet'}`);
+ok(/ETH\/BOLD/.test(await page.textContent('#check')) && /ZEC\/BOLD/.test(await page.textContent('#check')), 'the price checks cover the BOLD pairs');
 ok((await page.textContent('#connect')).trim() === 'Connect wallet', `the header offers any wallet: ${(await page.textContent('#connect')).trim()}`);
 // A visitor following a deposit link is told whose account it credits.
 const CODE = 'c0de'.repeat(16);
@@ -92,6 +121,13 @@ for (const bad of ['.5', '1e3', '0x10']) {
   await page.fill('#lend-amount', bad);
   ok(await page.isDisabled('#lend-go') && /decimal/.test(await page.textContent('#lend-note')), `"${bad}" is not an amount: ${await page.textContent('#lend-note')}`);
 }
+// BOLD in Lend: the price risk shows, and without a pool the form says it is not open.
+await page.goto(`${APP}/#/lend/BOLD`); await page.waitForTimeout(600);
+await page.fill('#lend-amount', '1'); await page.waitForTimeout(200);
+ok(await page.isVisible('#lend-stable') && (boldPool || (await page.isDisabled('#lend-go') && /BOLD\.zy pool is not open yet/.test(await page.textContent('#lend-note')))), `lending BOLD: ${await page.textContent('#lend-note')}`);
+await page.goto(`${APP}/#/borrow/ETH/BOLD`); await page.waitForTimeout(600);
+ok(await page.isVisible('#borrow-stable') && (await page.inputValue('#borrow-asset input:checked')) === 'BOLD', 'BOLD can be borrowed against ETH, with its price risk shown');
+await page.goto(`${APP}/#/lend/ETH`); await page.waitForTimeout(600);
 // A write goes through this page's own approval.
 await page.fill('#lend-amount', '0.001'); await page.click('#lend-go');
 await page.waitForTimeout(4000);
@@ -120,6 +156,32 @@ await page.waitForFunction(() => (document.querySelector('.br-receipt .rc-say')?
 const said = (await page.textContent('.br-receipt .rc-say')).trim();
 ok(/not succeeded|not final|not a deposit|minted/i.test(said), `the receipt service answers: ${said.slice(0, 100)}`);
 await page.screenshot({ path: `${S}/lend-evm.png` });
+// BOLD in and out through the same vault: a test faucet, then approve and
+// deposit from the connected wallet, two steps; out to that wallet.
+await page.goto(`${APP}/#/bridge`); await page.waitForTimeout(800);
+await page.check('input[name="br-mode"][value="in"]'); await page.check('#br-asset input[value="bold"]'); await page.waitForTimeout(1500);
+ok((await page.textContent('#br-go')).trim() === 'Approve and deposit' && /BOLD can trade away from \$1/.test(await page.textContent('#br-body')), `BOLD deposits in two steps: ${(await page.textContent('#br-go')).trim()}`);
+await page.evaluate(() => { window.__sends = []; });
+await page.click('#br-faucet');
+await page.waitForFunction(() => (window.__sends || []).length > 0, null, { timeout: 15000 }).catch(() => {});
+const mint = await page.evaluate(() => window.__sends[0]);
+ok(mint && mint.to.toLowerCase() === '0xd58c9e3eebe83fda55d59c186e86b37aa5d0f79a' && mint.data === `0x40c10f19${'1111111111111111111111111111111111111111'.padStart(64, '0')}${(1000n * 10n ** 18n).toString(16).padStart(64, '0')}`, `Get test BOLD mints 1,000 to the connected wallet: ${JSON.stringify(mint)?.slice(0, 80)}`);
+await page.evaluate(() => { window.__sends = []; });
+if (!boldListed) {
+  ok(await page.isDisabled('#br-go') && /not list BOLD\.zy/.test(await page.textContent('#br-body')), `before the bridge lists BOLD.zy, deposits wait: ${await page.textContent('#br-wait')}`);
+} else {
+  await page.fill('#br-amount', '2'); await page.click('#br-go');
+  await page.waitForFunction(() => (window.__sends || []).length >= 2 || /error|refused|Update Nap|another/i.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
+  const [ap, dep] = await page.evaluate(() => window.__sends);
+  const two = (2n * 10n ** 18n).toString(16).padStart(64, '0');
+  ok(ap && ap.to.toLowerCase() === '0xd58c9e3eebe83fda55d59c186e86b37aa5d0f79a' && ap.data === `0x095ea7b3${'e17bb5943b34133f6a8a5d221be4ed9493b3ef27'.padStart(64, '0')}${two}`, `step 1 approves the vault for 2 BOLD: ${ap?.data?.slice(0, 20)}`);
+  ok(dep && dep.to.toLowerCase() === '0xe17bb5943b34133f6a8a5d221be4ed9493b3ef27' && /^0xdedd8ed5[0-9a-f]{64}0{63}2/.test(dep.data) && dep.data.endsWith(two) && !dep.data.includes(CODE), `step 2 deposits under this account's code, asset 2: ${dep?.data?.slice(0, 20)} — ${await page.textContent('#br-note')}`);
+}
+await page.check('input[name="br-mode"][value="out"]'); await page.check('#br-asset input[value="bold"]'); await page.waitForTimeout(300);
+ok((await page.inputValue('#br-to')) === '0x1111111111111111111111111111111111111111' && /BOLD\.zy/.test(await page.textContent('#br-body')), 'a BOLD.zy withdrawal goes to the connected wallet by default');
+await page.check('input[name="br-channel"][value="private"]'); await page.waitForTimeout(300);
+ok(await page.isHidden('#br-asset input[value="bold"] >> xpath=..'), 'BOLD has no private channel');
+await page.check('input[name="br-channel"][value="transparent"]');
 // Solana opens its own account.
 await page.click('#connect'); await page.click('#w-out');
 await page.click('#connect');

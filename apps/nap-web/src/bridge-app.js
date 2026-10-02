@@ -40,7 +40,7 @@ const handoff = (() => {
   const q = new URLSearchParams(location.hash.slice(1));
   const code = String(q.get('code') || '');
   const key = String(q.get('deposit') || '');
-  if (!/^[0-9a-f]{64}$/.test(code) || !['eth', 'sol'].includes(key)) return null;
+  if (!/^[0-9a-f]{64}$/.test(code) || !['eth', 'sol', 'bold'].includes(key)) return null;
   history.replaceState(null, '', location.pathname);
   return { code, key, net: String(q.get('net') || '') };
 })();

@@ -831,13 +831,15 @@ export const METHODS = {
           live: b.live, issued: b.issued === null ? null : String(b.issued),
           vault: b.vault || null, rpc: b.rpc || null, cluster: b.cluster || null, chainId: b.chainId || null, explorer: b.explorer || null,
           capWei: b.capWei || null, custody: b.custody || null, safe: b.safe || null, chain: b.chain || null,
+          token: b.token || null, assetId: b.assetId || null, faucet: !!b.faucet,
         })),
       };
     },
   },
 
   /// What to send, for a deposit into this wallet: SOL a memo, ETH the
-  /// calldata, BTC an address (watched from now), ZEC this account's
+  /// calldata, an ERC-20 (BOLD) the code and, given an amount, its approve
+  /// and deposit calls, BTC an address (watched from now), ZEC this account's
   /// deposit address. The code names nobody; the other chain sees the sender.
   zyn_bridgeDeposit: {
     kind: 'read',
@@ -853,6 +855,25 @@ export const METHODS = {
       if (key === 'btc') return { key, address: await bridges.btcDepositAddress(ctx.config, ctx.identity, b) };
       const code = await bridges.depositCode(ctx.config, ctx.identity);
       if (key === 'sol') return { key, memo: `zyn:${code}`, vault: b.vault, rpc: b.rpc, cluster: b.cluster };
+      if (b.token) {
+        // An ERC-20 (BOLD): two transactions from the holder's wallet —
+        // approve the vault for the amount, then deposit(code, assetId, amount).
+        const out = { key, to: b.vault, token: b.token, chainId: b.chainId, assetId: b.assetId, decimals: b.decimals, code };
+        if (p?.amount == null) return out;
+        const raw = amountOf(p.amount, 'amount');
+        const scale = 10n ** BigInt(18 - b.decimals);
+        if (raw % scale !== 0n) throw bad(`${b.symbol} has ${b.decimals} decimal places`);
+        const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+        const sel = (sig) => hex(keccak_256(new TextEncoder().encode(sig)).slice(0, 4));
+        return {
+          ...out,
+          amount: String(raw / scale),
+          calls: [
+            { to: b.token, data: `0x${sel('approve(address,uint256)')}${word(BigInt(b.vault))}${word(raw / scale)}` },
+            { to: b.vault, data: `0x${sel('deposit(bytes32,uint32,uint256)')}${code}${word(b.assetId)}${word(raw / scale)}` },
+          ],
+        };
+      }
       const asset = new Uint8Array(32);
       new DataView(asset.buffer).setUint32(28, Number(b.assetId || 1));
       const selector = hex(keccak_256(new TextEncoder().encode('depositNative(bytes32,uint32)')).slice(0, 4));
@@ -860,7 +881,7 @@ export const METHODS = {
     },
   },
 
-  /// SOL.zy / ETH.zy / BTC.zy / ZEC.zy back to their chain.
+  /// SOL.zy / ETH.zy / BOLD.zy / BTC.zy / ZEC.zy back to their chain.
   zyn_bridgeWithdraw: {
     kind: 'write',
     async prepare(ctx, p) {

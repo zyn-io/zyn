@@ -74,7 +74,16 @@
           "chainId": 11155111,
           "vault": "0xe17bb5943b34133f6a8a5D221BE4eD9493B3ef27",
           "assetId": 1,
-          "explorer": "https://sepolia.etherscan.io/tx/{tx}"
+          "explorer": "https://sepolia.etherscan.io/tx/{tx}",
+          "tokens": [
+            {
+              "symbol": "BOLD",
+              "address": "0xD58C9e3EeBE83fda55D59C186E86b37aa5d0f79a",
+              "decimals": 18,
+              "assetId": 2,
+              "faucet": true
+            }
+          ]
         },
         "btc": {
           "network": "signet",

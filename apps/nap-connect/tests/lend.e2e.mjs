@@ -25,6 +25,13 @@ mkdirSync(S, { recursive: true });
 const ETH = '56737e143259c754d165074ad15058139bc0b116f5a22b2f3d50129a2a7a24a6';
 const SOL = '9204324e0511b4d1a90d0ff36242f044e894e1b71489d47abd824df273092ad1';
 
+// BOLD.zy (§68): the page draws it whether or not the chain lists it yet.
+const BOLD_ID = '8c1a1b0616cef63250e9f5bab8b20908320cc47ead0f60215a229d34b5c93ac2';
+const rpc = async (method) => (await (await fetch(process.env.RPC || 'https://zyn-rpc.cavebro.win/object', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }) })).json()).result;
+const boldPool = ((await rpc('zyn_lendMarkets').catch(() => ({})))?.pools || []).some((p) => p.asset === BOLD_ID);
+const boldListed = ((await rpc('zyn_bridged').catch(() => [])) || []).some((r) => r.asset === BOLD_ID);
+console.log(`      (the chain ${boldPool ? 'has' : 'has no'} BOLD pool; the bridge ${boldListed ? 'lists' : 'does not list'} BOLD.zy)`);
+
 let failed = 0;
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) failed++; };
 
@@ -57,6 +64,8 @@ await page.waitForTimeout(3000);
 ok(await page.isHidden('#chain-note'), 'the app reads the chain');
 const solCore = await page.textContent('.core:nth-child(3) .core-stats');
 ok(/Supplied\s*[1-9]/.test(solCore.replace(/\s+/g, ' ')), `SOL.zy pool has lenders: ${solCore.replace(/\s+/g, ' ').trim().slice(0, 80)}`);
+const boldCore = (await page.textContent('.core[aria-label="BOLD.zy market"]')).replace(/\s+/g, ' ');
+ok(/BOLD can trade away from \$1/.test(boldCore) && boldPool !== /Pool not open yet/.test(boldCore), `BOLD.zy market: ${boldCore.slice(0, 90)}`);
 await page.screenshot({ path: `${S}/lend-markets.png`, fullPage: true });
 
 // The liquidation replay: every step loads, the lot is public and nameless,
@@ -167,6 +176,19 @@ await page.fill('#br-amount', '0.1');
 await page.click('#br-go');
 await page.waitForFunction(() => /Solana wallet/.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
 ok(/No Solana wallet/.test(await page.textContent('#br-note')), `without Phantom the page says so: ${await page.textContent('#br-note')}`);
+// BOLD: approve then deposit from an Ethereum wallet, with a test faucet.
+await page.check('#br-asset input[value="bold"]');
+await page.waitForTimeout(1500);
+ok((await page.textContent('#br-go')).trim() === 'Approve and deposit' && await page.isVisible('#br-faucet'), `BOLD deposits in two steps, with Get test BOLD: ${(await page.textContent('#br-go')).trim()}`);
+if (!boldListed) {
+  ok(await page.isDisabled('#br-go') && /not list BOLD\.zy/.test(await page.textContent('#br-body')), 'BOLD deposits wait until the bridge lists BOLD.zy');
+} else {
+  await page.fill('#br-amount', '1');
+  await page.click('#br-go');
+  await page.waitForFunction(() => /wallet|Nap|vault/.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
+  // The deposit code comes from Nap (NAP_LOCAL until Nap with BOLD is deployed); then MetaMask, absent here.
+  ok(/No Ethereum wallet/.test(await page.textContent('#br-note')), `BOLD: the code from Nap, then the page asks for MetaMask: ${await page.textContent('#br-note')}`);
+}
 const OUT_TO = process.env.OUT_TO || 'HBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy';
 await page.check('input[name="br-mode"][value="out"]');
 await page.check('#br-asset input[value="sol"]');

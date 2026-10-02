@@ -20,6 +20,16 @@ export const handoffUrl = (config, key, code, fallback) => (bridgePage(config) ?
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
 
+/// The ERC-20s an EVM bridge config lists (`tokens`), the malformed left out.
+/// Their keys must not take a coin's own (eth, sol, btc, zec).
+export function evmTokens(eth) {
+  return (Array.isArray(eth?.tokens) ? eth.tokens : []).filter((t) => /^[A-Z][A-Z0-9]{1,9}$/.test(String(t?.symbol || ''))
+    && !['ETH', 'SOL', 'BTC', 'ZEC'].includes(t.symbol)
+    && /^0x[0-9a-fA-F]{40}$/.test(String(t.address || ''))
+    && Number.isSafeInteger(t.assetId) && t.assetId > 1 && t.assetId < 2 ** 32
+    && Number.isSafeInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 18);
+}
+
 /// The bridges a network's config declares, as bridge.html reads them.
 export function bridgesOf(net) {
   const b = net.bridges || {};
@@ -28,7 +38,19 @@ export function bridgesOf(net) {
     out.push({ ...b.sol, key: 'sol', symbol: 'SOL', zy: 'SOL.zy', chainName: /devnet/.test(b.sol.network) ? 'Solana devnet' : /testnet/.test(b.sol.network) ? 'Solana testnet' : 'Solana', decimals: 9, network: b.sol.network, asset: hex(bridgedAsset(b.sol.network)) });
   }
   if (b.eth && /^0x[0-9a-fA-F]{40}$/.test(b.eth.vault || '') && Number.isSafeInteger(b.eth.chainId)) {
-    out.push({ ...b.eth, key: 'eth', symbol: 'ETH', zy: 'ETH.zy', chainName: b.eth.chainId === 1 ? 'Ethereum' : 'Sepolia', decimals: 18, network: `eip155:${b.eth.chainId}`, asset: hex(bridgedAsset(`eip155:${b.eth.chainId}`)) });
+    const chainName = b.eth.chainId === 1 ? 'Ethereum' : 'Sepolia';
+    const network = `eip155:${b.eth.chainId}`;
+    out.push({ ...b.eth, key: 'eth', evm: true, symbol: 'ETH', zy: 'ETH.zy', chainName, decimals: 18, network, asset: hex(bridgedAsset(network)) });
+    // ERC-20s into the same vault (BOLD, §68): approve, then deposit under
+    // the token's own vault asset id. Each is its own asset on Zyn, named by
+    // the symbol the deployment gives it.
+    for (const t of evmTokens(b.eth)) {
+      out.push({
+        key: t.symbol.toLowerCase(), evm: true, symbol: t.symbol, zy: `${t.symbol}.zy`, chainName, decimals: t.decimals, network,
+        vault: b.eth.vault, chainId: b.eth.chainId, explorer: b.eth.explorer, token: t.address, assetId: t.assetId, origin: t.address.slice(2).toLowerCase(),
+        faucet: !!t.faucet && b.eth.chainId !== 1, asset: hex(bridgedAsset(network, unhex(t.address.slice(2).toLowerCase(), 20))),
+      });
+    }
   }
   if (b.btc && /^[0-9a-f]{64}$/.test(b.btc.internal || '')) {
     const chain = ['bitcoin', 'testnet4'].includes(b.btc.network) ? b.btc.network : 'signet';
@@ -101,10 +123,11 @@ export function checkBridgeOut(b, to, raw) {
   if (b.key === 'sol' && raw <= 5_000n * LAMPORT) throw new Error('Send more than the 0.000005 SOL network fee');
   if (b.key === 'btc' && raw % SAT !== 0n) throw new Error('BTC has eight decimal places');
   if (b.key === 'btc' && raw < 10_000n * SAT) throw new Error('Send at least 0.0001 BTC; the Bitcoin fee comes out of it');
+  if (b.token && b.decimals < 18 && raw % 10n ** BigInt(18 - b.decimals) !== 0n) throw new Error(`${b.symbol} has ${b.decimals} decimal places`);
   return destinationBytes(b, to);
 }
 
-/// SOL.zy / ETH.zy / BTC.zy back to their chain: commit to the address,
+/// SOL.zy / ETH.zy / BOLD.zy / BTC.zy back to their chain: commit to the address,
 /// burn, then show the address to the bridge that pays it.
 export async function bridgeOut(config, identity, held, b, to, raw, bps) {
   return bridgeOutTo(config, identity, held, b, checkBridgeOut(b, to, raw), raw, bps);
