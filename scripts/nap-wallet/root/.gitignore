@@ -1,0 +1,13 @@
+/target/
+**/target/
+**/node_modules/
+apps/nap-web/dist*/
+apps/extension/dist*/
+apps/extension/release/
+npm-debug.log*
+.env
+.env.*
+*.phrase
+*.key
+.DS_Store
+.wrangler/

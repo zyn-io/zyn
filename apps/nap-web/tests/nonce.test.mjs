@@ -7,8 +7,10 @@ import { readFile } from 'node:fs/promises';
 import { NONCE_TAKEN } from '../src/ledger.js';
 
 const vm = (f) => readFile(new URL(`../../../objectvm/src/${f}`, import.meta.url), 'utf8');
+// The VM's source sits beside Nap in the Zyn workspace, not in Nap's own repo.
+const NO_VM = await vm('lib.rs').then(() => false, () => 'objectvm is not checked out beside Nap');
 
-test('every "taken" refusal in the VM is one Nap steps over', async () => {
+test('every "taken" refusal in the VM is one Nap steps over', { skip: NO_VM }, async () => {
   const src = (await Promise.all(['lib.rs', 'market.rs', 'curve.rs', 'primary.rs'].map((f) => vm(f).catch(() => '')))).join('\n');
   const taken = [...src.matchAll(/(?:Refused|Err)\("([^"]*(?:nonce (?:was already used|is in use)|token exists)[^"]*)"\)/g)].map((m) => m[1]);
   assert.ok(taken.length >= 3, `found ${taken.join(' | ')}`);
