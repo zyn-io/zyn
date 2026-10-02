@@ -71,7 +71,7 @@ for (const [w, h, scheme] of [[1280, 900, 'light'], [390, 844, 'light'], [390, 8
     check((await page.getAttribute('#tx-out a', 'href')) === `https://mainnet.zcashexplorer.app/transactions/${tx}`, 'lookup: mainnet explorer link');
 
     // Info bubble opens, Escape closes it.
-    await page.click('.hero .i');
+    await page.click('.chain .i');
     check(await page.isVisible('.chain .bubble'), 'bubble opens');
     await page.keyboard.press('Escape');
     check(!(await page.isVisible('.chain .bubble')), 'Escape closes the bubble');

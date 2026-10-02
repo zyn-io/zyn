@@ -112,11 +112,13 @@ h1 {
 .hid { display: inline-block; width: 56px; height: 14px; border-radius: 3px; vertical-align: middle; opacity: .8; }
 .fine { color: var(--mute); font-size: 13px; margin: 10px 0 0; }
 
-/* Film */
-.film { max-width: 1240px; margin: 0 auto clamp(40px, 6vw, 64px); }
-.film-h { font-size: 22px; margin: 0 0 12px; }
+/* Film (hero, right) */
+.film { margin: 0; }
 .film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 14px; background: #15171b; border: 1px solid var(--line); }
-.film .fine { margin-top: 10px; }
+.film figcaption { margin-top: 10px; font-size: 14px; color: var(--mute); max-width: 60ch; }
+.film figcaption b { color: var(--ink); font-weight: 650; margin-right: 4px; }
+.chain-row { max-width: 1240px; margin: 0 auto clamp(40px, 6vw, 64px); }
+.chain-row .chain { max-width: 640px; }
 
 /* Steps */
 .layout {
