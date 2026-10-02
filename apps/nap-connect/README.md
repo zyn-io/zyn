@@ -66,7 +66,7 @@ is refused.
 
 ```sh
 # three servers: a relay to testnet's block server, Nap, and the Cave store
-node <relay.mjs> 168.119.53.39 8098 18095          # see RUNBOOK §5f-terdecies
+node <relay.mjs> <testnet-block-server> 8098 18095
 (cd ../nap-web && npm run build && NAP_DEV_ZEC=http://127.0.0.1:18095 \
   NAP_DEV_RPC=https://zyn-rpc.cavebro.win/object npx vite preview --port 4179)
 (cd ../cave-market && python3 -m http.server 4178 --bind 127.0.0.1)
