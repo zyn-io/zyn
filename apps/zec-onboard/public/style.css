@@ -182,7 +182,14 @@ h3 { font-size: 19px; margin: 32px 0 8px; }
 .out .bad { color: var(--public); }
 .out .pub { color: var(--public); }
 
-.finish { padding: 8px 0 72px; max-width: 62ch; }
+.finish { padding: 8px 0 72px; max-width: 760px; }
+.finish h2.sub { margin-top: 48px; }
+.finish > p { max-width: 62ch; }
+.wallets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 28px; margin: 4px 0 24px; }
+.wallets h3 { font-size: 16px; margin: 16px 0 4px; }
+.wallets .links { padding-left: 1.1em; font-size: 15.5px; }
+.wallets .links li { margin: 4px 0; }
+@media (max-width: 720px) { .wallets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .finish h2 { margin-bottom: 8px; }
 .links { padding-left: 1.2em; margin: 0; }
 .links li { margin: 6px 0; }
