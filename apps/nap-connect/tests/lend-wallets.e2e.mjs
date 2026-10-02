@@ -2,7 +2,9 @@
 //
 // Zyn Lend with wallets a holder already has: a stand-in Solana wallet (Wallet
 // Standard) and a stand-in Ethereum wallet (EIP-6963), both signing
-// deterministically, open a Zyn account in the page.
+// deterministically, open a Zyn account in the page. They sign the app's
+// sign-in (EIP-4361 / the Solana sign-in format), and the Ethereum one
+// writes v as 27/28 at first and as 0/1 later — the same account either way.
 import { chromium } from 'playwright-core';
 const APP = process.env.APP || 'https://lend.zyn-network.com';
 const S = process.env.SHOTS || '/tmp';
@@ -13,13 +15,22 @@ const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
 await ctx.addInitScript(() => {
   const hash = async (bytes) => new Uint8Array(await crypto.subtle.digest('SHA-512', bytes));
   window.__calls = [];
+  window.__msgs = [];
+  window.__vlow = false;
   // Ethereum, announced the EIP-6963 way.
   const evm = {
     async request({ method, params }) {
       window.__calls.push(method);
       if (method === 'eth_requestAccounts') return ['0x1111111111111111111111111111111111111111'];
       if (method === 'eth_chainId') return '0xaa36a7';
-      if (method === 'personal_sign') { const h = await hash(new TextEncoder().encode(params[0])); return '0x' + [...h, 27].map((x) => x.toString(16).padStart(2, '0')).join('').slice(0, 130); }
+      if (method === 'personal_sign') {
+        const text = new TextDecoder().decode(Uint8Array.from(params[0].slice(2).match(/../g), (x) => parseInt(x, 16)));
+        window.__msgs.push(text);
+        // r‖s from the message, v from its low bit — written 27/28, or 0/1.
+        const h = await hash(new TextEncoder().encode(text));
+        const v = (h[0] & 1) + (window.__vlow ? 0 : 27);
+        return '0x' + [...h.slice(0, 64), v].map((x) => x.toString(16).padStart(2, '0')).join('');
+      }
       if (method === 'eth_sendTransaction') { window.__sent = params[0]; return '0x' + 'ab'.repeat(32); }
       throw Object.assign(new Error('unsupported ' + method), { code: 4200 });
     },
@@ -29,7 +40,7 @@ await ctx.addInitScript(() => {
   const account = { address: 'HBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy', publicKey: new Uint8Array(32), chains: ['solana:devnet'], features: [] };
   const sol = { name: 'Test Solana', icon: 'data:image/png;base64,iVBORw0KGgo=', version: '1.0.0', chains: ['solana:devnet'], accounts: [account], features: {
     'standard:connect': { version: '1.0.0', connect: async () => ({ accounts: [account] }) },
-    'solana:signMessage': { version: '1.0.0', signMessage: async ({ message }) => [{ signedMessage: message, signature: (await hash(message)).slice(0, 64) }] },
+    'solana:signMessage': { version: '1.0.0', signMessage: async ({ message }) => { window.__msgs.push(new TextDecoder().decode(message)); return [{ signedMessage: message, signature: (await hash(message)).slice(0, 64) }]; } },
     'solana:signAndSendTransaction': { version: '1.0.0', signAndSendTransaction: async () => [{ signature: new Uint8Array(64).fill(7) }] },
   } };
   window.addEventListener('wallet-standard:app-ready', (e) => e.detail.register(sol));
@@ -39,8 +50,16 @@ const errs = []; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`${APP}/#/markets`);
 await page.waitForTimeout(1500);
 ok((await page.textContent('#connect')).trim() === 'Connect wallet', `the header offers any wallet: ${(await page.textContent('#connect')).trim()}`);
+// A visitor following a deposit link is told whose account it credits.
+const CODE = 'c0de'.repeat(16);
+await page.goto(`${APP}/#/bridge/deposit/eth?code=${CODE}`);
+await page.waitForTimeout(600);
+ok(/credits the account that made this link \(code c0dec0…c0de\)/.test(await page.textContent('#br-body')), 'a deposit link says it credits the account that made it');
+await page.goto(`${APP}/#/markets`);
+await page.waitForTimeout(400);
 await page.click('#connect');
 await page.waitForSelector('#wallet-list button', { timeout: 15000 });
+ok(await page.isVisible('#w-key') && /only sign it on lend\.zyn-network\.com/.test(await page.textContent('#w-key')), 'the connect dialog says the signature is the account key');
 await page.waitForTimeout(1200);
 const list = (await page.textContent('#wallet-list')).replace(/\s+/g, ' ');
 ok(/Solana.*Test Solana/.test(list) && /Ethereum.*Test EVM/.test(list) && /Nap/.test(list), `wallets grouped by chain, Nap kept: ${list.slice(0, 160)}`);
@@ -49,10 +68,13 @@ await page.waitForFunction(() => /^[0-9a-f]{5}…/.test(document.querySelector('
 const head = (await page.textContent('#connect')).trim();
 ok(/^[0-9a-f]{5}…/.test(head), `an Ethereum wallet opened a Zyn account: ${head} ${(await page.textContent('#w-note')).trim()}`);
 ok((await page.evaluate(() => window.__calls.filter((c) => c === 'personal_sign').length)) === 2, 'signed twice the first time on this device (stable check)');
+const siwe = await page.evaluate(() => window.__msgs[0]);
+ok(/^lend\.zyn-network\.com wants you to sign in with your Ethereum account:\n0x1111111111111111111111111111111111111111\n\n.+\n\nURI: https:\/\/lend\.zyn-network\.com\nVersion: 1\nChain ID: 1\nNonce: zynaccount1\nIssued At: 2026-10-02T00:00:00Z$/.test(siwe), `the Ethereum wallet signs an EIP-4361 sign-in: ${JSON.stringify(siwe).slice(0, 90)}`);
+ok(await page.evaluate(() => window.__msgs[0] === window.__msgs[1]), 'the sign-in is the same bytes each time');
 const acctEvm = head;
-// The same wallet again: the same account, one signature.
+// The same wallet again, now writing v as 0/1: the same account, one signature.
 await page.click('#connect'); await page.click('#w-out');
-await page.evaluate(() => { window.__calls = []; });
+await page.evaluate(() => { window.__calls = []; window.__vlow = true; });
 await page.click('#connect');
 await page.waitForSelector('#wallet-list button:has-text("Test EVM")');
 await page.click('#wallet-list button:has-text("Test EVM")');
@@ -64,8 +86,13 @@ await page.click('#connect'); await page.click('#w-words');
 const words = (await page.textContent('.words')).trim().split(/\s+/);
 ok(words.length === 24, `24 recovery words shown on request (${words.length})`);
 await page.keyboard.press('Escape');
-// A write goes through this page's own approval.
+// Amounts are read as Nap reads them.
 await page.goto(`${APP}/#/lend/ETH`); await page.waitForTimeout(800);
+for (const bad of ['.5', '1e3', '0x10']) {
+  await page.fill('#lend-amount', bad);
+  ok(await page.isDisabled('#lend-go') && /decimal/.test(await page.textContent('#lend-note')), `"${bad}" is not an amount: ${await page.textContent('#lend-note')}`);
+}
+// A write goes through this page's own approval.
 await page.fill('#lend-amount', '0.001'); await page.click('#lend-go');
 await page.waitForTimeout(4000);
 const asked = await page.evaluate(() => document.querySelector('#approve').open);
@@ -76,11 +103,15 @@ if (asked) await page.click('#a-no');
 await page.goto(`${APP}/#/bridge`); await page.waitForTimeout(800);
 await page.check('input[name="br-mode"][value="out"]'); await page.check('#br-asset input[value="eth"]'); await page.waitForTimeout(300);
 ok((await page.inputValue('#br-to')) === '0x1111111111111111111111111111111111111111', 'an ETH withdrawal goes to the connected wallet by default');
+// A deposit link opened while connected is ignored: the deposit carries this
+// account's own code.
+await page.goto(`${APP}/#/bridge/deposit/eth?code=${CODE}`); await page.waitForTimeout(800);
+ok(!/made this link/.test(await page.textContent('#br-body')), 'a connected holder is not offered the link\'s code');
 await page.check('input[name="br-mode"][value="in"]'); await page.waitForTimeout(300);
 await page.fill('#br-amount', '0.001'); await page.click('#br-go');
 await page.waitForFunction(() => !!window.__sent || /error|refused/i.test(document.querySelector('#br-note').textContent), null, { timeout: 30000 }).catch(() => {});
 const sent = await page.evaluate(() => window.__sent);
-ok(sent && sent.from === '0x1111111111111111111111111111111111111111' && /^0x52d29193/.test(sent.data), `the ETH deposit is sent by the connected wallet with this account's code: ${JSON.stringify(sent)?.slice(0, 90)}`);
+ok(sent && sent.from === '0x1111111111111111111111111111111111111111' && /^0x52d29193/.test(sent.data) && !sent.data.includes(CODE), `the ETH deposit is sent by the connected wallet with this account's code, not the link's: ${JSON.stringify(sent)?.slice(0, 90)}`);
 // A deposit offers a receipt, and asking for one gets an answer from the
 // receipt service (here a refusal: the stand-in wallet's deposit is not real).
 ok(await page.isVisible('.br-receipt .rc-go'), 'a deposit offers a receipt');
@@ -97,6 +128,13 @@ await page.click('#wallet-list button:has-text("Test Solana")');
 await page.waitForFunction(() => /^[0-9a-f]{5}…/.test(document.querySelector('#connect').textContent.trim()), null, { timeout: 60000 }).catch(() => {});
 const sh = (await page.textContent('#connect')).trim();
 ok(/^[0-9a-f]{5}…/.test(sh) && sh !== acctEvm, `a Solana wallet opens its own account: ${sh}`);
+const siws = await page.evaluate(() => window.__msgs.at(-1));
+ok(/^lend\.zyn-network\.com wants you to sign in with your Solana account:\nHBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy\n\n.+\n\nURI: https:\/\/lend\.zyn-network\.com\nVersion: 1\nNonce: zynaccount1\nIssued At: 2026-10-02T00:00:00Z$/.test(siws), `the Solana wallet signs a Solana sign-in: ${JSON.stringify(siws).slice(0, 90)}`);
+// Under Private, BTC is not offered while Mezo's channel is closed.
+await page.goto(`${APP}/#/bridge`); await page.waitForTimeout(600);
+await page.check('#br-asset input[value="btc"]');
+await page.check('input[name="br-channel"][value="private"]'); await page.waitForTimeout(300);
+ok(await page.isHidden('#br-asset input[value="btc"] >> xpath=..') && (await page.inputValue('#br-asset input:checked')) === 'sol', 'private BTC is not offered');
 ok(!errs.length, `no page errors ${errs.join(' | ')}`);
 await b.close();
 console.log(failed ? `${failed} failed` : 'all passed');

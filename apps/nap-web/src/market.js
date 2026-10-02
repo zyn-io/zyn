@@ -54,10 +54,11 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['lendOpen', 'lend-open'],
   ['lendRepay', 'lend-repay'],
   ['lendCollateral', 'lend-collateral'],
+  ['lendInsure', 'lend-insure'],
   ['lendBid', 'lend-bid'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47, lendInsure: 51 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -415,6 +416,11 @@ export const lendAddCollateralIntent = (o) => concatBytes(
 
 export const lendRemoveCollateralIntent = (o) => concatBytes(
   new Uint8Array([TAG.lendRemoveCollateral]), o.borrower, prog('lendCollateral'), o.position, i128Bytes(o.amount), o.nonce,
+);
+
+/// Anyone adding to a pool's insurance (§160): no shares, no claim back.
+export const lendInsureIntent = (o) => concatBytes(
+  new Uint8Array([TAG.lendInsure]), o.donor, prog('lendInsure'), o.asset, i128Bytes(o.amount), inputs(o.inputs), outputs(o.change),
 );
 
 export const lendBidIntent = (o) => concatBytes(

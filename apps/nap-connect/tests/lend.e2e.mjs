@@ -6,10 +6,16 @@
 //   PHRASE_FILE=~/.zyn/test-wallets/bidder.phrase node tests/lend.e2e.mjs
 //   (NOTES=1 also requires private notes: a wallet that has deposited privately)
 //
+// NAP_LOCAL=<a Nap web build> serves that build as nap.zyn-network.com (its
+// /rpc, /zec… doors go to NAP_UPSTREAM, default https://nap.cavebro.win): to
+// try Nap changes before they are deployed. NAP_UPSTREAM alone serves the
+// deployed Nap from there under Nap's name.
+//
 // The wallet needs a little SOL.zy and ETH.zy (testnet-wallet.local.mjs).
 
 import { chromium } from 'playwright-core';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { join, extname } from 'node:path';
 import { unlockNap } from './unlock.mjs';
 
 const APP = process.env.APP || 'https://lend.zyn-network.com';
@@ -23,7 +29,23 @@ let failed = 0;
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) failed++; };
 
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
-const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
+const NAP_LOCAL = process.env.NAP_LOCAL || '';
+const NAP_UPSTREAM = process.env.NAP_UPSTREAM || (NAP_LOCAL ? 'https://nap.cavebro.win' : '');
+const ctx = await b.newContext({ viewport: { width: 1280, height: 900 }, ...(NAP_UPSTREAM ? { serviceWorkers: 'block' } : {}) });
+if (NAP_UPSTREAM) {
+  const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' };
+  await ctx.route('https://nap.zyn-network.com/**', async (route) => {
+    const req = route.request();
+    const { pathname, search } = new URL(req.url());
+    const page = pathname === '/' ? '/index.html' : extname(pathname) ? pathname : `${pathname}.html`;
+    const file = NAP_LOCAL ? join(NAP_LOCAL, page) : '';
+    if (file && existsSync(file) && statSync(file).isFile()) {
+      return route.fulfill({ status: 200, contentType: TYPES[extname(file)] || 'application/octet-stream', body: readFileSync(file) });
+    }
+    const r = await fetch(`${NAP_UPSTREAM}${pathname}${search}`, { method: req.method(), headers: { 'content-type': req.headers()['content-type'] || 'application/json' }, body: ['GET', 'HEAD'].includes(req.method()) ? undefined : req.postDataBuffer() });
+    route.fulfill({ status: r.status, contentType: r.headers.get('content-type') || undefined, body: Buffer.from(await r.arrayBuffer()) });
+  });
+}
 const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('app error:', e.message));
 const toast = () => page.textContent('#toast');
@@ -32,7 +54,7 @@ const toast = () => page.textContent('#toast');
 await page.goto(`${APP}/#/markets`);
 await page.waitForFunction(() => /\d/.test(document.querySelector('.core-price')?.textContent || ''), null, { timeout: 30000 });
 await page.waitForTimeout(3000);
-ok(await page.isHidden('#preview'), 'the app reads the chain, not examples');
+ok(await page.isHidden('#chain-note'), 'the app reads the chain');
 const solCore = await page.textContent('.core:nth-child(3) .core-stats');
 ok(/Supplied\s*[1-9]/.test(solCore.replace(/\s+/g, ' ')), `SOL.zy pool has lenders: ${solCore.replace(/\s+/g, ' ').trim().slice(0, 80)}`);
 await page.screenshot({ path: `${S}/lend-markets.png`, fullPage: true });
@@ -88,7 +110,8 @@ await page.fill('#borrow-amount', '0.02');
 await page.waitForTimeout(400);
 ok(!(await page.isDisabled('#borrow-go')), `the form allows it: health ${await page.textContent('#health-num')}, ${await page.textContent('#borrow-note')}`);
 await page.click('#borrow-go');
-await approve('borrow', (t) => t.includes('Borrow SOL.zy against ETH.zy') && /Health/.test(t) && /Liquidated if/.test(t) && /auctioned/.test(t));
+// The worst case: "auctioned" (Nap before rules v2) or "sold down to …" (after).
+await approve('borrow', (t) => t.includes('Borrow SOL.zy against ETH.zy') && /Health/.test(t) && /Liquidated if/.test(t) && /auctioned|sold down to/.test(t));
 await page.waitForFunction(() => /Position opened|refused|declined|error/i.test(document.querySelector('#toast').textContent), null, { timeout: 90000 }).catch(() => {});
 ok(/Position opened/.test(await toast()), `borrow: ${await toast()}`);
 
@@ -170,9 +193,9 @@ if (process.env.NOTES) ok(/spent|sent|moved into Zyn/.test(notesText), `private 
 else ok(!/undefined|NaN/.test(notesText), `private notes, from this wallet only: ${notesText.slice(0, 120) || 'none for this wallet'}`);
 await page.check('#br-asset input[value="eth"]');
 ok(/Deposit 0\.1 ETH with MetaMask/.test(await page.textContent('#br-go')), `private ETH offers Sepolia's pool sizes: ${await page.textContent('#br-go')}`);
-// Private BTC through Mezo opens with the Mezo Buildathon (15 Oct).
-await page.check('#br-asset input[value="btc"]');
-ok(/Private BTC is not available yet/.test(await page.textContent('#br-body')) && await page.isHidden('#br-go'), 'private BTC waits for Mezo');
+// Private BTC through Mezo opens with the Mezo Buildathon (15 Oct): until
+// then it is not offered under Private at all.
+ok(await page.isHidden('#br-asset input[value="btc"] >> xpath=..'), 'private BTC is not offered while Mezo waits');
 await page.screenshot({ path: `${S}/lend-bridge-private.png`, fullPage: true });
 
 await b.close();

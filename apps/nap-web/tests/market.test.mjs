@@ -214,3 +214,18 @@ test('Zyn Lend: programs, ids and every holder intent match the ledger byte for 
   assert.equal(hex(m.lendRemoveCollateralIntent({ borrower: OWNER, position, amount: W(1), nonce: NONCE })), v.lend_remove_collateral);
   assert.equal(hex(m.lendBidIntent({ bidder: OWNER, lot: m.lotSource(position), pay: W(1), ...common })), v.lend_bid);
 });
+
+test('Zyn Lend v2: adding to a pool\'s insurance is laid out as the ledger reads op 51', () => {
+  // Until the shared fixture carries `lend_insure`, the layout is held to
+  // add-collateral's, which the ledger reads the same way after the tag and
+  // the program: account, a 32-byte id, the amount, inputs, change.
+  const insure = m.lendInsureIntent({ donor: OWNER, asset: ZEC, amount: W(1), inputs, change });
+  const add = m.lendAddCollateralIntent({ borrower: OWNER, position: ZEC, amount: W(1), inputs, change });
+  assert.equal(insure[0], 51);
+  assert.deepEqual(insure.slice(33, 65), unhexBytes(m.MARKET_PROGRAM.lendInsure));
+  assert.deepEqual(insure.slice(65), add.slice(65));
+  assert.deepEqual(insure.slice(1, 33), add.slice(1, 33));
+  if (v.program_lend_insure) assert.equal(m.MARKET_PROGRAM.lendInsure, v.program_lend_insure);
+  if (v.lend_insure) assert.equal(hex(insure), v.lend_insure);
+});
+const unhexBytes = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));

@@ -426,5 +426,8 @@ export async function loadPositions(config, identity) {
     const part = await call(config, 'zyn_lendPositions', { ids: ids.slice(i, i + 240).join(',') }).catch(() => []);
     if (Array.isArray(part)) rows.push(...part);
   }
-  return rows;
+  // Only ids this wallet asked for: a site is handed this list, and it must
+  // never carry a position that is not this account's.
+  const mine = new Set(ids);
+  return rows.filter((r) => r && mine.has(r.id));
 }

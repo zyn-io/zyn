@@ -1,7 +1,9 @@
 // Zyn Lend's portfolio: sign in with an Ethereum wallet, see the portfolio, link a
 // Solana wallet to the same account, then sign in with the Solana wallet
-// alone and find the same account. Stand-in wallets (Wallet Standard and
-// EIP-6963) sign deterministically.
+// alone and find the same account; unlink it and it opens its own again.
+// Stand-in wallets (Wallet Standard and EIP-6963) sign deterministically; the
+// Solana one signs in through `solana:signIn` with a real ed25519 key, and
+// adds a field to the message the way some wallets do.
 //
 //   node tests/app-portfolio.e2e.mjs                 (APP=… KEYRING=… to point elsewhere)
 //
@@ -28,10 +30,32 @@ await ctx.addInitScript(() => {
     },
   };
   window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info: { uuid: 'test-evm', name: 'Test EVM', icon: '', rdns: 'test' }, provider: evm }) })));
-  const account = { address: 'HBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy', publicKey: new Uint8Array(32), chains: ['solana:devnet'], features: [] };
-  const sol = { name: 'Test Solana', icon: 'data:image/png;base64,iVBORw0KGgo=', version: '1.0.0', chains: ['solana:devnet'], accounts: [account], features: {
-    'standard:connect': { version: '1.0.0', connect: async () => ({ accounts: [account] }) },
-    'solana:signMessage': { version: '1.0.0', signMessage: async ({ message }) => [{ signedMessage: message, signature: (await hash(new Uint8Array([...message, ...new TextEncoder().encode(salt)]))).slice(0, 64) }] },
+  // A real ed25519 key per run (from the salt), so the page can check the
+  // signature against the address.
+  const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const b58 = (bytes) => { let n = 0n; for (const b of bytes) n = n * 256n + BigInt(b); let o = ''; while (n > 0n) { o = B58[Number(n % 58n)] + o; n /= 58n; } for (const b of bytes) { if (b) break; o = '1' + o; } return o; };
+  const key = (async () => {
+    const seed = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`sol${salt}`)));
+    const der = Uint8Array.from([...'302e020100300506032b657004220420'.match(/../g).map((x) => parseInt(x, 16)), ...seed]);
+    const k = await crypto.subtle.importKey('pkcs8', der, { name: 'Ed25519' }, true, ['sign']);
+    const x = (await crypto.subtle.exportKey('jwk', k)).x;
+    const pub = Uint8Array.from(atob(x.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    window.__solAddress = b58(pub);
+    return { k, account: { address: b58(pub), publicKey: pub, chains: ['solana:devnet'], features: [] } };
+  })();
+  const sol = { name: 'Test Solana', icon: 'data:image/png;base64,iVBORw0KGgo=', version: '1.0.0', chains: ['solana:devnet'], get accounts() { return []; }, features: {
+    'standard:connect': { version: '1.0.0', connect: async () => ({ accounts: [(await key).account] }) },
+    'solana:signIn': { version: '1.0.0', signIn: async (input) => {
+      const { k, account } = await key;
+      // The sign-in format, with a chain id the site did not ask for.
+      const fields = [`URI: ${input.uri}`, `Version: ${input.version}`, 'Chain ID: solana:devnet', `Nonce: ${input.nonce}`, `Issued At: ${input.issuedAt}`];
+      const text = `${input.domain} wants you to sign in with your Solana account:\n${account.address}\n\n${input.statement}\n\n${fields.join('\n')}`;
+      window.__siws = text;
+      const signedMessage = new TextEncoder().encode(text);
+      const signature = new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, k, signedMessage));
+      return [{ account, signedMessage, signature }];
+    } },
+    'solana:signMessage': { version: '1.0.0', signMessage: async ({ message }) => { const { k } = await key; return [{ signedMessage: message, signature: new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, k, message)) }]; } },
     'solana:signAndSendTransaction': { version: '1.0.0', signAndSendTransaction: async () => [{ signature: new Uint8Array(64).fill(7) }] },
   } };
   window.addEventListener('wallet-standard:app-ready', (e) => e.detail.register(sol));
@@ -67,8 +91,11 @@ await page.click('#wallet-list button:has-text("Test Solana")');
 await page.waitForFunction(() => /linked/.test(document.querySelector('#toast').textContent) || /keyring|refused|Error|another/i.test(document.querySelector('#w-note').textContent), null, { timeout: 90000 }).catch(() => {});
 ok(/is linked/.test(await page.textContent('#toast')), `the Solana wallet is linked: ${(await page.textContent('#toast')).trim()} ${(await page.textContent('#w-note')).trim()}`);
 await page.waitForTimeout(800);
+const solAddr = await page.evaluate(() => window.__solAddress);
+const solShort = `${solAddr.slice(0, 6)}…${solAddr.slice(-4)}`;
+ok(/^lend\.zyn-network\.com wants you to sign in with your Solana account:\n/.test(await page.evaluate(() => window.__siws)), 'the Solana wallet signed in through solana:signIn');
 const both = (await page.textContent('.pf-wallets')).replace(/\s+/g, ' ');
-ok(/HBvV7Y…dTsy/.test(both) && /0x2222…2222/.test(both), `both wallets show on the portfolio: ${both.slice(0, 160)}`);
+ok(both.includes(solShort) && /0x2222…2222/.test(both), `both wallets show on the portfolio: ${both.slice(0, 160)}`);
 await page.screenshot({ path: `${S}/app-portfolio.png`, fullPage: true });
 // Sign out; sign in with the Solana wallet alone: the same account.
 await page.click('#connect'); await page.click('#w-out');
@@ -77,6 +104,34 @@ await page.waitForSelector('#wallet-list button:has-text("Test Solana")');
 await page.click('#wallet-list button:has-text("Test Solana")');
 await signedIn();
 ok((await page.textContent('#connect')).trim() === acct, `the Solana wallet now opens the same account (${acct})`);
+// Unlink it: it opens its own account again, without a "different account"
+// warning (the page knows it was unlinked here).
+await page.click('#connect');
+await page.waitForSelector('[data-unlink="sol"]');
+await page.click('[data-unlink="sol"]');
+await page.waitForSelector('#approve[open]');
+ok(/Unlink Test Solana/.test(await page.textContent('#a-title')), 'unlinking asks first');
+await page.click('#a-yes');
+await page.waitForFunction(() => /unlinked/.test(document.querySelector('#toast').textContent) || /refused|Error/i.test(document.querySelector('#w-note').textContent), null, { timeout: 60000 }).catch(() => {});
+ok(/is unlinked/.test(await page.textContent('#toast')), `the Solana wallet is unlinked: ${(await page.textContent('#toast')).trim()} ${(await page.textContent('#w-note')).trim()}`);
+await page.click('#w-out');
+await page.click('#connect');
+await page.waitForSelector('#wallet-list button:has-text("Test Solana")');
+await page.click('#wallet-list button:has-text("Test Solana")');
+await signedIn();
+const own = (await page.textContent('#connect')).trim();
+ok(own !== acct && !(await page.evaluate(() => document.querySelector('#approve').open)), `unlinked, the Solana wallet opens its own account (${own}) without a warning`);
+// A wallet that opens a different account than it did here before is warned.
+await page.click('#connect'); await page.click('#w-out');
+await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('zyn-lend.account.v2.evm.')) localStorage.setItem(k, '00'.repeat(8)); });
+await page.click('#connect');
+await page.waitForSelector('#wallet-list button:has-text("Test EVM")');
+await page.click('#wallet-list button:has-text("Test EVM")');
+await page.waitForSelector('#approve[open]', { timeout: 60000 }).catch(() => {});
+ok(/different account/i.test(await page.textContent('#a-title')) && /its signature changed/.test(await page.textContent('#a-note')), `a changed account is flagged before it opens: ${await page.textContent('#a-title')}`);
+await page.click('#a-yes');
+await signedIn();
+ok((await page.textContent('#connect')).trim() === acct, 'and opens once the holder says so');
 // Sending checks its inputs before anything is signed.
 await page.goto(`${APP}/#/portfolio`);
 ok(!errs.length, `no page errors ${errs.join(' | ')}`);

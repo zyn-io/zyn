@@ -184,6 +184,54 @@ function lendPreview(book, coll, collAmount, borrow, owed) {
   return { health, liquidation, allowed, cv, dv };
 }
 
+/// The step the node rounds a pool's public amounts to (two significant
+/// figures of what is supplied), unless the pool says its own.
+function roundStep(pool) {
+  if (isInt(pool.round_step)) return BigInt(pool.round_step);
+  const supplied = BigInt(pool.supplied);
+  let step = 1n;
+  while (supplied / step >= 100n) step *= 10n;
+  return step;
+}
+/// What is surely free in a pool: its published cash less half a rounding
+/// step, so a pre-check never promises coins the rounding made up.
+const freeCash = (pool) => { const v = BigInt(pool.cash) - roundStep(pool) / 2n; return v > 0n ? v : 0n; };
+
+/// How a lot is sold, as the chain says, else the rules this app was built
+/// for: from 102% of market down to an 85% floor, then a backstop that may
+/// sell down to 70%.
+function auctionTerms(book) {
+  const a = book.m.auction || {};
+  const n = (v, d) => (Number.isSafeInteger(v) && v > 0 ? v : d);
+  return { start: n(a.start_bps, 10_200), floor: n(a.floor_bps, 8_500), backstop: n(a.backstop_min_bps ?? a.backstop_bps, 7_000) };
+}
+const bpsText = (b) => `${b / 100}%`;
+/// The worst a liquidation can do to `coll`'s holder, in one line.
+const worstCase = (book, coll, cn) => {
+  const t = auctionTerms(book);
+  return `your ${cn} can be sold down to ${bpsText(t.floor)} of its market price, or ${bpsText(t.backstop)} if no one bids, plus a ${bpsText(coll.penalty_bps)} penalty`;
+};
+/// Health and liquidation price as rows, for an approval that changes them.
+function healthRows(v, cn, label = 'after') {
+  if (v.health == null) return v.dv === 0n || v.dv == null ? [] : [[`Health ${label}`, 'no price posted']];
+  return [[`Health ${label}`, `${v.health.toFixed(2)} — liquidated below 1.00`], [`Liquidated if (${label})`, `${cn} falls to ${usdText(v.liquidation)}`]];
+}
+/// Rules v2's pair entry for collateral `c` backing loans of `b`, if published.
+const pairOf = (book, c, b) => (Array.isArray(book.m.pairs) ? book.m.pairs.find((x) => x?.collateral_asset === c && x?.borrow_asset === b) : null) || null;
+/// The most collateral of `coll` that may still be posted against `borrow`:
+/// the pair's depth room and the asset's cap room, whichever the chain
+/// publishes (null: it publishes neither).
+function collateralRoom(book, coll, borrowAsset) {
+  const rooms = [];
+  const pair = borrowAsset ? pairOf(book, coll.asset, borrowAsset) : null;
+  if (pair && isInt(pair.room)) rooms.push(BigInt(pair.room));
+  if (isInt(coll.collateral_room)) rooms.push(BigInt(coll.collateral_room));
+  return rooms.length ? rooms.reduce((a, b) => (b < a ? b : a)) : null;
+}
+
+/// The smallest loan a pool makes, in WAD dollars, or null.
+const minLoan = (pool) => (isInt(pool.min_borrow_usd) && BigInt(pool.min_borrow_usd) > 0n ? BigInt(pool.min_borrow_usd) : null);
+
 async function ownPosition(ctx, id) {
   if (!isHex(id)) throw bad('position must be 64 hex characters');
   const p = (await ledger.loadPositions(ctx.config, ctx.identity)).find((x) => x.id === id);
@@ -429,6 +477,7 @@ export const METHODS = {
       const pool = lendPool(book, p.asset, 'asset');
       const amount = amountOf(p.amount, 'amount');
       const name = book.name(pool.asset);
+      if (pool.supply_paused === true) throw bad(`Deposits into the ${name} pool wait while an auction recovers a loss`);
       await mustHold(ctx, pool.asset, amount, name);
       return {
         title: `Lend ${name}`,
@@ -439,7 +488,7 @@ export const METHODS = {
           ['You receive', `l${name} shares, collected into this wallet`],
           ['Pool lent out', pctText(pool.utilization)],
         ],
-        note: 'If a borrower\'s collateral sells for less than their debt, the loss lowers every share in this pool. Withdrawing needs the coins to be free in the pool.',
+        note: 'Losses from a bad loan are shared by lenders: insurance pays first, then every share in this pool loses value. Withdrawals wait while the pool is fully lent out.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pool.asset), amount);
@@ -457,10 +506,11 @@ export const METHODS = {
       const pool = lendPool(book, p.asset, 'asset');
       const shares = amountOf(p.shares, 'shares');
       const name = book.name(pool.asset);
+      if (pool.withdraw_paused === true) throw bad(`Withdrawals from the ${name} pool wait for a held price to be confirmed`);
       await mustHold(ctx, pool.receipt, shares, `l${name}`);
       // The chain publishes a share's price, not how many shares exist.
       const worth = (shares * BigInt(pool.share_price)) / WAD;
-      if (worth > BigInt(pool.cash)) throw bad(`About ${wadText(pool.cash)} ${name} is free in the pool right now; the rest is lent out`);
+      if (worth > freeCash(pool)) throw bad(`About ${wadText(freeCash(pool))} ${name} is surely free in the pool right now; the rest is lent out, and withdrawals wait until borrowers repay`);
       return {
         title: `Withdraw ${name}`,
         danger: false,
@@ -486,12 +536,21 @@ export const METHODS = {
       const collAmount = amountOf(p.collateralAmount, 'collateralAmount');
       const amount = amountOf(p.amount, 'amount');
       const [cn, bn] = [book.name(coll.asset), book.name(borrow.asset)];
-      await mustHold(ctx, coll.asset, collAmount, cn);
-      if (amount > BigInt(borrow.cash)) throw bad(`The ${bn} pool has about ${wadText(borrow.cash)} free to borrow`);
-      if (coll.price_held || borrow.price_held || book.m.prices_fresh === false) throw bad('Prices are stale or still moving; borrowing waits for the next confirmed price');
-      if (borrow.min_borrow_usd != null && isInt(borrow.min_borrow_usd) && book.prices[borrow.asset] && usdOf(amount, book.prices[borrow.asset]) < BigInt(borrow.min_borrow_usd)) {
-        throw bad(`The smallest ${bn} loan is ${usdText(BigInt(borrow.min_borrow_usd))}`);
+      if (amount > freeCash(borrow)) throw bad(`The ${bn} pool has about ${wadText(freeCash(borrow))} surely free to borrow`);
+      if (coll.price_held || borrow.price_held || coll.price_fresh === false || borrow.price_fresh === false || book.m.prices_fresh === false) throw bad('Prices are stale or still moving; borrowing waits for the next confirmed price');
+      const least = minLoan(borrow);
+      if (least != null && book.prices[borrow.asset] && usdOf(amount, book.prices[borrow.asset]) < least) {
+        throw bad(`The smallest ${bn} loan is ${usdText(least)}`);
       }
+      // Caps: refused here only when surely over them (the published totals
+      // are rounded); the chain has the last word, and says why.
+      if (isInt(borrow.borrow_cap) && BigInt(borrow.borrowed) - roundStep(borrow) / 2n + amount > BigInt(borrow.borrow_cap)) {
+        throw bad(`The ${bn} pool lends at most ${wadText(borrow.borrow_cap)} in all; it is at or near that cap`);
+      }
+      const room = collateralRoom(book, coll, borrow.asset);
+      if (room != null && collAmount > room) throw bad(`At most ${wadText(room)} more ${cn} can back ${bn} loans now (the collateral cap, or a quarter of Zyn's ${cn}/${bn} pool)`);
+      if (pairOf(book, coll.asset, borrow.asset)?.prices_agree === false) throw bad(`Borrowing in this pair is paused: Zyn's pool and the posted price disagree`);
+      await mustHold(ctx, coll.asset, collAmount, cn);
       const v = lendPreview(book, coll, collAmount, borrow, amount);
       if (v.health == null) throw bad('No price is posted for this pair yet; borrowing opens once one is');
       if (!v.allowed) throw bad(`That is over the ${coll.max_ltv_bps / 100}% most ${cn} collateral may borrow`);
@@ -504,9 +563,9 @@ export const METHODS = {
           ['Health', `${v.health.toFixed(2)} — liquidated below 1.00`],
           ['Liquidated if', `${cn} falls to ${usdText(v.liquidation)}`],
           ['Borrow rate', `${pctText(borrow.borrow_rate)} a year, changing as the pool is used`],
-          ['If liquidated', `your ${cn} is auctioned to cover the debt plus ${coll.penalty_bps / 100}%; what is left comes back to you`],
+          ['If liquidated', worstCase(book, coll, cn)],
         ],
-        note: 'The position is private: only this wallet can find it. Prices are posted by the sequencer; if Zyn\'s own pool for this pair disagrees with them, the chain refuses the borrow.',
+        note: 'Debt grows with interest, and health falls with it. Others on the chain cannot see this position; the operator can. Prices are posted by the operator; if Zyn\'s own pool for this pair disagrees with them, the chain refuses the borrow.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(coll.asset), collAmount);
@@ -525,32 +584,70 @@ export const METHODS = {
       const pos = await ownPosition(ctx, p.position);
       const book = await lendBook(ctx);
       const name = book.name(pos.borrow_asset);
-      const owed = BigInt(pos.owed);
-      // "all" pays what is owed plus a little for interest until it lands;
-      // the chain returns anything over.
-      const all = p.amount === 'all';
-      const amount = all ? owed + owed / 1000n + 1n : amountOf(p.amount, 'amount');
-      await mustHold(ctx, pos.borrow_asset, amount, name);
       const cn = book.name(pos.collateral_asset);
+      const owed = BigInt(pos.owed);
+      const borrowPool = book.pools.find((x) => x.asset === pos.borrow_asset);
+      const collPool = book.pools.find((x) => x.asset === pos.collateral_asset);
+      const all = p.amount === 'all';
+      const held = async () => (await holdings(ctx)).held.filter((x) => x.asset === pos.borrow_asset).reduce((a, x) => a + BigInt(x.amount), 0n);
+      let amount, have;
+      if (all) {
+        have = await held();
+        // What is owed plus a little for interest until it lands; the chain
+        // returns anything over. A holder short of that buffer still repays
+        // if they hold the debt plus the interest it can grow by before the
+        // next seal.
+        const buffer = owed + owed / 1000n + 1n;
+        const rate = borrowPool && isInt(borrowPool.borrow_rate) ? BigInt(borrowPool.borrow_rate) : 0n;
+        const market = await ledger.call(ctx.config, 'zyn_market').catch(() => ({}));
+        const secs = BigInt(Math.max(60, 2 * (Number(market.epoch_seconds) || 60) + 60));
+        const accruing = owed + (owed * rate * secs) / (WAD * 31_536_000n) + 1n;
+        amount = have >= buffer ? buffer : have >= accruing ? have : buffer;
+      } else {
+        amount = amountOf(p.amount, 'amount');
+        if (amount >= owed) throw bad(`That is all of the debt (${wadText(owed)} ${name} now); use Repay and close`);
+        // Rules v2 says the most a partial payment may be ("0": only all).
+        if (isInt(pos.repay_max_partial) && amount > BigInt(pos.repay_max_partial)) {
+          throw bad(BigInt(pos.repay_max_partial) === 0n
+            ? 'This debt is already at the smallest loan: repay all of it'
+            : `Repay all of it, or at most ${wadText(pos.repay_max_partial)} ${name}: what stays must be at least the smallest loan`);
+        }
+        // Before v2, the same rule from the pool's smallest loan.
+        const least = borrowPool && !isInt(pos.repay_max_partial) ? minLoan(borrowPool) : null;
+        const pb = book.prices[pos.borrow_asset];
+        if (least != null && pb && usdOf(owed - amount, pb) < least) {
+          throw bad(`That leaves ${wadText(owed - amount)} ${name} owed, under the ${usdText(least)} smallest loan. Repay all of it, or leave at least that much`);
+        }
+        have = await held();
+      }
+      if (have < amount) throw bad(`This wallet does not hold enough ${name} (that needs ${wadText(amount)})`);
       const collateral = BigInt(pos.collateral);
       // Repaying everything closes the position: the collateral comes back in
       // the same approval, as a second intent the chain applies right after.
       const closing = all && collateral > 0n;
+      const after = !all && collPool && borrowPool ? lendPreview(book, collPool, collateral, borrowPool, owed - amount) : null;
       return {
         title: closing ? `Repay ${name} and close` : `Repay ${name}`,
         danger: false,
         rows: [
           ['You pay', `${wadText(amount)} ${name}`],
           ['Owed now', `${wadText(owed)} ${name}`],
+          ...(after ? [['Owed after', `about ${wadText(owed - amount)} ${name}`], ...healthRows(after, cn)] : []),
           ...(closing ? [['You get back', `${wadText(collateral)} ${cn}, collected into this wallet`]] : []),
         ],
-        note: 'Anything paid over what is owed comes back to this wallet.',
+        note: all ? 'Anything paid over what is owed comes back to this wallet. If interest outgrows the payment before it lands, a little debt stays and the collateral waits for it.' : 'Debt keeps growing with interest.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pos.borrow_asset), amount);
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRepayIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, nonce: n, inputs, change }));
           const source = hex(mk.lendSource(ctx.identity.account, nonce));
           if (!closing) return { source };
+          // Anything still owed (interest outran the payment) keeps the
+          // collateral in: say how much, rather than fail the second step.
+          const left = (await ledger.loadPositions(ctx.config, ctx.identity).catch(() => [])).find((x) => x.id === pos.id);
+          if (left && left.state === 'open' && isInt(left.owed) && BigInt(left.owed) > 0n) {
+            return { source, closed: false, dust: left.owed, note: `Repaid, but ${wadText(left.owed)} ${name} of interest is still owed; repay it to take the ${cn} out.` };
+          }
           try {
             const back = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRemoveCollateralIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount: collateral, nonce: n }));
             return { source, closed: true, collateral: hex(mk.lendSource(ctx.identity.account, back)) };
@@ -571,10 +668,15 @@ export const METHODS = {
       const name = book.name(pos.collateral_asset);
       const amount = amountOf(p.amount, 'amount');
       await mustHold(ctx, pos.collateral_asset, amount, name);
+      const collPool = book.pools.find((x) => x.asset === pos.collateral_asset);
+      const borrowPool = book.pools.find((x) => x.asset === pos.borrow_asset);
+      const room = collPool && isInt(collPool.collateral_room) ? BigInt(collPool.collateral_room) : null;
+      if (room != null && amount > room) throw bad(`${name} collateral is near its cap: at most ${wadText(room)} more fits now`);
+      const after = collPool && borrowPool ? lendPreview(book, collPool, BigInt(pos.collateral) + amount, borrowPool, BigInt(pos.owed)) : null;
       return {
         title: `Add ${name} collateral`,
         danger: false,
-        rows: [['You add', `${wadText(amount)} ${name}`], ['Collateral after', `${wadText(BigInt(pos.collateral) + amount)} ${name}`]],
+        rows: [['You add', `${wadText(amount)} ${name}`], ['Collateral after', `${wadText(BigInt(pos.collateral) + amount)} ${name}`], ...(after ? healthRows(after, name) : [])],
         note: 'More collateral moves the liquidation price further away.',
         run: async () => {
           const h = await holdings(ctx);
@@ -594,10 +696,17 @@ export const METHODS = {
       const name = book.name(pos.collateral_asset);
       const amount = p.amount === 'all' ? BigInt(pos.collateral) : amountOf(p.amount, 'amount');
       if (amount > BigInt(pos.collateral)) throw bad('More than the position holds');
+      const collPool = book.pools.find((x) => x.asset === pos.collateral_asset);
+      const borrowPool = book.pools.find((x) => x.asset === pos.borrow_asset);
+      const left = BigInt(pos.collateral) - amount;
+      const after = collPool && borrowPool && BigInt(pos.owed) > 0n ? lendPreview(book, collPool, left, borrowPool, BigInt(pos.owed)) : null;
+      if (after && after.health != null && !after.allowed) throw bad(`That would leave the position over the ${collPool.max_ltv_bps / 100}% most ${name} collateral may borrow`);
+      if (BigInt(pos.owed) > 0n && (collPool?.price_held || borrowPool?.price_held)) throw bad('Taking this collateral out waits for a held price to be confirmed');
+      if (BigInt(pos.owed) > 0n && pairOf(book, pos.collateral_asset, pos.borrow_asset)?.prices_agree === false) throw bad('Taking collateral out is paused: Zyn\'s pool and the posted price disagree');
       return {
         title: `Take out ${name} collateral`,
         danger: BigInt(pos.owed) > 0n,
-        rows: [['You take out', `${wadText(amount)} ${name}`], ['Debt', `${wadText(pos.owed)} ${book.name(pos.borrow_asset)}`]],
+        rows: [['You take out', `${wadText(amount)} ${name}`], ['Collateral after', `${wadText(left)} ${name}`], ['Debt', `${wadText(pos.owed)} ${book.name(pos.borrow_asset)}`], ...(after ? healthRows(after, name) : [])],
         note: 'The chain refuses this if it would leave the position over its maximum.',
         run: async () => {
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendRemoveCollateralIntent({ borrower: ctx.identity.account, position: unhex(pos.id), amount, nonce: n }));
@@ -616,6 +725,8 @@ export const METHODS = {
       if (!lot || !isHex(lot.borrow_asset) || !isHex(lot.collateral_asset) || !isInt(lot.price) || !isInt(lot.collateral)) throw bad('No such auction lot');
       const pay = amountOf(p.pay, 'pay');
       const [cn, bn] = [book.name(lot.collateral_asset), book.name(lot.borrow_asset)];
+      if (isInt(lot.min_bid) && pay < BigInt(lot.min_bid)) throw bad(`The smallest bid on this lot is ${wadText(lot.min_bid)} ${bn}`);
+      if (lot.bids_full === true && isInt(lot.outbid_above) && pay <= BigInt(lot.outbid_above)) throw bad(`This lot's bids are full; a new bid must pay more than ${wadText(lot.outbid_above)} ${bn}`);
       await mustHold(ctx, lot.borrow_asset, pay, bn);
       const price = BigInt(lot.price);
       const most = price > 0n ? (pay * WAD) / price : 0n;
@@ -633,6 +744,33 @@ export const METHODS = {
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(lot.borrow_asset), pay);
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.lendBidIntent({ bidder: ctx.identity.account, lot: unhex(lot.lot), pay, nonce: n, inputs, change }));
           return { source: hex(mk.lendSource(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_lendInsure: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const book = await lendBook(ctx);
+      if (book.m.rules !== 2) throw bad('Adding to insurance opens with lending rules v2 on this chain');
+      const pool = lendPool(book, p.asset, 'asset');
+      const amount = amountOf(p.amount, 'amount');
+      const name = book.name(pool.asset);
+      await mustHold(ctx, pool.asset, amount, name);
+      return {
+        title: `Add to the ${name} pool's insurance`,
+        danger: false,
+        rows: [
+          ['You give', `${wadText(amount)} ${name}`],
+          ['Insurance now', isInt(pool.insurance) ? `about ${wadText(pool.insurance)} ${name}` : 'not published'],
+        ],
+        note: 'A gift to the pool: it covers bad loans before lenders do. You get no shares and cannot take it back.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(pool.asset), amount);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.lendInsureIntent({ donor: ctx.identity.account, asset: unhex(pool.asset), amount, inputs, change }));
+          return { asset: pool.asset };
         },
       };
     },
