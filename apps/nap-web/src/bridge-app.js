@@ -26,6 +26,7 @@ import { bridgePage, handoffUrl } from './bridges.js';
 import './styles.css';
 import './market.css';
 import './bridge.css';
+import './moved-banner.js';
 
 const root = document.querySelector('#app');
 installTips();

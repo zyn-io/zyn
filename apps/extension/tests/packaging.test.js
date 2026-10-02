@@ -6,7 +6,7 @@ import { test } from 'node:test';
 const at = (p) => new URL(`../${p}`, import.meta.url);
 const read = (p) => readFileSync(at(p), 'utf8');
 const json = (p) => JSON.parse(read(p));
-const API = 'https://nap.cavebro.win';
+const API = 'https://nap.zyn-network.com';
 
 /// Two stores, two background models, one extension. Chrome's MV3 runs the
 /// background as a service worker; Firefox runs it as an event page and wants

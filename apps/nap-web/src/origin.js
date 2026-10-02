@@ -1,6 +1,6 @@
 // Where the wallet's endpoints live.
 //
-// On nap.cavebro.win the pages and the endpoints share one origin, and every
+// On nap.zyn-network.com the pages and the endpoints share one origin, and every
 // configured URL must be a path on it. The extension ships the same pages
 // inside itself (chrome-extension://…), so there the endpoints stay on Nap's
 // server — the one origin its host permission and page policy admit — and the

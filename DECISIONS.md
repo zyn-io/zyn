@@ -6478,6 +6478,7 @@ itself."
 | 148.4 | **The provider goes to https pages** (and localhost for development), not every URL | ✅ |
 | 148.5 | **Desktop Nap is no longer behind the extension.** Its own UI stays; whether the extension should also reach it (when it runs) is open | ⏳ |
 | 148.6 | **Stores:** Chrome Web Store and Firefox Add-ons, from `apps/extension/release/`. Firefox gets the source package (rebuilds byte for byte) and declares `financialAndPaymentInfo` — the signed transactions that leave the device | ✅ |
+| 148.7 | **2 Oct 2026: Nap's one server is nap.zyn-network.com** (extension 0.3.2 and later). nap.cavebro.win stays an alias of the same Pages project with no redirect — 0.3.1 and the first phone build call it, and browser wallets are kept per origin — and shows a notice pointing to the new host. 148.1–148.2 read with the new host | ✅ |
 
 ## §149 — Nap on phones is the web wallet in a native shell (25 Sep 2026)
 

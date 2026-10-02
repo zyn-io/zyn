@@ -29,7 +29,7 @@ The add-on is \`apps/extension/dist-firefox/\` (and zipped as
 ## What is built from what
 
 - \`apps/nap-web\` — the wallet (Vite). \`npm run build:extension\` builds its four
-  pages with \`VITE_NAP_API=https://nap.cavebro.win\` (\`.env.extension\`), the
+  pages with \`VITE_NAP_API=https://nap.zyn-network.com\` (\`.env.extension\`), the
   one server the add-on talks to (\`src/origin.js\`).
 - \`apps/extension\` — \`build.mjs\` copies those pages next to the extension's
   own \`background.js\`, \`content.js\` and \`inpage.js\` (unminified, in \`src/\`)

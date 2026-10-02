@@ -1,8 +1,8 @@
 # Nap Wallet for iOS and Android
 
-The same wallet as nap.cavebro.win and the browser extension, in a native
+The same wallet as nap.zyn-network.com and the browser extension, in a native
 shell: `apps/nap-web` built with `--mode mobile` (endpoints on
-nap.cavebro.win, see `apps/nap-web/src/origin.js`) inside Tauri 2's web view.
+nap.zyn-network.com, see `apps/nap-web/src/origin.js`) inside Tauri 2's web view.
 The Rust side is only the shell — no commands, no plugins — so the app is
 exactly the wallet: keys made and sealed on the phone, chain reads and signed
 transactions to Nap's server. Nap's server answers the app's origins

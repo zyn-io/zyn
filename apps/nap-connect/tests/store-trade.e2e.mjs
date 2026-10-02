@@ -3,7 +3,7 @@
 // takes one on cavebro.win's market and the other on the Cave store; the
 // items move, and the seller collects what the market owes them.
 //
-//   SITE=https://cavebro.win STORE=https://cave-market.pages.dev NAP=https://nap.cavebro.win
+//   SITE=https://cavebro.win STORE=https://cave-market.pages.dev NAP=https://nap.zyn-network.com
 //   SELLER_PHRASE=<file> BUYER_PHRASE=<file>  node tests/store-trade.e2e.mjs
 import { chromium } from 'playwright-core';
 import { unlockNap } from './unlock.mjs';
@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 
 const SITE = process.env.SITE || 'https://cavebro.win';
 const STORE = process.env.STORE || 'https://cave-market.pages.dev';
-const NAP = process.env.NAP || 'https://nap.cavebro.win';
+const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const S = process.env.SHOTS || '/tmp';
 const PRICE = process.env.PRICE || '0.002';
 // TAIL_ONLY="name one|name two": only check that those moved and the seller collects.

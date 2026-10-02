@@ -20,6 +20,7 @@ import { endpoint } from './origin.js';
 import { installTips, tip } from './tip.js';
 import './styles.css';
 import './market.css';
+import './moved-banner.js';
 
 const root = document.querySelector('#app');
 installTips();

@@ -1,5 +1,5 @@
 //! Nap Wallet on a phone: the wallet's own pages (apps/nap-web, built with
-//! `--mode mobile`) in the platform's web view — the wallet on nap.cavebro.win:
+//! `--mode mobile`) in the platform's web view — the wallet on nap.zyn-network.com:
 //! keys made and sealed on the device, chain reads and signed frames to Nap's
 //! server. Two native pieces are exposed to those pages: `napvault` (the kept
 //! wallet's password behind Face ID / fingerprint, §151) and `napbrowser`

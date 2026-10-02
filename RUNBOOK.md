@@ -1391,26 +1391,33 @@ The Rust core compiles for `aarch64-apple-ios`, `aarch64-apple-ios-sim`,
 `aarch64-linux-android` (targets installed here). Proving an exit on a
 phone takes about a minute and a few hundred MB; it runs off the UI thread.
 
+**Nap's address (2 Oct 2026):** Nap is at https://nap.zyn-network.com (Pages
+project `nap-web`, custom domain). nap.cavebro.win stays on the same project as
+an alias, without a redirect: the 0.3.1 extension and the first TestFlight build
+call it, and browser wallets are kept per origin. On that host the full pages
+show a one-line notice pointing to the new address (`apps/nap-web/src/moved.js`).
+
 **Browser extension — `apps/extension`** (Manifest V3, Chrome and Firefox).
 Since 25 Sep 2026 (0.2.0) it is a wallet by itself — no desktop app. It is
 Nap in the browser, packaged: `npm run build` in `apps/extension` builds
 `apps/nap-web` in extension mode (`vite build --mode extension`,
-`.env.extension` sets `VITE_NAP_API=https://nap.cavebro.win`, see
+`.env.extension` sets `VITE_NAP_API=https://nap.zyn-network.com`, see
 `src/origin.js`) and adds three small files:
 
 - the toolbar popup is the wallet (`index.html?popup=1`, 400 px wide; Market
   and Bridge open in tabs). Keys live in the extension's own storage, sealed
-  under the holder's password if they keep them — as on nap.cavebro.win;
+  under the holder's password if they keep them — as on nap.zyn-network.com;
 - `content.js` + `inpage.js` announce Nap to https pages (`nap:announceProvider`,
   and `window.zyn`) and carry a site's requests over a runtime port straight to
   `connect.html` — the same connect window as the web, which answers each
   port at the origin the browser names;
 - `background.js` only opens (or focuses) that window.
 
-Endpoints: everything goes to nap.cavebro.win (the one host permission) —
+Endpoints: everything goes to nap.zyn-network.com (the one host permission;
+0.3.1 and older call nap.cavebro.win) —
 `/rpc`, `/zec`, `/media`, `/claim`, the same Pages Functions the web wallet
 uses. Bridging from Phantom or MetaMask needs their providers, which don't
-inject into extension pages; bring SOL or ETH in from nap.cavebro.win/bridge.
+inject into extension pages; bring SOL or ETH in from nap.zyn-network.com/bridge.
 
 ```sh
 cd apps/extension && npm run build     # dist/, dist-firefox/, release/*.zip
@@ -1422,7 +1429,7 @@ cd ../nap-connect && PHRASE_FILE=… POOL=… SELL=… IN=… OUT=… node tests
 
 Store listing, permission reasons and data declarations:
 `apps/extension/store/LISTING.md`; images in `apps/extension/store/`; privacy
-policy at https://nap.cavebro.win/privacy. The source package rebuilds the
+policy at https://nap.zyn-network.com/privacy. The source package rebuilds the
 Firefox add-on byte for byte (checked 25 Sep).
 
 ## 4r. ZynZap, the front (`apps/zynzap`)
@@ -2643,7 +2650,7 @@ deploys to the `cave-jade` Pages project. `?network=testnet` reads chain 212.
 - **Content** lives at KV `c:<token>`. To hide a token's picture and description: `npx wrangler@4.40.0 kv key put --namespace-id 6fec82c33ade4ebba5836456d67cdb04 hide:<token> 1 --remote`; delete that key to show it again.
 - **Local:** `npx wrangler@4.40.0 pages dev dist --port 8788 --kv CAVE_JADE_CONTENT` in `jade-stage`; a local node has no CORS, so put a proxy in front of it and open `/?network=testnet&rpc=http://127.0.0.1:<proxy>` (the `rpc`/`nap` overrides work on localhost only).
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
-- **Live e2e:** `JADE=… NAP=https://nap.cavebro.win TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
+- **Live e2e:** `JADE=… NAP=https://nap.zyn-network.com TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
 
 ## 5f-duodevicies. End-to-end suites on the public testnet (25 Sep 2026)
 
@@ -2771,7 +2778,7 @@ set: POST one request frame, get the reply frame back (DECISIONS §139).
 3. nap-web deployed; `functions/zec/[[path]].js` maps `/zec/mainnet` →
    `$ZYN_RPC_URL/zec` and `/zec/testnet` → `/zec-testnet`.
 
-Check from anywhere: `printf '\001' | curl -s --data-binary @- https://nap.cavebro.win/zec/mainnet | xxd | head -1`.
+Check from anywhere: `printf '\001' | curl -s --data-binary @- https://nap.zyn-network.com/zec/mainnet | xxd | head -1`.
 
 Local testing without any of that: `node relay.mjs 168.119.53.39 8098 18095`
 (HTTP → testnet's public TCP port), then
@@ -4399,7 +4406,8 @@ zyn-attend serve                       # POST /attend, GET /events on ZYN_ATTEND
 Dynamic Messaging on the NDEF file with encrypted PICC data (UID + read
 counter) and a CMAC over nothing but itself, the meta-read and file-read keys
 from `<name>.keys.json`, and the URL
-`https://nap.cavebro.win/tap?e=<collection>&picc=<32 hex placeholder>&cmac=<16 hex placeholder>`
+`https://nap.zyn-network.com/tap?e=<collection>&picc=<32 hex placeholder>&cmac=<16 hex placeholder>`
+(tags written before 2 Oct 2026 carry nap.cavebro.win, which still serves the wallet)
 with the mirrors on the two placeholders. `badge` events want a tag per
 attendee; `door` events one tag everyone taps.
 

@@ -3,7 +3,7 @@
 //
 // The extension is Nap in the browser, packaged: the wallet's own pages, built
 // for the extension (`npm run build:extension` in apps/nap-web — endpoints on
-// nap.cavebro.win, keys on the extension's origin), with a toolbar popup, a
+// nap.zyn-network.com, keys on the extension's origin), with a toolbar popup, a
 // content script that announces Nap to sites, and a background that opens the
 // connect window. No desktop app is needed.
 import { execFileSync } from 'node:child_process';

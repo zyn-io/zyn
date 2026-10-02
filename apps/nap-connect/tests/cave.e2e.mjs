@@ -5,7 +5,7 @@
 // reconnecting with the password, and the same through the Nap extension.
 // Nothing is bought or signed; the wallets are fresh and hold nothing.
 //
-//   node tests/cave.e2e.mjs            (SITE=https://cavebro.win NAP=https://nap.cavebro.win)
+//   node tests/cave.e2e.mjs            (SITE=https://cavebro.win NAP=https://nap.zyn-network.com)
 //   EXT=0 node tests/cave.e2e.mjs      skip the extension part
 //
 // Uses Playwright's Chrome for Testing (branded Chrome no longer loads an
@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 
 const SITE = process.env.SITE || 'https://cavebro.win';
-const NAP = new URL(process.env.NAP || 'https://nap.cavebro.win').origin;
+const NAP = new URL(process.env.NAP || 'https://nap.zyn-network.com').origin;
 const CHROMIUM = process.env.CHROMIUM || `${homedir()}/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const EXT = new URL('../../extension/dist', import.meta.url).pathname;
 const S = process.env.SHOTS || '/tmp/cave-e2e';

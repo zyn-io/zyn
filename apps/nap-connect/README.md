@@ -22,7 +22,7 @@ await provider.request({ method: 'zyn_nftBuy', params: { item, pay: '1.01' } });
 | | How it is found | Where approvals happen |
 |---|---|---|
 | **Extension** (desktop Nap behind it) | `nap:announceProvider` in answer to `nap:requestProvider` — EIP-6963's shape; older builds via `window.zyn` | the extension's own window |
-| **Nap in the browser** | always offered; opens `https://nap.cavebro.win/connect.html` as a popup and talks by `postMessage` | Nap's window, on Nap's origin |
+| **Nap in the browser** | always offered; opens `https://nap.zyn-network.com/connect.html` as a popup and talks by `postMessage` | Nap's window, on Nap's origin |
 
 The browser path is how web-only wallets do it: the keys never leave Nap's
 origin, the site never draws an approval, and every message is checked both

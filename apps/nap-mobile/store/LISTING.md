@@ -22,13 +22,13 @@ Nap Wallet is a private wallet for Zcash and Zyn.
 
 Your keys stay on your phone. Nap never stores your recovery phrase; if you keep the wallet on this phone, the key is sealed under a password you set. No account, no email, no analytics.
 
-The same recovery phrase opens Nap on the web at nap.cavebro.win and in the Nap browser extension.
+The same recovery phrase opens Nap on the web at nap.zyn-network.com and in the Nap browser extension.
 
 **Keywords** (App Store, ≤100): zcash,zec,shielded,privacy,wallet,zyn,crypto,self-custody,swap,nft
 **Category:** Finance (secondary: Utilities)
 **Support URL:** https://x.com/cavebrowin
-**Marketing URL:** https://nap.cavebro.win
-**Privacy policy URL:** https://nap.cavebro.win/privacy
+**Marketing URL:** https://nap.zyn-network.com
+**Privacy policy URL:** https://nap.zyn-network.com/privacy
 **Age rating:** answer "none" to every content question (no gambling, no user-generated content feed, no unrestricted web browsing) → 4+ / Everyone.
 
 ## App Store Connect — App Privacy

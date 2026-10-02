@@ -20,7 +20,7 @@ const extensionPages = (mode) => ({
   name: 'nap-extension-pages',
   transformIndexHtml(html) {
     if (mode !== 'extension' && mode !== 'mobile') return html;
-    const api = new URL(process.env.VITE_NAP_API || 'https://nap.cavebro.win').origin;
+    const api = new URL(process.env.VITE_NAP_API || 'https://nap.zyn-network.com').origin;
     return html
       // The phone app's pages also reach its native side (Tauri IPC), for
       // biometric unlock (§151).

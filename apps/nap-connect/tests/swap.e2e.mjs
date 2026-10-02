@@ -9,7 +9,7 @@ import { unlockNap } from './unlock.mjs';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 
-const NAP = process.env.NAP || 'https://nap.cavebro.win';
+const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const NODE = process.env.NODE_URL || 'https://zyn-rpc.cavebro.win/object';
 const S = process.env.SHOTS || '/tmp';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();

@@ -24,7 +24,7 @@ Nap Wallet is a private wallet for Zcash and Zyn that lives in your toolbar.
 
 Your keys stay on your device. Nap never stores your recovery phrase; if you choose to keep the wallet on this device, the key is sealed under a password you set. No account, no email, no analytics.
 
-The same recovery phrase opens Nap in the browser at nap.cavebro.win.
+The same recovery phrase opens Nap in the browser at nap.zyn-network.com.
 
 **Category:** Productivity → Tools (Chrome has no finance category for extensions)
 **Language:** English
@@ -34,7 +34,7 @@ The same recovery phrase opens Nap in the browser at nap.cavebro.win.
 - Screenshots (1280×800): `screenshot-0-popup.png` (the toolbar wallet — lead with it), `screenshot-1-keys.png`, `screenshot-2-pocket.png`, `screenshot-3-approve.png`, `screenshot-4-market.png`
 - Small promo tile (440×280): `promo-small-440x280.png`
 
-**Official URL / Homepage:** https://nap.cavebro.win
+**Official URL / Homepage:** https://nap.zyn-network.com
 **Support URL:** https://x.com/cavebrowin
 
 ## Privacy practices
@@ -47,7 +47,7 @@ A cryptocurrency wallet for Zcash and Zyn: it holds the user's keys on their dev
 | Permission | Why |
 |---|---|
 | `storage` | Remembers which window is Nap's approval window for the current browser session, so a second request focuses it instead of opening another. (The wallet's own settings and its password-sealed key live in the extension's page storage.) |
-| Host `https://nap.cavebro.win/*` | Nap's server: the wallet reads the Zyn and Zcash networks and sends the user's signed transactions through it. It is the only host the extension talks to. |
+| Host `https://nap.zyn-network.com/*` | Nap's server: the wallet reads the Zyn and Zcash networks and sends the user's signed transactions through it. It is the only host the extension talks to. |
 | Content script on `https://*/*` (and localhost for development) | Adds the Nap provider to web pages so a site can ask Nap to connect or to approve a transaction. The script reads nothing from the page; it only passes the site's requests to Nap's window, where the user decides. |
 
 **Remote code:** No. All code is in the package. (`'wasm-unsafe-eval'` in the extension's policy lets the packaged Zcash wallet, compiled to WebAssembly, run; no code is fetched.)
@@ -58,7 +58,7 @@ A cryptocurrency wallet for Zcash and Zyn: it holds the user's keys on their dev
 
 Certify: not sold to third parties; not used or transferred for purposes unrelated to the single purpose; not used to determine creditworthiness or for lending.
 
-**Privacy policy URL:** https://nap.cavebro.win/privacy
+**Privacy policy URL:** https://nap.zyn-network.com/privacy
 
 ## Distribution
 

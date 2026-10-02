@@ -1,5 +1,5 @@
 // Nap Market — the DEX — end to end on testnet, through the real page
-// (nap.cavebro.win/market.html): open a pool, collect its shares, swap in a
+// (nap.zyn-network.com/market.html): open a pool, collect its shares, swap in a
 // batch, add and remove liquidity, collecting what each leaves owed.
 //
 //   PHRASE_FILE=<wallet holding both assets>  A=<asset hex>  B=<asset hex>
@@ -7,7 +7,7 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
 
-const NAP = process.env.NAP || 'https://nap.cavebro.win';
+const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const S = process.env.SHOTS || '/tmp';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const A = process.env.A;

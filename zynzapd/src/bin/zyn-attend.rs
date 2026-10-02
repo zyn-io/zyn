@@ -6,7 +6,7 @@
 //! mode 0600 — whoever holds them can mint taps). Tags are NTAG 424 DNA in SUN
 //! mode, their NDEF URL
 //!
-//!   https://nap.cavebro.win/tap?e=<collection>&picc=<picc>&cmac=<cmac>
+//!   https://nap.zyn-network.com/tap?e=<collection>&picc=<picc>&cmac=<cmac>
 //!
 //! with the chip mirroring `picc` (encrypted UID and counter) and `cmac` on
 //! every read. Nap opens that link and, once the wallet is open, posts the
@@ -143,7 +143,7 @@ fn main() {
             let uid = unhex(&arg(2, "uid (14 hex)")).and_then(|b| <[u8; 7]>::try_from(b).ok()).unwrap_or_else(|| die("uid is 7 bytes, 14 hex"));
             let counter: u32 = arg(3, "counter").parse().unwrap_or_else(|_| die("counter is a number"));
             let (picc, cmac) = tap::emulate(&meta, &file, &Tap { uid, counter }, [0; 5]);
-            println!("https://nap.cavebro.win/tap?e={}&picc={picc}&cmac={cmac}", hex(&m.collection()));
+            println!("https://nap.zyn-network.com/tap?e={}&picc={picc}&cmac={cmac}", hex(&m.collection()));
         }
         Some("serve") => serve(),
         _ => die("usage: zyn-attend event|keys|register|tap|serve — see the header of src/bin/zyn-attend.rs"),

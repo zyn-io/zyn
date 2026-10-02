@@ -50,7 +50,7 @@
 // This file is dependency-free and copied verbatim into sites that use it
 // (`apps/cave-market/nap-connect.js`); a test keeps the copies identical.
 
-export const NAP_WEB = 'https://nap.cavebro.win';
+export const NAP_WEB = 'https://nap.zyn-network.com';
 export const VERSION = 1;
 
 const WEB_RDNS = 'win.cavebro.nap.web';

@@ -12,6 +12,7 @@ import { endpoint, IN_APP, IN_EXTENSION, IN_POPUP, openPage } from './origin.js'
 import { endSession, hasSession, loadSession, saveSession } from './session.js';
 import { installTips, tip } from './tip.js';
 import './styles.css';
+import './moved-banner.js';
 
 installTips();
 

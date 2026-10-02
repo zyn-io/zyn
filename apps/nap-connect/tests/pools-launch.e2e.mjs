@@ -5,14 +5,14 @@
 // refused before Nap is asked, and nothing may read NaN or undefined.
 //
 //   PHRASE_FILE=<a funded testnet wallet>  node tests/pools-launch.e2e.mjs
-//   (JADE=https://cave-jade.pages.dev NAP=https://nap.cavebro.win)
+//   (JADE=https://cave-jade.pages.dev NAP=https://nap.zyn-network.com)
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { unlockNap } from './unlock.mjs';
 
 const JADE = process.env.JADE || 'https://cave-jade.pages.dev';
-const NAP = process.env.NAP || 'https://nap.cavebro.win';
+const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const CHROMIUM = process.env.CHROMIUM || `${homedir()}/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const S = process.env.SHOTS || '/tmp/pools-launch';

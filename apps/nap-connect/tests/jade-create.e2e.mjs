@@ -2,14 +2,14 @@
 // Nap's approval, the coin on chain, and its picture attached to the site's
 // content store under the creator's proof.
 //
-//   JADE=https://cave-jade.pages.dev NAP=https://nap.cavebro.win
+//   JADE=https://cave-jade.pages.dev NAP=https://nap.zyn-network.com
 //   PHRASE_FILE=<a testnet wallet's phrase>  IMAGE=<a png>  node tests/jade-create.e2e.mjs
 import { chromium } from 'playwright-core';
 import { unlockNap } from './unlock.mjs';
 import { readFileSync } from 'node:fs';
 
 const JADE = process.env.JADE || 'https://cave-jade.pages.dev';
-const NAP = process.env.NAP || 'https://nap.cavebro.win';
+const NAP = process.env.NAP || 'https://nap.zyn-network.com';
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const IMAGE = process.env.IMAGE;
 const S = process.env.SHOTS || '/tmp';
