@@ -84,6 +84,27 @@ await page.waitForFunction(() => /Nothing here yet|SOL\.zy|ETH\.zy|ZEC\.zy/.test
 const pf = (await page.textContent('#pf')).replace(/\s+/g, ' ');
 ok(/Zyn account/.test(pf) && /0x2222…2222/.test(pf) && /Link a wallet/.test(pf), `the portfolio shows the account, the Ethereum wallet, and offers to link Solana: ${pf.slice(0, 140)}`);
 ok(/Nothing here yet|\.zy/.test(await page.textContent('#pf-coins')), 'assets are read from the account');
+// Its addresses: the Zyn account in full, and its own Zcash ones, derived on the page.
+await page.waitForFunction(() => /^utest1/.test(document.querySelector('#pf-id-zec')?.textContent || ''), null, { timeout: 90000 });
+const ids = await page.evaluate(() => ({ zyn: document.querySelector('#pf-id-zyn').textContent, u: document.querySelector('#pf-id-zec').textContent, t: document.querySelector('#pf-id-zect').textContent }));
+ok(/^[0-9a-f]{64}$/.test(ids.zyn) && ids.zyn.startsWith(acct.slice(0, 5)) && /^tm/.test(ids.t), `addresses: Zyn ${ids.zyn.slice(0, 8)}…, Zcash ${ids.u.slice(0, 14)}…, ${ids.t}`);
+// Export: the warning first, the words only when asked.
+await page.click('#pf-export-go');
+ok(/account's key, on Zyn and on Zcash/.test(await page.textContent('#pf-export')) && !(await page.$('#pf-export .words')), 'export warns before showing anything');
+await page.click('#pf-export-show');
+const words = (await page.textContent('#pf-export .words')).trim();
+const exp = (await page.textContent('#pf-export')).replace(/\s+/g, ' ');
+ok(words.split(/\s+/).length === 24 && /Birthday height\s*4,320,000/.test(exp) && /Account\s*0/.test(exp) && /Zashi/.test(exp), `export shows 24 words, account 0 and the birthday: ${exp.slice(exp.indexOf('Network'), exp.indexOf('Network') + 90)}`);
+// The words, restored on their own, give the same Zcash addresses.
+{
+  const base = `${APP}/vendor/zec/`;
+  const z = await import(`data:text/javascript,${encodeURIComponent(await (await fetch(`${base}nap_zec.js`)).text())}`);
+  await z.default({ module_or_path: Buffer.from(await (await fetch(`${base}nap_zec_bg.wasm`)).arrayBuffer()) });
+  const w = new z.ZecWallet(z.spendingKeyFromPhrase(words, '', 'testnet', 0), 'testnet');
+  w.setTransparent(z.transparentKeyFromPhrase(words, '', 'testnet', 0));
+  ok(w.address() === ids.u && w.transparentAddress() === ids.t, 'the exported words restore the same Zcash addresses (ZIP-32 / BIP-44, account 0)');
+}
+await page.click('#pf-export-hide');
 // Link the Solana wallet.
 await page.click('[data-link="sol"]');
 await page.waitForSelector('#wallet-list button:has-text("Test Solana")');

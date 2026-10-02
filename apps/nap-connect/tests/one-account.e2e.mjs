@@ -72,6 +72,18 @@ for (const v of VENUES) {
     seen.push(account);
     ok(account === expected, `${v.name}: connected as ${account.slice(0, 8)}…${account.slice(-6)}`);
     await page.screenshot({ path: `${S}/one-account-${v.name.replace(/\s+/g, '-').toLowerCase()}.png` });
+    if (v.name === 'Lend') {
+      // Lend's portfolio shows the same account, and the Zcash address Nap shares
+      // is the one the phrase gives in any Zcash wallet (account 0).
+      await page.goto(v.url.replace('#/markets', '#/portfolio'));
+      await page.waitForFunction(() => /^[0-9a-f]{64}$/.test(document.querySelector('#pf-id-zyn')?.textContent || ''), null, { timeout: 30000 });
+      const shown = await page.evaluate(() => ({ zyn: document.querySelector('#pf-id-zyn').textContent, zec: document.querySelector('#pf-id-zec').textContent }));
+      const base = `${new URL(v.url).origin}/vendor/zec/`;
+      const z = await import(`data:text/javascript,${encodeURIComponent(await (await fetch(`${base}nap_zec.js`)).text())}`);
+      await z.default({ module_or_path: Buffer.from(await (await fetch(`${base}nap_zec_bg.wasm`)).arrayBuffer()) });
+      const own = new z.ZecWallet(z.spendingKeyFromPhrase(WORDS, '', 'testnet', 0), 'testnet').address();
+      ok(shown.zyn === expected && shown.zec === own, `Lend portfolio: Zyn ${shown.zyn.slice(0, 8)}…, Zcash ${shown.zec.slice(0, 16)}… — the phrase's own (account 0)`);
+    }
   } catch (e) {
     ok(false, `${v.name}: ${e.message.split('\n')[0]}`);
   }
