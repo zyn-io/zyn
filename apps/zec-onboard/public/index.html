@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" data-net="main">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zcash onboarding</title>
+<meta name="description" content="Set up a Zcash wallet, get ZEC, shield it, send and receive privately, and unshield. Six steps.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="Zcash onboarding">
+<meta property="og:description" content="Wallet setup, getting ZEC, shielding and unshielding, sending and receiving. Six steps to your first shielded transaction.">
+<meta property="og:image" content="https://onboard.cavebro.win/og.png">
+<meta property="og:url" content="https://onboard.cavebro.win/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/schibsted.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#s1">Skip to step 1</a>
+
+<header class="top">
+  <a class="mark" href="/"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15"/><path d="M10 10h12l-11 12h12M16 6v4M16 22v4"/></svg>Zcash onboarding</a>
+  <div class="net" role="group" aria-label="Network">
+    <button type="button" data-net="main" aria-pressed="true">Mainnet</button>
+    <button type="button" data-net="test" aria-pressed="false">Testnet</button>
+    <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About testnet">i</button><span class="bubble" role="note" hidden>Testnet is a copy of Zcash for practice. Its coins, TAZ, are free from a faucet and worth nothing. Every step works the same way. Switch here and in your wallet.</span></span>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-text">
+      <h1>From zero to your first shielded ZEC transaction.</h1>
+      <p class="lede">Six steps: set up a wallet, get ZEC, shield it, receive, send, and unshield. About twenty minutes, plus waiting for blocks.</p>
+      <p class="lede small"><span class="m">You need a phone or computer and a little money to buy ZEC.</span><span class="t">On testnet you need nothing: the faucet gives you coins.</span></p>
+    </div>
+    <figure class="chain" aria-labelledby="chain-cap">
+      <figcaption id="chain-cap">What the chain sees
+        <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About this table">i</button><span class="bubble" role="note" hidden>Every Zcash transaction is public on the blockchain. Shielded parts are encrypted: only the wallets involved can read the addresses, the amount and the memo. Hatched cells are what an observer cannot see.</span></span>
+      </figcaption>
+      <table>
+        <thead><tr><th scope="col">Step</th><th scope="col">From</th><th scope="col">To</th><th scope="col">Amount</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><a href="#s2">Withdraw</a></th><td><code>Exchange</code></td><td><code><span class="m">t1Hx…</span><span class="t">tmAM…</span></code></td><td><code>1.00</code></td></tr>
+          <tr><th scope="row"><a href="#s3">Shield</a></th><td><code><span class="m">t1Hx…</span><span class="t">tmAM…</span></code></td><td><span class="hid" role="img" aria-label="hidden"></span></td><td><code>1.00</code></td></tr>
+          <tr class="shielded"><th scope="row"><a href="#s5">Send</a></th><td><span class="hid" role="img" aria-label="hidden"></span></td><td><span class="hid" role="img" aria-label="hidden"></span></td><td><span class="hid" role="img" aria-label="hidden"></span></td></tr>
+          <tr><th scope="row"><a href="#s6">Unshield</a></th><td><span class="hid" role="img" aria-label="hidden"></span></td><td><code><span class="m">t1Pk…</span><span class="t">tmGf…</span></code></td><td><code>0.25</code></td></tr>
+        </tbody>
+      </table>
+      <p class="fine">The network fee is always visible, usually 0.0001 to 0.00015 ZEC.</p>
+    </figure>
+  </section>
+
+  <div class="layout">
+    <nav class="rail" aria-label="Steps">
+      <p class="count" id="count" aria-live="polite">0 of 6 done</p>
+      <ol>
+        <li><a href="#s1" data-step="1"><i></i>Set up a wallet</a></li>
+        <li><a href="#s2" data-step="2"><i></i>Get ZEC</a></li>
+        <li class="sh"><a href="#s3" data-step="3"><i></i>Shield</a></li>
+        <li class="sh"><a href="#s4" data-step="4"><i></i>Receive</a></li>
+        <li class="sh"><a href="#s5" data-step="5"><i></i>Send</a></li>
+        <li><a href="#s6" data-step="6"><i></i>Unshield</a></li>
+      </ol>
+      <button type="button" class="reset" id="reset">Clear progress</button>
+    </nav>
+
+    <div class="steps">
+
+      <section class="step" id="s1" data-step="1" aria-labelledby="s1-h">
+        <div class="step-text">
+          <h2 id="s1-h"><span class="n">1</span>Set up a wallet</h2>
+          <p>This guide uses Nap Wallet in its pictures. It runs in the browser, so there is nothing to install.
+            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="Other wallets">i</button><span class="bubble" role="note" hidden>Zodl, YWallet and Zingo follow the same steps. The buttons have slightly different names. Links are at the end of this page.</span></span>
+          </p>
+          <ol class="do">
+            <li>Open <a href="https://nap.zyn-network.com" rel="noopener">nap.zyn-network.com</a>.<span class="t"> Pick <b>Testnet</b> in the network menu at the top.</span></li>
+            <li>Choose <b>Create a new wallet</b>.</li>
+            <li>Write the 24 words on paper, in order. Tick the box once they are saved.</li>
+            <li>Set a password. It opens the wallet on this device; the 24 words restore it anywhere.</li>
+          </ol>
+          <p class="warn">Anyone with your 24 words can spend your ZEC, and nobody can recover them for you. Keep them offline: no screenshots, no cloud notes, no chat.</p>
+          <button type="button" class="done" data-step="1" aria-pressed="false">Mark step 1 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/create.png" alt="Nap's new wallet screen with the 24 words and the confirmation box" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="step" id="s2" data-step="2" aria-labelledby="s2-h">
+        <div class="step-text">
+          <h2 id="s2-h"><span class="n">2</span>Get ZEC</h2>
+          <div class="m">
+            <p>Buy ZEC on an exchange that serves your country, such as Coinbase, Kraken or Gemini. Most exchanges pay out only to a transparent address, so that is where you will receive it first.</p>
+            <ol class="do">
+              <li>In Nap, open <b>Receive</b> and choose <b>Transparent address</b>. It starts with <code>t1</code>.</li>
+              <li>On the exchange, withdraw ZEC and paste that address. Check the first and last few characters match.</li>
+              <li>Wait for it to arrive. Zcash makes a block about every 75 seconds; exchanges and wallets wait for a few.
+                <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="If your exchange can pay a shielded address">i</button><span class="bubble" role="note" hidden>If your exchange accepts a unified address (u1…), you can withdraw straight to your shielded address and skip step 3. The exchange's withdrawal page says which address types it accepts.</span></span>
+              </li>
+            </ol>
+          </div>
+          <div class="t">
+            <p>Testnet coins (TAZ) come from a faucet. They are free and worth nothing.</p>
+            <ol class="do">
+              <li>In Nap, open <b>Receive</b> and choose <b>Transparent address</b>. On testnet it starts with <code>tm</code>.</li>
+              <li>Paste it into the <a href="https://faucet.testnet.valargroup.dev" rel="noopener">Valar testnet faucet</a>. It pays 0.125 TAZ once a day.</li>
+              <li>Wait for it to arrive. A block comes about every 75 seconds.</li>
+            </ol>
+          </div>
+          <p class="warn">A transparent address is public, like a Bitcoin address. Anyone can see what it receives, from whom, and its balance. Use it to receive from the exchange, then shield.</p>
+          <button type="button" class="done" data-step="2" aria-pressed="false">Mark step 2 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/shield-receive-t.png" alt="Nap's receive screen showing the transparent address and its QR code" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="step sh" id="s3" data-step="3" aria-labelledby="s3-h">
+        <div class="step-text">
+          <h2 id="s3-h"><span class="n">3</span>Shield</h2>
+          <p>Shielding moves your ZEC from the transparent address into the shielded pool, where amounts and addresses are encrypted.</p>
+          <ol class="do">
+            <li>Once the ZEC arrives, Nap shows it as a separate <b>Transparent</b> balance with a <b>Shield</b> button.</li>
+            <li>Press <b>Shield</b>, check the fee, and confirm.</li>
+            <li>Nap builds a zero-knowledge proof. It takes about half a minute; keep the tab open.
+              <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About the proof">i</button><span class="bubble" role="note" hidden>The proof shows the network the transaction is valid without revealing what is inside it. Your device makes it; nothing secret leaves the device.</span></span>
+            </li>
+            <li>After the next block, the ZEC shows in your shielded balance.</li>
+          </ol>
+          <p>This is your first shielded transaction. The chain shows the transparent address and the amount going in, but not where it went.</p>
+          <button type="button" class="done" data-step="3" aria-pressed="false">Mark step 3 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/shield-balance.png" alt="Nap showing a transparent balance with a Shield button" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="step sh" id="s4" data-step="4" aria-labelledby="s4-h">
+        <div class="step-text">
+          <h2 id="s4-h"><span class="n">4</span>Receive</h2>
+          <p>Your shielded address starts with <code class="m">u1</code><code class="t">utest1</code>. This is the one to give people.
+            <span class="tip"><button type="button" class="i" aria-expanded="false" aria-label="About unified addresses">i</button><span class="bubble" role="note" hidden>A unified address bundles receivers for Zcash's pools in one string. Nap's includes an Orchard receiver, the newest shielded pool, so payments to it are private.</span></span>
+          </p>
+          <ol class="do">
+            <li>Open <b>Receive</b>. The shielded address is shown first, with a QR code.</li>
+            <li>Copy it or show the QR to whoever pays you.</li>
+            <li>They can add a memo of up to 512 bytes. Only you can read it; it shows in your activity.</li>
+          </ol>
+          <p>Sharing a shielded address is safe: payments to it do not show on the chain.</p>
+          <button type="button" class="done" data-step="4" aria-pressed="false">Mark step 4 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/receive-u.png" alt="Nap's receive screen with the shielded address and QR code" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="step sh" id="s5" data-step="5" aria-labelledby="s5-h">
+        <div class="step-text">
+          <h2 id="s5-h"><span class="n">5</span>Send a shielded payment</h2>
+          <p>From one shielded address to another, nothing but the fee is visible.</p>
+          <ol class="do">
+            <li>Open <b>Send</b> and paste a <code class="m">u1…</code><code class="t">utest1…</code> address. No one to pay? Use your own.</li>
+            <li>Enter an amount and, if you like, a memo.</li>
+            <li>Review and confirm. Proving takes about half a minute.</li>
+            <li>Copy the transaction id and look it up below.</li>
+          </ol>
+          <form class="tool" id="tx-form" autocomplete="off">
+            <label for="txid">Transaction id</label>
+            <div class="row"><input id="txid" spellcheck="false" placeholder="64 characters, 0–9 and a–f"><button type="submit">Look up</button></div>
+            <p class="out" id="tx-out" aria-live="polite"></p>
+          </form>
+          <button type="button" class="done" data-step="5" aria-pressed="false">Mark step 5 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/send.png" alt="Nap's send form with a shielded address, an amount and a memo" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="step" id="s6" data-step="6" aria-labelledby="s6-h">
+        <div class="step-text">
+          <h2 id="s6-h"><span class="n">6</span>Unshield</h2>
+          <p>Sending to a transparent address, for example an exchange deposit address to sell, takes ZEC out of the shielded pool.</p>
+          <ol class="do">
+            <li>Open <b>Send</b> and paste the <code class="m">t1…</code><code class="t">tm…</code> address. Check it below first if you are unsure what it is.</li>
+            <li>Enter the amount. Memos only reach shielded addresses, so there is no memo field.</li>
+            <li>Review and confirm.</li>
+          </ol>
+          <p class="warn">The amount and the receiving address become public. Your shielded balance and where the ZEC came from stay private. Unshield only what you are moving.</p>
+          <form class="tool" id="addr-form" autocomplete="off">
+            <label for="addr">Check an address</label>
+            <div class="row"><input id="addr" spellcheck="false" placeholder="t1…, u1…, zs1…, tex1…"><button type="submit">Check</button></div>
+            <dl class="out" id="addr-out" aria-live="polite"></dl>
+          </form>
+          <button type="button" class="done" data-step="6" aria-pressed="false">Mark step 6 done</button>
+        </div>
+        <figure class="shot"><img src="/shots/unshield.png" alt="Nap's send form with a transparent address and no memo field" width="390" height="844" loading="lazy"></figure>
+      </section>
+
+      <section class="finish" id="finish" aria-labelledby="finish-h">
+        <h2 id="finish-h">Next</h2>
+        <ul class="links">
+          <li><a href="https://zechub.wiki" rel="noopener">ZecHub</a>: community guides to Zcash.</li>
+          <li><a href="https://forum.zcashcommunity.com" rel="noopener">Zcash Community Forum</a>: questions and wallet support.</li>
+          <li><a href="https://z.cash" rel="noopener">z.cash</a>: how Zcash works.</li>
+        </ul>
+        <h3>Other wallets</h3>
+        <ul class="links">
+          <li><a href="https://zodl.com/download/" rel="noopener">Zodl</a> (formerly Zashi): iOS and Android.</li>
+          <li><a href="https://ywallet.app" rel="noopener">YWallet</a>: iOS, Android and desktop.</li>
+          <li><a href="https://zingolabs.org" rel="noopener">Zingo</a>: iOS, Android and desktop.</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <p>Screens are from Nap Wallet. Explorer links open <span class="m">mainnet.zcashexplorer.app</span><span class="t">testnet.zcashexplorer.app</span>. This page stores your ticks in this browser only.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "zec-onboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "deploy": "wrangler pages deploy public --project-name zec-onboard --branch main"
+  }
+}
