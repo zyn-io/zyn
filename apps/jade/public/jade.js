@@ -772,11 +772,20 @@ function renderPreview() {
     ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
   if (creating) return;
-  if (!ok) $('#create-status').textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
-  else if (!/Created|refused|picture|Picture|attach/.test($('#create-status').textContent)) $('#create-status').textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
+  const status = $('#create-status');
+  // A coin just made keeps its message; the form was cleared, not refused.
+  if (/^Created /.test(status.textContent)) return;
+  if (!ok && !typed && !nameInput.value) status.textContent = 'Choose a name and a ticker.';
+  else if (!ok) status.textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
+  else if (!/refused|picture|Picture|attach/.test(status.textContent)) status.textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
 }
 
-form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', renderPreview));
+// Typing starts a new coin: the last one's message gives way.
+form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', () => {
+  const status = $('#create-status');
+  if (/^Created /.test(status.textContent)) status.textContent = '';
+  renderPreview();
+}));
 /// Attach a coin's picture and description with the proof Nap made once.
 /// Kept for this tab until it succeeds, so a failed upload can be retried.
 async function attach(token, pending) {
