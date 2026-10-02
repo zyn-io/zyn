@@ -596,7 +596,11 @@ impl Market {
     }
 
     pub fn encode(&self, e: &mut Encoder) {
-        e.bytes(b"MARKET09").u32(self.pools.len() as u32);
+        // MARKET10 only once lending rules v2 are on: until then it would
+        // carry nothing MARKET09 does not, and a node rolled back to a binary
+        // from before §160 can still read the state a newer one saved.
+        let v10 = self.lend.v2();
+        e.bytes(if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -669,7 +673,7 @@ impl Market {
         crate::curve::encode(e, self.curve_terms, &self.curves, &self.curve_orders);
         crate::sale::encode(e, &self.sales, &self.tickets, &self.burns);
         crate::bridge::encode(e, &self.bridged, &self.waiting);
-        crate::lend::encode(e, &self.lend);
+        crate::lend::encode(e, &self.lend, v10);
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -682,15 +686,17 @@ impl Market {
         // v6 predates bridged assets beside ZEC (§146) and reads as none.
         // v7 predates lending (Zyn Lend) and reads as a market with none.
         // v8 predates guarded lending and reads as not guarded.
-        let (v3, v4, v5, v6, v7, v8, v9) = match d.take_bytes(8).ok()? {
-            b"MARKET09" => (true, true, true, true, true, true, true),
-            b"MARKET08" => (true, true, true, true, true, true, false),
-            b"MARKET07" => (true, true, true, true, true, false, false),
-            b"MARKET06" => (true, true, true, true, false, false, false),
-            b"MARKET05" => (true, true, true, false, false, false, false),
-            b"MARKET04" => (true, true, false, false, false, false, false),
-            b"MARKET03" => (true, false, false, false, false, false, false),
-            b"MARKET02" => (false, false, false, false, false, false, false),
+        // v9 predates lending rules v2 (§160) and reads as rules 0.
+        let (v3, v4, v5, v6, v7, v8, v9, v10) = match d.take_bytes(8).ok()? {
+            b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET09" => (true, true, true, true, true, true, true, false),
+            b"MARKET08" => (true, true, true, true, true, true, false, false),
+            b"MARKET07" => (true, true, true, true, true, false, false, false),
+            b"MARKET06" => (true, true, true, true, false, false, false, false),
+            b"MARKET05" => (true, true, true, false, false, false, false, false),
+            b"MARKET04" => (true, true, false, false, false, false, false, false),
+            b"MARKET03" => (true, false, false, false, false, false, false, false),
+            b"MARKET02" => (false, false, false, false, false, false, false, false),
             _ => return None,
         };
         let mut m = Market::default();
@@ -819,7 +825,7 @@ impl Market {
             m.waiting = waiting;
         }
         if v8 {
-            m.lend = crate::lend::decode(d, v9)?;
+            m.lend = crate::lend::decode(d, v9, v10)?;
         }
         Some(m)
     }

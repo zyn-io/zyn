@@ -119,6 +119,8 @@ pub struct Node<V: MicrochainVm> {
     /// Actions since the last seal, and when that seal happened.
     since_seal: u64,
     sealed_at: u64,
+    /// Of those, the ones the VM did not refuse: only these hurry a seal.
+    accepted_since_seal: u64,
     /// Epochs and actions since the last anchor, and when that anchor happened.
     epochs_since_anchor: u64,
     actions_since_anchor: u64,
@@ -152,6 +154,8 @@ pub struct Node<V: MicrochainVm> {
     /// When set, sealing never anchors by itself: an operator proposes an
     /// anchor, carries it to Zcash, and confirms it once the chain has it.
     manual_anchoring: bool,
+    /// Whether only accepted intents count toward `intents_per_epoch`.
+    refusals_uncounted: bool,
     /// The anchor in flight under manual anchoring, and how many of `pending`
     /// it covers.
     proposed: Option<(Anchor, usize)>,
@@ -176,6 +180,7 @@ impl<V: MicrochainVm> Node<V> {
             ledger: Ledger::new(chain_id),
             since_seal: 0,
             sealed_at: 0,
+            accepted_since_seal: 0,
             epochs_since_anchor: 0,
             actions_since_anchor: 0,
             anchored_at: 0,
@@ -186,6 +191,7 @@ impl<V: MicrochainVm> Node<V> {
             endorsed_at: BTreeMap::new(),
             recorder: None,
             manual_anchoring: false,
+            refusals_uncounted: false,
             proposed: None,
             unattributed: 0,
         }
@@ -202,6 +208,16 @@ impl<V: MicrochainVm> Node<V> {
     /// actually travel to Zcash.
     pub fn with_manual_anchoring(mut self) -> Self {
         self.manual_anchoring = true;
+        self
+    }
+
+    /// Count only intents the VM accepted toward `intents_per_epoch`. A
+    /// refused intent is still sealed with the rest, and still starts the
+    /// clock to a seal; it just cannot bring one closer — for a VM whose
+    /// rules count epochs, where free refusals would let anyone end them.
+    /// Seals are journaled, so a replica replays them wherever they fell.
+    pub fn with_refusals_uncounted(mut self) -> Self {
+        self.refusals_uncounted = true;
         self
     }
 
@@ -336,6 +352,7 @@ impl<V: MicrochainVm> Node<V> {
             ledger,
             since_seal: 0,
             sealed_at: now,
+            accepted_since_seal: 0,
             epochs_since_anchor: 0,
             actions_since_anchor: 0,
             anchored_at: now,
@@ -346,6 +363,7 @@ impl<V: MicrochainVm> Node<V> {
             endorsed_at: BTreeMap::new(),
             recorder: None,
             manual_anchoring: false,
+            refusals_uncounted: false,
             proposed: None,
             unattributed: 0,
         }
@@ -491,11 +509,12 @@ impl<V: MicrochainVm> Node<V> {
         self.compression.actions = self.compression.actions.saturating_add(1);
         self.since_seal = self.since_seal.saturating_add(1);
         self.actions_since_anchor = self.actions_since_anchor.saturating_add(1);
+        let refused = !receipts.is_empty() && receipts.iter().all(V::rejected);
+        if !(refused && self.refusals_uncounted) {
+            self.accepted_since_seal = self.accepted_since_seal.saturating_add(1);
+        }
 
-        let sealed = if self
-            .policy
-            .should_seal(self.since_seal, now.saturating_sub(self.sealed_at))
-        {
+        let sealed = if self.due(now) {
             self.seal(now)
         } else {
             None
@@ -538,16 +557,15 @@ impl<V: MicrochainVm> Node<V> {
     /// enough time since the last seal. The main loop's tick uses this, so
     /// that a batch window is the policy's window and not the tick's.
     pub fn seal_if_due(&mut self, now: u64) -> Option<Checkpoint> {
-        if self.since_seal == 0 {
-            return None;
-        }
-        if !self
-            .policy
-            .should_seal(self.since_seal, now.saturating_sub(self.sealed_at))
-        {
+        if !self.due(now) {
             return None;
         }
         self.seal(now)
+    }
+
+    /// The policy's verdict, with only accepted intents in its count.
+    fn due(&self, now: u64) -> bool {
+        self.policy.should_seal_counting(self.since_seal, self.accepted_since_seal, now.saturating_sub(self.sealed_at))
     }
 
     /// Seal on the clock alone, even an epoch nobody wrote to, once the
@@ -613,6 +631,7 @@ impl<V: MicrochainVm> Node<V> {
         });
         self.epochs_since_anchor = self.epochs_since_anchor.saturating_add(1);
         self.since_seal = 0;
+        self.accepted_since_seal = 0;
         self.sealed_at = now;
         Some(cp)
     }

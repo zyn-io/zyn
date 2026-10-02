@@ -630,6 +630,33 @@ static HISTORY: std::sync::OnceLock<Mutex<zynzapd::market_history::History>> = s
 /// Zyn Lend's public figures as of the last seal, not live: actions inside
 /// an epoch mix before anyone sees a total move (`lend_markets_json`).
 static LEND_SNAPSHOT: Mutex<Option<(u64, serde_json::Value)>> = Mutex::new(None);
+/// Where the snapshot is kept, so a restart serves the last seal's figures
+/// rather than live ones (or none) until its first seal.
+static LEND_SNAPSHOT_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Take the public lending figures from a state that has just been sealed.
+/// Called at every seal — by the policy inside a submission, or on the
+/// timer — so the figures never lag the chain, however busy.
+fn take_lend_snapshot(st: &ObjectVm) {
+    if st.market.lend.listed.is_empty() {
+        return;
+    }
+    let v = lend_markets_json(st);
+    if let Some(path) = LEND_SNAPSHOT_PATH.get() {
+        let _ = std::fs::write(path, serde_json::json!({ "epoch": st.epoch, "figures": v }).to_string());
+    }
+    *LEND_SNAPSHOT.lock().unwrap() = Some((st.epoch, v));
+}
+
+/// The snapshot a previous run saved, if it is this chain's.
+fn load_lend_snapshot(path: &std::path::Path) -> Option<(u64, serde_json::Value)> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    Some((v.get("epoch")?.as_u64()?, v.get("figures")?.clone()))
+}
+
+/// How often, at most, the ledger's lending clock is posted on its own
+/// under rules v2 (`LendTime`); price posts move it too.
+const LEND_TICK_SECS: u64 = 10;
 
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -939,10 +966,15 @@ fn handle(
         }
         // Zyn Lend, public: pools, rates, posted prices and open auction lots
         // (a lot never names whose position it was).
+        // Only ever the last seal's figures: the live state would show one
+        // action's effect on its own. A node that has not sealed since it
+        // first started says so for the seconds until it does.
         "zyn_lendMarkets" => {
             let snap = LEND_SNAPSHOT.lock().unwrap().as_ref().map(|(_, v)| v.clone());
-            let v = snap.unwrap_or_else(|| lend_markets_json(node.lock().unwrap().state()));
-            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", v)
+            match snap {
+                Some(v) => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", v),
+                None => "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"lending figures are published at the next seal\"}}".to_string(),
+            }
         }
         // Positions by id. An id is `lend_source(owner, nonce)`, which only
         // its owner can derive, so asking reveals nothing to anyone else.
@@ -2061,6 +2093,7 @@ fn apply_authorized(
                 n.state().epoch,
                 hex(&n.state().state_root())
             );
+            take_lend_snapshot(n.state());
         }
         if !step.receipts.iter().any(ObjectVm::rejected) {
             let mut p = pub_log.lock().unwrap();
@@ -2546,7 +2579,21 @@ fn main() {
             Node::new(chain, Limits { max_io }, policy, Economics::flat(1))
         }
     };
-    let node = Arc::new(Mutex::new(vm.with_manual_anchoring()));
+    // Refused intents do not hurry a seal (§160): lending counts time, and
+    // nobody should be able to end epochs with intents that do nothing.
+    let node = Arc::new(Mutex::new(vm.with_manual_anchoring().with_refusals_uncounted()));
+    // The public lending figures as the last run left them; or, from a state
+    // saved at a seal, taken now.
+    let _ = LEND_SNAPSHOT_PATH.set(std::path::Path::new(&dir).join(format!("chain-{chain}.lend-snapshot.json")));
+    {
+        let n = node.lock().unwrap();
+        let st = n.state();
+        if st.epoch_intents == 0 {
+            take_lend_snapshot(st);
+        } else if let Some(s) = LEND_SNAPSHOT_PATH.get().and_then(|p| load_lend_snapshot(p)).filter(|s| s.0 <= st.epoch) {
+            *LEND_SNAPSHOT.lock().unwrap() = Some(s);
+        }
+    }
     // The journal is what makes this chain checkable by anyone else: a root
     // is only meaningful next to the intents that produced it.
     let journal = match Journal::open(&dir, chain) {
@@ -2642,11 +2689,13 @@ fn main() {
         });
     }
 
-    // Zyn Lend's prices: every ZYN_LEND_PRICE_SECS (30), the median of
-    // Coinbase and CoinGecko for each listed asset, posted with the time.
-    // Interest accrues to that time; a source pair that disagrees by more
-    // than 2% posts nothing for that asset that round.
+    // Zyn Lend's prices: at start and then every ZYN_LEND_PRICE_SECS (30),
+    // for each listed asset the median of Coinbase, Kraken and CoinGecko,
+    // posted with the time. Interest accrues to that time. At least two
+    // sources must agree within 2% of their median, or that asset posts
+    // nothing that round (and goes stale after five minutes under rules v2).
     //   ZYN_LEND_ASSETS  ZEC=<asset hex>,ETH=<asset hex>,SOL=<asset hex>
+    //   ZYN_LEND_RULES   2 switches the chain to rules v2 (§160), once
     if let Ok(spec) = std::env::var("ZYN_LEND_ASSETS") {
         let assets: Vec<(String, [u8; 32])> = spec
             .split(',')
@@ -2655,21 +2704,30 @@ fn main() {
                 Some((sym.trim().to_uppercase(), <[u8; 32]>::try_from(unhex(h.trim())?).ok()?))
             })
             .collect();
+        // Rules v2 wanted, or already in force: then v2's risk numbers, and
+        // an asset listed at other numbers is listed again (that changes its
+        // risk, never its pool) — before the switch, which requires them.
+        let rules_v2 = std::env::var("ZYN_LEND_RULES").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0) >= objectvm::lend::RULES_V2
+            || node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(false);
         // List what is named and not listed yet, at the design's risk
         // (zyn_lend::params). Listing again would only reset the risk, so an
-        // asset already listed is left as it is.
+        // asset already listed at these numbers is left as it is.
         for (sym, asset) in &assets {
-            let risk = match sym.as_str() {
-                "ZEC" => objectvm::zyn_lend::params::ZEC,
-                "ETH" => objectvm::zyn_lend::params::ETH,
-                "SOL" => objectvm::zyn_lend::params::SOL,
-                other => {
+            use objectvm::zyn_lend::params;
+            let risk = match (sym.as_str(), rules_v2) {
+                ("ZEC", false) => params::ZEC,
+                ("ETH", false) => params::ETH,
+                ("SOL", false) => params::SOL,
+                ("ZEC", true) => params::v2::ZEC,
+                ("ETH", true) => params::v2::ETH,
+                ("SOL", true) => params::v2::SOL,
+                (other, _) => {
                     eprintln!("zyn-object-node: no lending risk defined for {other}; not listed");
                     continue;
                 }
             };
-            let listed = node.lock().map(|n| n.state().market.lend.listed.contains_key(asset)).unwrap_or(true);
-            if listed {
+            let have = node.lock().ok().and_then(|n| n.state().market.lend.listed.get(asset).map(|l| l.risk));
+            if have.is_some() && (!rules_v2 || have == Some(risk)) {
                 continue;
             }
             let op = Op::LendList {
@@ -2714,6 +2772,26 @@ fn main() {
                 }
             }
         }
+        // Rules v2, once: guarded mode must already be on (the limits above).
+        if rules_v2 && !node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(true) {
+            let op = Op::LendRules { program: zyn_vm::program::lend_list(), version: objectvm::lend::RULES_V2 };
+            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                match r {
+                    objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending rules v2 refused: {why}"),
+                    _ => eprintln!("zyn-object-node: lending rules v2 in force"),
+                }
+            }
+        }
+        // Under v2 the clock moves first, before any holder's intent: after
+        // a restart, prices from before it are as old as they really are.
+        if node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(false) {
+            let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at: now_secs() };
+            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                if let objectvm::Receipt::Refused(why) = r {
+                    eprintln!("zyn-object-node: lending clock refused: {why}");
+                }
+            }
+        }
         let every: u64 = std::env::var("ZYN_LEND_PRICE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(5);
         eprintln!("zyn-object-node: lending prices every {every}s for {}", assets.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(", "));
         let node = Arc::clone(&node);
@@ -2721,10 +2799,23 @@ fn main() {
         let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
         std::thread::spawn(move || {
-            use zynzapd::feeds::{aggregate, to_fixed, Fetcher, Http, Source};
+            use zynzapd::feeds::{aggregate_quorum, to_fixed, Fetcher, Http, Source};
             let http = Http::default();
+            // A failing source is said once, then at most every ten minutes.
+            let mut said: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            let mut say = |key: String, line: String| {
+                let now = now_secs();
+                if said.get(&key).is_none_or(|t| now >= t + 600) {
+                    eprintln!("zyn-object-node: {line}");
+                    said.insert(key, now);
+                }
+            };
+            // The first post goes out at once, not a period after start.
+            let mut first = true;
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(every));
+                if !std::mem::take(&mut first) {
+                    std::thread::sleep(std::time::Duration::from_secs(every));
+                }
                 let listed: Vec<[u8; 32]> = node.lock().map(|n| n.state().market.lend.listed.keys().copied().collect()).unwrap_or_default();
                 if listed.is_empty() {
                     continue;
@@ -2743,19 +2834,26 @@ fn main() {
                     if !listed.contains(asset) {
                         continue;
                     }
-                    let samples: Vec<f64> = [Source::Coinbase(format!("{sym}-USD")), Source::CoinGecko(gecko(sym))]
-                        .iter()
-                        .filter_map(|src| http.fetch(src).ok())
-                        .collect();
-                    match aggregate(samples, 0.02).and_then(to_fixed) {
+                    // Coinbase and Kraken take the bare symbol; the request
+                    // adds the quote currency.
+                    let mut samples = Vec::new();
+                    for src in [Source::Coinbase(sym.clone()), Source::Kraken(sym.clone()), Source::CoinGecko(gecko(sym))] {
+                        match http.fetch(&src) {
+                            Ok(x) => samples.push(x),
+                            Err(e) => say(format!("{sym}/{}", src.name()), format!("lending price source {} for {sym} failed: {}", src.name(), e.chars().take(160).collect::<String>())),
+                        }
+                    }
+                    match aggregate_quorum(samples.clone(), 0.02, 2).and_then(to_fixed) {
                         Some(p) => prices.push((*asset, p)),
-                        None => eprintln!("zyn-object-node: no agreed price for {sym} this round"),
+                        None => say(format!("{sym}/agree"), format!("no two lending price sources agree for {sym} this round ({samples:?})")),
                     }
                 }
                 if prices.is_empty() {
                     continue;
                 }
-                let op = Op::LendPrices { program: zyn_vm::program::lend_prices(), at: now_secs(), prices };
+                // Never behind the clock the timer may have just posted.
+                let at = node.lock().map(|n| now_secs().max(n.state().market.lend.time)).unwrap_or_else(|_| now_secs());
+                let op = Op::LendPrices { program: zyn_vm::program::lend_prices(), at, prices };
                 for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
                     if let objectvm::Receipt::Refused(why) = r {
                         eprintln!("zyn-object-node: lending prices refused: {why}");
@@ -2770,10 +2868,27 @@ fn main() {
     {
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
+        let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
         let anchoring_on = anchoring.is_some();
+        let tick_secs = epoch_secs.clamp(1, LEND_TICK_SECS);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
+            // Rules v2: the lending clock, posted whenever nothing has moved
+            // it for a tick — so prices age and auctions step in seconds even
+            // when the price feed is down, and spammed epochs move neither.
+            let tick = node.lock().map(|n| {
+                let l = &n.state().market.lend;
+                l.v2() && now_secs() >= l.time.saturating_add(tick_secs)
+            });
+            if tick.unwrap_or(false) {
+                let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at: now_secs() };
+                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                    if let objectvm::Receipt::Refused(why) = r {
+                        eprintln!("zyn-object-node: lending clock refused: {why}");
+                    }
+                }
+            }
             let mut n = node.lock().unwrap();
             // Only fires for an epoch that had traffic and then went quiet:
             // `seal_if_due` refuses an empty epoch, and a submission that was
@@ -2786,22 +2901,15 @@ fn main() {
                 .launches
                 .values()
                 .any(|l| l.state == objectvm::market::LaunchState::Open);
-            // Likewise lending: auction prices step down per epoch, and a
-            // price counts as stale after so many epochs, so while anything
-            // is listed epochs have to keep counting time when nobody trades.
+            // Likewise lending: auctions settle and lots open at seals (and,
+            // before rules v2, prices aged and auctions stepped per epoch),
+            // so while anything is listed epochs keep sealing on the clock.
             let lending = !n.state().market.lend.listed.is_empty();
             let sealed = n.seal_if_due(now_secs()).is_some()
                 || ((sale_open || lending) && n.seal_on_clock(now_secs()).is_some());
-            // The public lending figures move only at a seal: taken when an
-            // epoch has just been sealed and nothing has arrived in the next.
-            {
-                let st = n.state();
-                if !st.market.lend.listed.is_empty() && st.epoch_intents == 0 {
-                    let mut snap = LEND_SNAPSHOT.lock().unwrap();
-                    if snap.as_ref().map(|(e, _)| *e) != Some(st.epoch) {
-                        *snap = Some((st.epoch, lend_markets_json(st)));
-                    }
-                }
+            // The public lending figures move only at a seal.
+            if sealed {
+                take_lend_snapshot(n.state());
             }
             if sealed {
                 // A sealed epoch is a root worth carrying. Proposing is free

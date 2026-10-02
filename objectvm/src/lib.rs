@@ -561,6 +561,28 @@ pub enum Op {
         borrow_cap: Fixed,
         min_borrow_usd: Fixed,
     },
+    /// Switch lending to rules `version` (2: DECISIONS §160), for good.
+    /// Operator only.
+    LendRules {
+        program: ProgramId,
+        version: u32,
+    },
+    /// Rules v2: the operator's clock, posted on its own. Every pool accrues
+    /// interest to `at`; no price gets any younger. Operator only.
+    LendTime {
+        program: ProgramId,
+        at: u64,
+    },
+    /// Rules v2: add `amount` of `asset` to its pool's insurance. No shares,
+    /// nothing back.
+    LendInsure {
+        donor: AccountId,
+        program: ProgramId,
+        asset: Address,
+        amount: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
     /// Bid `pay` of the borrowed asset for a liquidation lot's collateral at
     /// this epoch's auction price.
     LendBid {
@@ -637,6 +659,7 @@ impl Op {
             | Op::LendOpen { inputs, .. }
             | Op::LendRepay { inputs, .. }
             | Op::LendAddCollateral { inputs, .. }
+            | Op::LendInsure { inputs, .. }
             | Op::LendBid { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
@@ -674,6 +697,7 @@ impl Op {
             | Op::LendOpen { change, .. }
             | Op::LendRepay { change, .. }
             | Op::LendAddCollateral { change, .. }
+            | Op::LendInsure { change, .. }
             | Op::LendBid { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
             Op::ClaimItems { change, items, .. } | Op::ClaimVoucherItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
@@ -2162,6 +2186,21 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_lend_bid(bidder, lot, *pay, nonce, inputs, change)
             }),
+            Op::LendRules { program, version } => one(if *program != program::lend_list() {
+                Err("wrong program for lending rules")
+            } else {
+                self.apply_lend_rules(*version)
+            }),
+            Op::LendTime { program, at } => one(if *program != program::lend_prices() {
+                Err("wrong program for the lending clock")
+            } else {
+                self.apply_lend_time(*at)
+            }),
+            Op::LendInsure { donor, program, asset, amount, inputs, change } => one(if *program != program::lend_insure() {
+                Err("wrong program for insurance")
+            } else {
+                self.apply_lend_insure(donor, asset, *amount, inputs, change)
+            }),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -2272,7 +2311,9 @@ impl MicrochainVm for ObjectVm {
             | Op::LendAddCollateral { borrower, .. }
             | Op::LendRemoveCollateral { borrower, .. } => vec![*borrower],
             Op::LendBid { bidder, .. } => vec![*bidder],
-            // LendList and LendPrices stay operator-only: no user signs them.
+            Op::LendInsure { donor, .. } => vec![*donor],
+            // LendList, LendPrices, LendLimits, LendRules and LendTime stay
+            // operator-only: no user signs them.
             _ => Vec::new(),
         }
     }
@@ -2759,6 +2800,17 @@ impl MicrochainVm for ObjectVm {
             }
             Op::LendBid { bidder, program, lot, pay, nonce, inputs, change } => {
                 e.u8(47).bytes(bidder).bytes(&program.0).bytes(lot).fixed(*pay).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::LendRules { program, version } => {
+                e.u8(49).bytes(&program.0).u32(*version);
+            }
+            Op::LendTime { program, at } => {
+                e.u8(50).bytes(&program.0).u64(*at);
+            }
+            Op::LendInsure { donor, program, asset, amount, inputs, change } => {
+                e.u8(51).bytes(donor).bytes(&program.0).bytes(asset).fixed(*amount);
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
             }
@@ -3307,6 +3359,16 @@ impl MicrochainVm for ObjectVm {
                 lot: d.hash().ok()?,
                 pay: d.fixed().ok()?,
                 nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            49 => Some(Op::LendRules { program: ProgramId(d.hash().ok()?), version: d.u32().ok()? }),
+            50 => Some(Op::LendTime { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
+            51 => Some(Op::LendInsure {
+                donor: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
                 inputs: wire::read_inputs(d)?,
                 change: wire::read_outputs(d)?,
             }),

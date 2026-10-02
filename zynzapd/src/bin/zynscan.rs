@@ -207,6 +207,11 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         | Op::LendRemoveCollateral { .. } => ("Lending", false, Value::Null),
         // A lot is public (it has to be, to be bid on); its owner is not.
         Op::LendBid { lot, .. } => ("Auction bid", false, json!({ "lot": hex(lot) })),
+        Op::LendRules { version, .. } => ("Lending rules", true, json!({ "version": version })),
+        Op::LendTime { at, .. } => ("Lending clock", true, json!({ "at": at })),
+        // Insurance is public (rounded) and protocol-owned; who added to it,
+        // and how much, is not shown.
+        Op::LendInsure { asset, .. } => ("Insurance added", false, json!({ "asset": hex(asset) })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }

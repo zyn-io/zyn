@@ -248,6 +248,11 @@ pub fn lend_bid() -> ProgramId {
     named(b"lend-bid")
 }
 
+/// Add to a lending pool's insurance (rules v2, DECISIONS §160).
+pub fn lend_insure() -> ProgramId {
+    named(b"lend-insure")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")

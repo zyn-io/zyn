@@ -50,8 +50,11 @@ use zyn::node::Node;
 /// Where one number comes from.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Source {
+    /// A bare symbol (`ZEC`); the request adds `-USD`.
     Coinbase(String),
     CoinGecko(String),
+    /// A bare symbol (`ZEC`); the request adds `USD` (BTC is `XBT` there).
+    Kraken(String),
     Nasdaq(String),
     Yahoo(String),
     Frankfurter(String),
@@ -70,6 +73,7 @@ impl Source {
         match self {
             Source::Coinbase(_) => "coinbase",
             Source::CoinGecko(_) => "coingecko",
+            Source::Kraken(_) => "kraken",
             Source::Nasdaq(_) => "nasdaq",
             Source::Yahoo(_) => "yahoo",
             Source::Frankfurter(_) => "frankfurter",
@@ -87,6 +91,7 @@ impl Source {
         Some(match kind.trim().to_ascii_lowercase().as_str() {
             "coinbase" => Source::Coinbase(id),
             "coingecko" => Source::CoinGecko(id),
+            "kraken" => Source::Kraken(id),
             "nasdaq" => Source::Nasdaq(id),
             "yahoo" => Source::Yahoo(id),
             "frankfurter" => Source::Frankfurter(id),
@@ -403,6 +408,24 @@ pub fn aggregate(mut samples: Vec<f64>, max_spread: f64) -> Option<f64> {
     })
 }
 
+/// The median of the samples within `max_spread` of the median of all, if
+/// at least `quorum` of them are: one source down or wrong does not stop a
+/// price, and one source alone never makes one.
+pub fn aggregate_quorum(mut samples: Vec<f64>, max_spread: f64, quorum: usize) -> Option<f64> {
+    samples.retain(|x| x.is_finite() && *x > 0.0);
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = samples.len();
+    if n == 0 || n < quorum {
+        return None;
+    }
+    let mid = if n % 2 == 1 { samples[n / 2] } else { (samples[n / 2 - 1] + samples[n / 2]) / 2.0 };
+    let near: Vec<f64> = samples.into_iter().filter(|x| (x - mid).abs() / mid <= max_spread).collect();
+    if near.len() < quorum.max(1) {
+        return None;
+    }
+    aggregate(near, max_spread * 2.0)
+}
+
 /// A price as the chain takes it: 18 decimals, rounded to nearest.
 pub fn to_fixed(x: f64) -> Option<Fixed> {
     if !x.is_finite() || x <= 0.0 || x > 1e20 {
@@ -430,6 +453,22 @@ pub fn parse_coinbase(body: &str) -> Result<f64, String> {
         .and_then(|a| a.as_str())
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| "no amount".into())
+}
+
+/// `/0/public/Ticker?pair=…`: the one pair's last trade, `c[0]`.
+pub fn parse_kraken(body: &str) -> Result<f64, String> {
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    if let Some(e) = v.get("error").and_then(|e| e.as_array()).filter(|e| !e.is_empty()) {
+        return Err(format!("kraken: {}", e.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")));
+    }
+    v.get("result")
+        .and_then(|r| r.as_object())
+        .and_then(|r| r.values().next())
+        .and_then(|t| t.get("c"))
+        .and_then(|c| c.get(0))
+        .and_then(|a| a.as_str())
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "no last trade".into())
 }
 
 pub fn parse_coingecko(body: &str, id: &str) -> Result<f64, String> {
@@ -620,6 +659,10 @@ impl Fetcher for Http {
             Source::Coinbase(sym) => parse_coinbase(&get(&format!(
                 "https://api.coinbase.com/v2/prices/{}-USD/spot",
                 sym
+            ))?),
+            Source::Kraken(sym) => parse_kraken(&get(&format!(
+                "https://api.kraken.com/0/public/Ticker?pair={}USD",
+                if sym == "BTC" { "XBT" } else { sym.as_str() }
             ))?),
             Source::CoinGecko(id) => parse_coingecko(
                 &get(&format!(
@@ -996,6 +1039,7 @@ mod tests {
         fn fetch(&self, source: &Source) -> Result<f64, String> {
             let key = match source {
                 Source::Coinbase(s)
+                | Source::Kraken(s)
                 | Source::CoinGecko(s)
                 | Source::Nasdaq(s)
                 | Source::Yahoo(s)
@@ -1249,5 +1293,29 @@ mod tests {
         assert_eq!(m["GOLD"].len(), 2);
         assert!(apply_overrides(&mut m, "BAD").is_err());
         assert!(apply_overrides(&mut m, "X=nowhere:1").is_err());
+    }
+
+    #[test]
+    fn a_lending_price_needs_two_sources_that_agree() {
+        // One source alone is not a price.
+        assert_eq!(aggregate_quorum(vec![100.0], 0.02, 2), None);
+        assert_eq!(aggregate_quorum(vec![100.0, f64::NAN], 0.02, 2), None);
+        // Two that agree are; one wrong source of three is left out.
+        assert_eq!(aggregate_quorum(vec![100.0, 101.0], 0.02, 2), Some(100.5));
+        assert_eq!(aggregate_quorum(vec![100.0, 101.0, 140.0], 0.02, 2), Some(100.5));
+        // Two that disagree are not.
+        assert_eq!(aggregate_quorum(vec![100.0, 110.0], 0.02, 2), None);
+    }
+
+    #[test]
+    fn kraken_and_coinbase_parse_and_coinbase_takes_a_bare_symbol() {
+        let k = r#"{"error":[],"result":{"XZECZUSD":{"a":["1369.17","1","1.0"],"c":["1368.53","0.01"]}}}"#;
+        assert_eq!(parse_kraken(k), Ok(1368.53));
+        assert!(parse_kraken(r#"{"error":["EQuery:Unknown asset pair"]}"#).is_err());
+        assert_eq!(parse_coinbase(r#"{"data":{"amount":"1368.61","base":"ZEC","currency":"USD"}}"#), Ok(1368.61));
+        // The request is `/v2/prices/{sym}-USD/spot`: the node passes `ZEC`,
+        // never `ZEC-USD`, which asked for ZEC-USD-USD and got a 400 (§160).
+        assert_eq!(Source::parse("coinbase:ZEC"), Some(Source::Coinbase("ZEC".into())));
+        assert_eq!(Source::parse("kraken:ETH"), Some(Source::Kraken("ETH".into())));
     }
 }

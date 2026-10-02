@@ -88,10 +88,18 @@ impl EpochPolicy {
 
     /// Whether the epoch should be sealed now.
     pub fn should_seal(&self, actions_since_seal: u64, seconds_since_seal: u64) -> bool {
+        self.should_seal_counting(actions_since_seal, actions_since_seal, seconds_since_seal)
+    }
+
+    /// [`Self::should_seal`] where only `counted` of the actions count
+    /// toward `intents_per_epoch` — the node leaves refused intents out, so
+    /// nobody can end epochs by sending intents that do nothing. Any action
+    /// still makes the epoch worth sealing on the clock.
+    pub fn should_seal_counting(&self, actions_since_seal: u64, counted: u64, seconds_since_seal: u64) -> bool {
         if actions_since_seal == 0 {
             return false; // never seal an empty epoch: nothing moved to attest
         }
-        actions_since_seal >= self.intents_per_epoch
+        counted >= self.intents_per_epoch
             || (self.max_seconds_per_epoch > 0 && seconds_since_seal >= self.max_seconds_per_epoch)
     }
 

@@ -6628,7 +6628,7 @@ risk and privacy gap".
 |---|---|---|
 | 157.8 | **Guarded mode, switched on by the first `LendLimits` (op 48, operator).** Journals from before it replay to the same roots; the state root's lend section grows (`objectvm.lend.v2`) only once it is on. Saved state is MARKET09 | ✅ |
 | 157.9 | **Caps and a floor.** Per asset: a collateral cap and a borrow cap (whole tokens) and a minimum loan in USD, so no pool takes more than its tail can sell and no loan is too small to be worth liquidating. Testnet: SOL 100/50/$1, ETH 2/1/$1, ZEC 5/2/$1 (`ZYN_LEND_LIMITS`) | ✅ |
-| 157.10 | **Prices must be fresh and confirmed.** Borrowing and collateral removal stop when the last posted price is over 12 epochs old; a move over 15% is held, not used, until a second post within 2% confirms it. Liquidation waits on a held price too, so one bad feed tick neither opens nor closes positions | ✅ |
+| 157.10 | **Prices must be fresh and confirmed.** Borrowing and collateral removal stop when the last posted price is over 12 epochs old (seconds under rules v2, §160); a move over 15% is held, not used, until a second post within 2% confirms it. Liquidation waits on a held price too, so one bad feed tick neither opens nor closes positions | ✅ |
 | 157.11 | **Losses are booked when they become likely, not when they land.** At lot open the shortfall the floor price implies is taken from insurance first, then written off the pool; whatever the lot recovers goes back to lenders, then insurance, then the owner | ✅ |
 | 157.12 | **Nothing sits unsold.** A lot still open after 37 epochs goes into its pair's Zyn pool batch as a protocol order, minimum 70% of the posted rate; what it fetches settles the lot like any bid | ✅ |
 | 157.13 | **Revenue is protocol-owned for now.** The 10% reserve fills insurance up to 5% of each pool's debt; only above that does it go to the ZYN pot | ✅ |
@@ -6694,3 +6694,27 @@ does not have (10,000 zat; it has never anchored).
 | 159.3 | **Standalone anchors only after an idle interval** — `ZYN_ANCHOR_IDLE_SECS`, default 86,400 — and still only from the fee reserve (`covers_backing`). A quiet chain spends nothing; no seal proposes an anchor before the interval | 🟢 |
 | 159.4 | **An anchor that can no longer land** (expired unseen, refused on consensus) releases any exits it carried — also after a restart, from the anchor ledger's abandoned entries — so they are paid again rather than waiting on it | 🟢 |
 | 159.5 | The anchor stays its own output with its own memo, the format verifiers already read; it is not moved onto the change output | 🟢 |
+
+## §160 — Zyn Lend rules v2: the operator's clock, not epochs (2 Oct 2026)
+
+"fix all" — the lending audit of 1 Oct: anyone could seal epochs (64 intents,
+refused ones included, and `zyn_submitSigned` is free), and lending measured
+price age and auctions in epochs; the Coinbase feed had never answered
+(`ZEC-USD-USD`); lots kept their opening price; a held price stalled a crash.
+
+| # | Decision | |
+|---|---|---|
+| 160.1 | **Rules v2, switched on by `LendRules { version: 2 }` (op 49, operator), after guarded mode.** Journals from before it replay to the same roots (pinned by `objectvm/tests/lend_v2.rs`); the root's lend section grows (`objectvm.lend.v3`) and the saved state becomes MARKET10 only once it is on (until then the state saves as MARKET09, so the binary can be rolled back). The node sends it once when `ZYN_LEND_RULES=2`; after that, roll forward only | ✅ |
+| 160.2 | **Time is the operator's clock.** `LendTime { at }` (op 50, operator) every ~10 s when prices have not moved it; interest accrues to it without making any price younger. A price is stale 300 s after its own last post, per asset. An auction steps 1 point a minute from 102% to 85% (17 min), the backstop runs 20 min after that. Spammed epochs move none of these. The node also stops counting refused intents toward the 64 (node policy, `with_refusals_uncounted`; seals are journaled, so replay is unaffected) | ✅ |
+| 160.3 | **A lot follows the price.** Re-marked each seal at the confirmed prices; its debt is fixed when it opens — interest after that is forgiven with the reserve's cut, so neither lenders nor the ZYN pot count interest nobody will pay. Each seal the gap between its debt and what it can be counted on to fetch (proceeds + collateral at 70% of today's rate) is booked, insurance first. While a lot may still recover a booked loss, deposits into its pool wait | ✅ |
+| 160.4 | **The backstop sells only what covers the lot** at the 70% minimum, rounded up; the rest returns to the owner. A backstop the pool will not fill books the lot's remaining debt at once; the lot keeps selling and recovers it for lenders, then insurance | ✅ |
+| 160.5 | **The breaker no longer stalls a crash.** Health and liquidation use the worse of the confirmed and held price; three posts in a row on one side confirm a held move (or one within 2% of it). While a price is held, withdrawals from that pool — and from any pool borrowed against it — and collateral removal with debt wait | ✅ |
+| 160.6 | **Bids:** at least 1% of the lot's debt or the pool's minimum loan, whichever is less (never more than the lot still needs); a full lot (64) keeps its largest bids and refunds the smallest | ✅ |
+| 160.7 | **Depth:** collateral of C backing loans of B at most 25% of C's reserve in Zyn's C/B pool, on opening and on adding collateral; the collateral cap applies on adding too. Removing collateral with debt needs the pool to agree with the posted price, as borrowing does | ✅ |
+| 160.8 | **Risk and rate, v2 only:** ETH 72/77/5 (was 75/80/5); invariant line × (1 + penalty) ≤ floor − 3 pts (`Risk::is_sound_v2`); curve 8% at the 80% kink (was 4%), +75%, 10% reserve. Old listings replay through the unchanged `is_sound` | ✅ |
+| 160.9 | **Insurance takes donations:** `LendInsure` (op 51, program `lend-insure`), anyone, no shares | ✅ |
+| 160.10 | **A part repayment leaves at least the minimum loan**, or the whole debt is repaid | ✅ |
+| 160.11 | **The crate refuses an empty pool** instead of restarting its shares (supply) or burning shares for nothing (withdraw). Unconditional: only a write-off empties a pool with lenders, and testnet never wrote one off (share price 1.000000 in every pool, no lot ever opened) | ✅ |
+| 160.12 | **Prices from three sources, two must agree:** Coinbase (bare symbol — the doubled `-USD` is fixed), Kraken, CoinGecko; within 2% of their median; a failing source is logged at most every 10 min. The first post goes out at start | ✅ |
+| 160.13 | **Public figures:** cash + borrowed − reserve = supplied on one step; utilization from exact figures, rounded up to 1% (a loan never shows 0%), rates from it; insurance to two figures of its own size; `zyn_lendMarkets` serves only the last seal's figures, refreshed at every seal and kept across restarts. New fields for the app: `rules`, `curve`, `auction`, `price_max_age_secs`, `depth_limit_bps`, `pairs[]` (room under the depth limit), per pool `price_at`/`price_fresh`/`held_price`/`held_posts`/`withdraw_paused`/`supply_paused`/`collateral_room`, per lot `rate`/`opened_at`/`floor_at`/`backstop_at`/`min_bid`/`bids_full`/`outbid_above`, per position `repay_max_partial` | ✅ |
+| 160.14 | **Testnet only.** Mainnet 26460 lists no lending and does not set `ZYN_LEND_RULES` | ✅ |
