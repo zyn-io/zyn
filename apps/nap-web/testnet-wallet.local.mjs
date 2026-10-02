@@ -9,6 +9,8 @@
 //   node testnet-wallet.local.mjs collect <name>          collect all of that
 //   node testnet-wallet.local.mjs code <name>             a one-time bridge deposit code
 //   node testnet-wallet.local.mjs claim <name>            claim bridge deposits that arrived
+//   node testnet-wallet.local.mjs pool <name> <assetA> <assetB> <amountA> <amountB> [feeBps]
+//        open a pool (as Nap's market screen does); the shares come as a claim
 //   node testnet-wallet.local.mjs call <name> <method> '<json params>'
 //        any Nap Connect method (zyn_lendSupply, zyn_lendOpen, zyn_swap, …):
 //        prints the approval Nap would show, then runs it.
@@ -94,6 +96,20 @@ switch (cmd) {
     const got = await ledger.loadWaiting(config, identity).catch(() => []);
     if (got.length) await ledger.claimWaiting(config, identity);
     console.log(got.length ? got.map((w) => `claimed ${show(w.amount)} ${nameOf(w.asset)}`).join('\n') : 'no deposits waiting');
+    break;
+  }
+  case 'pool': {
+    const [a, b, ta, tb, fee = '30'] = rest;
+    const amt = (t) => { const [w, f = ''] = String(t).split('.'); return BigInt(w) * W + BigInt(f.padEnd(18, '0')); };
+    const { held } = await ledger.loadHoldings(config, identity, []);
+    const taken = new Set();
+    const fa = mk.fund(identity, held, obj.unhex(a), amt(ta), taken);
+    const fb = mk.fund(identity, held, obj.unhex(b), amt(tb), taken);
+    const nonce = await ledger.submitFresh(config, identity, (n) => mk.createPoolIntent({
+      provider: identity.account, assetA: obj.unhex(a), assetB: obj.unhex(b), amountA: amt(ta), amountB: amt(tb), feeBps: Number(fee),
+      inputs: [...fa.inputs, ...fb.inputs], change: [...fa.change, ...fb.change], nonce: n,
+    }));
+    console.log(`pool opened: ${ta} ${nameOf(a)} + ${tb} ${nameOf(b)} (nonce ${obj.hex(nonce)}); collect the shares after the seal`);
     break;
   }
   case 'call': {
