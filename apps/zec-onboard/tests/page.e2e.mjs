@@ -76,6 +76,17 @@ for (const [w, h, scheme] of [[1280, 900, 'light'], [390, 844, 'light'], [390, 8
     await page.keyboard.press('Escape');
     check(!(await page.isVisible('.chain .bubble')), 'Escape closes the bubble');
 
+    // The film loads and is a minute long.
+    const filmDur = await page.evaluate(() => new Promise((r) => {
+      const v = document.querySelector('.film video');
+      v.preload = 'metadata';
+      v.addEventListener('loadedmetadata', () => r(v.duration), { once: true });
+      v.load();
+      setTimeout(() => r(-1), 10000);
+    }));
+    check(Math.abs(filmDur - 60) < 1, `film loads (${filmDur.toFixed ? filmDur.toFixed(1) : filmDur}s)`);
+    check(await page.evaluate(() => { const i = new Image(); i.src = document.querySelector('.film video').poster; return new Promise((r) => { i.onload = () => r(i.naturalWidth > 0); i.onerror = () => r(false); }); }), 'film poster loads');
+
     await page.click('#reset');
     check((await page.textContent('#count')) === '0 of 6 done', 'clear progress');
   }
