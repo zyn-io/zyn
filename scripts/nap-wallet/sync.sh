@@ -37,6 +37,11 @@ if grep -rIlE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|ZYN_SUBMIT_TOKEN=[^$ ]|"sec
   echo "refusing: the files above look like they hold a secret" >&2
   exit 1
 fi
+# Nor where the servers are, or whose machine built it.
+if grep -rIlE '(95\.111\.240|168\.119\.53|192\.168)\.[0-9]+|/Users/[a-z]+/' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=target; then
+  echo "refusing: the files above name a server address or a local path" >&2
+  exit 1
+fi
 big=$(find . -path ./.git -prune -o -type f -size +50M -print)
 [ -z "$big" ] || { echo "refusing: files over 50 MB: $big" >&2; exit 1; }
 
