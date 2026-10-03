@@ -270,6 +270,66 @@ pub fn parse_assets(spec: &str, network: &[u8]) -> Result<Vec<Carried>, String> 
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// Caps per vault asset (§163). The pilot's `ZYN_ETH_CAP_WEI` capped ETH and
+// refused to carry anything else; mainnet carries BOLD beside it, each under
+// its own cap.
+
+/// `ZYN_ETH_CAPS` (`1=<units>,2=<units>`, each the most this bridge will have
+/// issued of that vault asset, in the token's own base units — wei for ETH)
+/// together with the older `ZYN_ETH_CAP_WEI`, which caps the native asset.
+/// A capped bridge caps everything it carries: an asset left uncapped beside a
+/// capped one is refused, so adding a token can never open it without a cap.
+/// Empty when neither is set (testnet: no caps).
+pub fn parse_caps(spec: &str, cap_wei: &str, assets: &[Carried]) -> Result<std::collections::BTreeMap<u32, u128>, String> {
+    let mut caps = std::collections::BTreeMap::new();
+    for kv in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (id, units) = kv.split_once('=').ok_or_else(|| format!("ZYN_ETH_CAPS entry {kv:?} is not id=<base units>"))?;
+        let id: u32 = id.trim().parse().map_err(|_| format!("ZYN_ETH_CAPS: {id:?} is not a vault asset id"))?;
+        let units: u128 = units.trim().parse().map_err(|_| format!("ZYN_ETH_CAPS: {units:?} is not a whole number of base units"))?;
+        if carried(assets, id).is_none() {
+            return Err(format!("ZYN_ETH_CAPS caps vault asset {id}, which ZYN_ETH_ASSETS does not carry"));
+        }
+        if caps.insert(id, units).is_some() {
+            return Err(format!("ZYN_ETH_CAPS names vault asset {id} twice"));
+        }
+    }
+    let cap_wei = cap_wei.trim();
+    if !cap_wei.is_empty() {
+        let wei: u128 = cap_wei.parse().map_err(|_| "ZYN_ETH_CAP_WEI must be a whole number of wei".to_string())?;
+        let native = assets.iter().find(|c| c.token.is_none()).ok_or("ZYN_ETH_CAP_WEI caps ETH, which ZYN_ETH_ASSETS does not carry")?;
+        match caps.get(&native.id) {
+            Some(c) if *c != wei => return Err(format!("ZYN_ETH_CAP_WEI ({wei}) and ZYN_ETH_CAPS ({c}) disagree on ETH's cap")),
+            _ => {
+                caps.insert(native.id, wei);
+            }
+        }
+    }
+    if !caps.is_empty() {
+        if let Some(c) = assets.iter().find(|c| !caps.contains_key(&c.id)) {
+            return Err(format!("a capped bridge caps every asset it carries: vault asset {} has no cap in ZYN_ETH_CAPS", c.id));
+        }
+    }
+    Ok(caps)
+}
+
+/// A cap in the token's base units as WAD, the unit deposits and Zyn's
+/// issuance are counted in. A token with more than 18 decimals rounds down,
+/// so the cap never grows in the conversion.
+pub fn cap_wad(units: u128, decimals: u8) -> Option<u128> {
+    if decimals <= 18 {
+        units.checked_mul(10u128.checked_pow((18 - decimals) as u32)?)
+    } else {
+        Some(units / 10u128.checked_pow((decimals - 18) as u32)?)
+    }
+}
+
+/// Would crediting `deposit` (WAD) take what is issued past the cap (WAD)?
+/// Exactly at the cap is still credited.
+pub fn past_cap(issued: u128, deposit: u128, cap: u128) -> bool {
+    issued.saturating_add(deposit) > cap
+}
+
 /// The carried asset a `Deposited` log's vault id belongs to.
 pub fn carried(list: &[Carried], vault_asset: u32) -> Option<&Carried> {
     list.iter().find(|c| c.id == vault_asset)
@@ -621,5 +681,68 @@ mod tests {
         swapped[1].asset = 1;
         let vault = [0xe1; 20];
         assert_ne!(withdrawal_digest(11155111, &vault, 9, 3, &payouts), withdrawal_digest(11155111, &vault, 9, 3, &swapped));
+    }
+
+    const MAIN_BOLD: &str = "0x6440f144b7e50D6a8439336510312d2F54beB01D";
+
+    #[test]
+    fn each_carried_asset_has_its_own_cap() {
+        let eth_only = parse_assets("1=native", b"eip155:1").unwrap();
+        let both = parse_assets(&format!("1=native,2={MAIN_BOLD}"), b"eip155:1").unwrap();
+        // The pilot's env, unchanged: ZYN_ETH_CAP_WEI caps asset 1.
+        assert_eq!(parse_caps("", "10000000000000000", &eth_only).unwrap().into_iter().collect::<Vec<_>>(), vec![(1, 10u128.pow(16))]);
+        // No caps at all (testnet).
+        assert!(parse_caps("", "", &both).unwrap().is_empty());
+        // ETH and BOLD, each under its own cap; the old variable may stay if it agrees.
+        let caps = parse_caps("1=10000000000000000, 2=1000000000000000000000", "", &both).unwrap();
+        assert_eq!((caps[&1], caps[&2]), (10u128.pow(16), 1000 * 10u128.pow(18)));
+        assert_eq!(parse_caps("2=1000000000000000000000", "10000000000000000", &both).unwrap(), caps);
+        assert_eq!(parse_caps("1=10000000000000000,2=1000000000000000000000", "10000000000000000", &both).unwrap(), caps);
+        for (spec, wei, assets, why) in [
+            ("", "10000000000000000", &both, "BOLD carried beside a capped ETH without a cap of its own"),
+            ("1=10000000000000000", "", &both, "the same, through ZYN_ETH_CAPS"),
+            ("1=5,2=7", "10000000000000000", &both, "the two variables disagree on ETH"),
+            ("3=5", "", &both, "a cap for an asset not carried"),
+            ("1=5,1=6", "", &eth_only, "an asset twice"),
+            ("1=0.5", "", &eth_only, "not whole base units"),
+            ("1", "", &eth_only, "not id=units"),
+            ("", "ten", &eth_only, "ZYN_ETH_CAP_WEI not a number"),
+        ] {
+            assert!(parse_caps(spec, wei, assets).is_err(), "{why}");
+        }
+        let bold_only = parse_assets(&format!("2={MAIN_BOLD}"), b"eip155:1").unwrap();
+        assert!(parse_caps("", "10000000000000000", &bold_only).is_err(), "an ETH cap on a bridge that carries no ETH");
+    }
+
+    #[test]
+    fn a_deposit_past_its_assets_cap_is_not_credited() {
+        // Caps convert from base units to WAD by the vault's decimals.
+        assert_eq!(cap_wad(10u128.pow(16), 18), Some(10u128.pow(16)));
+        assert_eq!(cap_wad(1_000_000_000, 6), Some(1000 * 10u128.pow(18)), "1,000 of a 6-decimal token");
+        assert_eq!(cap_wad(1999, 21), Some(1), "more than 18 decimals rounds the cap down");
+        assert_eq!(cap_wad(u128::MAX, 0), None);
+        // As the pilot does for ETH: up to the cap is credited, past it is not.
+        let cap = cap_wad(10u128.pow(16), 18).unwrap();
+        assert!(!past_cap(0, cap, cap), "a deposit that reaches the cap exactly is credited");
+        assert!(past_cap(1, cap, cap));
+        assert!(past_cap(cap, 1, cap), "once full, nothing more");
+        assert!(past_cap(u128::MAX - 1, 5, cap), "no overflow into room");
+        // Each asset is counted against its own cap: BOLD's 1,000 does not fill ETH's 0.01.
+        let bold_cap = cap_wad(1000 * 10u128.pow(18), 18).unwrap();
+        assert!(!past_cap(0, 900 * 10u128.pow(18), bold_cap));
+        assert!(past_cap(0, 900 * 10u128.pow(18), cap));
+    }
+
+    #[test]
+    fn the_safe_registers_bold_with_this_calldata() {
+        // registerAsset(2, BOLD) — what Safe{Wallet} is given for mainnet (§163).
+        let call = register_asset_call(2, &unhex20(MAIN_BOLD));
+        // cast calldata "registerAsset(uint32,address)" 2 0x6440f144b7e50D6a8439336510312d2F54beB01D
+        let want = concat!(
+            "df17aa25",
+            "0000000000000000000000000000000000000000000000000000000000000002",
+            "0000000000000000000000006440f144b7e50d6a8439336510312d2f54beb01d",
+        );
+        assert_eq!(hex(&call), want);
     }
 }
