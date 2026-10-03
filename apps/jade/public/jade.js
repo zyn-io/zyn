@@ -146,7 +146,8 @@ async function rpc(method, fields = {}) {
   try {
     r = await fetch(RPC, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      // JSON as text/plain: no CORS preflight for the gateway's rate limit to refuse.
+      headers: { 'content-type': 'text/plain;charset=UTF-8' },
       body: JSON.stringify({ jsonrpc: '2.0', id, method, params: [], ...fields }),
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
