@@ -14,8 +14,16 @@ import { objectCall, withdrawIntent } from './object.js';
 /// serves mainnet.
 export const LEND_BRIDGE = 'https://lend.zyn-network.com/#/bridge';
 export const bridgePage = (config) => (config?.id === 'testnet' ? LEND_BRIDGE : null);
+/// Mainnet ERC-20 deposits (BOLD): Nap's own page does ETH only; the lending
+/// app's mainnet Bridge does a token's two steps.
+export const LEND_MAINNET_BRIDGE = 'https://lend.zyn-network.com/?network=mainnet#/bridge';
+const COINS = ['eth', 'sol', 'btc', 'zec'];
 /// A deposit handed over with its one-time code, on the page for `config`.
-export const handoffUrl = (config, key, code, fallback) => (bridgePage(config) ? `${LEND_BRIDGE}/deposit/${key}?code=${code}` : fallback);
+export function handoffUrl(config, key, code, fallback) {
+  if (bridgePage(config)) return `${LEND_BRIDGE}/deposit/${key}?code=${code}`;
+  if (config?.id === 'mainnet' && !COINS.includes(key)) return `${LEND_MAINNET_BRIDGE}/deposit/${key}?code=${code}`;
+  return fallback;
+}
 
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
@@ -49,6 +57,9 @@ export function bridgesOf(net) {
         key: t.symbol.toLowerCase(), evm: true, symbol: t.symbol, zy: `${t.symbol}.zy`, chainName, decimals: t.decimals, network,
         vault: b.eth.vault, chainId: b.eth.chainId, explorer: b.eth.explorer, token: t.address, assetId: t.assetId, origin: t.address.slice(2).toLowerCase(),
         faucet: !!t.faucet && b.eth.chainId !== 1, asset: hex(bridgedAsset(network, unhex(t.address.slice(2).toLowerCase(), 20))),
+        // A vault whose registry is read on its own chain (mainnet): the token
+        // waits for it. Declared but unreachable is shut, never skipped.
+        checkVault: b.eth.vaultRpc !== undefined, vaultRpc: typeof b.eth.vaultRpc === 'string' && b.eth.vaultRpc ? b.eth.vaultRpc : null,
       });
     }
   }
@@ -60,13 +71,48 @@ export function bridgesOf(net) {
   return out;
 }
 
+/// `assets(uint32)` on a ZynVault: the token registered under an asset id.
+export const VAULT_ASSETS = 'f8a80dc8';
+
+/// The vault's answer to `assets(id)`: the token (lowercase), its decimals,
+/// and whether the id is registered; null for anything else.
+export function readVaultAsset(result) {
+  const h = String(result ?? '').replace(/^0x/, '');
+  if (!/^[0-9a-fA-F]{192}$/.test(h)) return null;
+  return { token: `0x${h.slice(24, 64).toLowerCase()}`, decimals: Number(BigInt(`0x${h.slice(64, 128)}`)), registered: BigInt(`0x${h.slice(128, 192)}`) === 1n };
+}
+
+/// Whether `b`'s vault has registered `b.token` under `b.assetId`, read on
+/// its chain through `b.vaultRpc`. A token the vault does not take yet would
+/// be stuck in it, so anything short of that exact answer is false.
+export async function vaultTakes(b) {
+  if (!b.token || !b.checkVault) return true;
+  if (!b.vaultRpc) return false;
+  try {
+    const r = await fetch(b.vaultRpc, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: b.vault, data: `0x${VAULT_ASSETS}${BigInt(b.assetId).toString(16).padStart(64, '0')}` }, 'latest'] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const a = readVaultAsset((await r.json())?.result);
+    return !!a?.registered && a.token === String(b.token).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 /// Which bridges this chain has registered, what each has issued, and the fee.
+/// A token on a vault checked on its own chain (mainnet BOLD) is live only
+/// once the chain lists it and the vault has registered it; `waiting` says
+/// which is missing.
 export async function bridgeState(config) {
   const [bridged, market] = await Promise.all([loadBridged(config), objectCall(config.rpcUrl, 'zyn_market').catch(() => ({}))]);
-  const bridges = bridgesOf(config).map((b) => {
+  const bridges = await Promise.all(bridgesOf(config).map(async (b) => {
     const row = bridged.find((x) => x.asset === b.asset);
-    return { ...b, live: !!row, issued: /^\d+$/.test(String(row?.issued ?? '')) ? BigInt(row.issued) : null };
-  });
+    const vault = await vaultTakes(b);
+    return { ...b, live: !!row && vault, waiting: !vault ? 'vault' : !row ? 'chain' : null, issued: /^\d+$/.test(String(row?.issued ?? '')) ? BigInt(row.issued) : null };
+  }));
   return { bridges, bps: BigInt(Number(market?.fees?.bridge_bps) || 0) };
 }
 

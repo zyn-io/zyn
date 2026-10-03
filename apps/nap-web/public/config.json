@@ -36,7 +36,16 @@
           "explorer": "https://etherscan.io/tx/{tx}",
           "capWei": "10000000000000000",
           "custody": "2-of-3 Safe",
-          "safe": "0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983"
+          "safe": "0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983",
+          "vaultRpc": "/eth/mainnet",
+          "tokens": [
+            {
+              "symbol": "BOLD",
+              "address": "0x6440f144b7e50D6a8439336510312d2F54beB01D",
+              "decimals": 18,
+              "assetId": 2
+            }
+          ]
         }
       }
     },

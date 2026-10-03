@@ -27,6 +27,8 @@ function checkedNetwork(value) {
     if ((key === 'lightdUrl' || key === 'attendUrl') && !value[key]) continue;
     out[key] = endpoint(value[key], key);
   }
+  // The vault registry read (functions/eth) is a path on Nap's origin too.
+  if (value.bridges?.eth?.vaultRpc) out.bridges = { ...value.bridges, eth: { ...value.bridges.eth, vaultRpc: endpoint(value.bridges.eth.vaultRpc, 'vaultRpc') } };
   return out;
 }
 

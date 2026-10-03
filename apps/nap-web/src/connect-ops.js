@@ -828,7 +828,7 @@ export const METHODS = {
         zec: { asset: ctx.config.zecAsset, zcash: ctx.config.zcash },
         bridges: st.bridges.map((b) => ({
           key: b.key, symbol: b.symbol, zy: b.zy, chainName: b.chainName, decimals: b.decimals, network: b.network, asset: b.asset,
-          live: b.live, issued: b.issued === null ? null : String(b.issued),
+          live: b.live, waiting: b.waiting || null, issued: b.issued === null ? null : String(b.issued),
           vault: b.vault || null, rpc: b.rpc || null, cluster: b.cluster || null, chainId: b.chainId || null, explorer: b.explorer || null,
           capWei: b.capWei || null, custody: b.custody || null, safe: b.safe || null, chain: b.chain || null,
           token: b.token || null, assetId: b.assetId || null, faucet: !!b.faucet,
@@ -853,6 +853,12 @@ export const METHODS = {
       const b = bridges.bridgesOf(ctx.config).find((x) => x.key === key);
       if (!b) throw bad(`No ${key.toUpperCase() || 'such'} bridge on this network`);
       if (key === 'btc') return { key, address: await bridges.btcDepositAddress(ctx.config, ctx.identity, b) };
+      if (b.token) {
+        // A token the chain does not list, or its vault has not registered,
+        // would be stuck in the vault: no code for it until both have.
+        const live = (await bridges.bridgeState(ctx.config)).bridges.find((x) => x.key === key);
+        if (!live?.live) throw bad(live?.waiting === 'vault' ? `The vault does not take ${b.symbol} yet` : `${b.symbol} deposits are not open on this network yet`);
+      }
       const code = await bridges.depositCode(ctx.config, ctx.identity);
       if (key === 'sol') return { key, memo: `zyn:${code}`, vault: b.vault, rpc: b.rpc, cluster: b.cluster };
       if (b.token) {

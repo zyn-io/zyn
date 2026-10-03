@@ -570,6 +570,12 @@ function render() {
     location.replace(handoff ? handoffUrl(config, handoff.key, handoff.code) : bridgePage(config));
     return;
   }
+  // A token deposit (mainnet BOLD) is two steps this page does not do: the
+  // lending app's mainnet Bridge does them, with the same code.
+  if (handoff && !config.bridges.some((b) => b.key === handoff.key)) {
+    const there = handoffUrl(config, handoff.key, handoff.code, null);
+    if (there) { location.replace(there); return; }
+  }
   // Unlocked already (the extension, the phone app): open straight in.
   const held = handoff ? null : await loadSession();
   if (held?.identity.viewing) begin(held.identity);

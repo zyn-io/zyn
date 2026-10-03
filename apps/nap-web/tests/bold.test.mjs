@@ -38,9 +38,17 @@ test('testnet lists BOLD on the Sepolia vault, with the asset id the chain deriv
   assert.equal(bridgesOf(testnet).find((b) => b.key === 'eth').asset, ETH_ZY);
 });
 
-test('mainnet has no BOLD yet', () => {
-  assert.equal(bridgesOf(mainnet).some((b) => b.key === 'bold'), false);
-  assert.deepEqual(evmTokens(mainnet.bridges.eth), []);
+test('mainnet lists Liquity BOLD on the Ethereum vault, checked against the vault itself', () => {
+  const bold = bridgesOf(mainnet).find((b) => b.key === 'bold');
+  assert.equal(bold.token, '0x6440f144b7e50D6a8439336510312d2F54beB01D');
+  assert.equal(bold.asset, 'ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f');
+  assert.equal(bold.assetId, 2);
+  assert.equal(bold.chainName, 'Ethereum');
+  assert.equal(bold.faucet, false);
+  assert.equal(bold.checkVault, true);
+  assert.equal(bold.vaultRpc, '/eth/mainnet');
+  // Testnet's TestBold is not checked that way.
+  assert.equal(bridgesOf(testnet).find((b) => b.key === 'bold').checkVault, false);
 });
 
 test('a token that would take a coin\'s key, or has no asset id, is left out', () => {
