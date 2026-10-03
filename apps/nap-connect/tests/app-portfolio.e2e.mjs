@@ -148,7 +148,9 @@ await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.sta
 await page.click('#connect');
 await page.waitForSelector('#wallet-list button:has-text("Test EVM")');
 await page.click('#wallet-list button:has-text("Test EVM")');
-await page.waitForSelector('#approve[open]', { timeout: 60000 }).catch(() => {});
+// Wait for this warning itself, not just an open dialog: the unlink dialog's
+// title can still be in place while sign-in runs.
+await page.waitForFunction(() => document.querySelector('#approve').open && /different account/i.test(document.querySelector('#a-title').textContent), null, { timeout: 90000 }).catch(() => {});
 ok(/different account/i.test(await page.textContent('#a-title')) && /its signature changed/.test(await page.textContent('#a-note')), `a changed account is flagged before it opens: ${await page.textContent('#a-title')}`);
 await page.click('#a-yes');
 await signedIn();
