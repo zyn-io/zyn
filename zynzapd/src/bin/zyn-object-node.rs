@@ -971,6 +971,10 @@ fn handle(
         // first started says so for the seconds until it does.
         "zyn_lendMarkets" => {
             let snap = LEND_SNAPSHOT.lock().unwrap().as_ref().map(|(_, v)| v.clone());
+            // Nothing listed (mainnet before its first deposit): no snapshot
+            // is ever taken, and an empty market has nothing to hide, so it
+            // is answered as it is — `guarded: false`, no pools.
+            let snap = snap.or_else(|| node.lock().ok().filter(|n| n.state().market.lend.listed.is_empty()).map(|n| lend_markets_json(n.state())));
             match snap {
                 Some(v) => format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", v),
                 None => "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"lending figures are published at the next seal\"}}".to_string(),
@@ -2073,6 +2077,37 @@ fn lend_list_named(
     true
 }
 
+/// Rules v2 are due when they are wanted, guarded mode is on (the ledger
+/// refuses them before the first `LendLimits`) and they are not in force yet.
+/// On a chain that has issued nothing — mainnet before its first deposit —
+/// nothing is listed, so nothing is guarded and nothing is sent: a refused
+/// `LendRules` would be journaled at every restart and move the root.
+fn lend_rules_due(lend: &objectvm::lend::Lend, wanted: bool) -> bool {
+    wanted && lend.guarded && !lend.v2()
+}
+
+/// Send `LendRules { version: 2 }` once [`lend_rules_due`]; called at start
+/// and again whenever the price thread lists an asset that was waiting.
+fn lend_rules_v2_once(
+    wanted: bool,
+    node: &Arc<Mutex<Node<ObjectVm>>>,
+    journal: &Arc<Mutex<Journal>>,
+    pub_log: &Arc<Mutex<Published>>,
+    dir: &str,
+    chain: u32,
+) {
+    if !node.lock().map(|n| lend_rules_due(&n.state().market.lend, wanted)).unwrap_or(false) {
+        return;
+    }
+    let op = Op::LendRules { program: zyn_vm::program::lend_list(), version: objectvm::lend::RULES_V2 };
+    for r in apply_operator(&op, node, journal, pub_log, dir, chain) {
+        match r {
+            objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending rules v2 refused: {why}"),
+            _ => eprintln!("zyn-object-node: lending rules v2 in force"),
+        }
+    }
+}
+
 fn apply_operator(
     op: &Op,
     node: &Arc<Mutex<Node<ObjectVm>>>,
@@ -2810,14 +2845,11 @@ fn main() {
             }
         }
         // Rules v2, once: guarded mode must already be on (the limits above).
+        // Nothing listed yet (nothing issued): they wait for the first
+        // listing, which the price thread makes and follows with them.
+        lend_rules_v2_once(rules_v2, &node, &journal, &pub_log, &dir, chain);
         if rules_v2 && !node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(true) {
-            let op = Op::LendRules { program: zyn_vm::program::lend_list(), version: objectvm::lend::RULES_V2 };
-            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
-                match r {
-                    objectvm::Receipt::Refused(why) => eprintln!("zyn-object-node: lending rules v2 refused: {why}"),
-                    _ => eprintln!("zyn-object-node: lending rules v2 in force"),
-                }
-            }
+            eprintln!("zyn-object-node: lending rules v2 wait for the first listed asset's limits");
         }
         // Under v2 the clock moves first, before any holder's intent: after
         // a restart, prices from before it are as old as they really are.
@@ -2854,6 +2886,9 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(every));
                 }
                 waiting.retain(|(sym, asset)| !lend_list_named(sym, asset, rules_v2, limits.get(sym).copied(), &node, &journal, &pub_log, &dir, chain));
+                // The first listing turns guarded mode on; rules v2 follow it
+                // before any price is posted.
+                lend_rules_v2_once(rules_v2, &node, &journal, &pub_log, &dir, chain);
                 let listed: Vec<[u8; 32]> = node.lock().map(|n| n.state().market.lend.listed.keys().copied().collect()).unwrap_or_default();
                 if listed.is_empty() {
                     continue;
@@ -3373,6 +3408,20 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /// Mainnet before its first deposit: ZYN_LEND_RULES=2 sends nothing until
+    /// a listing has turned guarded mode on, then once, then never again.
+    #[test]
+    fn rules_v2_wait_for_guarded_mode_and_go_once() {
+        let mut lend = objectvm::lend::Lend::default();
+        assert!(!super::lend_rules_due(&lend, true), "nothing issued, nothing listed: nothing sent");
+        assert!(!super::lend_rules_due(&lend, false));
+        lend.guarded = true;
+        assert!(super::lend_rules_due(&lend, true), "the first limits are in: rules v2 follow");
+        assert!(!super::lend_rules_due(&lend, false), "not wanted, not sent");
+        lend.rules = objectvm::lend::RULES_V2;
+        assert!(!super::lend_rules_due(&lend, true), "in force: never sent again");
+    }
+
     #[test]
     fn deposits_the_bridge_has_not_reached_are_not_the_operators() {
         // An empty store has nothing unjudged, whatever the height.
