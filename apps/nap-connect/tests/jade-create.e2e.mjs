@@ -17,6 +17,8 @@ const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) proc
 const stamp = Date.now().toString(36).slice(-4).toUpperCase();
 const NAME = `E2E Coin ${stamp}`;
 const SYMBOL = `E2E${stamp}`.slice(0, 8);
+// The coin it is priced in (§166): ZEC, or ETH, BOLD or SOL on testnet.
+const QUOTE = process.env.QUOTE || 'ZEC';
 
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
 const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
@@ -42,12 +44,17 @@ await page.setInputFiles('#create-image', IMAGE);
 await page.waitForFunction(() => document.querySelector('#preview-thumb img'), null, { timeout: 10000 }).catch(() => {});
 ok(await page.locator('#preview-thumb img').count() === 1, 'the preview shows the picture');
 ok(await page.isEnabled('#create-go'), 'the create button is enabled for a valid ticker and name');
+if (QUOTE !== 'ZEC') {
+  await page.click(`#create-quote .chip:has-text("${QUOTE}")`);
+  ok((await page.textContent('#fact-cap')).includes(QUOTE), `priced in ${QUOTE}: graduates at ${await page.textContent('#fact-cap')}`);
+}
 
 // Create: Nap shows the coin and the picture, and names the site.
 await page.click('#create-go');
 await popup.waitForSelector('#yes', { timeout: 60000 });
 const approval = await popup.textContent('main');
 ok(approval.includes(SYMBOL) && approval.includes(new URL(JADE).host), `Nap shows ${SYMBOL} and names the site`);
+ok(approval.includes(`Priced in${QUOTE}.zy`) || approval.includes(`Priced in ${QUOTE}.zy`), `Nap says it is priced in ${QUOTE}.zy`);
 ok(await popup.locator('main img').count() >= 1, 'Nap shows the picture it is about to attach');
 await popup.screenshot({ path: `${S}/jade-create-approve.png` });
 await popup.click('#yes');
@@ -65,6 +72,8 @@ if (token) {
   await page.waitForSelector('#coin-title', { timeout: 30000 });
   await page.waitForFunction((n) => document.querySelector('#coin-title').textContent.includes(n), NAME, { timeout: 60000 }).catch(() => {});
   ok((await page.textContent('#coin-title')).includes(NAME), `the chain lists "${NAME}"`);
+  await page.waitForFunction((q) => document.querySelector('#coin-mcap').textContent.endsWith(` ${q}`), QUOTE, { timeout: 20000 }).catch(() => {});
+  ok((await page.textContent('#coin-mcap')).endsWith(` ${QUOTE}`), `its page prices it in ${QUOTE}: ${await page.textContent('#coin-mcap')}`);
   await page.waitForSelector('#coin-thumb img', { timeout: 20000 }).catch(() => {});
   ok(await page.locator('#coin-thumb img').count() === 1, 'the coin page shows its picture');
   const content = await (await fetch(`${JADE}/api/content/${token}`)).json();

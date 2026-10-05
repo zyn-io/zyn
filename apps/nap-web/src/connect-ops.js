@@ -341,7 +341,7 @@ export const METHODS = {
           ['Name', String(p.name).trim()],
           ['Priced in', q$],
           ['Supply', '1,000,000,000 — all sold on the curve or put in its pool; none to you'],
-          ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about ${wadText(raise)} ${q$} raised), into a locked pool`],
+          ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about ${(Number(raise / 10n ** 14n) / 1e4).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${q$} raised), into a locked pool`],
           ['Bond', bond ? `${wadText(bond)} ${q$} — returned only if it graduates; otherwise it stays in the curve` : 'none'],
           ['Your share', terms.fee_bps ? `10% of its trading fees, paid when it graduates` : 'none (no fee is set)'],
           ...(description ? [['Description', description]] : []),

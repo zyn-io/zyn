@@ -43,7 +43,7 @@ test('a coin in ETH says it is priced in ETH and raises ~8.3 ETH', async () => {
   const plan = await METHODS.zyn_curveCreate.prepare(ctx, { symbol: 'ethc', name: 'An ETH coin', quote: ETH });
   const rows = Object.fromEntries(plan.rows);
   assert.match(rows['Priced in'], /^ETH/);
-  assert.match(rows.Graduates, /about 8\.3\d* ETH/);
+  assert.match(rows.Graduates, /about 8\.31 ETH/);
 });
 
 test('a coin is refused in an asset the ledger does not launch coins in', async () => {
@@ -52,7 +52,7 @@ test('a coin is refused in an asset the ledger does not launch coins in', async 
   // None named (a node before §166): ZEC.zy only, at ZEC's size.
   named([]);
   const plan = await METHODS.zyn_curveCreate.prepare(ctx, { symbol: 'z', name: 'z' });
-  assert.match(Object.fromEntries(plan.rows).Graduates, /about 17\.0\d* ZEC\.zy/);
+  assert.match(Object.fromEntries(plan.rows).Graduates, /about 17 ZEC\.zy raised/);
   await assert.rejects(METHODS.zyn_curveCreate.prepare(ctx, { symbol: 'x', name: 'x', quote: ETH }), /not launched in that asset/);
 });
 
