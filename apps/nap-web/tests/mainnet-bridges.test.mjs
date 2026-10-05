@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
 
-const { bridgesOf, bridgeState, readVaultAsset, handoffUrl, VAULT_ASSETS } = await import('../src/bridges.js');
+const { bridgesOf, bridgeState, readVaultAsset, VAULT_ASSETS } = await import('../src/bridges.js');
 const { METHODS } = await import('../src/connect-ops.js');
 const { deriveIdentity } = await import('../src/core.js');
 const relay = await import(new URL('../functions/eth/[[path]].js', import.meta.url));
@@ -109,13 +109,6 @@ test('no BOLD deposit code while the vault does not take it — and no nonce spe
   const eth = listed.bridges.find((x) => x.key === 'eth');
   assert.equal(eth.safe, mainnet.bridges.eth.safe);
   assert.equal(listed.bridges.find((x) => x.key === 'bold').waiting, null);
-});
-
-test('a mainnet BOLD deposit handed over goes to the lending app\'s mainnet Bridge; ETH stays on Nap\'s page', () => {
-  const code = 'ab'.repeat(32);
-  assert.equal(handoffUrl(mainnet, 'bold', code, 'nap'), `https://lend.zyn-network.com/?network=mainnet#/bridge/deposit/bold?code=${code}`);
-  assert.equal(handoffUrl(mainnet, 'eth', code, 'nap'), 'nap');
-  assert.equal(handoffUrl({ id: 'testnet' }, 'bold', code, 'nap'), `https://lend.zyn-network.com/#/bridge/deposit/bold?code=${code}`);
 });
 
 test('the relay passes the vault registry read and nothing else', async () => {

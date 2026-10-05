@@ -1,29 +1,14 @@
-// The bridges (§146, §154, §155), shared by the toolbar wallet (pocket.js)
-// and Nap Connect (connect-ops.js), so a site's bridge page and Nap's own
-// follow one set of rules. No page, no Vite: it runs in Node's tests too.
+// The bridges (§146, §154, §155), as Nap Connect (connect-ops.js) serves
+// them to a site's bridge page (Zyn Lend's Bridge), and what the wallet
+// itself does with them (pocket.js): claim what arrived under its codes, and
+// tell the vault where its exits go. No page, no Vite: it runs in Node's
+// tests too.
 import { hex, parseAmount, unhex } from './core.js';
 import { bridgedAsset, exitCommitment, fund } from './market.js';
 import { bridgeMemo, call, claimWaiting, loadBridged, loadWaiting, submitIntent } from './ledger.js';
 import * as btc from './bitcoin.js';
 import { solanaKey } from './solana.js';
 import { objectCall, withdrawIntent } from './object.js';
-
-/// Where bridging happens on testnet: the lending app's Bridge tab, where
-/// Phantom and MetaMask can reach the page (they cannot reach Nap's own
-/// extension pages). Mainnet keeps Nap's page for the ETH pilot until the app
-/// serves mainnet.
-export const LEND_BRIDGE = 'https://lend.zyn-network.com/#/bridge';
-export const bridgePage = (config) => (config?.id === 'testnet' ? LEND_BRIDGE : null);
-/// Mainnet ERC-20 deposits (BOLD): Nap's own page does ETH only; the lending
-/// app's mainnet Bridge does a token's two steps.
-export const LEND_MAINNET_BRIDGE = 'https://lend.zyn-network.com/?network=mainnet#/bridge';
-const COINS = ['eth', 'sol', 'btc', 'zec'];
-/// A deposit handed over with its one-time code, on the page for `config`.
-export function handoffUrl(config, key, code, fallback) {
-  if (bridgePage(config)) return `${LEND_BRIDGE}/deposit/${key}?code=${code}`;
-  if (config?.id === 'mainnet' && !COINS.includes(key)) return `${LEND_MAINNET_BRIDGE}/deposit/${key}?code=${code}`;
-  return fallback;
-}
 
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
@@ -38,7 +23,7 @@ export function evmTokens(eth) {
     && Number.isSafeInteger(t.decimals) && t.decimals >= 0 && t.decimals <= 18);
 }
 
-/// The bridges a network's config declares, as bridge.html reads them.
+/// The bridges a network's config declares.
 export function bridgesOf(net) {
   const b = net.bridges || {};
   const out = [];
@@ -149,7 +134,7 @@ function destinationBytes(b, text) {
   return unhex(t.slice(2).toLowerCase(), 20);
 }
 
-// Exits waiting to be revealed — the record bridge.html keeps, shared.
+// Exits waiting to be revealed: a record kept on this device, shared by every page of Nap.
 const bridgeExitsKey = (config) => `nap.bridge.exits.${config.chain}`;
 const bridgeExits = (config) => { try { return JSON.parse(read(bridgeExitsKey(config)) || '[]'); } catch { return []; } };
 

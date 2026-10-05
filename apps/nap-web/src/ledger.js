@@ -1,7 +1,7 @@
 // The object ledger, as the wallet's pages talk to it: one JSON-RPC call,
 // the holder's own view of what they hold, and signing an intent.
 //
-// Shared by Nap Market and the connect window. Two copies of the claim-id
+// Shared by the wallet, the connect window and the embedded core. Two copies of the claim-id
 // derivation or the nonce counter would drift, and a drift here is money the
 // wallet can no longer find — so there is one.
 

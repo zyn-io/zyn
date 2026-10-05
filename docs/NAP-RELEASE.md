@@ -49,18 +49,16 @@ Do not enable automatic migration or use this build for the funded event yet.
    testing. Never place real recovery material in the source tree or fixtures.
 2. Run `cargo test -p zynzapd --lib` and `cargo check -p zynzapd --all-targets`.
 3. In `apps/nap-web`, run `npm ci`, `npm test`, and `npm run build`.
-4. For local UI testing only, run `node tests/fixture-server.mjs` and open port
-   4174. Its signed-read/transfer verifier uses Node/OpenSSL and no chain.
-5. On restore interruption, preserve `nap-restore-pending.json` and the
+4. On restore interruption, preserve `nap-restore-pending.json` and the
    referenced `restore-backup-*` directory. Restart Nap to roll back before
    loading either identity. If rollback fails, repair filesystem access first;
    do not bypass the journal or invent a replacement seed.
-6. A leftover `wallet-*.restore` is staged recovery material. Preserve/inspect
+5. A leftover `wallet-*.restore` is staged recovery material. Preserve/inspect
    it before retrying; Nap refuses to overwrite a previous staging file.
-7. Backups contain secrets even when installation succeeded. `index.json`
+6. Backups contain secrets even when installation succeeded. `index.json`
    identifies original paths; protect retained copies with the same care as
    the active wallet. No automatic backup deletion is performed.
-8. Before deployment, configure same-origin `/rpc`, `/claim`, `/media` and
+7. Before deployment, configure same-origin `/rpc`, `/claim`, `/media` and
    required HTTP security headers from the browser README. No mainnet mint,
    transfer, deployment or migration was performed as part of these checks.
 

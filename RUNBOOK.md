@@ -2658,7 +2658,6 @@ Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chro
 |---|---|---|---|
 | Launchpad | `jade-create.e2e.mjs` (`JADE`, `NAP`, `PHRASE_FILE`, `IMAGE`) | create a coin with a picture on Jade, Nap approval, content attached | 25 Sep, 12/12 |
 | Launchpad | `jade.e2e.mjs` (`TOKEN`, `NAME`, `SYMBOL`) | coin list, coin page, chart, buy and sell through Nap, auto-collect | 25 Sep, 10/10 |
-| DEX | `dex.e2e.mjs` (`A`, `B`, `SELL`, amounts) | open a pool (or use the A/B pool), collect shares, batch swap, add/remove liquidity, collect each | 25 Sep, 9/9 on SOL.zy/ETH.zy and on the graduated TGRAD/TESTZ.zy pool |
 | Extension | `extension.e2e.mjs` (`PHRASE_FILE`, `POOL`, `SELL`, `IN`, `OUT`) | the standalone extension: popup restores and reads testnet, a site finds it, connects in its window, a swap approved and collected, reopen after close | 25 Sep, 12/12 |
 | DEX via a site | `swap.e2e.mjs` (`POOL`, `SELL`, `AMOUNT`, `IN`, `OUT`) | a bare site asks Nap Connect for `zyn_swap`; Nap's approval names both sides; auto-collect | 25 Sep, 4/4 on TGRAD/TESTZ.zy |
 | NFT store | `store-trade.e2e.mjs` (`SELLER_PHRASE`, `BUYER_PHRASE`, `PRICE`) | list on cavebro.win, buy there and on the Cave store, seller collects | 25 Sep, 15/15 |
@@ -2666,7 +2665,7 @@ Real pages, real Nap, testnet 212 — run from `apps/nap-connect` (headless Chro
 
 **Graduation on testnet (25 Sep)** runs on a test coin rather than ZEC.zy (17 ZEC.zy is more than testnet holds): TESTZ, an SPL token on Solana devnet (mint `FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9`, 6 decimals, supply held by the operator's devnet CLI wallet), bridged in as TESTZ.zy (`e2603fcc…c032`). A curve may be quoted in any issued asset, so TGRAD (`17057e59…1614`) was created quoted in TESTZ.zy, bought 17.3 → sold 51,098 lots and graduated into pool `d63cf21d…` (361,275,000 TGRAD / 17.068 TESTZ.zy, 30 bps, locked), then traded there by script, by Nap Market and through Nap Connect. Jade lists only ZEC-quoted coins, so TGRAD does not show there.
 
-To fund a test wallet with TESTZ: take its deposit code (`zyn:<commitment>`, from Nap's bridge page or `ledger.bridgeMemo`), then from the operator's devnet wallet
+To fund a test wallet with TESTZ: take its deposit code (`zyn:<commitment>`, from Zyn Lend's Bridge or `ledger.bridgeMemo`), then from the operator's devnet wallet
 `spl-token transfer FvCnGJ1BGghAbQoMJ4tLwKudpcTVdo45ws7GFxNxRrU9 <amount> 7KacSYXuVhKSf8dpXcLY3qFZQYiZg2m6vKh4m1HxKZmA --url devnet --with-memo zyn:<commitment>` (the recipient resolves to the vault's token account; no `--commitment` flag); it waits under the code (0.5% fee) until the wallet collects.
 
 ## 5f-undevicies. ETH.zy mainnet pilot, Safe mode (26 Sep 2026, DECISIONS §155)

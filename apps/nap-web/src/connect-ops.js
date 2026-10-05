@@ -21,6 +21,9 @@ import * as pool from './pool.js';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
+import { CAVE_Z, itemName } from './items.js';
+
+export { itemName };
 
 /// EIP-1193's error codes, so a site handles Nap the way it handles any wallet.
 export const ERR = Object.freeze({ REJECTED: 4001, UNAUTHORIZED: 4100, UNSUPPORTED: 4200, PARAMS: -32602 });
@@ -46,14 +49,6 @@ const wadText = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString()
 const amountOf = (v, what) => { try { return parseAmount(String(v ?? '')); } catch (e) { throw bad(`${what}: ${e.message}`); } };
 const NO_ZEC = 'This wallet has no Zcash keys on this device yet. Open Nap, choose Zcash, add your Zcash wallet, then try again.';
 const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
-
-/// Collection Z's species share one index space (§86.1).
-const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e';
-export function itemName(collection, serial) {
-  if (collection !== CAVE_Z) return `${collection.slice(0, 6)}… #${serial}`;
-  const [species, start] = serial < 2222 ? ['Mole', 0] : serial < 3555 ? ['Owl', 2222] : ['Moth', 3555];
-  return `Zyn ${species} #${String(serial - start + 1).padStart(4, '0')}`;
-}
 
 /// The sale a site asks about: Collection Z unless it names another.
 function saleCollection(p) {

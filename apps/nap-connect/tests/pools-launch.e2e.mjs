@@ -1,7 +1,6 @@
-// Pools and the launchpad, the edges the trade tests do not reach: bad and
+// The launchpad on Jade, the edges the trade tests do not reach: bad and
 // oversized amounts on every form, selling more than is held, the create
-// form's limits, a graduated coin, the portfolio, a reload mid-session, and
-// what a phone shows. Testnet; nothing is signed — every bad input must be
+// form's limits, a graduated coin, the portfolio, and what a phone shows. Testnet; nothing is signed — every bad input must be
 // refused before Nap is asked, and nothing may read NaN or undefined.
 //
 //   PHRASE_FILE=<a funded testnet wallet>  node tests/pools-launch.e2e.mjs
@@ -143,69 +142,6 @@ await pp.screenshot({ path: `${S}/jade-phone.png`, fullPage: true });
 await phone.close();
 await ctx.close();
 
-// ---------------------------------------------------------------------------
-// Nap Market.
-
-const mctx = await b.newContext({ viewport: { width: 1280, height: 950 } });
-const m = await mctx.newPage();
-watch(m, 'market');
-await m.goto(`${NAP}/market.html`);
-await m.evaluate(() => localStorage.setItem('nap.network', 'testnet'));
-await m.goto(`${NAP}/market.html`);
-await m.click('#open-wallet');
-await m.waitForSelector('#words, #kept-password');
-if (await m.$('#use-phrase')) await m.click('#use-phrase');
-await m.fill('#words', WORDS);
-await m.click('#phrase-form button[type=submit]');
-await m.waitForFunction(() => /Up to date/.test(document.querySelector('#notice')?.textContent || ''), null, { timeout: 120000 })
-  .catch(async () => { throw new Error(`the market never said Up to date; it says: ${(await m.textContent('#notice').catch(() => '?')).slice(0, 160)} | ${(await m.textContent('#view').catch(() => '?')).replace(/\s+/g, ' ').slice(0, 200)}`); });
-const tab = async (v) => { await m.click(`#tabs [data-view="${v}"]`); await m.waitForTimeout(600); };
-const notice = () => m.textContent('#notice').catch(() => '');
-
-await tab('swap');
-for (const v of ['abc', '0', '-1', '1e3', '999999']) {
-  await m.fill('#amount', v);
-  await m.waitForTimeout(300);
-  const q = await m.textContent('#quote');
-  const before = await notice();
-  await m.click('#swap-form button[type=submit]');
-  await m.waitForTimeout(2500);
-  const said = await notice();
-  ok(clean(q + said), `market swap "${v}": no NaN/undefined (quote ${q})`);
-  ok(!/Order placed/.test(said) || said === before, `market swap "${v}": no order placed (${said.trim().slice(0, 80)})`);
-}
-await m.screenshot({ path: `${S}/market-swap-bad.png`, fullPage: true });
-
-await tab('pools');
-ok(clean(await m.textContent('main')), 'market pools: no NaN/undefined');
-const selects = await m.$$eval('#create-pool select[name="a"] option', (o) => o.map((x) => x.value).filter(Boolean));
-if (selects.length) {
-  await m.selectOption('#create-pool select[name="a"]', selects[0]);
-  await m.selectOption('#create-pool select[name="b"]', selects[0]);
-  await m.fill('#create-pool input[name="amount_a"]', '0.001');
-  await m.fill('#create-pool input[name="amount_b"]', '0.001');
-  const before = await notice();
-  await m.click('#create-pool button[type=submit]');
-  await m.waitForTimeout(2500);
-  const said = await notice();
-  ok(!/Pool open/.test(said) && said !== before, `market: a pool of an asset with itself is refused (${said.trim().slice(0, 80)})`);
-}
-await m.screenshot({ path: `${S}/market-pools.png`, fullPage: true });
-
-await tab('launchpad');
-const lp = await m.textContent('main');
-ok(clean(lp), 'market launchpad: no NaN/undefined');
-await m.screenshot({ path: `${S}/market-launchpad.png`, fullPage: true });
-
-await tab('owed');
-ok(clean(await m.textContent('main')), 'market owed: no NaN/undefined');
-
-// A reload keeps the network and asks to open the wallet again (or opens it
-// from this browser's session where there is one).
-await m.reload();
-await m.waitForTimeout(3000);
-ok(/testnet/i.test(await m.textContent('header')), 'market: a reload stays on testnet');
-await mctx.close();
 await b.close();
 
 ok(errors.length === 0, `no page errors${errors.length ? `:\n  ${errors.join('\n  ')}` : ''}`);
