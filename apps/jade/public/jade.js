@@ -24,6 +24,8 @@ const ZAT = 10_000_000_000n;
 const LOT = CURVE.lotTokens * WAD;
 const BPS = 10_000n;
 const SUPPLY = 1_000_000_000n;
+/// Fully diluted value at graduation, in units of a curve's size (§166).
+const GRADUATION_MC_UNITS = (CURVE.baseZat + CURVE.slopeZat * BigInt(CURVE.graduateAt)) * BigInt(CURVE.lots);
 
 const params = new URLSearchParams(location.search);
 const NETWORK = params.get('network') === 'testnet' ? 'testnet' : 'mainnet';
@@ -34,6 +36,22 @@ const NAP = (LOCAL && params.get('nap')) || NAP_WEB;
 /// Nap's Chrome extension, from its GitHub releases: the newest build, and its install steps.
 const NAP_EXTENSION = 'https://github.com/zyn-io/nap-wallet/releases/latest/download/nap-wallet-chrome.zip';
 const NAP_RELEASE = 'https://github.com/zyn-io/nap-wallet/releases/latest';
+
+/// The bridged coins a coin can be priced in (§166), by asset id. Each
+/// curve is sized for its coin by the ledger; these only name them.
+const QUOTE_ASSETS = {
+  mainnet: {
+    [XZEC]: 'ZEC',
+    '9f5a2c088a0071ba7afcb2c74b9c7cc23f0f94c297d97aef68e50392c04acc6c': 'ETH',
+    'ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f': 'BOLD',
+  },
+  testnet: {
+    [XZEC]: 'ZEC',
+    '56737e143259c754d165074ad15058139bc0b116f5a22b2f3d50129a2a7a24a6': 'ETH',
+    '9204324e0511b4d1a90d0ff36242f044e894e1b71489d47abd824df273092ad1': 'SOL',
+    '8c1a1b0616cef63250e9f5bab8b20908320cc47ead0f60215a229d34b5c93ac2': 'BOLD',
+  },
+}[NETWORK];
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -94,21 +112,23 @@ function priceText(v, plain = false) {
 
 // The curve's own arithmetic, for previews. Each epoch's orders settle
 // together at one price, so these are what an order gets alone.
-const cost = (q, d) => { const Q = BigInt(q), D = BigInt(d); return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * ZAT; };
-function lotsFor(q, budget, cap) {
+// A curve's `unit` is its size: the ledger amount one "zatoshi" of the
+// shared shape stands for (ZEC.zy's is one zatoshi).
+const cost = (q, d, unit = ZAT) => { const Q = BigInt(q), D = BigInt(d); return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * unit; };
+function lotsFor(q, budget, cap, unit = ZAT) {
   let lo = 0, hi = cap;
-  while (lo < hi) { const mid = lo + Math.ceil((hi - lo) / 2); if (cost(q, mid) <= budget) lo = mid; else hi = mid - 1; }
+  while (lo < hi) { const mid = lo + Math.ceil((hi - lo) / 2); if (cost(q, mid, unit) <= budget) lo = mid; else hi = mid - 1; }
   return lo;
 }
-function previewBuy(sold, amountIn, feeBps) {
+function previewBuy(sold, amountIn, feeBps, unit = ZAT) {
   const budget = (amountIn * BPS) / (BPS + BigInt(feeBps));
-  const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold));
-  const paid = cost(sold, lots);
+  const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold), unit);
+  const paid = cost(sold, lots, unit);
   return { lots, tokens: BigInt(lots) * LOT, paid, fee: (paid * BigInt(feeBps)) / BPS };
 }
-function previewSell(sold, lots, feeBps) {
+function previewSell(sold, lots, feeBps, unit = ZAT) {
   const n = Math.min(lots, sold);
-  const gross = n ? cost(sold - n, n) : 0n;
+  const gross = n ? cost(sold - n, n, unit) : 0n;
   const fee = (gross * BigInt(feeBps)) / BPS;
   return { gross, fee, net: gross - fee };
 }
@@ -139,9 +159,14 @@ let curves = [];
 let pools = [];
 let stats = new Map();
 let terms = { set: false, fee_bps: 0, bond: '0' };
+/// What new coins launch in: [{ asset, symbol, unit, bond }]. A node from
+/// before §166 names none, and coins launch in ZEC.zy at ZEC's size.
+let quotes = [];
+/// Dollars per coin, by symbol (ZEC, ETH, SOL, BOLD); `usd` is ZEC's.
+let usdBy = {};
 let usd = null;
 let wallet = null;
-let mine = null; // { zec, holdings: Map token -> amount, created: [] }
+let mine = null; // { zec, quotes: Map asset -> amount | null, holdings: Map token -> amount, created: [] }
 let currentCoin = null;
 let tradeSide = 'buy';
 let unit = 'zec';
@@ -206,13 +231,38 @@ async function rpc(method, fields = {}) {
   return body.result;
 }
 
-const validCurve = (c) => isHex(c.token) && isHex(c.meta) && c.quote === XZEC && Number.isSafeInteger(c.sold) && c.sold >= 0
+const validCurve = (c) => isHex(c.token) && isHex(c.meta) && !!QUOTE_ASSETS[c.quote] && Number.isSafeInteger(c.sold) && c.sold >= 0
   && ['reserve', 'graduation', 'price_per_token'].every((k) => isInt(c[k])) && typeof c.graduated === 'boolean';
+
+/// A coin's quote: its symbol, size, and dollars per unit of it.
+const symOf = (asset) => QUOTE_ASSETS[asset] || `${String(asset).slice(0, 6)}…`;
+const qsym = (c) => symOf(c?.quote || XZEC);
+const unitOf = (c) => (isInt(c?.unit) && c.unit !== '0' ? BigInt(c.unit) : ZAT);
+const usdPer = (c) => usdBy[qsym(c)] ?? null;
+/// Its market cap at graduation, in its quote.
+const gradMc = (unit) => num(GRADUATION_MC_UNITS * unit);
+/// What this wallet holds of a quote asset, or null when its Nap does not say.
+function balanceOf(asset) {
+  if (!mine) return null;
+  if (mine.quotes?.has(asset)) return mine.quotes.get(asset);
+  return asset === XZEC ? mine.zec : null;
+}
+/// Amounts in several coins: in dollars when every one is priced, else each in its own.
+function sumText(by, cell = zecCell) {
+  const parts = [...by].filter(([, v]) => v > 0);
+  if (!parts.length) return '0';
+  if (parts.every(([s]) => usdBy[s])) return usdText(parts.reduce((t, [s, v]) => t + v * usdBy[s], 0));
+  return parts.map(([s, v]) => `${cell(v)} ${s}`).join(' · ');
+}
 
 async function loadMarket() {
   try {
     const [m, s] = await Promise.all([rpc('zyn_market'), rpc('zyn_curveStats').catch(() => [])]);
     terms = m.curve_terms || terms;
+    const named = (m.curve_quotes || []).filter((q) => isHex(q.asset) && QUOTE_ASSETS[q.asset] && isInt(q.unit) && isInt(q.bond));
+    quotes = named.length
+      ? named.map((q) => ({ asset: q.asset, symbol: symOf(q.asset), unit: BigInt(q.unit), bond: BigInt(q.bond) }))
+      : [{ asset: XZEC, symbol: 'ZEC', unit: ZAT, bond: BigInt(terms.bond || '0') }];
     pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b));
     curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, pending: Number.isSafeInteger(c.pending) && c.pending > 0 ? c.pending : 0, ...decodeMeta(c.meta) }));
     stats = new Map((Array.isArray(s) ? s : []).filter((x) => isHex(x.token)).map((x) => [x.token, x]));
@@ -229,30 +279,31 @@ async function loadMarket() {
 
 async function loadUsd() {
   try {
-    const r = await fetch('/api/zec-usd', { credentials: 'omit' });
-    const v = Number((await r.json())?.usd);
-    usd = Number.isFinite(v) && v > 0 ? v : null;
-  } catch { usd = null; }
+    const r = await fetch('/api/usd', { credentials: 'omit' });
+    const j = await r.json();
+    usdBy = Object.fromEntries(Object.entries(j?.usd || {}).map(([k, v]) => [k, Number(v)]).filter(([, v]) => Number.isFinite(v) && v > 0));
+  } catch { usdBy = {}; }
+  usd = usdBy.ZEC ?? null;
   $('#zec-usd').textContent = usd ? `ZEC $${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : 'ZEC';
   $$('[data-unit="usd"]').forEach((b) => { b.hidden = !usd; });
   render();
 }
 
 const poolOf = (c) => pools.find((p) => p.id === c.pool);
-/// ZEC.zy per token: the next lot on the curve, or the pool's spot.
+/// Its quote per token: the next lot on the curve, or the pool's spot.
 function price(c) {
   const p = c.graduated && poolOf(c);
   if (!p) return BigInt(c.price_per_token);
-  const [z, t] = p.a === XZEC ? [p.reserve_a, p.reserve_b] : [p.reserve_b, p.reserve_a];
+  const [z, t] = p.a === c.quote ? [p.reserve_a, p.reserve_b] : [p.reserve_b, p.reserve_a];
   return (BigInt(z) * WAD) / BigInt(t);
 }
-/// Market cap in ZEC: price per token times the whole supply.
+/// Market cap in its quote: price per token times the whole supply.
 const mcap = (c) => num(price(c) * SUPPLY);
 const mcapOf = (priceRaw) => num(BigInt(priceRaw) * SUPPLY);
 function zecSet(c) {
   if (!c.graduated) return BigInt(c.reserve);
   const p = poolOf(c);
-  return p ? BigInt(p.a === XZEC ? p.reserve_a : p.reserve_b) : 0n;
+  return p ? BigInt(p.a === c.quote ? p.reserve_a : p.reserve_b) : 0n;
 }
 const progress = (c) => (c.graduated ? 1 : Math.min(1, c.sold / CURVE.graduateAt));
 const change24 = (c) => { const s = stats.get(c.token); return s?.price_24h ? pct(Number(price(c)), Number(s.price_24h)) : null; };
@@ -267,8 +318,11 @@ function changeSince(c, secs) {
 const vol24 = (c) => { const v = stats.get(c.token)?.volume_24h; return isInt(v) ? num(v) : 0; };
 const moves24 = (c) => stats.get(c.token)?.moves_24h || 0;
 const pendingOf = (c) => (c.graduated ? (poolOf(c)?.pending || 0) : c.pending) || 0;
-const capText = (zec) => (unit === 'usd' && usd ? usdText(zec * usd) : `${zecText(zec)} ZEC`);
-const capBoth = (zec) => `${zecText(zec)} ZEC${usd ? ` · ${usdText(zec * usd)}` : ''}`;
+/// An amount in a coin's quote, in dollars when the toggle says so and it is priced.
+const capText = (v, c = currentCoin) => (unit === 'usd' && usdPer(c) ? usdText(v * usdPer(c)) : `${zecText(v)} ${qsym(c)}`);
+/// For ranking across quotes: dollars when priced, else the quote amount.
+const mcSort = (c) => (usdPer(c) ? mcap(c) * usdPer(c) : mcap(c));
+const volSort = (c) => (usdPer(c) ? vol24(c) * usdPer(c) : vol24(c));
 
 /// A batch fill's side and size, from either venue.
 function fillOf(p) {
@@ -343,7 +397,7 @@ function renderTape() {
   }
   fills.sort((a, b) => b.p.time - a.p.time || b.p.epoch - a.p.epoch);
   const top = fills.slice(0, 30);
-  const key = top.map(({ c, p }) => `${c.token.slice(0, 8)}${p.epoch}`).join(',') + (usd ? 'u' : '');
+  const key = top.map(({ c, p }) => `${c.token.slice(0, 8)}${p.epoch}`).join(',') + Object.keys(usdBy).join('');
   const track = $('#tape-track');
   if (!top.length) {
     if (marketRead && tapeKey !== 'none') { track.className = 'tape-track'; track.innerHTML = `<span class="tape-empty">${curves.length ? 'No fills yet.' : 'No coins yet.'}</span>`; tapeKey = 'none'; }
@@ -356,7 +410,7 @@ function renderTape() {
   const item = ({ c, p }) => {
     const f = fillOf(p);
     return `<a class="tp${before && p.time > before ? ' fresh' : ''}" href="${withNet(`/coin/${c.token}`)}" data-go="${c.token}" title="${esc(c.name)} · epoch ${p.epoch}">
-      ${thumb(c)}<b>${esc(c.symbol)}</b><span class="s ${f.buy ? 'up' : 'down'}">${f.buy ? '▲ Buy' : '▼ Sell'}</span><span>${zecCell(f.zec)} ZEC</span><span class="t">MC ${zecCell(mcapOf(p.price))}</span><span class="t" data-ago="${p.time}"></span></a>`;
+      ${thumb(c)}<b>${esc(c.symbol)}</b><span class="s ${f.buy ? 'up' : 'down'}">${f.buy ? '▲ Buy' : '▼ Sell'}</span><span>${zecCell(f.zec)} ${esc(qsym(c))}</span><span class="t">MC ${usdPer(c) ? usdText(mcapOf(p.price) * usdPer(c)) : `${zecCell(mcapOf(p.price))} ${esc(qsym(c))}`}</span><span class="t" data-ago="${p.time}"></span></a>`;
   };
   const html = top.map(item).join('');
   track.className = 'tape-track';
@@ -423,10 +477,10 @@ function sortValue(c, key) {
   switch (key) {
     case 'age': return s.created_time || 0;
     case 'last': return s.last_trade_time || 0;
-    case 'mc': return mcap(c);
+    case 'mc': return mcSort(c);
     case 'ch1': return change1h(c) ?? -Infinity;
     case 'ch24': return change24(c) ?? -Infinity;
-    case 'vol': return vol24(c);
+    case 'vol': return volSort(c);
     case 'moves': return moves24(c);
     default: return progress(c);
   }
@@ -462,9 +516,9 @@ function rowHtml(c) {
   return `<div class="j-thumb">${thumbInner(c)}${q ? '<i class="dot" aria-hidden="true"></i>' : ''}</div>
     <div class="c-coin"><p class="nm"><b>${esc(c.name)}</b></p>
       <p class="sub"><span class="tk">${esc(c.symbol)}</span>${s.created_time ? `<span class="ago" data-ago="${s.created_time}" title="Age"></span>` : ''}${s.last_trade_time ? `<span class="lt" data-ago="${s.last_trade_time}" title="Last trade"></span>` : ''}${q ? `<span class="tag-q">${q} in batch</span>` : ''}</p></div>
-    <div class="c-num"><b data-k="mc">${zecCell(mc)}</b><span>${usd ? usdText(mc * usd) : 'ZEC'}</span></div>
+    <div class="c-num"><b data-k="mc">${usdPer(c) ? usdText(mc * usdPer(c)) : zecCell(mc)}</b><span>${usdPer(c) ? `${zecCell(mc)} ` : ''}${esc(qsym(c))}</span></div>
     <div class="c-num"><b data-k="h1" class="${changeCls(h1)}">${changeText(h1)}</b><span data-k="h24" class="${changeCls(h24)}">${changeText(h24)}</span></div>
-    <div class="c-num"><b data-k="vol">${zecCell(vol24(c))}</b><span data-k="mv">${moves24(c)} mv</span></div>
+    <div class="c-num"><b data-k="vol">${usdPer(c) ? usdText(vol24(c) * usdPer(c)) : zecCell(vol24(c))}</b><span data-k="mv">${moves24(c)} mv</span></div>
     <div class="c-bond">${c.graduated ? '<span class="grad">pool</span>' : `<b data-k="bd">${cut < 10 ? cut.toFixed(2) : cut.toFixed(1)}%</b>`}<i class="bar"><i style="width:${cut.toFixed(2)}%"></i></i></div>`;
 }
 
@@ -497,7 +551,7 @@ function renderColumn(col, list) {
     }
     const html = rowHtml(c);
     if (el.jadeHtml !== html) { el.innerHTML = html; el.jadeHtml = html; }
-    flashCells(el, c.token, { mc: mcap(c), h1: change1h(c), h24: change24(c), vol: vol24(c), mv: moves24(c), bd: progress(c) });
+    flashCells(el, c.token, { mc: mcSort(c), h1: change1h(c), h24: change24(c), vol: volSort(c), mv: moves24(c), bd: progress(c) });
     return el;
   });
   if (!els.length) {
@@ -530,8 +584,9 @@ function renderBoard() {
   boardPainted = marketRead;
   $('#tally-all').textContent = curves.length;
   $('#tally-grad').textContent = curves.filter((c) => c.graduated).length;
-  $('#tally-zec').textContent = `${wad(curves.reduce((s, c) => s + zecSet(c), 0n), 4)} ZEC`;
-  $('#tally-vol').textContent = `${zecCell(curves.reduce((s, c) => s + vol24(c), 0))} ZEC`;
+  const bySym = (f) => curves.reduce((m, c) => m.set(qsym(c), (m.get(qsym(c)) || 0) + f(c)), new Map());
+  $('#tally-zec').textContent = sumText(bySym((c) => num(zecSet(c))));
+  $('#tally-vol').textContent = sumText(bySym(vol24));
   $('#tally-moves').textContent = curves.reduce((s, c) => s + moves24(c), 0);
   $('[data-filter="held"]').hidden = !mine;
   // Pictures for what is on screen, a few at a time.
@@ -586,7 +641,7 @@ function ensureChart() {
     rightPriceScale: { borderColor: 'rgba(242,241,235,.09)', scaleMargins: { top: 0.1, bottom: 0.22 } },
     crosshair: { mode: 0, vertLine: { color: 'rgba(88,232,187,.35)', labelBackgroundColor: '#173029' }, horzLine: { color: 'rgba(88,232,187,.35)', labelBackgroundColor: '#173029' } },
   });
-  candles = chart.addCandlestickSeries({ upColor: '#35e6ae', downColor: '#e8794f', borderVisible: false, wickUpColor: '#35e6ae', wickDownColor: '#e8794f', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usd ? usd : 1)) , minMove: 1e-9 },
+  candles = chart.addCandlestickSeries({ upColor: '#35e6ae', downColor: '#e8794f', borderVisible: false, wickUpColor: '#35e6ae', wickDownColor: '#e8794f', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usdPer(currentCoin) ? usdPer(currentCoin) : 1)), minMove: 1e-9 },
     // A quiet coin moves a hair: show at least ±2% around it, not a hair blown up to the full height.
     autoscaleInfoProvider: (base) => {
       const a = base();
@@ -608,17 +663,17 @@ function ensureChart() {
 function legend(row = chartRows[chartRows.length - 1]) {
   const el = $('#chart-legend');
   if (!row) { el.textContent = ''; return; }
-  const factor = unit === 'usd' && usd ? usd : 1;
+  const factor = unit === 'usd' && usdPer(currentCoin) ? usdPer(currentCoin) : 1;
   const f = (v) => esc(capText(v / factor));
   const ch = pct(row.close, row.open);
-  el.innerHTML = `<span class="muted">O</span> <b>${f(row.open)}</b><span class="muted">H</span> <b>${f(row.high)}</b><span class="muted">L</span> <b>${f(row.low)}</b><span class="muted">C</span> <b class="${changeCls(ch)}">${f(row.close)}</b><span class="muted">Vol</span> <b>${zecCell(row.vol)} ZEC</b>`;
+  el.innerHTML = `<span class="muted">O</span> <b>${f(row.open)}</b><span class="muted">H</span> <b>${f(row.high)}</b><span class="muted">L</span> <b>${f(row.low)}</b><span class="muted">C</span> <b class="${changeCls(ch)}">${f(row.close)}</b><span class="muted">Vol</span> <b>${zecCell(row.vol)} ${esc(qsym(currentCoin))}</b>`;
 }
 
 /// Candles of market cap, one bucket per `tf` seconds, from the epoch points.
 function drawChart() {
   if (!currentCoin) return;
   ensureChart();
-  const factor = unit === 'usd' && usd ? usd : 1;
+  const factor = unit === 'usd' && usdPer(currentCoin) ? usdPer(currentCoin) : 1;
   const pts = historyOf(currentCoin.token).filter((p) => isInt(p.price));
   const buckets = new Map();
   let prev = null;
@@ -677,17 +732,17 @@ function renderBatch() {
   const last = fills[fills.length - 1];
   if (last) {
     const f = fillOf(last);
-    $('#batch-clear').innerHTML = `${priceText(num(last.price))} <span class="muted">· MC ${esc(zecCell(mcapOf(last.price)))}</span>`;
-    $('#batch-last').innerHTML = `<span class="${f.buy ? 'up' : 'down'}">${f.buy ? 'Buy' : 'Sell'} ${zecCell(f.zec)} ZEC</span> <span class="muted" data-ago="${last.time}" data-ago-long="1">${ago(last.time)}</span>`;
+    $('#batch-clear').innerHTML = `${priceText(num(last.price))} <span class="muted">· MC ${esc(capText(mcapOf(last.price), c))}</span>`;
+    $('#batch-last').innerHTML = `<span class="${f.buy ? 'up' : 'down'}">${f.buy ? 'Buy' : 'Sell'} ${zecCell(f.zec)} ${esc(qsym(c))}</span> <span class="muted" data-ago="${last.time}" data-ago-long="1">${ago(last.time)}</span>`;
   } else {
     $('#batch-clear').textContent = 'no fills yet';
     $('#batch-last').textContent = '—';
   }
-  // The last 36 batches that moved, as bars: height is ZEC, colour is side.
+  // The last 36 batches that moved, as bars: height is the amount, colour is side.
   const recent = fills.slice(-36);
   const max = Math.max(...recent.map((p) => fillOf(p).zec), 0);
   const spark = $('#batch-spark');
-  const html = recent.length ? recent.map((p) => { const f = fillOf(p); return `<i class="${f.buy ? '' : 's'}" style="height:${Math.max(8, (f.zec / (max || 1)) * 100).toFixed(0)}%" title="epoch ${p.epoch}: ${f.buy ? 'buy' : 'sell'} ${zecCell(f.zec)} ZEC"></i>`; }).join('') : '<span class="spark-empty">No batches yet</span>';
+  const html = recent.length ? recent.map((p) => { const f = fillOf(p); return `<i class="${f.buy ? '' : 's'}" style="height:${Math.max(8, (f.zec / (max || 1)) * 100).toFixed(0)}%" title="epoch ${p.epoch}: ${f.buy ? 'buy' : 'sell'} ${zecCell(f.zec)} ${esc(qsym(c))}"></i>`; }).join('') : '<span class="spark-empty">No batches yet</span>';
   if (spark.jadeHtml !== html) { spark.innerHTML = html; spark.jadeHtml = html; }
   tickRing();
 }
@@ -795,7 +850,7 @@ async function renderCoin(token, fresh = false) {
     setHtml('coin-thumb', '<span>?</span>');
     $('#curve-bar').style.width = '0%';
     $('#coin-description').textContent = curves.length
-      ? `No coin priced in ZEC.zy has this address on ${NETWORK}.${NETWORK === 'mainnet' ? ' A testnet coin? Add ?network=testnet to the address.' : ''}`
+      ? `No coin has this address on ${NETWORK}.${NETWORK === 'mainnet' ? ' A testnet coin? Add ?network=testnet to the address.' : ''}`
       : '';
     $('#fills').innerHTML = '';
     $('#position').innerHTML = '';
@@ -814,32 +869,35 @@ async function renderCoin(token, fresh = false) {
     // A new coin starts with a clean form, and its own last order status.
     tradeSide = 'buy';
     $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === 'buy'));
-    $('#trade-input').value = '0.1';
+    $('#trade-input').value = presetsFor(c)[2];
     showOrder(token);
     if (chart) { candles.setData([]); volume.setData([]); chartRows = []; }
     showPane(paneNow);
   }
   const s = stats.get(token) || {};
   const mc = mcap(c);
+  const q = qsym(c), per = usdPer(c);
+  setText('unit-quote', q);
+  $('[data-unit="usd"]').hidden = !per;
   setText('coin-title', c.name);
   setText('coin-symbol', c.symbol);
   setHtml('coin-age', s.created_time ? `made <span data-ago="${s.created_time}" data-ago-long="1">${ago(s.created_time)}</span>` : `made in epoch ${c.created_at}`);
   if (!/copied/.test($('#coin-copy').textContent)) setText('coin-copy', short(c.token, 4));
   $('#coin-description').textContent ||= 'No description.';
   setText('coin-stage', c.graduated ? 'Graduated' : 'Bonding curve', `stage${c.graduated ? ' grad' : ''}`);
-  setHtml('coin-price', `${priceText(num(price(c)))} ZEC`);
-  setText('coin-mcap', `${zecText(mc)} ZEC`);
-  setText('coin-mcap-usd', usd ? usdText(mc * usd) : '');
+  setHtml('coin-price', `${priceText(num(price(c)))} ${esc(q)}`);
+  setText('coin-mcap', `${zecText(mc)} ${q}`);
+  setText('coin-mcap-usd', per ? usdText(mc * per) : '');
   const ch5 = changeSince(c, 300), ch1 = change1h(c), ch = change24(c);
   setText('coin-ch5', changeText(ch5), changeCls(ch5));
   setText('coin-ch1', changeText(ch1), changeCls(ch1));
   setText('coin-change', changeText(ch), changeCls(ch));
-  setText('coin-vol', `${zecCell(vol24(c))} ZEC`);
+  setText('coin-vol', `${zecCell(vol24(c))} ${q}`);
   setText('coin-moves', String(moves24(c)));
   setText('coin-liq-label', c.graduated ? 'In pool' : 'In curve');
-  setText('coin-liquidity', `${wad(zecSet(c), 4)} ZEC`);
+  setText('coin-liquidity', `${wad(zecSet(c), 4)} ${q}`);
   setHtml('coin-holders', `private${tip('Zyn does not publish who holds a coin or how much: balances are private to each wallet.', 'About holders')}`);
-  $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ZEC.zy`;
+  $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ${q}.zy`;
   $('#coin-fee').textContent = c.graduated ? `${poolOf(c)?.fee_bps ?? 30} bps, kept by the pool` : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
   $('#coin-addr').textContent = c.token;
   const cut = progress(c);
@@ -849,7 +907,7 @@ async function renderCoin(token, fresh = false) {
   $('#curve-bar-2').style.width = `${(cut * 100).toFixed(2)}%`;
   $('#curve-text').textContent = c.graduated
     ? 'Graduated. Every unsold lot and everything the curve raised opened a pool whose shares nobody holds.'
-    : `${wad(c.reserve, 4)} ZEC.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold), 3)} ZEC.zy of buying to graduate · it graduates at ~47 ZEC market cap${usd ? ` (${usdText(47 * usd)})` : ''}`;
+    : `${wad(c.reserve, 4)} ${q}.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold, unitOf(c)), 3)} ${q}.zy of buying to graduate · it graduates at ~${zecText(gradMc(unitOf(c)))} ${q} market cap${per ? ` (${usdText(gradMc(unitOf(c)) * per)})` : ''}`;
   $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
   $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
   flashStats(token, { 'coin-price': Number(price(c)), 'coin-mcap': mc, 'coin-vol': vol24(c), 'coin-moves': moves24(c), 'curve-pct': cut, 'coin-liquidity': Number(zecSet(c)) });
@@ -949,16 +1007,16 @@ function renderPosition() {
   const ch = change24(c);
   const cells = [
     ['Holding', `${wad(held, 0)} ${esc(c.symbol)}`],
-    ['Value', `${zecText(worth)} ZEC${usd ? ` <span class="muted">${usdText(worth * usd)}</span>` : ''}`],
+    ['Value', `${zecText(worth)} ${esc(qsym(c))}${usdPer(c) ? ` <span class="muted">${usdText(worth * usdPer(c))}</span>` : ''}`],
     ['24h', `<span class="${changeCls(ch)}">${changeText(ch)}</span>`],
     ['Share of supply', `${((Number(held / WAD) / 1e9) * 100).toFixed(4)}%`],
     ['Sellable lots', c.graduated ? 'any amount' : (held / LOT).toLocaleString('en-US')],
-    ['ZEC.zy free', `${wad(mine.zec, 4)}`],
+    [`${esc(qsym(c))}.zy free`, balanceOf(c.quote) == null ? '—' : `${wad(balanceOf(c.quote), 4)}`],
   ];
   if (ac && held > 0n) {
     const tracked = ac.tokens < held ? ac.tokens : held;
     const pnl = num((price(c) * tracked) / WAD) - num((ac.perToken * tracked) / WAD);
-    cells.push(['Avg cost', `${priceText(num(ac.perToken))} ZEC`], ['P/L, tracked', `<span class="${changeCls(pnl)}">${pnl >= 0 ? '+' : '−'}${zecText(Math.abs(pnl))} ZEC</span>`]);
+    cells.push(['Avg cost', `${priceText(num(ac.perToken))} ${esc(qsym(c))}`], ['P/L, tracked', `<span class="${changeCls(pnl)}">${pnl >= 0 ? '+' : '−'}${zecText(Math.abs(pnl))} ${esc(qsym(c))}</span>`]);
   }
   box.innerHTML = cells.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')
     + `<div class="note">${ac ? 'Average cost counts only trades placed and settled in this browser.' : 'Average cost appears after a trade placed here settles; Zyn does not publish your fills.'}</div>`;
@@ -969,13 +1027,21 @@ function renderPosition() {
 
 const tradeInput = $('#trade-input');
 
+/// Buy presets sized to the coin's quote: 0.01, 0.05, 0.1 and 0.5 ZEC's
+/// worth of its curve, to two significant figures.
+function presetsFor(c) {
+  const scale = Number(unitOf(c)) / Number(ZAT);
+  const nice = (v) => { const p = 10 ** (Math.floor(Math.log10(v)) - 1); return String(Number((Math.round(v / p) * p).toPrecision(2))); };
+  return [0.01, 0.05, 0.1, 0.5].map((v) => nice(v * scale));
+}
+
 function configureTrade() {
   const c = currentCoin;
   if (!c) return;
   const buying = tradeSide === 'buy';
-  $('#trade-unit').textContent = buying ? 'ZEC.zy' : c.symbol;
+  $('#trade-unit').textContent = buying ? `${qsym(c)}.zy` : c.symbol;
   const presets = buying
-    ? ['0.01', '0.05', '0.1', '0.5'].map((v) => `<button type="button" data-preset="${v}">${v}</button>`)
+    ? presetsFor(c).map((v) => `<button type="button" data-preset="${v}">${v}</button>`)
     : [25, 50, 100].map((p) => `<button type="button" data-pct="${p}">${p}%</button>`);
   const box = $('#trade-presets');
   const html = presets.join('');
@@ -994,8 +1060,9 @@ function configureTrade() {
       quote();
     }));
   }
+  const bal = balanceOf(c.quote);
   $('#trade-balance').textContent = mine
-    ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol} · ${wad(mine.zec, 4)} ZEC.zy`
+    ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol}${bal == null ? '' : ` · ${wad(bal, 4)} ${qsym(c)}.zy`}`
     : 'Connect a wallet to see your balance.';
   const submit = $('.trade-submit');
   submit.textContent = wallet ? (buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`) : 'Connect wallet';
@@ -1019,41 +1086,44 @@ function quote() {
   try {
     const value = parseDecimal($('#trade-input').value);
     if (value <= 0n) throw new Error('Enter an amount above zero');
-    if (tradeSide === 'buy' && mine && value > mine.zec) throw new Error(`You have ${full(mine.zec)} ZEC.zy`);
+    const q$ = `${qsym(c)}.zy`;
+    const bal = balanceOf(c.quote);
+    if (tradeSide === 'buy' && bal != null && value > bal) throw new Error(`You have ${full(bal)} ${q$}`);
     if (c.graduated) {
       const p = poolOf(c);
       if (!p) throw new Error('Its pool is not visible yet');
-      const sellA = tradeSide === 'buy' ? p.a === XZEC : p.a === c.token;
+      const sellA = tradeSide === 'buy' ? p.a === c.quote : p.a === c.token;
       if (tradeSide === 'sell' && mine && value > heldOf(c.token)) throw new Error(`You hold ${full(heldOf(c.token))}`);
       const q = poolQuote(p, sellA, value);
       if (q <= 0n) throw new Error('Too small to trade');
-      out.textContent = `${full(q)} ${tradeSide === 'buy' ? c.symbol : 'ZEC.zy'}`;
+      out.textContent = `${full(q)} ${tradeSide === 'buy' ? c.symbol : q$}`;
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
       min.textContent = `${full((q * (BPS - slip)) / BPS)}`;
       if (wallet) submit.disabled = false;
       return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip) };
     }
     if (tradeSide === 'buy') {
-      if (value < 100_000n * ZAT) throw new Error('A buy is at least 0.001 ZEC.zy');
-      const q = previewBuy(c.sold, value, c.fee_bps);
+      const least = 100_000n * unitOf(c);
+      if (value < least) throw new Error(`A buy is at least ${full(least)} ${q$}`);
+      const q = previewBuy(c.sold, value, c.fee_bps, unitOf(c));
       if (!q.lots) throw new Error('That buys less than one lot of 12,500');
       // At least one lot: a floor of none would be no floor, and Nap refuses it.
       const floorLots = (BigInt(q.lots) * (BPS - slip)) / BPS;
       const minTokens = (floorLots > 0n ? floorLots : 1n) * LOT;
       out.textContent = `${wad(q.tokens, 0)} ${c.symbol}`;
-      fee.textContent = c.fee_bps ? `${full(q.fee)} ZEC.zy` : 'none';
+      fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
       min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
       if (wallet) submit.disabled = false;
       return { kind: 'buy', amount: value, minTokens };
     }
     if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
     if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
-    const q = previewSell(c.sold, Number(value / LOT), c.fee_bps);
+    const q = previewSell(c.sold, Number(value / LOT), c.fee_bps, unitOf(c));
     const minZec = (q.net * (BPS - slip)) / BPS;
     if (minZec <= 0n) throw new Error('Too small to sell');
-    out.textContent = `${full(q.net)} ZEC.zy`;
-    fee.textContent = c.fee_bps ? `${full(q.fee)} ZEC.zy` : 'none';
-    min.textContent = `${full(minZec)} ZEC.zy`;
+    out.textContent = `${full(q.net)} ${q$}`;
+    fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
+    min.textContent = `${full(minZec)} ${q$}`;
     if (wallet) submit.disabled = false;
     return { kind: 'sell', tokens: value, minZec };
   } catch (e) {
@@ -1065,7 +1135,7 @@ function quote() {
 function setSide(side) {
   tradeSide = side;
   $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === side));
-  $('#trade-input').value = tradeSide === 'buy' ? '0.1' : '';
+  $('#trade-input').value = tradeSide === 'buy' && currentCoin ? presetsFor(currentCoin)[2] : '';
   configureTrade();
 }
 $$('[data-trade]').forEach((button) => button.addEventListener('click', () => setSide(button.dataset.trade)));
@@ -1083,7 +1153,8 @@ $$('[data-jump]').forEach((b) => b.addEventListener('click', () => {
 /// After an order: wait for its epoch to seal, collect what it was paid, and
 /// say what arrived. Collecting needs no approval — it only moves what the
 /// ledger owes this wallet into it.
-async function settle(placedEpoch, token, side, symbol, zecBefore = null) {
+async function settle(placedEpoch, token, side, symbol, quote, quoteBefore = null) {
+  const q$ = `${symOf(quote)}.zy`;
   const before = heldOf(token);
   let sealed = false;
   // The coin view's 1 s poll, while it is fresh; otherwise the chain every 3 s.
@@ -1102,10 +1173,11 @@ async function settle(placedEpoch, token, side, symbol, zecBefore = null) {
       await ask('zyn_collect', {});
       await loadMine();
       const got = heldOf(token) - before;
-      if (got !== 0n && zecBefore != null && mine) recordFill(token, got, zecBefore - mine.zec);
+      const after = balanceOf(quote);
+      if (got !== 0n && quoteBefore != null && after != null) recordFill(token, got, quoteBefore - after);
       setOrder(token, got > 0n ? `Filled: +${wad(got, 0)} ${symbol}. It is in your wallet.`
-        : got < 0n ? 'Filled: sold. The ZEC.zy is in your wallet.'
-          : side === 'buy' ? 'Not filled — the price moved past your floor, so your ZEC.zy came back to your wallet.'
+        : got < 0n ? `Filled: sold. The ${q$} is in your wallet.`
+          : side === 'buy' ? `Not filled — the price moved past your floor, so your ${q$} came back to your wallet.`
             : `Not filled — the price moved past your floor, so your ${symbol} came back to your wallet.`, got !== 0n ? 'done' : 'missed');
     } else {
       setOrder(token, "Settled. Open Nap's window to collect it.", 'done');
@@ -1124,7 +1196,7 @@ async function placeOrder() {
   if (button.disabled) return;
   button.disabled = true;
   const side = tradeSide, symbol = c.symbol;
-  const zecBefore = mine ? mine.zec : null;
+  const quoteBefore = balanceOf(c.quote);
   try {
     // Asked before anything is awaited: Nap may need to open its window.
     const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
@@ -1133,7 +1205,7 @@ async function placeOrder() {
     await pending;
     const epoch = (await rpc('zyn_status')).epoch;
     setOrder(c.token, `Placed. Settling when epoch ${epoch} seals…`, 'sealing');
-    settle(epoch, c.token, side, symbol, zecBefore);
+    settle(epoch, c.token, side, symbol, c.quote, quoteBefore);
   } catch (e) {
     // 4001 is Nap's "no"; anything else says what happened in its own words.
     setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message, e.code === 4001 ? 'idle' : 'error');
@@ -1230,6 +1302,8 @@ async function loadMine() {
     const r = await ask('zyn_curveHoldings', {});
     mine = {
       zec: BigInt(isInt(r?.zec) ? r.zec : '0'),
+      // A Nap from before §166 says only ZEC.zy.
+      quotes: Array.isArray(r?.quotes) ? new Map(r.quotes.filter((q) => isHex(q.asset) && isInt(q.amount)).map((q) => [q.asset, BigInt(q.amount)])) : null,
       holdings: new Map((r?.holdings || []).filter((h) => isHex(h.token) && isInt(h.amount)).map((h) => [h.token, BigInt(h.amount)])),
       created: (r?.created || []).filter((x) => isHex(x.token)).map((x) => x.token),
     };
@@ -1259,31 +1333,37 @@ function renderPortfolio() {
     $('#pf-24h').className = '';
     return;
   }
-  $('#portfolio-status').textContent = `${wad(mine.zec, 4)} ZEC.zy ready to trade.`;
-  let total = 0, before = 0, count = 0;
+  const free = quotes.map((q) => [q.symbol, balanceOf(q.asset)]).filter(([, v]) => v != null);
+  $('#portfolio-status').textContent = `${free.map(([s, v]) => `${wad(v, 4)} ${s}.zy`).join(' · ') || '—'} ready to trade.`;
+  const totals = new Map(), befores = new Map();
+  let count = 0;
   const rows = [...mine.holdings].filter(([, amount]) => amount > 0n).map(([token, amount]) => {
     const c = curves.find((x) => x.token === token);
     if (!c) return '';
     count++;
     const worth = num((price(c) * amount) / WAD);
     const ch = change24(c);
-    total += worth;
-    before += ch == null ? worth : worth / (1 + ch / 100);
+    const sym = qsym(c);
+    totals.set(sym, (totals.get(sym) || 0) + worth);
+    befores.set(sym, (befores.get(sym) || 0) + (ch == null ? worth : worth / (1 + ch / 100)));
     const ac = avgCost(token);
-    return `<tr><td>${coinCell(c)}</td><td class="r">${wad(amount, 0)}</td><td class="r">${priceText(num(price(c)))}</td><td class="r">${esc(zecText(worth))} ZEC${usd ? ` <span class="muted">${usdText(worth * usd)}</span>` : ''}</td><td class="r ${changeCls(ch)}">${changeText(ch)}</td><td class="r">${bondCell(c)}</td><td class="r">${ac ? priceText(num(ac.perToken)) : '<span class="muted">—</span>'}</td><td class="r"><a href="${withNet(`/coin/${token}`)}">Trade</a></td></tr>`;
+    return `<tr><td>${coinCell(c)}</td><td class="r">${wad(amount, 0)}</td><td class="r">${priceText(num(price(c)))}</td><td class="r">${esc(zecText(worth))} ${esc(sym)}${usdPer(c) ? ` <span class="muted">${usdText(worth * usdPer(c))}</span>` : ''}</td><td class="r ${changeCls(ch)}">${changeText(ch)}</td><td class="r">${bondCell(c)}</td><td class="r">${ac ? priceText(num(ac.perToken)) : '<span class="muted">—</span>'}</td><td class="r"><a href="${withNet(`/coin/${token}`)}">Trade</a></td></tr>`;
   });
   $('#held').innerHTML = rows.join('') || '<tr><td colspan="8" class="empty">Nothing held yet.</td></tr>';
-  $('#held-total').textContent = `${zecText(total)} ZEC${usd ? ` · ${usdText(total * usd)}` : ''}`;
-  $('#pf-zec').textContent = wad(mine.zec, 4);
+  $('#held-total').textContent = sumText(totals, zecText);
+  $('#pf-zec').textContent = free.map(([s, v]) => `${wad(v, 4)} ${s}`).join(' · ') || '—';
   $('#pf-count').textContent = count;
-  const ch = before > 0 ? pct(total, before) : null;
+  // A 24h change across coins priced in different quotes only in dollars.
+  const inUsd = (m) => [...m].reduce((t, [s, v]) => (t == null || !usdBy[s] ? null : t + v * usdBy[s]), 0);
+  const [total, before] = totals.size === 1 ? [[...totals.values()][0], [...befores.values()][0]] : [inUsd(totals), inUsd(befores)];
+  const ch = total != null && before > 0 ? pct(total, before) : null;
   $('#pf-24h').textContent = changeText(ch);
   $('#pf-24h').className = changeCls(ch);
   const made = mine.created.map((t) => curves.find((c) => c.token === t)).filter(Boolean);
   $('#made').innerHTML = made.length ? made.map((c) => {
     const s = stats.get(c.token) || {};
     const ch24 = change24(c);
-    return `<tr><td>${coinCell(c)}</td><td class="r">${esc(capText(mcap(c)))}</td><td class="r ${changeCls(ch24)}">${changeText(ch24)}</td><td class="r">${zecCell(vol24(c))} ZEC</td><td class="r">${bondCell(c)}</td><td class="r muted">${s.created_time ? ago(s.created_time) : '—'}</td><td class="r"><a href="${withNet(`/coin/${c.token}`)}">Open</a></td></tr>`;
+    return `<tr><td>${coinCell(c)}</td><td class="r">${esc(capText(mcap(c), c))}</td><td class="r ${changeCls(ch24)}">${changeText(ch24)}</td><td class="r">${zecCell(vol24(c))} ${esc(qsym(c))}</td><td class="r">${bondCell(c)}</td><td class="r muted">${s.created_time ? ago(s.created_time) : '—'}</td><td class="r"><a href="${withNet(`/coin/${c.token}`)}">Open</a></td></tr>`;
   }).join('') : `<tr><td colspan="7" class="empty">No coins made from this wallet yet. <a href="${withNet('/launch')}">Create one.</a></td></tr>`;
 }
 
@@ -1297,6 +1377,8 @@ const descInput = $('#create-description');
 const imageInput = $('#create-image');
 const launchButton = $('#create-go');
 let imageData = '';
+/// The coin a new coin is priced in: ZEC.zy unless another is picked.
+let createQuote = XZEC;
 const validSymbol = (v) => /^[A-Z0-9]{1,8}$/.test(v);
 const validName = (v) => v.length >= 1 && v.length <= 24 && v === v.trim() && /^[\x20-\x7e]+$/.test(v);
 
@@ -1345,11 +1427,27 @@ function renderPreview() {
   $('#preview-symbol').textContent = symbol;
   $('#preview-description').textContent = descInput.value.trim() || 'No description.';
   $('#preview-thumb').innerHTML = imageData ? `<img src="${esc(imageData)}" alt="" />` : `<span id="preview-letter">${esc(symbol[0] || '?')}</span>`;
-  $('#preview-usd').textContent = usd ? usdText(6.1768 * usd) : 'ZEC';
+  // The coins it can be priced in, and what its curve is in the one picked.
+  if (!quotes.some((q) => q.asset === createQuote)) createQuote = (quotes.find((q) => q.asset === XZEC) || quotes[0])?.asset || XZEC;
+  const qt = quotes.find((q) => q.asset === createQuote) || { asset: XZEC, symbol: 'ZEC', unit: ZAT, bond: 0n };
+  const picker = $('#create-quote');
+  const chips = quotes.map((q) => `<label class="chip"><input type="radio" name="create-quote" value="${q.asset}"${q.asset === createQuote ? ' checked' : ''} /><span>${esc(q.symbol)}</span></label>`).join('');
+  if (picker.jadeHtml !== chips) { picker.innerHTML = chips; picker.jadeHtml = chips; }
+  $('#create-quote-row').hidden = quotes.length < 2;
+  const start = num(CURVE.baseZat * BigInt(CURVE.lots) * qt.unit);
+  const per = usdBy[qt.symbol];
+  const both = (v) => `${zecText(v)} ${qt.symbol}${per ? ` · ${usdText(v * per)}` : ''}`;
+  $('#fact-start').textContent = both(start);
+  $('#fact-raise').textContent = `~${both(num(cost(0, CURVE.graduateAt, qt.unit)))}`;
+  $('#fact-cap').textContent = `~${both(gradMc(qt.unit))}`;
+  $('#preview-mc').textContent = per ? usdText(start * per) : zecCell(start);
+  $('#preview-usd').textContent = per ? `${zecCell(start)} ${qt.symbol}` : qt.symbol;
+  setHtml('preview-price', `${priceText(num(cost(0, 1, qt.unit) / CURVE.lotTokens))} ${esc(qt.symbol)}`);
+  $('#preview-mcap').textContent = `${zecText(start)} ${qt.symbol}`;
   launchButton.disabled = !ok || creating;
-  const bond = BigInt(terms.bond || '0');
+  const bond = qt.bond;
   $('#create-terms').textContent = terms.set
-    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ZEC.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
+    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ${qt.symbol}.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
   if (creating) return;
   const status = $('#create-status');
@@ -1359,6 +1457,12 @@ function renderPreview() {
   else if (!ok) status.textContent = 'A ticker is 1–8 letters or digits; a name is 1–24 plain characters.';
   else if (!/refused|picture|Picture|attach/.test(status.textContent)) status.textContent = wallet ? 'Ready: Nap shows you everything before it is created.' : 'Connect a wallet to create it.';
 }
+
+$('#create-quote').addEventListener('change', (event) => {
+  if (event.target.name !== 'create-quote') return;
+  createQuote = event.target.value;
+  renderPreview();
+});
 
 // Typing starts a new coin: the last one's message gives way.
 form.querySelectorAll('input,textarea').forEach((input) => input.addEventListener('input', () => {
@@ -1389,8 +1493,11 @@ form.addEventListener('submit', async (event) => {
   let token = null;
   try {
     const description = descInput.value.trim();
-    status.textContent = 'Approve it in Nap.';
-    const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim(), description, image: imageData });
+    const sym = symOf(createQuote);
+    // A Nap from before §166 would make it in ZEC.zy whatever is asked: its
+    // card says what it is priced in, and an older card does not.
+    status.textContent = createQuote === XZEC ? 'Approve it in Nap.' : `Approve it in Nap. Its card says "Priced in ${sym}.zy"; if it does not, your Nap is older: reject it and update Nap.`;
+    const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim(), description, image: imageData, ...(createQuote === XZEC ? {} : { quote: createQuote }) });
     if (!isHex(r?.token)) throw new Error('Nap did not say which coin it made');
     token = r.token;
     // The coin exists from here on, whatever happens to the picture.

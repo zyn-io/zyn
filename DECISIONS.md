@@ -6790,3 +6790,16 @@ Supersedes 159.3's idle cadence.
 | 165.4 | **Hetzner:** Zebra to 7.0.0-rc.0 (state v28→v29: snapshot first; rollback needs it), the NU7 node and lightd, `ZYN_CONFIRMATIONS` 6→18 (25-second blocks). If installed after activation, lower the bridge cursor to 4,465,025 first so skipped deposits are scanned again | ⏳ user runs |
 | 165.5 | Nap web, the extension and the iOS app need the rebuilt wasm before they can send testnet ZEC again; mainnet is unaffected until NU7 has a mainnet height | ⏳ |
 | 165.6 | Remove when `zcash_protocol` 0.11 / `zcash_primitives` 0.31 are final (RUNBOOK §NU7) | ⏳ |
+
+## §166 — Launches in any bridged coin, sized per coin (5 Oct 2026)
+
+The user's call: coins launch in any bridged coin, and each quote coin has its own fixed graduation market cap in that coin. No price feed is read. Supersedes the "ZEC.zy only" part of §141 for new coins.
+
+| # | Decision | |
+|---|---|---|
+| 166.1 | **One shape, sized per quote.** The curve stays §141's: 80,000 lots, lot `i` = 7,721 + `i` units, graduation at lot 51,098. Each quote asset has a *unit*, the ledger amount one unit stands for. ZEC.zy's unit is a zatoshi (10¹⁰), which gives 47.06 ZEC fully diluted at graduation. `unit = graduation_mc / 4,705,520,000`. A curve keeps the unit it was made with. Its minimum buy (10⁵ units) and its bond ceiling (10⁸ units) scale with the unit | ✅ |
+| 166.2 | **`SetCurveQuote` (op 52, operator, `configure-curves`)**: quote, `graduation_mc`, bond. It refuses derived assets and units outside 10⁶–10¹⁸. A zero size removes the quote, and coins already made in it keep trading. Until any quote is named, every deposited asset prices at ZEC's size, as before. Once one is named, only named quotes take new coins | ✅ |
+| 166.3 | **Replay unchanged.** A ZEC-sized curve hashes exactly as before; the unit joins its leaf only when it differs. The quotes join the curve section only once one is named. MARKET11 is written only then, and carries MARKET10's lending state. Replaying the live journals with this ledger matched every sealed root: 8,320 testnet epochs and 22 mainnet epochs | ✅ |
+| 166.4 | **Proposed sizes, ≈ $63k at 5 Oct prices:** ZEC 47.0552 (unit 10¹⁰, bond 0.05), ETH 23 (bond 0.025), BOLD 63,000 (bond 67), SOL 525 on testnet (bond 0.55). On mainnet, ETH and BOLD coins cannot graduate until those bridge caps are raised (0.01 ETH, 1,000 BOLD) | ⏳ set per network |
+| 166.5 | **Nap**: `zyn_curveCreate` takes `quote`. Its card says what the coin is priced in and what it raises. Buy and sell previews use the curve's unit. `zyn_curveHoldings` returns the wallet's balance in each launch asset. **Jade**: a quote picker on Create; the board shows market cap in dollars, so coins in different quotes rank together; dollar prices for ZEC, ETH, SOL, BOLD and BTC come from `/api/usd` (DefiLlama, then Coinbase). An older Nap ignores `quote` and its card has no "Priced in" row, and Jade says so before approval | ✅ |
+| 166.6 | **Rollout:** replicas first (Contabo's testnet replica, the Windows mainnet replica), then the nodes and ZynScan, then `SetCurveQuote` per network | ⏳ |

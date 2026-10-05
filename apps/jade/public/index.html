@@ -35,7 +35,7 @@
     </header>
 
     <div class="tape" aria-label="Recent fills across coins">
-      <span class="tape-label">Fills<button type="button" class="tip" data-tip="Each entry is one coin's batch in one epoch, net of its buys and sells: side, ZEC moved and the market cap it cleared at. Zyn does not publish who traded." aria-label="About fills" aria-expanded="false">i</button></span>
+      <span class="tape-label">Fills<button type="button" class="tip" data-tip="Each entry is one coin's batch in one epoch, net of its buys and sells: side, the amount moved and the market cap it cleared at. Zyn does not publish who traded." aria-label="About fills" aria-expanded="false">i</button></span>
       <div class="tape-view" id="tape-view"><div class="tape-track" id="tape-track"><span class="tape-empty">Reading fills…</span></div></div>
     </div>
 
@@ -93,13 +93,14 @@
             <label class="wide"><span>Description <em>(optional)</em></span><textarea id="create-description" rows="3" maxlength="400" placeholder="What is it?"></textarea></label>
             <label class="wide j-file"><span>Picture <em>(optional)</em></span><input id="create-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk to under 300 KB on your device first.</small></label>
           </div>
+          <fieldset class="create-quote" id="create-quote-row" hidden><legend>Priced in<button type="button" class="tip" data-tip="The coin trades against this bridged coin, and its curve is sized for it: every coin graduates at about the same value in dollars, whichever coin it is priced in." aria-label="About the quote coin" aria-expanded="false">i</button></legend><div class="chips" id="create-quote"></div></fieldset>
           <p class="terms" id="create-terms">Reading this network's terms…</p>
           <dl class="facts">
             <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
-            <div><dt>Start cap</dt><dd>6.18 ZEC</dd></div>
+            <div><dt>Start cap</dt><dd id="fact-start">6.18 ZEC</dd></div>
             <div><dt>Graduates at</dt><dd>51,098 / 80,000 lots</dd></div>
-            <div><dt>Raised by then</dt><dd>~17 ZEC</dd></div>
-            <div><dt>Cap at graduation</dt><dd>~47 ZEC</dd></div>
+            <div><dt>Raised by then</dt><dd id="fact-raise">~17 ZEC</dd></div>
+            <div><dt>Cap at graduation</dt><dd id="fact-cap">~47 ZEC</dd></div>
             <div><dt>Pool shares</dt><dd>locked</dd></div>
           </dl>
           <p class="risk">You get none of the supply unless you buy. Nobody can pull a graduated coin's liquidity.</p>
@@ -112,7 +113,7 @@
             <div class="row row-preview">
               <div class="j-thumb" id="preview-thumb"><span id="preview-letter">V</span></div>
               <div class="c-coin"><p class="nm"><b id="preview-name">Unnamed coin</b></p><p class="sub"><span class="tk" id="preview-symbol">COIN</span><span class="ago">now</span><span class="tag-new">new</span></p></div>
-              <div class="c-num"><b>6.18</b><span id="preview-usd">ZEC</span></div>
+              <div class="c-num"><b id="preview-mc">6.18</b><span id="preview-usd">ZEC</span></div>
               <div class="c-num"><b class="flat">0.0%</b><span>0.0%</span></div>
               <div class="c-num"><b>0</b><span>0 mv</span></div>
               <div class="c-bond"><b>0.0%</b><i class="bar"><i style="width:0%"></i></i></div>
@@ -122,8 +123,8 @@
           <div class="panel preview-card">
             <p class="desc" id="preview-description">No description.</p>
             <dl class="facts facts-tight">
-              <div><dt>Price</dt><dd>0.0<sub>8</sub>6177 ZEC</dd></div>
-              <div><dt>MCap</dt><dd>6.18 ZEC</dd></div>
+              <div><dt>Price</dt><dd id="preview-price">0.0<sub>8</sub>6177 ZEC</dd></div>
+              <div><dt>MCap</dt><dd id="preview-mcap">6.18 ZEC</dd></div>
               <div><dt>Bonded</dt><dd>0.00%</dd></div>
               <div><dt>Holders</dt><dd>private</dd></div>
             </dl>
@@ -163,10 +164,10 @@
                 <button type="button" data-tf="60">1m</button><button type="button" data-tf="300" class="active">5m</button><button type="button" data-tf="900">15m</button><button type="button" data-tf="3600">1h</button><button type="button" data-tf="14400">4h</button><button type="button" data-tf="86400">1d</button>
               </div>
               <p class="legend" id="chart-legend" aria-hidden="true"></p>
-              <div class="seg" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
+              <div class="seg" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active" id="unit-quote">ZEC</button><button type="button" data-unit="usd">USD</button></div>
             </div>
             <div class="chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
-            <p class="j-note" id="chart-note">Market cap per epoch batch<button type="button" class="tip" data-tip="Each candle is built from epoch batches: in every epoch all buyers pay one price and all sellers get one, so each batch is one point. Bars below are ZEC traded." aria-label="About the chart" aria-expanded="false">i</button></p>
+            <p class="j-note" id="chart-note">Market cap per epoch batch<button type="button" class="tip" data-tip="Each candle is built from epoch batches: in every epoch all buyers pay one price and all sellers get one, so each batch is one point. Bars below are the amount traded, in the coin it is priced in." aria-label="About the chart" aria-expanded="false">i</button></p>
           </section>
 
           <section class="panel batch" id="batch" aria-labelledby="batch-title">
@@ -215,7 +216,7 @@
               <button type="button" role="tab" data-pane="about" aria-selected="false">About</button>
             </div>
             <div class="pane" data-pane-body="batches">
-              <div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Epoch</th><th>Side</th><th class="r">Tokens</th><th class="r">ZEC</th><th class="r">Price</th><th class="r">MCap</th></tr></thead><tbody id="fills"></tbody></table></div>
+              <div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Epoch</th><th>Side</th><th class="r">Tokens</th><th class="r">Amount</th><th class="r">Price</th><th class="r">MCap</th></tr></thead><tbody id="fills"></tbody></table></div>
             </div>
             <div class="pane" data-pane-body="position" hidden>
               <dl class="facts facts-wide" id="position"></dl>
@@ -251,7 +252,7 @@
         <div class="board-head">
           <h1 class="board-title" id="portfolio-title">Portfolio</h1>
           <dl class="ledger" aria-label="Totals">
-            <div><dt>ZEC.zy</dt><dd id="pf-zec">—</dd></div>
+            <div><dt>Free to trade</dt><dd id="pf-zec">—</dd></div>
             <div><dt>Positions</dt><dd id="held-total">—</dd></div>
             <div><dt>24h</dt><dd id="pf-24h">—</dd></div>
             <div><dt>Coins held</dt><dd id="pf-count">—</dd></div>

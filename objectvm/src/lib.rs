@@ -357,6 +357,15 @@ pub enum Op {
         fee_bps: u32,
         bond: Fixed,
     },
+    /// Name an asset coins launch in, sized to graduate at `graduation_mc`
+    /// of it fully diluted, with `bond` of it to create one (§166). A zero
+    /// `graduation_mc` stops new coins in it. Operator only.
+    SetCurveQuote {
+        program: ProgramId,
+        quote: Address,
+        graduation_mc: Fixed,
+        bond: Fixed,
+    },
     /// Open a collection's primary sale at these prices (§144). Operator only.
     SetSale {
         program: ProgramId,
@@ -620,6 +629,7 @@ pub enum Receipt {
     Redeemed { paid: Fixed, source: Hash },
     CurveCreated { token: Address },
     CurveTermsSet { fee_bps: u32, bond: Fixed },
+    CurveQuoteSet { quote: Address, unit: i128, bond: Fixed },
     SaleOpened { collection: Address },
     TicketsBought { first: Hash, count: u32 },
     SaleClosed { collection: Address, tickets: u32 },
@@ -2065,6 +2075,27 @@ impl MicrochainVm for ObjectVm {
                 self.market.curve_terms = Some(curve::CurveTerms { fee_bps: *fee_bps, bond: *bond });
                 vec![Receipt::CurveTermsSet { fee_bps: *fee_bps, bond: *bond }]
             }
+            Op::SetCurveQuote { program, quote, graduation_mc, bond } => {
+                if *program != program::configure_curves() {
+                    return vec![Receipt::Refused("wrong program for curve terms")];
+                }
+                if self.market.is_derived(quote) {
+                    return vec![Receipt::Refused("coins launch in an asset people deposit, not a share or a coin")];
+                }
+                if graduation_mc.0 == 0 {
+                    // Stops new coins in it; coins already made keep their size.
+                    return match self.market.curve_quotes.remove(quote) {
+                        Some(_) => vec![Receipt::CurveQuoteSet { quote: *quote, unit: 0, bond: Fixed::ZERO }],
+                        None => vec![Receipt::Refused("coins are not launched in that asset")],
+                    };
+                }
+                let q = curve::QuoteTerms { unit: curve::QuoteTerms::unit_for(*graduation_mc), bond: *bond };
+                if graduation_mc.0 < 0 || !q.valid() {
+                    return vec![Receipt::Refused("those terms are outside what a curve can be sized to")];
+                }
+                self.market.curve_quotes.insert(*quote, q);
+                vec![Receipt::CurveQuoteSet { quote: *quote, unit: q.unit, bond: q.bond }]
+            }
             Op::SetSale { program, collection, ticket_price, claim_price, open_price, treasury_bps } => one(if *program != program::sale_open() {
                 Err("wrong program for a sale")
             } else {
@@ -2689,6 +2720,9 @@ impl MicrochainVm for ObjectVm {
             }
             Op::SetCurveTerms { program, fee_bps, bond } => {
                 e.u8(25).bytes(&program.0).u32(*fee_bps).fixed(*bond);
+            }
+            Op::SetCurveQuote { program, quote, graduation_mc, bond } => {
+                e.u8(52).bytes(&program.0).bytes(quote).fixed(*graduation_mc).fixed(*bond);
             }
             Op::SetSale { program, collection, ticket_price, claim_price, open_price, treasury_bps } => {
                 e.u8(26).bytes(&program.0).bytes(collection).fixed(*ticket_price).fixed(*claim_price).fixed(*open_price).u32(*treasury_bps);
@@ -3364,6 +3398,12 @@ impl MicrochainVm for ObjectVm {
             }),
             49 => Some(Op::LendRules { program: ProgramId(d.hash().ok()?), version: d.u32().ok()? }),
             50 => Some(Op::LendTime { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
+            52 => Some(Op::SetCurveQuote {
+                program: ProgramId(d.hash().ok()?),
+                quote: d.hash().ok()?,
+                graduation_mc: d.fixed().ok()?,
+                bond: d.fixed().ok()?,
+            }),
             51 => Some(Op::LendInsure {
                 donor: d.account().ok()?,
                 program: ProgramId(d.hash().ok()?),

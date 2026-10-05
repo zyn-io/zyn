@@ -332,6 +332,9 @@ pub struct Market {
     pub curve_orders: Vec<crate::curve::CurveOrder>,
     /// What curves charge; absent until the operator sets it.
     pub curve_terms: Option<crate::curve::CurveTerms>,
+    /// The assets coins launch in and how curves in each are sized (§166);
+    /// empty until the operator names one.
+    pub curve_quotes: BTreeMap<Address, crate::curve::QuoteTerms>,
     /// Primary sales, by collection (`crate::sale`).
     pub sales: BTreeMap<Address, crate::sale::Sale>,
     /// Their tickets, by an id only each ticket's buyer can derive.
@@ -362,6 +365,7 @@ impl Market {
             && self.curves.is_empty()
             && self.curve_orders.is_empty()
             && self.curve_terms.is_none()
+            && self.curve_quotes.is_empty()
             && self.sales.is_empty()
             && self.tickets.is_empty()
             && self.burns.is_empty()
@@ -571,8 +575,8 @@ impl Market {
             e.bytes(&merkle_root(&items)).bytes(&merkle_root(&listings));
         }
         // Likewise curves: joined once there are any, or terms for them.
-        if !self.curves.is_empty() || !self.curve_orders.is_empty() || self.curve_terms.is_some() {
-            crate::curve::section(&mut e, self.curve_terms, &self.curves, &self.curve_orders);
+        if !self.curves.is_empty() || !self.curve_orders.is_empty() || self.curve_terms.is_some() || !self.curve_quotes.is_empty() {
+            crate::curve::section(&mut e, self.curve_terms, &self.curve_quotes, &self.curves, &self.curve_orders);
         }
         // And sales: joined once one exists, so every root sealed before keeps.
         if !self.sales.is_empty() || !self.tickets.is_empty() || !self.burns.is_empty() {
@@ -599,8 +603,11 @@ impl Market {
         // MARKET10 only once lending rules v2 are on: until then it would
         // carry nothing MARKET09 does not, and a node rolled back to a binary
         // from before §160 can still read the state a newer one saved.
-        let v10 = self.lend.v2();
-        e.bytes(if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        // MARKET11 (§166) only once a quote asset is named or a curve is
+        // sized for one; it carries MARKET10's lending state too.
+        let v11 = !self.curve_quotes.is_empty() || self.curves.values().any(|c| c.unit != crate::curve::ZAT);
+        let v10 = self.lend.v2() || v11;
+        e.bytes(if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -674,6 +681,9 @@ impl Market {
         crate::sale::encode(e, &self.sales, &self.tickets, &self.burns);
         crate::bridge::encode(e, &self.bridged, &self.waiting);
         crate::lend::encode(e, &self.lend, v10);
+        if v11 {
+            crate::curve::encode_quotes(e, &self.curve_quotes, &self.curves);
+        }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -687,8 +697,11 @@ impl Market {
         // v7 predates lending (Zyn Lend) and reads as a market with none.
         // v8 predates guarded lending and reads as not guarded.
         // v9 predates lending rules v2 (§160) and reads as rules 0.
-        let (v3, v4, v5, v6, v7, v8, v9, v10) = match d.take_bytes(8).ok()? {
-            b"MARKET10" => (true, true, true, true, true, true, true, true),
+        // v10 predates quote assets (§166) and reads as none named.
+        let tag = d.take_bytes(8).ok()?;
+        let v11 = tag == b"MARKET11";
+        let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
+            b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -826,6 +839,9 @@ impl Market {
         }
         if v8 {
             m.lend = crate::lend::decode(d, v9, v10)?;
+        }
+        if v11 {
+            m.curve_quotes = crate::curve::decode_quotes(d, &mut m.curves)?;
         }
         Some(m)
     }

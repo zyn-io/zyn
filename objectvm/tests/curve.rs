@@ -3,7 +3,7 @@
 //! pay the creator — on a real ledger, with the books checked after every
 //! intent.
 
-use objectvm::curve::{self, cost, curve_order_id, curve_source, GRADUATE_AT, LOT, LOTS, POOL_FEE_BPS};
+use objectvm::curve::{self, cost, cost_at, curve_order_id, curve_source, QuoteTerms, GRADUATE_AT, LOT, LOTS, POOL_FEE_BPS, ZAT};
 use objectvm::market::{self, token_of};
 use objectvm::{Limits, ObjectVm, Op, Output, Receipt};
 use zyn_vm::commit::Hash;
@@ -13,6 +13,8 @@ use zyn_vm::spec::{AccountId, MicrochainVm};
 use zyn_vm::{program, Fixed};
 
 const ZEC: [u8; 32] = [0x10; 32];
+const ETH: [u8; 32] = [0x20; 32];
+const BOLD: [u8; 32] = [0x30; 32];
 const ALICE: AccountId = [0xA1; 32];
 const BOB: AccountId = [0xB0; 32];
 const CAROL: AccountId = [0xC0; 32];
@@ -44,7 +46,7 @@ impl Chain {
         assert_eq!(ObjectVm::decode_intent(&mut zyn_vm::read::Decoder::new(&wire)).as_ref(), Some(&op));
         // The reserve always covers buying back every lot sold.
         for c in self.vm.market.curves.values().filter(|c| !c.graduated) {
-            assert!(c.reserve.0 >= cost(0, c.sold), "reserve {} below the integral {}", c.reserve.0, cost(0, c.sold));
+            assert!(c.reserve.0 >= cost_at(0, c.sold, c.unit), "reserve {} below the integral {}", c.reserve.0, cost_at(0, c.sold, c.unit));
         }
         r.into_iter().next().unwrap()
     }
@@ -74,8 +76,16 @@ impl Chain {
     }
 
     fn mint(&mut self, owner: AccountId, whole: i64) {
+        self.mint_of(owner, ZEC, whole);
+    }
+
+    fn mint_of(&mut self, owner: AccountId, asset: [u8; 32], whole: i64) {
         let nonce = self.fresh();
-        self.ok(Op::Mint { asset: ZEC, amount: Fixed::whole(whole), owner, nonce });
+        self.ok(Op::Mint { asset, amount: Fixed::whole(whole), owner, nonce });
+    }
+
+    fn quote(&mut self, quote: [u8; 32], graduation_mc: Fixed, bond: Fixed) -> Receipt {
+        self.apply(Op::SetCurveQuote { program: program::configure_curves(), quote, graduation_mc, bond })
     }
 
     fn note(&mut self, owner: AccountId, asset: [u8; 32], amount: Fixed) -> Output {
@@ -127,17 +137,25 @@ impl Chain {
 
     /// Make a token; returns it and the creator's nonce.
     fn create(&mut self, creator: AccountId) -> ([u8; 32], Hash) {
-        let bond = self.vm.market.curve_terms.map(|t| t.bond).unwrap_or(Fixed::ZERO);
-        let (inputs, change) = if bond.0 > 0 { self.fund(creator, ZEC, bond) } else { (Vec::new(), Vec::new()) };
+        self.create_in(creator, ZEC)
+    }
+
+    fn create_in(&mut self, creator: AccountId, quote: [u8; 32]) -> ([u8; 32], Hash) {
+        let bond = match self.vm.market.curve_quotes.get(&quote) {
+            Some(q) => q.bond,
+            None => self.vm.market.curve_terms.map(|t| t.bond).unwrap_or(Fixed::ZERO),
+        };
+        let (inputs, change) = if bond.0 > 0 { self.fund(creator, quote, bond) } else { (Vec::new(), Vec::new()) };
         let nonce = self.fresh();
-        let r = self.ok(Op::CreateCurve { creator, program: program::curve_create(), nonce, quote: ZEC, meta: [7; 32], inputs, change });
+        let r = self.ok(Op::CreateCurve { creator, program: program::curve_create(), nonce, quote, meta: [7; 32], inputs, change });
         assert_eq!(r, Receipt::CurveCreated { token: token_of(&creator, &nonce) });
         (token_of(&creator, &nonce), nonce)
     }
 
     /// Place a trade; returns the order's claim source.
     fn trade(&mut self, who: AccountId, token: [u8; 32], buy: bool, amount: Fixed, min_out: Fixed) -> Hash {
-        let (inputs, change) = self.fund(who, if buy { ZEC } else { token }, amount);
+        let quote = self.vm.market.curves[&token].quote;
+        let (inputs, change) = self.fund(who, if buy { quote } else { token }, amount);
         let nonce = self.fresh();
         self.ok(Op::CurveTrade { trader: who, program: program::curve_trade(), token, buy, amount_in: amount, min_out, inputs, change, nonce });
         curve_order_id(&who, &nonce)
@@ -296,4 +314,125 @@ fn slippage_protection_refunds_whole() {
     c.claim(BOB, &[greedy]);
     assert_eq!(c.balance(BOB, ZEC), Fixed::whole(5), "refunded whole");
     assert_eq!(c.balance(BOB, token), Fixed::ZERO);
+}
+
+// --- Quote assets (§166) ------------------------------------------------------
+
+/// A whole coin of an 18-decimal asset, times `n`, divided by `d`.
+fn coins(n: i128, d: i128) -> Fixed {
+    Fixed(n * zyn_vm::fixed::WAD / d)
+}
+
+/// ETH named at 23 ETH fully diluted: an ETH coin has ZEC's shape at that
+/// size, raises it, graduates into an ETH pool and pays its bond in ETH.
+#[test]
+fn a_coin_in_eth_is_sized_for_eth_and_graduates_at_its_size() {
+    let mut c = Chain::new();
+    c.terms(100, Fixed(5 * CENT.0));
+    assert!(matches!(c.quote(ZEC, Fixed(curve::GRADUATION_MC_UNITS * ZAT), Fixed(5 * CENT.0)), Receipt::CurveQuoteSet { unit: ZAT, .. }));
+    let r = c.quote(ETH, Fixed::whole(23), coins(25, 1000));
+    let unit = QuoteTerms::unit_for(Fixed::whole(23));
+    assert_eq!(r, Receipt::CurveQuoteSet { quote: ETH, unit, bond: coins(25, 1000) });
+    assert_eq!(unit, 4_887_876_366, "23 ETH / 4,705,520,000 units");
+    c.mint_of(BOB, ETH, 1);
+    c.mint_of(ALICE, ETH, 30);
+
+    let (token, bob_nonce) = c.create_in(BOB, ETH);
+    let cv = c.vm.market.curves[&token];
+    assert_eq!((cv.quote, cv.unit, cv.bond), (ETH, unit, coins(25, 1000)));
+    assert_eq!(c.balance(BOB, ETH), coins(975, 1000));
+    assert_eq!(cv.price_per_token().0, cost_at(0, 1, unit) / curve::LOT_TOKENS);
+
+    // A whale takes it to graduation: ~8.3 ETH raised, the rest refunded.
+    let w = c.trade(ALICE, token, true, Fixed::whole(20), Fixed::ZERO);
+    c.seal();
+    let cv = c.vm.market.curves[&token];
+    assert!(cv.graduated);
+    let raised = cost_at(0, GRADUATE_AT, unit);
+    assert!((8_300..8_320).contains(&(raised / (zyn_vm::fixed::WAD / 1000))), "raised {raised}");
+    c.claim(ALICE, &[w]);
+    assert!(c.balance(ALICE, ETH) > Fixed::whole(21), "the unfilled part came back");
+    let p = c.vm.market.pools[&market::pool_id(&token, &ETH)];
+    let quote = if p.a == ETH { p.reserve_a } else { p.reserve_b };
+    assert!(quote.0 >= raised, "the pool has at least what the curve raised");
+    // Its fully diluted value at the curve's last price: 23 ETH, to a unit.
+    let mc = cost_at(GRADUATE_AT, 1, unit) * LOTS as i128;
+    assert!((Fixed::whole(23).0 - mc) < curve::GRADUATION_MC_UNITS, "{mc}");
+    // Fees went to the pot in ETH; the bond comes back in ETH.
+    assert!(c.vm.market.pol[&ETH].0 > 0);
+    let before = c.balance(BOB, ETH);
+    c.claim(BOB, &[curve_source(&BOB, &bob_nonce)]);
+    assert!(c.balance(BOB, ETH).0 >= before.0 + coins(25, 1000).0);
+}
+
+/// Before any quote is named, every deposited asset prices curves at ZEC's
+/// size, as on chains made before §166. Once one is named, only named ones
+/// take new coins — and coins already made keep their size and keep trading.
+#[test]
+fn once_a_quote_is_named_only_named_quotes_take_new_coins() {
+    let mut c = Chain::new();
+    c.mint_of(ALICE, ETH, 30);
+    c.mint(ALICE, 5);
+    let (old, _) = c.create_in(ALICE, ETH);
+    assert_eq!(c.vm.market.curves[&old].unit, ZAT, "before §166's terms: ZEC's size");
+    assert!(!c.vm.encode().windows(8).any(|w| w == b"MARKET11"), "nothing new is saved before a quote is named");
+
+    c.quote(ZEC, Fixed(curve::GRADUATION_MC_UNITS * ZAT), Fixed::ZERO);
+    assert!(c.vm.encode().windows(8).any(|w| w == b"MARKET11"));
+    let n = c.fresh();
+    let why = c.refused(Op::CreateCurve { creator: ALICE, program: program::curve_create(), nonce: n, quote: ETH, meta: [7; 32], inputs: Vec::new(), change: Vec::new() });
+    assert!(why.contains("not launched in that asset"), "{why}");
+    c.create_in(ALICE, ZEC);
+    // The ETH coin made before still trades, at the size it was made with.
+    let o = c.trade(ALICE, old, true, Fixed::whole(1), Fixed::ZERO);
+    c.seal();
+    c.claim(ALICE, &[o]);
+    let cv = c.vm.market.curves[&old];
+    assert_eq!(cv.unit, ZAT);
+    assert_eq!(cv.reserve.0, cost(0, cv.sold));
+
+    // A zero size stops new coins in it again.
+    assert!(matches!(c.quote(ZEC, Fixed::ZERO, Fixed::ZERO), Receipt::CurveQuoteSet { unit: 0, .. }));
+    assert!(c.vm.market.curve_quotes.is_empty());
+    let why = match c.quote(ZEC, Fixed::ZERO, Fixed::ZERO) { Receipt::Refused(w) => w, r => panic!("{r:?}") };
+    assert!(why.contains("not launched"), "{why}");
+}
+
+/// Sized for BOLD (63,000 BOLD fully diluted), the smallest buy scales too:
+/// 1 BOLD is below it, 2 BOLD is not.
+#[test]
+fn a_coin_in_bold_scales_its_smallest_buy() {
+    let mut c = Chain::new();
+    c.quote(BOLD, Fixed::whole(63_000), Fixed::whole(67));
+    let unit = c.vm.market.curve_quotes[&BOLD].unit;
+    assert_eq!(unit, 13_388_530_916_880, "63,000 BOLD / 4,705,520,000");
+    c.mint_of(ALICE, BOLD, 200);
+    let (token, _) = c.create_in(ALICE, BOLD);
+    assert_eq!(c.vm.market.curves[&token].min_buy().0, 100_000 * unit);
+    let (inputs, change) = c.fund(ALICE, BOLD, Fixed::whole(1));
+    let n = c.fresh();
+    let why = c.refused(Op::CurveTrade { trader: ALICE, program: program::curve_trade(), token, buy: true, amount_in: Fixed::whole(1), min_out: Fixed::ZERO, inputs, change, nonce: n });
+    assert!(why.contains("at least"), "{why}");
+    let o = c.trade(ALICE, token, true, Fixed::whole(2), Fixed::ZERO);
+    c.seal();
+    c.claim(ALICE, &[o]);
+    assert!(c.vm.market.curves[&token].sold > 0);
+}
+
+#[test]
+fn quote_terms_are_the_operators_and_bounded() {
+    let mut c = Chain::new();
+    c.mint(ALICE, 5);
+    let why = |r: Receipt| match r { Receipt::Refused(w) => w.to_string(), r => panic!("expected a refusal, got {r:?}") };
+    let r = c.apply(Op::SetCurveQuote { program: program::curve_create(), quote: ETH, graduation_mc: Fixed::whole(23), bond: Fixed::ZERO });
+    assert!(why(r).contains("wrong program"));
+    // A coin on a curve is not something coins launch in.
+    let (token, _) = c.create(ALICE);
+    assert!(why(c.quote(token, Fixed::whole(23), Fixed::ZERO)).contains("not a share or a coin"));
+    // Too small to size, too large to settle, a negative size, too big a bond.
+    assert!(why(c.quote(ETH, Fixed(curve::GRADUATION_MC_UNITS * 1_000), Fixed::ZERO)).contains("outside"));
+    assert!(why(c.quote(ETH, Fixed(curve::GRADUATION_MC_UNITS.saturating_mul(curve::MAX_UNIT) * 2), Fixed::ZERO)).contains("outside"));
+    assert!(why(c.quote(ETH, Fixed::whole(-23), Fixed::ZERO)).contains("outside"));
+    assert!(why(c.quote(ETH, Fixed::whole(23), Fixed::whole(1))).contains("outside"), "a bond above 1 ZEC's worth of the size");
+    assert!(matches!(c.quote(ETH, Fixed::whole(23), coins(48, 100)), Receipt::CurveQuoteSet { .. }));
 }

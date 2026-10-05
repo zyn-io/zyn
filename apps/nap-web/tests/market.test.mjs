@@ -146,6 +146,12 @@ test('curve ids and intents match the Rust side', () => {
 test('the curve prices lots exactly as the ledger does', () => {
   assert.equal(m.curveCost(0, m.CURVE.graduateAt).toString(), v.curve_cost_to_graduation);
   assert.equal(m.curveCost(1000, 50).toString(), v.curve_cost_1000_50);
+  // Sized for another coin (§166).
+  assert.equal(m.GRADUATION_MC_UNITS.toString(), v.curve_graduation_mc_units);
+  assert.equal(m.curveUnitFor(23n * m.WAD).toString(), v.curve_unit_23);
+  assert.equal(m.curveUnitFor(63_000n * m.WAD).toString(), v.curve_unit_63000);
+  assert.equal(m.curveCost(1000, 50, BigInt(v.curve_unit_23)).toString(), v.curve_cost_1000_50_at_23);
+  assert.equal(m.curveCost(1000, 50, m.ZAT), m.curveCost(1000, 50), 'ZEC-sized is the default');
   // A lone buy never spends more than it put in, and one more lot is out of reach.
   const q = m.previewCurveBuy(1234, m.WAD / 10n, 100);
   assert.ok(q.paid + q.fee <= m.WAD / 10n && q.refund >= 0n);

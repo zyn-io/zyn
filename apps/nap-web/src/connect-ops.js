@@ -106,6 +106,18 @@ const validCurve = (c) => isHex(c.token) && isHex(c.quote) && isHex(c.meta)
   && ['reserve', 'graduation', 'creator_fees', 'bond', 'price_per_token'].every((k) => isInt(c[k]))
   && Number.isSafeInteger(c.sold) && c.sold >= 0 && typeof c.graduated === 'boolean';
 
+/// A curve's size (§166): the ledger amount one unit of its shape stands
+/// for. A node from before §166 says nothing, and every curve was ZEC-sized.
+const unitOf = (c) => (isInt(c?.unit) && c.unit !== '0' ? BigInt(c.unit) : mk.ZAT);
+
+/// The assets coins launch in, and each one's size and bond. None named:
+/// ZEC.zy at ZEC's size with the general bond, as before §166.
+function launchAssets(ctx, market, terms) {
+  const named = (market.curve_quotes || []).filter((q) => isHex(q.asset) && isInt(q.unit) && isInt(q.bond));
+  if (named.length) return named.map((q) => ({ asset: q.asset, unit: BigInt(q.unit), bond: BigInt(q.bond) }));
+  return [{ asset: ctx.config.zecAsset, unit: mk.ZAT, bond: BigInt(terms.bond || '0') }];
+}
+
 async function curveBook(ctx) {
   const market = await ledger.call(ctx.config, 'zyn_market');
   const curves = (market.curves || []).filter(validCurve).map((c) => ({ ...c, ...(mk.decodeMeta(c.meta) || { symbol: '?', name: 'Unnamed' }) }));
@@ -273,12 +285,16 @@ export const METHODS = {
 
   zyn_curves: {
     kind: 'public',
-    run: async (ctx) => { const { curves, terms } = await curveBook(ctx); return { curves, terms, curve: mk.CURVE }; },
+    run: async (ctx) => {
+      const { market, curves, terms } = await curveBook(ctx);
+      const quotes = launchAssets(ctx, market, terms).map((q) => ({ asset: q.asset, unit: String(q.unit), bond: String(q.bond) }));
+      return { curves, terms, quotes, curve: mk.CURVE };
+    },
   },
   zyn_curveHoldings: {
     kind: 'read',
     run: async (ctx) => {
-      const { curves } = await curveBook(ctx);
+      const { market, curves, terms } = await curveBook(ctx);
       const h = await holdings(ctx);
       // The tokens this wallet made: its own nonces, turned into token ids.
       const mine = new Set();
@@ -286,6 +302,8 @@ export const METHODS = {
       for (let n = 0; n < count; n++) mine.add(hex(mk.tokenOf(ctx.identity.account, mk.marketNonce(ctx.identity.secretKey, n))));
       return {
         zec: String(h.balances.get(ctx.config.zecAsset) || 0n),
+        // What it holds of each asset coins launch in, to trade them with.
+        quotes: launchAssets(ctx, market, terms).map((q) => ({ asset: q.asset, amount: String(h.balances.get(q.asset) || 0n) })),
         holdings: curves.map((c) => ({ token: c.token, symbol: c.symbol, name: c.name, amount: String(h.balances.get(c.token) || 0n) }))
           .filter((x) => x.amount !== '0'),
         created: curves.filter((c) => mine.has(c.token)).map((c) => ({ token: c.token, symbol: c.symbol, name: c.name })),
@@ -306,16 +324,25 @@ export const METHODS = {
       if (image && !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(image)) throw bad('The picture must be a PNG, JPEG, WebP or GIF');
       if (image.length > 420_000) throw bad('The picture must be under 300 KB');
       const content = description || image ? { description, image } : null;
-      const { terms } = await curveBook(ctx);
-      const bond = BigInt(terms.bond || '0');
-      if (bond > 0n) await mustHold(ctx, ctx.config.zecAsset, bond, 'ZEC.zy');
+      const { market, terms } = await curveBook(ctx);
+      // The coin it is priced in: ZEC.zy unless the site asks for another
+      // the ledger launches coins in (§166).
+      const quote = p.quote == null ? ctx.config.zecAsset : p.quote;
+      if (!isHex(quote)) throw bad('quote must be 64 hex characters');
+      const as = launchAssets(ctx, market, terms).find((q) => q.asset === quote);
+      if (!as) throw bad('Coins are not launched in that asset');
+      const q$ = (await namer(ctx, market))(quote);
+      const bond = as.bond;
+      if (bond > 0n) await mustHold(ctx, quote, bond, q$);
+      const raise = mk.curveCost(0, mk.CURVE.graduateAt, as.unit);
       return {
         title: `Create ${String(p.symbol).toUpperCase()}`,
         rows: [
           ['Name', String(p.name).trim()],
+          ['Priced in', q$],
           ['Supply', '1,000,000,000 — all sold on the curve or put in its pool; none to you'],
-          ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about 17 ZEC.zy raised), into a locked pool`],
-          ['Bond', bond ? `${wadText(bond)} ZEC.zy — returned only if it graduates; otherwise it stays in the curve` : 'none'],
+          ['Graduates', `at ${mk.CURVE.graduateAt.toLocaleString('en-US')} of 80,000 lots (about ${wadText(raise)} ${q$} raised), into a locked pool`],
+          ['Bond', bond ? `${wadText(bond)} ${q$} — returned only if it graduates; otherwise it stays in the curve` : 'none'],
           ['Your share', terms.fee_bps ? `10% of its trading fees, paid when it graduates` : 'none (no fee is set)'],
           ...(description ? [['Description', description]] : []),
           ...(image ? [['Picture', 'shown above, stored by the site that asked; it proves you made the token']] : []),
@@ -326,15 +353,15 @@ export const METHODS = {
           let inputs = [], change = [];
           if (bond > 0n) {
             const h = await holdings(ctx);
-            ({ inputs, change } = mk.fund(ctx.identity, h.held, unhex(ctx.config.zecAsset), bond));
+            ({ inputs, change } = mk.fund(ctx.identity, h.held, unhex(quote), bond));
           }
           const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.createCurveIntent({
-            creator: ctx.identity.account, nonce: n, quote: unhex(ctx.config.zecAsset), meta, inputs, change,
+            creator: ctx.identity.account, nonce: n, quote: unhex(quote), meta, inputs, change,
           }));
           const token = mk.tokenOf(ctx.identity.account, nonce);
-          if (!content) return { token: hex(token) };
+          if (!content) return { token: hex(token), quote };
           const hash = contentHash(content);
-          return { token: hex(token), content: { hash: hex(hash), proof: await contentProof(ctx.identity.secretKey, nonce, token, hash) } };
+          return { token: hex(token), quote, content: { hash: hex(hash), proof: await contentProof(ctx.identity.secretKey, nonce, token, hash) } };
         },
       };
     },
@@ -347,8 +374,9 @@ export const METHODS = {
       const q$ = (await namer(ctx, market))(c.quote);
       if (c.graduated) throw bad('That token has graduated; it trades in its pool (zyn_swap)');
       const amount = amountOf(p.amount, 'amount');
-      if (amount < mk.MIN_CURVE_BUY) throw bad(`A buy is at least 0.001 ${q$}`);
-      const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps);
+      const min = mk.curveMinBuy(unitOf(c));
+      if (amount < min) throw bad(`A buy is at least ${wadText(min)} ${q$}`);
+      const q = mk.previewCurveBuy(c.sold, amount, c.fee_bps, unitOf(c));
       if (q.lots === 0) throw bad('That buys less than one lot at the current price');
       const minLots = p.minTokens != null ? BigInt(amountOf(p.minTokens, 'minTokens')) / mk.LOT : 0n;
       await mustHold(ctx, c.quote, amount, q$);
@@ -385,7 +413,7 @@ export const METHODS = {
       const tokens = amountOf(p.tokens, 'tokens');
       if (tokens % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
       const lots = Number(tokens / mk.LOT);
-      const q = mk.previewCurveSell(c.sold, lots, c.fee_bps);
+      const q = mk.previewCurveSell(c.sold, lots, c.fee_bps, unitOf(c));
       const minZec = p.minZec != null ? amountOf(p.minZec, 'minZec') : 0n;
       await mustHold(ctx, c.token, tokens, c.symbol);
       return {

@@ -150,6 +150,7 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         ),
         Op::CurveTrade { token, .. } => ("Curve trade", false, json!({ "token": hex(token) })),
         Op::SetCurveTerms { fee_bps, bond, .. } => ("Curve terms set", true, json!({ "fee_bps": fee_bps, "bond": bond.0.to_string() })),
+        Op::SetCurveQuote { quote, graduation_mc, bond, .. } => ("Launch asset set", true, json!({ "quote": hex(quote), "graduation_mc": graduation_mc.0.to_string(), "bond": bond.0.to_string() })),
         Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
             "Sale opened",
             true,

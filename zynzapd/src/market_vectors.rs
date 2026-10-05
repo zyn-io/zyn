@@ -228,6 +228,14 @@ pub fn vectors() -> Vec<(&'static str, String)> {
         ("curve_token", hex(&market::token_of(&OWNER, &NONCE))),
         ("curve_cost_to_graduation", objectvm::curve::cost(0, objectvm::curve::GRADUATE_AT).to_string()),
         ("curve_cost_1000_50", objectvm::curve::cost(1_000, 50).to_string()),
+        // Sized for another coin (§166): ETH at 23 ETH, BOLD at 63,000 BOLD.
+        ("curve_unit_23", objectvm::curve::QuoteTerms::unit_for(zyn_vm::Fixed::whole(23)).to_string()),
+        ("curve_unit_63000", objectvm::curve::QuoteTerms::unit_for(zyn_vm::Fixed::whole(63_000)).to_string()),
+        (
+            "curve_cost_1000_50_at_23",
+            objectvm::curve::cost_at(1_000, 50, objectvm::curve::QuoteTerms::unit_for(zyn_vm::Fixed::whole(23))).to_string(),
+        ),
+        ("curve_graduation_mc_units", objectvm::curve::GRADUATION_MC_UNITS.to_string()),
         (
             "create_curve",
             enc(&Op::CreateCurve {

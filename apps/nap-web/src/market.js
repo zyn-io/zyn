@@ -146,27 +146,37 @@ export const CURVE = Object.freeze({
   graduateAt: 51_098,
   poolFeeBps: 30,
 });
-const ZAT = 10_000_000_000n; // one zatoshi, in the ledger's units
+/// One zatoshi, in the ledger's units: a ZEC-sized curve's unit. A curve
+/// priced in another coin (§166) has its own unit, the ledger amount one
+/// "zatoshi" of the same shape stands for (`unit` in `zyn_market`).
+export const ZAT = 10_000_000_000n;
 /// One lot, in the ledger's units (1e18 per token).
 export const LOT = CURVE.lotTokens * WAD;
-/// The smallest buy: 0.001 of the quote asset.
+/// The smallest buy: 0.001 of the quote asset on a ZEC-sized curve.
 export const MIN_CURVE_BUY = 100_000n * ZAT;
+/// A curve's smallest buy at its size.
+export const curveMinBuy = (unit = ZAT) => 100_000n * BigInt(unit);
+/// Fully diluted value at graduation, in units (`GRADUATION_MC_UNITS`).
+export const GRADUATION_MC_UNITS = (CURVE.baseZat + CURVE.slopeZat * BigInt(CURVE.graduateAt)) * BigInt(CURVE.lots);
+/// The unit that makes a curve graduate at `mc` fully diluted (`QuoteTerms::unit_for`).
+export const curveUnitFor = (mc) => BigInt(mc) / GRADUATION_MC_UNITS;
 
 export const curveSource = (creator, nonce) => id('objectvm.curve.v1', creator, nonce);
 export const curveOrderId = (trader, nonce) => id('objectvm.curve-order.v1', trader, nonce);
 
-/// What lots `[q, q+d)` cost, in the ledger's units — `objectvm::curve::cost`.
-export function curveCost(q, d) {
+/// What lots `[q, q+d)` cost, in the ledger's units, on a curve of size
+/// `unit` — `objectvm::curve::cost_at`.
+export function curveCost(q, d, unit = ZAT) {
   const Q = BigInt(q), D = BigInt(d);
-  return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * ZAT;
+  return (CURVE.baseZat * D + CURVE.slopeZat * ((D * (2n * Q + D - 1n)) / 2n)) * BigInt(unit);
 }
 
 /// The most lots `budget` buys from lot `q`, at most `cap`.
-export function lotsFor(q, budget, cap) {
+export function lotsFor(q, budget, cap, unit = ZAT) {
   let lo = 0, hi = cap;
   while (lo < hi) {
     const mid = lo + Math.ceil((hi - lo) / 2);
-    if (curveCost(q, mid) <= budget) lo = mid; else hi = mid - 1;
+    if (curveCost(q, mid, unit) <= budget) lo = mid; else hi = mid - 1;
   }
   return lo;
 }
@@ -174,24 +184,24 @@ export function lotsFor(q, budget, cap) {
 /// A buy of `amountIn` alone in its batch: lots, what they cost, the fee.
 /// Other buyers in the same epoch share the price, so this is what a buy
 /// gets at best when nobody else buys — a preview, never a promise.
-export function previewCurveBuy(sold, amountIn, feeBps) {
+export function previewCurveBuy(sold, amountIn, feeBps, unit = ZAT) {
   const budget = (BigInt(amountIn) * BPS) / (BPS + BigInt(feeBps));
-  const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold));
-  const paid = curveCost(sold, lots);
+  const lots = lotsFor(sold, budget, Math.max(0, CURVE.graduateAt - sold), unit);
+  const paid = curveCost(sold, lots, unit);
   const fee = (paid * BigInt(feeBps)) / BPS;
   return { lots, tokens: BigInt(lots) * LOT, paid, fee, refund: BigInt(amountIn) - paid - fee };
 }
 
 /// Selling `lots` alone: gross from the curve, the fee, what arrives.
-export function previewCurveSell(sold, lots, feeBps) {
+export function previewCurveSell(sold, lots, feeBps, unit = ZAT) {
   const n = Math.min(lots, sold);
-  const gross = n ? curveCost(sold - n, n) : 0n;
+  const gross = n ? curveCost(sold - n, n, unit) : 0n;
   const fee = (gross * BigInt(feeBps)) / BPS;
   return { lots: n, gross, fee, net: gross - fee };
 }
 
 /// Price of the next lot, per token, in the ledger's units.
-export const curvePricePerToken = (sold) => curveCost(sold, 1) / CURVE.lotTokens;
+export const curvePricePerToken = (sold, unit = ZAT) => curveCost(sold, 1, unit) / CURVE.lotTokens;
 
 export const createCurveIntent = (o) => concatBytes(
   new Uint8Array([TAG.createCurve]), o.creator, prog('curveCreate'), o.nonce, o.quote, o.meta,

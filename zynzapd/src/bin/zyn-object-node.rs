@@ -311,7 +311,7 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
         .map(|c| {
             let pool = objectvm::market::pool_id(&c.token, &c.quote);
             format!(
-                "{{\"token\":\"{}\",\"quote\":\"{}\",\"meta\":\"{}\",\"created_at\":{},\"fee_bps\":{},\"sold\":{},\"lots\":{},\"graduate_at\":{},\"reserve\":\"{}\",\"graduation\":\"{}\",\"creator_fees\":\"{}\",\"bond\":\"{}\",\"price_per_token\":\"{}\",\"graduated\":{},\"pool\":\"{}\",\"pending\":{}}}",
+                "{{\"token\":\"{}\",\"quote\":\"{}\",\"meta\":\"{}\",\"created_at\":{},\"fee_bps\":{},\"sold\":{},\"lots\":{},\"graduate_at\":{},\"reserve\":\"{}\",\"graduation\":\"{}\",\"creator_fees\":\"{}\",\"bond\":\"{}\",\"price_per_token\":\"{}\",\"graduated\":{},\"pool\":\"{}\",\"pending\":{},\"unit\":\"{}\",\"min_buy\":\"{}\",\"raise\":\"{}\"}}",
                 hex(&c.token),
                 hex(&c.quote),
                 hex(&c.meta),
@@ -327,7 +327,11 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
                 c.price_per_token().0,
                 c.graduated,
                 if c.graduated { hex(&pool) } else { String::new() },
-                vm.market.curve_orders.iter().filter(|o| o.token == c.token).count()
+                vm.market.curve_orders.iter().filter(|o| o.token == c.token).count(),
+                c.unit,
+                c.min_buy().0,
+                // What the whole curve raises to graduation, at its size.
+                objectvm::curve::cost_at(0, objectvm::curve::GRADUATE_AT, c.unit)
             )
         })
         .collect();
@@ -359,14 +363,33 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
         })
         .collect();
     let terms = vm.market.curve_terms.unwrap_or_default();
+    // The assets coins launch in (§166) and each one's size: empty until the
+    // operator names one, when any deposited asset prices at ZEC's size.
+    let quotes: Vec<String> = vm
+        .market
+        .curve_quotes
+        .iter()
+        .map(|(a, q)| {
+            serde_json::json!({
+                "asset": hex(a),
+                "unit": q.unit.to_string(),
+                "bond": q.bond.0.to_string(),
+                "graduation_mc": (q.unit * objectvm::curve::GRADUATION_MC_UNITS).to_string(),
+                "raise": objectvm::curve::cost_at(0, objectvm::curve::GRADUATE_AT, q.unit).to_string(),
+                "min_buy": (objectvm::curve::MIN_BUY_UNITS * q.unit).to_string(),
+            })
+            .to_string()
+        })
+        .collect();
     format!(
-        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"curve_terms\":{{\"set\":{},\"fee_bps\":{},\"bond\":\"{}\"}},\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}],\"curves\":[{}],\"sales\":[{}]}}",
+        "{{\"epoch\":{},\"epoch_seconds\":{},\"fees\":{{\"bridge_bps\":{}}},\"curve_terms\":{{\"set\":{},\"fee_bps\":{},\"bond\":\"{}\"}},\"curve_quotes\":[{}],\"zyn_pot\":[{}],\"collections\":[{}],\"pools\":[{}],\"launches\":[{}],\"curves\":[{}],\"sales\":[{}]}}",
         vm.epoch,
         epoch_seconds,
         vm.market.bridge_bps(),
         vm.market.curve_terms.is_some(),
         terms.fee_bps,
         terms.bond.0,
+        quotes.join(","),
         pot.join(","),
         collections.join(","),
         pools.join(","),

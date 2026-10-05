@@ -19,6 +19,17 @@
 //! last price. The numbers are consensus, not the creator's: a creator who
 //! could tune them could tune them against buyers.
 //!
+//! # Quote assets (§166)
+//!
+//! A curve priced in another bridged coin has the same shape, sized for that
+//! coin: its [`QuoteTerms`] fix a *unit*, the ledger amount one "zatoshi" of
+//! the shape stands for, and the bond. ZEC.zy's unit is [`ZAT`]: 47 ZEC at
+//! graduation. ETH.zy's might be sized to 23 ETH, BOLD.zy's to 63,000 BOLD.
+//! The operator sets each from a graduation market cap in that coin; no price
+//! feed is read. A curve keeps the unit it was made with. Until the operator
+//! names a quote asset, every deposited asset prices curves at ZEC's size, as
+//! before; once one is named, only named ones do.
+//!
 //! # Batches, sells first
 //!
 //! Orders are escrowed for the epoch and settle at its seal, like swaps. The
@@ -62,11 +73,23 @@ pub const BASE_ZAT: i128 = 7_721;
 pub const SLOPE_ZAT: i128 = 1;
 /// Lots the curve sells before it graduates.
 pub const GRADUATE_AT: u32 = 51_098;
-/// A zatoshi in the ledger's units.
-const ZAT: i128 = 10_000_000_000;
+/// A zatoshi in the ledger's units: ZEC.zy's unit.
+pub const ZAT: i128 = 10_000_000_000;
 /// The smallest buy, 0.001 of the quote asset: below it a lot is not
 /// affordable anyway, and the batch has a limit worth spending on real orders.
-pub const MIN_BUY: Fixed = Fixed(100_000 * ZAT);
+/// In units: a curve sized for another coin scales it with its unit.
+pub const MIN_BUY_UNITS: i128 = 100_000;
+pub const MIN_BUY: Fixed = Fixed(MIN_BUY_UNITS * ZAT);
+/// A curve's fully diluted value at graduation, in units: the next lot's
+/// price per token times the supply, `(BASE + SLOPE·GRADUATE_AT) · LOTS`.
+/// At ZEC's unit, 47.0552 ZEC.
+pub const GRADUATION_MC_UNITS: i128 = (BASE_ZAT + SLOPE_ZAT * GRADUATE_AT as i128) * LOTS as i128;
+/// Bounds on a quote's unit, so that no batch's arithmetic can overflow and
+/// no lot rounds to nothing: 10⁶ to 10¹⁸ ledger units (ZEC's is 10¹⁰).
+pub const MIN_UNIT: i128 = 1_000_000;
+pub const MAX_UNIT: i128 = 1_000_000_000_000_000_000;
+/// The bond's ceiling, in units: 1 ZEC at ZEC's unit ([`MAX_BOND`]).
+pub const MAX_BOND_UNITS: i128 = 100_000_000;
 /// A graduated pool's fee, kept by the pool — whose shares nobody holds, so
 /// it deepens the pool rather than paying anyone.
 pub const POOL_FEE_BPS: u32 = 30;
@@ -95,18 +118,30 @@ pub fn curve_order_id(trader: &AccountId, nonce: &Hash) -> Hash {
     id(b"objectvm.curve-order.v1", &[trader, nonce])
 }
 
-/// The quote asset lots `[q, q+d)` cost, in the ledger's units.
+/// The quote asset lots `[q, q+d)` cost, in the ledger's units, on a curve
+/// sized for ZEC.
 pub fn cost(q: u32, d: u32) -> i128 {
-    let (q, d) = (q as i128, d as i128);
-    (BASE_ZAT * d + SLOPE_ZAT * (d * (2 * q + d - 1) / 2)) * ZAT
+    cost_at(q, d, ZAT)
 }
 
-/// The most lots `budget` buys starting at lot `q`, at most `cap`.
+/// The same on a curve whose unit is `unit`.
+pub fn cost_at(q: u32, d: u32, unit: i128) -> i128 {
+    let (q, d) = (q as i128, d as i128);
+    (BASE_ZAT * d + SLOPE_ZAT * (d * (2 * q + d - 1) / 2)) * unit
+}
+
+/// The most lots `budget` buys starting at lot `q`, at most `cap`, sized
+/// for ZEC.
 pub fn lots_for(q: u32, budget: i128, cap: u32) -> u32 {
+    lots_for_at(q, budget, cap, ZAT)
+}
+
+/// The same on a curve whose unit is `unit`.
+pub fn lots_for_at(q: u32, budget: i128, cap: u32, unit: i128) -> u32 {
     let (mut lo, mut hi) = (0u32, cap);
     while lo < hi {
         let mid = lo + (hi - lo).div_ceil(2);
-        if cost(q, mid) <= budget {
+        if cost_at(q, mid, unit) <= budget {
             lo = mid;
         } else {
             hi = mid - 1;
@@ -122,6 +157,31 @@ pub struct CurveTerms {
     pub fee_bps: u32,
     /// Put up to create a token; returned to its creator at graduation.
     pub bond: Fixed,
+}
+
+/// How curves priced in one asset are sized (§166): set by the operator per
+/// quote asset, fixed per curve at creation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct QuoteTerms {
+    /// The ledger amount one unit of the curve's shape stands for.
+    pub unit: i128,
+    /// What a creator puts up, in this asset.
+    pub bond: Fixed,
+}
+
+impl QuoteTerms {
+    /// The unit that makes a curve graduate at `mc` (ledger units of the
+    /// quote) fully diluted, rounded down.
+    pub fn unit_for(mc: Fixed) -> i128 {
+        mc.0 / GRADUATION_MC_UNITS
+    }
+
+    /// Whether these terms are within what the ledger takes.
+    pub fn valid(&self) -> bool {
+        (MIN_UNIT..=MAX_UNIT).contains(&self.unit)
+            && self.bond.0 >= 0
+            && self.bond.0 <= MAX_BOND_UNITS.saturating_mul(self.unit)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,6 +206,9 @@ pub struct Curve {
     pub creator_fees: Fixed,
     pub bond: Fixed,
     pub graduated: bool,
+    /// The ledger amount one unit of the shape stands for: [`ZAT`] for a
+    /// curve sized for ZEC, which every curve made before §166 is.
+    pub unit: i128,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -163,7 +226,12 @@ pub struct CurveOrder {
 impl Curve {
     /// The price of the next lot, per token, in the ledger's units.
     pub fn price_per_token(&self) -> Fixed {
-        Fixed(cost(self.sold, 1) / LOT_TOKENS)
+        Fixed(cost_at(self.sold, 1, self.unit) / LOT_TOKENS)
+    }
+
+    /// The smallest buy this curve takes.
+    pub fn min_buy(&self) -> Fixed {
+        Fixed(MIN_BUY_UNITS * self.unit)
     }
 
     /// What the curve holds of its quote asset.
@@ -192,6 +260,17 @@ pub(crate) fn curve_leaf(c: &Curve) -> Hash {
         .bool(c.graduated)
         // The creator is private, like a launch's: committed with its source.
         .bytes(&id(b"objectvm.curve-creator.v1", &[&c.creator, &c.source]));
+    // A curve sized for another coin says so; one sized for ZEC hashes as it
+    // always did, so every root sealed before §166 keeps.
+    if c.unit != ZAT {
+        e.bytes(b"objectvm.curve-unit.v1").fixed(Fixed(c.unit));
+    }
+    e.leaf()
+}
+
+fn quote_leaf(quote: &Address, q: &QuoteTerms) -> Hash {
+    let mut e = Encoder::new();
+    e.bytes(b"objectvm.curve-quote-leaf.v1").bytes(quote).fixed(Fixed(q.unit)).fixed(q.bond);
     e.leaf()
 }
 
@@ -213,6 +292,7 @@ pub(crate) fn curve_order_leaf(o: &CurveOrder) -> Hash {
 pub(crate) fn section(
     e: &mut Encoder,
     terms: Option<CurveTerms>,
+    quotes: &std::collections::BTreeMap<Address, QuoteTerms>,
     curves: &std::collections::BTreeMap<Address, Curve>,
     orders: &[CurveOrder],
 ) {
@@ -221,6 +301,46 @@ pub(crate) fn section(
     let leaves: Vec<Hash> = curves.values().map(curve_leaf).collect();
     let order_leaves: Vec<Hash> = orders.iter().map(curve_order_leaf).collect();
     e.u32(curves.len() as u32).bytes(&merkle_root(&leaves)).bytes(&merkle_root(&order_leaves));
+    // Joined once a quote asset is named (§166), so older roots keep.
+    if !quotes.is_empty() {
+        let q: Vec<Hash> = quotes.iter().map(|(a, t)| quote_leaf(a, t)).collect();
+        e.bytes(b"objectvm.curve-quotes.v1").u32(q.len() as u32).bytes(&merkle_root(&q));
+    }
+}
+
+/// MARKET11's tail (§166): the named quote assets, and the unit of every
+/// curve not sized for ZEC.
+pub(crate) fn encode_quotes(
+    e: &mut Encoder,
+    quotes: &std::collections::BTreeMap<Address, QuoteTerms>,
+    curves: &std::collections::BTreeMap<Address, Curve>,
+) {
+    e.u32(quotes.len() as u32);
+    for (a, q) in quotes {
+        e.bytes(a).fixed(Fixed(q.unit)).fixed(q.bond);
+    }
+    let sized: Vec<&Curve> = curves.values().filter(|c| c.unit != ZAT).collect();
+    e.u32(sized.len() as u32);
+    for c in sized {
+        e.bytes(&c.token).fixed(Fixed(c.unit));
+    }
+}
+
+pub(crate) fn decode_quotes(
+    d: &mut Decoder,
+    curves: &mut std::collections::BTreeMap<Address, Curve>,
+) -> Option<std::collections::BTreeMap<Address, QuoteTerms>> {
+    let mut quotes = std::collections::BTreeMap::new();
+    for _ in 0..d.u32().ok()? {
+        let a = d.hash().ok()?;
+        quotes.insert(a, QuoteTerms { unit: d.fixed().ok()?.0, bond: d.fixed().ok()? });
+    }
+    for _ in 0..d.u32().ok()? {
+        let token = d.hash().ok()?;
+        let unit = d.fixed().ok()?.0;
+        curves.get_mut(&token)?.unit = unit;
+    }
+    Some(quotes)
 }
 
 pub(crate) fn encode(
@@ -285,6 +405,7 @@ pub(crate) fn decode(
                 creator_fees: d.fixed().ok()?,
                 bond: d.fixed().ok()?,
                 graduated: d.u8().ok()? == 1,
+                unit: ZAT,
             },
         );
     }
@@ -312,7 +433,7 @@ pub(crate) struct SellFill {
 }
 
 /// Sells, all at one price: the average over the lots they return.
-pub(crate) fn clear_sells(sold: u32, fee_bps: u32, orders: &[CurveOrder]) -> SellFill {
+pub(crate) fn clear_sells(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> SellFill {
     let mut active: Vec<bool> = vec![true; orders.len()];
     loop {
         let lots: u64 = orders
@@ -328,7 +449,7 @@ pub(crate) fn clear_sells(sold: u32, fee_bps: u32, orders: &[CurveOrder]) -> Sel
             return SellFill { filled: Vec::new(), refunded: (0..orders.len()).collect(), lots: 0 };
         }
         let lots = lots as u32;
-        let total = if lots == 0 { 0 } else { cost(sold - lots, lots) };
+        let total = if lots == 0 { 0 } else { cost_at(sold - lots, lots, unit) };
         let mut filled = Vec::new();
         let mut unmet = None;
         for (i, o) in orders.iter().enumerate() {
@@ -375,7 +496,7 @@ fn budget(amount_in: i128, fee_bps: u32) -> i128 {
 
 /// Buys, all at one price: the average over the lots they take, shared in
 /// proportion to what each put in, never past graduation.
-pub(crate) fn clear_buys(sold: u32, fee_bps: u32, orders: &[CurveOrder]) -> BuyFill {
+pub(crate) fn clear_buys(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> BuyFill {
     let cap = GRADUATE_AT.saturating_sub(sold);
     let mut active: Vec<bool> = vec![true; orders.len()];
     loop {
@@ -385,8 +506,8 @@ pub(crate) fn clear_buys(sold: u32, fee_bps: u32, orders: &[CurveOrder]) -> BuyF
             .filter(|(_, a)| **a)
             .map(|(o, _)| budget(o.amount_in.0, fee_bps))
             .sum();
-        let lots = if total_budget <= 0 { 0 } else { lots_for(sold, total_budget, cap) };
-        let total = cost(sold, lots);
+        let lots = if total_budget <= 0 { 0 } else { lots_for_at(sold, total_budget, cap, unit) };
+        let total = cost_at(sold, lots, unit);
         let mut filled = Vec::new();
         let mut unmet = None;
         for (i, o) in orders.iter().enumerate() {
@@ -442,8 +563,15 @@ impl ObjectVm {
             return Err("a curve is priced in an asset people can deposit");
         }
         let terms = self.market.curve_terms.unwrap_or_default();
-        if terms.bond.0 > 0 {
-            let f = self.plan_funding(creator, inputs, change, &[(*quote, terms.bond)])?;
+        // Sized for its quote asset once the operator names any (§166);
+        // before that, every asset prices at ZEC's size, as it always did.
+        let (unit, bond) = match self.market.curve_quotes.get(quote) {
+            Some(q) => (q.unit, q.bond),
+            None if self.market.curve_quotes.is_empty() => (ZAT, terms.bond),
+            None => return Err("coins are not launched in that asset"),
+        };
+        if bond.0 > 0 {
+            let f = self.plan_funding(creator, inputs, change, &[(*quote, bond)])?;
             self.apply_funding(creator, inputs, f);
         } else if !inputs.is_empty() || !change.is_empty() {
             return Err("there is no bond to pay");
@@ -464,8 +592,9 @@ impl ObjectVm {
                 reserve: Fixed::ZERO,
                 graduation: Fixed::ZERO,
                 creator_fees: Fixed::ZERO,
-                bond: terms.bond,
+                bond,
                 graduated: false,
+                unit,
             },
         );
         Ok(Receipt::CurveCreated { token })
@@ -491,7 +620,7 @@ impl ObjectVm {
             return Err("a minimum below nothing");
         }
         if buy {
-            if amount_in < MIN_BUY {
+            if amount_in < c.min_buy() {
                 return Err("a buy is at least 0.001");
             }
         } else if amount_in.0 <= 0 || amount_in.0 % LOT.0 != 0 {
@@ -544,7 +673,7 @@ impl ObjectVm {
             let sells: Vec<CurveOrder> = batch.iter().filter(|o| !o.buy).copied().collect();
             let buys: Vec<CurveOrder> = batch.iter().filter(|o| o.buy).copied().collect();
 
-            let s = clear_sells(c.sold, c.fee_bps, &sells);
+            let s = clear_sells(c.sold, c.fee_bps, c.unit, &sells);
             let mut paid_out: i128 = 0;
             for (i, gross, fee) in &s.filled {
                 let o = &sells[*i];
@@ -566,7 +695,7 @@ impl ObjectVm {
             }
 
             let sold = self.market.curves[&token].sold;
-            let b = clear_buys(sold, c.fee_bps, &buys);
+            let b = clear_buys(sold, c.fee_bps, c.unit, &buys);
             let mut paid_in: i128 = 0;
             for (i, lots, paid, fee) in &b.filled {
                 let o = &buys[*i];
@@ -673,7 +802,7 @@ mod tests {
     #[test]
     fn buyers_share_one_price_and_the_curve_is_never_short() {
         let orders = [order(1, true, 3 * 100_000_000 * ZAT / 100, 0), order(2, true, 100_000_000 * ZAT / 100, 0)];
-        let f = clear_buys(1_000, 100, &orders);
+        let f = clear_buys(1_000, 100, ZAT, &orders);
         let paid: i128 = f.filled.iter().map(|x| x.2).sum();
         assert!(paid >= cost(1_000, f.lots), "buyers pay at least what the lots cost");
         // Three times the money, three times the lots (to a lot).
@@ -688,8 +817,8 @@ mod tests {
     fn order_within_the_batch_changes_nothing() {
         let a = [order(1, true, 50_000_000 * ZAT, 0), order(2, true, 20_000_000 * ZAT, 0), order(3, true, 7_000_000 * ZAT, 0)];
         let b = [a[2], a[0], a[1]];
-        let fa = clear_buys(5_000, 100, &a);
-        let fb = clear_buys(5_000, 100, &b);
+        let fa = clear_buys(5_000, 100, ZAT, &a);
+        let fb = clear_buys(5_000, 100, ZAT, &b);
         let by = |f: &BuyFill, o: &[CurveOrder]| {
             let mut v: Vec<_> = f.filled.iter().map(|x| (o[x.0].id, x.1, x.2)).collect();
             v.sort();
@@ -701,7 +830,7 @@ mod tests {
     #[test]
     fn a_batch_never_buys_past_graduation() {
         let whale = [order(1, true, 1_000 * 100_000_000 * ZAT, 0)];
-        let f = clear_buys(GRADUATE_AT - 10, 0, &whale);
+        let f = clear_buys(GRADUATE_AT - 10, 0, ZAT, &whale);
         assert_eq!(f.lots, 10);
         assert_eq!(f.filled[0].2, cost(GRADUATE_AT - 10, 10));
     }
@@ -709,7 +838,7 @@ mod tests {
     #[test]
     fn sellers_get_one_price_and_the_reserve_keeps_the_dust() {
         let sells = [order(1, false, 3 * LOT.0, 0), order(2, false, 4 * LOT.0, 0)];
-        let f = clear_sells(20_000, 100, &sells);
+        let f = clear_sells(20_000, 100, ZAT, &sells);
         assert_eq!(f.lots, 7);
         let gross: i128 = f.filled.iter().map(|x| x.1).sum();
         assert!(gross <= cost(20_000 - 7, 7));
@@ -720,7 +849,7 @@ mod tests {
     #[test]
     fn an_unmet_minimum_is_refunded_and_the_rest_reprice() {
         let orders = [order(1, true, 10_000_000 * ZAT, 0), order(2, true, 10_000_000 * ZAT, 10_000 * LOT.0)];
-        let f = clear_buys(0, 0, &orders);
+        let f = clear_buys(0, 0, ZAT, &orders);
         assert_eq!(f.refunded, vec![1]);
         assert_eq!(f.filled.len(), 1);
     }
