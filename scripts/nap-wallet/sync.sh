@@ -17,6 +17,8 @@ PATHS=(
   apps/nap-web apps/extension apps/nap-mobile
   apps/nap-connect/nap-connect.js apps/nap-connect/README.md
   zyn-vm zyn-bridge zyn-custody zyn-pool
+  # NU7 on testnet (§165): the patched zcash_protocol and the cfg that turns it on.
+  vendor/zcash_protocol .cargo/config.toml
 )
 # Local tooling that works on the operator's own test wallets.
 DROP=(apps/nap-web/testnet-wallet.local.mjs apps/nap-web/rehearse.local.mjs)
@@ -33,7 +35,7 @@ cp "$ZYN/Cargo.lock" "$OUT/Cargo.lock"
 cargo metadata --format-version 1 --offline >/dev/null
 
 # Nothing secret goes out: keys, phrases, tokens, private endpoints.
-if grep -rIlE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|ZYN_SUBMIT_TOKEN=[^$ ]|"secretKey" *: *\[|xprv[0-9A-Za-z]{20,}|AKIA[0-9A-Z]{16}|ghp_[0-9A-Za-z]{30,}|sk-[0-9A-Za-z]{30,}' . --exclude-dir=.git --exclude-dir=node_modules; then
+if grep -rIlE --exclude-dir=.git --exclude-dir=node_modules -e '-----BEGIN [A-Z ]*PRIVATE KEY-----|ZYN_SUBMIT_TOKEN=[^$ ]|"secretKey" *: *\[|xprv[0-9A-Za-z]{20,}|AKIA[0-9A-Z]{16}|ghp_[0-9A-Za-z]{30,}|sk-[0-9A-Za-z]{30,}' .; then
   echo "refusing: the files above look like they hold a secret" >&2
   exit 1
 fi
