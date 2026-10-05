@@ -93,6 +93,9 @@ pub enum PayoutError {
     /// the builder disagree about what is being signed, and sending it again
     /// cannot resolve a disagreement.
     BadSignature,
+    /// Fewer custodians answered a signing round than the threshold needs —
+    /// one asleep, a tunnel down. Nothing was signed; the next pass asks again.
+    TooFewSigners { round: u8, answered: usize, needed: u16 },
     /// A signature arrived for an action the bundle does not have.
     NoSuchAction(usize),
 }
@@ -115,6 +118,13 @@ impl std::fmt::Display for PayoutError {
                     "a signature did not authorise the action it was given for"
                 )
             }
+            PayoutError::TooFewSigners { round, answered, needed } => write!(
+                f,
+                "only {} custodian(s) answered signing round {}, and {} are needed — check that the others are running and reachable; nothing was signed",
+                answered,
+                if *round == 1 { "one" } else { "two" },
+                needed
+            ),
             PayoutError::NoSuchAction(i) => write!(f, "no action {} in this bundle", i),
         }
     }
@@ -808,7 +818,7 @@ pub fn sign_all_with(
     // Round one: collect commitments; keep a threshold of whoever answered.
     let r1 = quorum.round1(request_id, sighash, &alphas, now);
     if r1.len() < usize::from(threshold) {
-        return Err(PayoutError::BadSignature);
+        return Err(PayoutError::TooFewSigners { round: 1, answered: r1.len(), needed: threshold });
     }
     let chosen: Vec<Identifier> = r1.keys().take(usize::from(threshold)).copied().collect();
 
@@ -826,7 +836,7 @@ pub fn sign_all_with(
     // Round two: the chosen participants each return a share per action.
     let r2 = quorum.round2(request_id, &chosen, &packages);
     if r2.len() < usize::from(threshold) {
-        return Err(PayoutError::BadSignature);
+        return Err(PayoutError::TooFewSigners { round: 2, answered: r2.len(), needed: threshold });
     }
 
     for (i, n) in needed.iter().enumerate() {
@@ -1242,6 +1252,27 @@ mod tests {
         // NU7's first testnet block (DECISIONS §165): built, proved, signed,
         // read back by the standard reader under NU7's branch.
         payout_round_trip(4_465_026);
+    }
+
+    #[test]
+    fn too_few_custodians_is_said_as_such_not_as_a_bad_signature() {
+        // 4 Oct 2026 on testnet: two of three custodians asleep, and every
+        // anchor pass said "a signature did not authorise…".
+        let keys: Vec<(Identifier, crate::ceremony::VaultKeys)> = Ceremony::new(2, 3)
+            .unwrap()
+            .run(&mut rand::rngs::OsRng)
+            .unwrap()
+            .into_iter()
+            .collect();
+        let (store, fvk, change_to) = funded_vault(100_000, &keys);
+        let mut payout = build(&store, &fvk, None, &[Payment::new(a_recipient(), 400)], change_to, v3(), rand::rngs::OsRng).unwrap();
+        let env = Envelope::testnet_at(4_300_000);
+        let sighash = payout.sighash(&env).unwrap();
+        payout.finalize_io(sighash, rand::rngs::OsRng).unwrap();
+        let one: Vec<(Identifier, &crate::ceremony::VaultKeys)> = keys.iter().take(1).map(|(i, k)| (*i, k)).collect();
+        let e = sign_all(&mut payout, sighash, &one, 2, rand::rngs::OsRng).unwrap_err();
+        assert!(matches!(e, PayoutError::TooFewSigners { round: 1, answered: 1, needed: 2 }), "{e:?}");
+        assert!(e.to_string().contains("only 1 custodian(s) answered signing round one, and 2 are needed"), "{e}");
     }
 
     fn payout_round_trip(height: u32) {
