@@ -2640,6 +2640,8 @@ nothing to replay yet: no DA bundle exists until the first anchor, which waits
 on a funded vault.
 Without terms mainnet curves charge nothing and need no bond.
 
+**Launch assets (§166).** A coin can be priced in any named launch asset; each one's curves are sized from a graduation market cap in that coin. Name, resize or stop one with `zyn-curve-quote <asset> <graduation mc> <bond>` (`0 0` stops new coins in it, and existing ones keep trading). Run it on the box under `systemd-run --wait --pipe -p EnvironmentFile=<the node's env>` (add `-E ZYN_OBJECT_NODE=http://127.0.0.1:8599` for mainnet) so the token is never typed. `--print` shows the unit, the raise and the intent without sending. **Testnet 212 (5 Oct):** ZEC 47.0552, ETH 23, BOLD 63,000, SOL 525, no bonds. **Mainnet:** ZEC 47.0552 / 0.05, ETH 23 / 0.025, BOLD 63,000 / 67 (`s166-mainnet.sh`). Replicas must run a §166 build before op 52 reaches their chain.
+
 **Jade** (Zyn's launchpad, `apps/jade`, jade.zyn-network.com) has no build step: `cd apps/jade && npm run deploy` (Pages project `zyn-jade`). `?network=testnet` reads chain 212.
 
 ### Jade: deploy, content store, history (moved under Zyn 2 Oct 2026)
