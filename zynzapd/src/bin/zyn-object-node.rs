@@ -19,6 +19,8 @@
 //!   ZYN_LISTEN         JSON-RPC, read and write        (127.0.0.1:8399)
 //!   ZYN_DATA_DIR       where state is kept             (./object-data)
 //!   ZYN_EPOCH_SECS     seal at least this often        (10)
+//!   ZYN_ANCHOR_IDLE_SECS  a standalone anchor after this long without
+//!                      one; 0 = only on Zcash requests (§164)   (0)
 //!   ZYN_MAX_IO         objects per spend               (16)
 //! ```
 //!
@@ -2475,8 +2477,9 @@ fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
         chain,
     )
     .ok()?
-    // Anchors on demand (§159): with ZEC exits to carry, or once the chain has
-    // been idle ZYN_ANCHOR_IDLE_SECS since the last one.
+    // Anchors on Zcash requests (§159, §164): with ZEC exits to carry, after a
+    // ZEC deposit is credited, or — only if ZYN_ANCHOR_IDLE_SECS is set — once
+    // the chain has been idle that long since the last one.
     .on_demand();
 
     eprintln!(
@@ -2616,6 +2619,18 @@ fn da_key() -> Option<[u8; 32]> {
     }
 }
 
+/// The node's epoch policy. Epochs seal on the clock; anchors are never due
+/// by count, and by time only when `anchor_idle` is above 0 (§164) — so with
+/// the default a quiet chain proposes nothing and waits for a Zcash request.
+fn anchor_policy(epoch_secs: u64, anchor_idle: u64, anchoring: bool) -> EpochPolicy {
+    EpochPolicy {
+        intents_per_epoch: 64,
+        epochs_per_anchor: u64::MAX, // never by count
+        max_seconds_per_epoch: epoch_secs,
+        max_seconds_per_anchor: if anchoring { anchor_idle } else { 0 },
+    }
+}
+
 /// Write both note trees where the next boot will look for them.
 fn save_note_trees(dir: &str, chain: u32, notes: &zyn_custody::shielded::PoolStores) {
     for (pool, store) in [
@@ -2651,17 +2666,11 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Anchors are on demand (§159): every ZEC exit carries one, and with no
-    // exits a standalone anchor waits this long after the last. A standalone
-    // anchor's fee is the vault's own money, so it is also the cadence that
-    // spends the fee reserve.
-    let anchor_idle: u64 = env("ZYN_ANCHOR_IDLE_SECS", "86400").parse().unwrap_or(86_400);
-    let policy = EpochPolicy {
-        intents_per_epoch: 64,
-        epochs_per_anchor: u64::MAX, // never by count
-        max_seconds_per_epoch: epoch_secs,
-        max_seconds_per_anchor: if anchoring.is_some() { anchor_idle.max(1) } else { 0 },
-    };
+    // Anchors go out on Zcash requests (§164): every ZEC exit carries one, and
+    // a ZEC deposit calls for one. ZYN_ANCHOR_IDLE_SECS > 0 adds a standalone
+    // anchor after that long without one; 0, the default, means never.
+    let anchor_idle: u64 = env("ZYN_ANCHOR_IDLE_SECS", "0").parse().unwrap_or(0);
+    let policy = anchor_policy(epoch_secs, anchor_idle, anchoring.is_some());
 
     let vm = match load(&dir, chain) {
         Some(v) => {
@@ -2985,15 +2994,10 @@ fn main() {
                 take_lend_snapshot(n.state());
             }
             if sealed {
-                // A sealed epoch is a root worth carrying. Proposing is free
-                // and idempotent — `propose_anchor` refuses while one is in
-                // flight — and the settler below is what turns a proposal
-                // into something Zcash has seen.
-                // On demand (§159): the settler proposes for exits to ride;
-                // here only once the idle interval is past.
-                if n.anchor_due(now_secs()) {
-                    n.propose_anchor(now_secs());
-                }
+                // No proposal here (§164): the settler proposes when an anchor
+                // is wanted — exits, a ZEC deposit, the optional idle interval
+                // — and only once the fee can be paid, so a proposal made here
+                // could only sit unsent.
                 // The seal belongs in the journal wherever it happens. Sealing
                 // here and recording it only on the submit path left the epoch
                 // closed in memory and open on disk, which every verifier
@@ -3062,6 +3066,11 @@ fn main() {
         // the same blocks into it twice.
         let (scanner, notes, zebra, confirmations) =
             (a.scanner, a.notes, a.zebra, a.confirmations);
+        // A credited ZEC deposit calls for an anchor (§164).
+        let demand = a.settler.demand();
+        if let Some(seq) = demand.through() {
+            eprintln!("zyn-object-node: ZEC deposits through seq {seq} are waiting on an anchor");
+        }
         let addresses = a.addresses.clone();
         let dir2 = dir.clone();
         // The bridge shares this thread with the note walk on purpose. Both
@@ -3169,7 +3178,14 @@ fn main() {
                             chain,
                         ) {
                             Ok(0) => {}
-                            Ok(n) => eprintln!("zyn-object-node: bridge credited {n} deposit(s)"),
+                            Ok(n) => {
+                                eprintln!("zyn-object-node: bridge credited {n} deposit(s)");
+                                // Read after the credits: whatever epoch they
+                                // landed in, the next seal covers this seq.
+                                if let Ok(seq) = bridge_node.lock().map(|n| n.state().seq()) {
+                                    demand.want_through(seq);
+                                }
+                            }
                             Err(e) => {
                                 eprintln!("zyn-object-node: BRIDGE PASS FAILED: {e}");
                                 if let Ok(mut g) = sync_writer.lock() {
@@ -3220,6 +3236,8 @@ fn main() {
         if let Some(ex) = exits.as_mut() {
             ex.dropped(&settler.abandoned());
         }
+        // The last anchor failure logged: the same one again is not news.
+        let mut last_failure: Option<String> = None;
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(20));
             if let Some(floor) = BACKING_FLOOR.get() {
@@ -3265,6 +3283,7 @@ fn main() {
             // The pass an anchor confirms sends nothing new; the next one
             // carries them, so they wait that pass too.
             let just_confirmed = matches!(polled, Ok(Some(_)));
+            let pass_ok = polled.is_ok();
             let hold = waiting_exits && (settler.in_flight().is_some() || just_confirmed);
             // A pass can propose, confirm or drop epochs: keep disk in step.
             if let Ok(n) = node.lock() {
@@ -3321,7 +3340,15 @@ fn main() {
                     }
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("zyn-object-node: anchor pass failed: {e}"),
+                Err(e) => {
+                    if last_failure.as_deref() != Some(e.as_str()) {
+                        eprintln!("zyn-object-node: anchor pass failed: {e}");
+                    }
+                    last_failure = Some(e);
+                }
+            }
+            if pass_ok && last_failure.take().is_some() {
+                eprintln!("zyn-object-node: anchor pass ok again");
             }
             // Exits, after anchoring. Both spend from the same vault, and
             // running the anchor first keeps the chain's own settlement ahead
@@ -3715,6 +3742,36 @@ mod signed_door {
         save_anchoring(std::path::Path::new(&r.dir), &back);
         let mut again = restore_anchoring(&r.dir, CHAIN, back.state().clone(), policy, 7);
         assert_eq!(again.propose_anchor(8).unwrap().previous_root, a.checkpoint.state_root);
+    }
+
+    /// §164: with ZYN_ANCHOR_IDLE_SECS at its default (0) the node never
+    /// finds an anchor due, however many epochs seal or however long it waits
+    /// — the settler anchors on Zcash requests only. A value above 0 is still
+    /// a fallback cadence; with anchoring off nothing is ever due.
+    #[test]
+    fn anchors_are_never_due_by_time_unless_an_idle_interval_is_set() {
+        let quiet = anchor_policy(15, 0, true);
+        assert!(quiet.validate().is_ok());
+        let mut n: Node<ObjectVm> = Node::new(CHAIN, objectvm::Limits { max_io: 8 }, quiet, Economics::flat(1)).with_manual_anchoring();
+        for i in 1..=200u64 {
+            n.seal_on_clock(i * 15).unwrap();
+        }
+        assert_eq!(n.pending().len(), 200);
+        for now in [0, 3_600, 86_400, 365 * 86_400] {
+            assert!(!n.anchor_due(now), "no anchor is due by time at {now}");
+        }
+
+        let daily = anchor_policy(15, 86_400, true);
+        assert!(daily.validate().is_ok());
+        let mut n: Node<ObjectVm> = Node::new(CHAIN, objectvm::Limits { max_io: 8 }, daily, Economics::flat(1)).with_manual_anchoring();
+        n.seal_on_clock(15).unwrap();
+        assert!(!n.anchor_due(3_600));
+        assert!(n.anchor_due(86_400), "a set interval still anchors");
+
+        let off = anchor_policy(15, 86_400, false);
+        let mut n: Node<ObjectVm> = Node::new(CHAIN, objectvm::Limits { max_io: 8 }, off, Economics::flat(1)).with_manual_anchoring();
+        n.seal_on_clock(15).unwrap();
+        assert!(!n.anchor_due(365 * 86_400), "no vault, no anchors");
     }
 
     impl Rig {

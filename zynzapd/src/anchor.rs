@@ -117,6 +117,12 @@ pub trait Builder {
     fn build(&mut self, anchor: &Anchor, tip: u64, riders: &[Rider]) -> Result<Built, String>;
     /// The transaction is final: its spent notes are gone from the chain.
     fn settled(&mut self, pool: ValuePool, spent: &[u64]);
+    /// Whether the vault's fee reserve can pay an anchor that carries no
+    /// exit. Asked before proposing one (§164), so a short reserve is a wait,
+    /// not a failure every pass.
+    fn reserve(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// The 512-byte memo field for an anchor: the anchor memo, zero-padded.
@@ -337,13 +343,8 @@ impl Builder for ZcashBuilder {
         // With riders the fee comes out of the first exit, as it would if the
         // exit went alone; only a standalone anchor spends the vault's own
         // money, and only from its fee reserve.
-        if let (Some(floor), true) = (&self.backing_floor, riders.is_empty()) {
-            let mut held: u64 = 0;
-            for p in [ValuePool::Orchard, ValuePool::Ironwood] {
-                let store = self.notes.of(p).lock().map_err(|_| "note store poisoned".to_string())?;
-                held = held.saturating_add(store.balance());
-            }
-            covers_backing(held, floor.load(std::sync::atomic::Ordering::SeqCst))?;
+        if riders.is_empty() {
+            self.reserve()?;
         }
         self.tree_matches_node(pool)?;
         let mut payments: Vec<Payment> = riders.iter().map(|r| Payment::new(r.to, r.zatoshi)).collect();
@@ -436,6 +437,18 @@ impl Builder for ZcashBuilder {
         })
     }
 
+    fn reserve(&self) -> Result<(), String> {
+        let Some(floor) = &self.backing_floor else {
+            return Ok(());
+        };
+        let mut held: u64 = 0;
+        for p in [ValuePool::Orchard, ValuePool::Ironwood] {
+            let store = self.notes.of(p).lock().map_err(|_| "note store poisoned".to_string())?;
+            held = held.saturating_add(store.balance());
+        }
+        covers_backing(held, floor.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
     fn settled(&mut self, pool: ValuePool, spent: &[u64]) {
         if let Ok(mut store) = self.notes.of(pool).lock() {
             for pos in spent {
@@ -451,6 +464,69 @@ pub struct Confirmed {
     pub anchor: Anchor,
     pub txid: String,
     pub height: u64,
+}
+
+/// Zcash requests waiting on an anchor (§164): the ledger sequence number a
+/// ZEC deposit was credited at, which the next anchor must cover.
+///
+/// Shared between the deposit bridge, which raises it, and the settler, which
+/// clears it once an anchor covering it is confirmed. Kept on disk beside the
+/// anchor ledger, so a restart in between still anchors the deposit.
+#[derive(Clone, Debug)]
+pub struct Demand {
+    through: Arc<Mutex<Option<u64>>>,
+    path: Option<PathBuf>,
+}
+
+impl Demand {
+    /// The demand saved in `dir` for `chain_id`, or none.
+    pub fn load(dir: &Path, chain_id: u32) -> Demand {
+        let path = dir.join(format!("chain-{chain_id}.anchor-demand"));
+        let through = std::fs::read_to_string(&path).ok().and_then(|s| s.trim().parse().ok());
+        Demand { through: Arc::new(Mutex::new(through)), path: Some(path) }
+    }
+
+    /// The next anchor must cover the ledger through `seq`.
+    pub fn want_through(&self, seq: u64) {
+        if let Ok(mut t) = self.through.lock() {
+            if t.is_some_and(|d| d >= seq) {
+                return;
+            }
+            *t = Some(seq);
+            self.save(*t);
+        }
+    }
+
+    pub fn through(&self) -> Option<u64> {
+        self.through.lock().ok().and_then(|t| *t)
+    }
+
+    /// An anchor through `seq` is confirmed: whatever it covered waits no more.
+    fn met_by(&self, seq: u64) {
+        if let Ok(mut t) = self.through.lock() {
+            if t.is_some_and(|d| d <= seq) {
+                *t = None;
+                self.save(None);
+            }
+        }
+    }
+
+    fn save(&self, through: Option<u64>) {
+        let Some(path) = &self.path else { return };
+        let written = match through {
+            Some(seq) => {
+                let tmp = path.with_extension("anchor-demand.tmp");
+                std::fs::write(&tmp, seq.to_string()).and_then(|_| std::fs::rename(&tmp, path))
+            }
+            None => match std::fs::remove_file(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                r => r,
+            },
+        };
+        if let Err(e) = written {
+            eprintln!("zynzapd: cannot save the anchor demand: {e}");
+        }
+    }
 }
 
 /// Proposes, broadcasts, confirms. One in flight at a time.
@@ -478,9 +554,15 @@ pub struct AnchorSettler<C: Chain, B: Builder> {
     /// not among these was sent before a restart; if the node can no longer
     /// reproduce it, its epochs were lost with that process (§157.15).
     sent_here: Vec<[u8; 32]>,
-    /// Anchor only when there is a reason (§159): exits to carry, or the
-    /// node's idle interval (`anchor_due`) past. Off: anchor on every seal.
+    /// Anchor only when there is a reason (§159, §164): exits to carry, a ZEC
+    /// deposit credited since the last anchor, or the node's idle interval
+    /// (`anchor_due`, off by default) past. Off: anchor on every seal.
     on_demand: bool,
+    /// ZEC deposits waiting on an anchor (§164).
+    demand: Demand,
+    /// The fee reserve could not pay an anchor last time it was asked; said
+    /// once when it starts and once when it ends, not every pass.
+    reserve_short: bool,
     /// Exits offered for the next anchor this pass.
     riders: Vec<Rider>,
     /// The transaction that took riders this pass, and which exits.
@@ -516,6 +598,8 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
             reanchor_pending: Vec::new(),
             sent_here: Vec::new(),
             on_demand: false,
+            demand: Demand::load(dir, chain_id),
+            reserve_short: false,
             riders: Vec::new(),
             carried: None,
             dropped: Vec::new(),
@@ -528,6 +612,11 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
     pub fn on_demand(mut self) -> Self {
         self.on_demand = true;
         self
+    }
+
+    /// The handle the deposit bridge raises when it credits ZEC (§164).
+    pub fn demand(&self) -> Demand {
+        self.demand.clone()
     }
 
     /// Hold new anchors while another payment from the vault confirms.
@@ -852,6 +941,7 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
                     self.builder.settled(pool, &spent);
                     self.ledger.entries[i].status = Status::Confirmed;
                     changed = true;
+                    self.demand.met_by(anchor.checkpoint.seq);
                     confirmed = Some(Confirmed {
                         anchor,
                         txid: id,
@@ -909,13 +999,60 @@ impl<C: Chain, B: Builder> AnchorSettler<C, B> {
         if self.hold {
             return Ok(());
         }
+        // Whether an anchor should go out at all. On demand (§164) that is
+        // for exits to ride, for a ZEC deposit credited and sealed since the
+        // last anchor, for an anchor already sent once (rebuilt after it was
+        // abandoned), or once the optional idle interval is past. Nothing
+        // else: a quiet chain waits for its next Zcash request.
+        let (wanted, sent_before) = {
+            let n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
+            // Anchored already: a restart between confirming and clearing.
+            if let (Some(d), Some(last)) = (self.demand.through(), n.ledger().last()) {
+                if last.checkpoint.seq >= d {
+                    self.demand.met_by(last.checkpoint.seq);
+                }
+            }
+            let sealed_seq = n.pending().last().map(|s| s.checkpoint.seq);
+            let deposit = self.demand.through().is_some_and(|d| sealed_seq.is_some_and(|s| s >= d));
+            let sent_before = n.proposed().is_some_and(|a| self.ledger.entries.iter().any(|e| e.nonce == a.id()));
+            let wanted = !self.on_demand || !riders.is_empty() || deposit || sent_before || n.anchor_due(now);
+            (wanted, sent_before)
+        };
+        if !wanted {
+            return Ok(());
+        }
+        // An anchor with no exit aboard pays its fee from the vault's own
+        // reserve. Asked before proposing, and outside the node lock (the note
+        // stores can be held for a scan step, A162): a short reserve is a wait
+        // that changes nothing and is said once.
+        if riders.is_empty() {
+            match self.builder.reserve() {
+                Err(e) => {
+                    if !self.reserve_short {
+                        eprintln!("zynzapd: anchoring waits for the fee reserve: {e}");
+                        self.reserve_short = true;
+                    }
+                    return Ok(());
+                }
+                Ok(()) if self.reserve_short => {
+                    eprintln!("zynzapd: the fee reserve covers an anchor again");
+                    self.reserve_short = false;
+                }
+                Ok(()) => {}
+            }
+        }
         let proposal = {
             let mut n = node.lock().map_err(|_| "node lock poisoned".to_string())?;
-            // A proposal already made is carried whatever the reason. A new
-            // one, on demand, only for exits to ride or once the chain has
-            // been idle long enough.
-            let wanted = !self.on_demand || !riders.is_empty() || n.anchor_due(now);
-            n.proposed().copied().or_else(|| if wanted { n.propose_anchor(now) } else { None })
+            // A proposal never sent has never been on Zcash: bring it up to
+            // the newest sealed epoch, so the anchor covers the request that
+            // called for it rather than only what was sealed when it was made.
+            if self.on_demand && !sent_before {
+                let newest = n.pending().last().map(|s| s.checkpoint.seq);
+                if n.proposed().is_some_and(|a| newest.is_some_and(|s| s > a.checkpoint.seq)) {
+                    n.withdraw_proposal();
+                }
+            }
+            n.proposed().copied().or_else(|| n.propose_anchor(now))
         };
         let Some(anchor) = proposal else {
             return Ok(());
@@ -1046,9 +1183,17 @@ mod tests {
     struct FakeBuilder {
         builds: u32,
         fail: bool,
+        /// The fee reserve cannot pay a standalone anchor.
+        short: bool,
         settled: Vec<(ValuePool, Vec<u64>)>,
     }
     impl Builder for FakeBuilder {
+        fn reserve(&self) -> Result<(), String> {
+            if self.short {
+                return Err(covers_backing(10_000, 0).unwrap_err());
+            }
+            Ok(())
+        }
         fn build(&mut self, anchor: &Anchor, tip: u64, riders: &[Rider]) -> Result<Built, String> {
             if self.fail {
                 return Err("unfunded".into());
@@ -1104,6 +1249,35 @@ mod tests {
             n.submit_operator(d, 0);
         }
         Arc::new(Mutex::new(n))
+    }
+
+    /// The mainnet policy (§164): never by count, never by time.
+    fn quiet_node() -> SharedOf<SwapState> {
+        let n = node();
+        let st = Arc::try_unwrap(n).ok().unwrap().into_inner().unwrap().state().clone();
+        let policy = EpochPolicy { intents_per_epoch: 10, epochs_per_anchor: u64::MAX, max_seconds_per_epoch: 0, max_seconds_per_anchor: 0 };
+        let n = Arc::new(Mutex::new(Node::resume(st, policy, Economics::flat(1), 0).with_manual_anchoring()));
+        seal_another(&n);
+        n
+    }
+
+    /// Ten deposits: one more sealed epoch. Returns the seq it sealed at.
+    fn seal_another(n: &SharedOf<SwapState>) -> u64 {
+        let mut n = n.lock().unwrap();
+        let before = n.pending().len();
+        for _ in 0..10 {
+            let d = Intent::next_deposit(n.state(), [1u8; 32], XZEC, Fixed::whole(1), [0u8; 32]);
+            n.submit_operator(d, 0);
+        }
+        assert_eq!(n.pending().len(), before + 1);
+        n.pending().last().unwrap().checkpoint.seq
+    }
+
+    /// Bury whatever anchor is in flight and run the pass that confirms it.
+    fn confirm_in_flight(s: &mut AnchorSettler<FakeChain, FakeBuilder>, chain: &FakeChain, n: &SharedOf<SwapState>, now: u64) -> Confirmed {
+        let id = s.in_flight().expect("an anchor in flight").id.clone();
+        chain.0.borrow_mut().depth.insert(id, 3);
+        s.poll_once(n, now).unwrap().expect("confirmed this pass")
     }
 
     fn rider(index: u32) -> Rider {
@@ -1163,6 +1337,132 @@ mod tests {
         assert_eq!(s.take_dropped(), vec![txid.clone()]);
         let again = AnchorSettler::new(chain, FakeBuilder::default(), 3, &dir, 1).unwrap();
         assert_eq!(again.abandoned(), vec![txid], "a restart still knows it was abandoned");
+    }
+
+    /// §164: with no idle interval a quiet chain never anchors, however long
+    /// it waits; a credited ZEC deposit calls for one, which covers it, and
+    /// once that anchor is confirmed nothing is waiting any more.
+    #[test]
+    fn a_zec_deposit_calls_for_an_anchor_and_a_quiet_chain_never_does() {
+        let dir = tmp("deposit");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        for now in [0, 3_600, 86_400, 30 * 86_400] {
+            s.poll_once(&n, now).unwrap();
+        }
+        assert!(chain.0.borrow().broadcasts.is_empty(), "nothing asked for an anchor: none goes out");
+        assert!(n.lock().unwrap().proposed().is_none(), "and none is proposed");
+
+        let deposit = seal_another(&n);
+        s.demand().want_through(deposit);
+        s.poll_once(&n, 30 * 86_400 + 20).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1, "the deposit brings the anchor");
+        assert!(n.lock().unwrap().proposed().unwrap().checkpoint.seq >= deposit, "and the anchor covers it");
+
+        let c = confirm_in_flight(&mut s, &chain, &n, 30 * 86_400 + 40);
+        assert!(c.anchor.checkpoint.seq >= deposit);
+        assert_eq!(s.demand().through(), None, "anchored: nothing waits");
+        assert!(!dir.join("chain-1.anchor-demand").exists());
+        s.poll_once(&n, 30 * 86_400 + 60).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1, "and no second anchor follows");
+    }
+
+    /// A deposit credited in the open epoch waits for that epoch to seal, so
+    /// one anchor covers it rather than one before it and another after.
+    #[test]
+    fn a_deposit_waits_for_its_epoch_to_seal() {
+        let dir = tmp("unsealed");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        let open = n.lock().unwrap().state().seq() + 1;
+        s.demand().want_through(open);
+        s.poll_once(&n, 10).unwrap();
+        assert!(chain.0.borrow().broadcasts.is_empty(), "its epoch is still open");
+        seal_another(&n);
+        s.poll_once(&n, 20).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1);
+        assert!(n.lock().unwrap().proposed().unwrap().checkpoint.seq >= open);
+    }
+
+    /// The demand is on disk: a restart between the credit and the anchor
+    /// still anchors the deposit.
+    #[test]
+    fn a_deposit_waiting_on_an_anchor_survives_a_restart() {
+        let dir = tmp("demand-restart");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        let deposit = n.lock().unwrap().pending().last().unwrap().checkpoint.seq;
+        s.demand().want_through(deposit);
+        s.demand().want_through(deposit - 1); // never lowered
+        drop(s);
+        let mut again = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        assert_eq!(again.demand().through(), Some(deposit));
+        again.poll_once(&n, 10).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1);
+    }
+
+    /// A reserve that cannot pay the fee is a wait, not a failure every pass:
+    /// no proposal, no error; once it is topped up, one anchor goes out.
+    #[test]
+    fn a_short_reserve_waits_then_anchors_once_funded() {
+        let dir = tmp("short");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let builder = FakeBuilder { short: true, ..Default::default() };
+        let mut s = AnchorSettler::new(chain.clone(), builder, 3, &dir, 1).unwrap().on_demand();
+        s.demand().want_through(n.lock().unwrap().pending().last().unwrap().checkpoint.seq);
+        for now in [10, 30, 50] {
+            assert_eq!(s.poll_once(&n, now), Ok(None), "waiting is not an error");
+        }
+        assert!(chain.0.borrow().broadcasts.is_empty());
+        assert!(n.lock().unwrap().proposed().is_none(), "nothing proposed while it cannot be paid");
+        assert!(s.demand().through().is_some(), "the deposit still waits");
+
+        s.builder.short = false;
+        s.poll_once(&n, 70).unwrap();
+        s.poll_once(&n, 90).unwrap();
+        assert_eq!(s.builder.builds, 1, "funded: one anchor, not one per pass");
+        assert_eq!(s.ledger().entries.len(), 1);
+    }
+
+    /// An exit still rides with no idle interval and an empty reserve: its
+    /// own payout pays the fee.
+    #[test]
+    fn an_exit_rides_whatever_the_reserve() {
+        let dir = tmp("ride-short");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let builder = FakeBuilder { short: true, ..Default::default() };
+        let mut s = AnchorSettler::new(chain.clone(), builder, 3, &dir, 1).unwrap().on_demand();
+        s.offer_riders(vec![rider(2)]);
+        s.poll_once(&n, 10).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1);
+        assert_eq!(s.take_carried().map(|c| c.1), Some(vec![2]));
+    }
+
+    /// A proposal made earlier and never sent (mainnet holds one from the
+    /// daily cadence) goes out over everything sealed since, not over the
+    /// old window, so the deposit that called for it is covered.
+    #[test]
+    fn an_unsent_proposal_is_brought_up_to_date() {
+        let dir = tmp("refresh");
+        let chain = FakeChain::default();
+        let n = quiet_node();
+        let old = n.lock().unwrap().propose_anchor(0).unwrap();
+        let deposit = seal_another(&n);
+        let mut s = AnchorSettler::new(chain.clone(), FakeBuilder::default(), 3, &dir, 1).unwrap().on_demand();
+        s.poll_once(&n, 10).unwrap();
+        assert!(chain.0.borrow().broadcasts.is_empty(), "an old proposal alone is no reason to anchor");
+        s.demand().want_through(deposit);
+        s.poll_once(&n, 20).unwrap();
+        assert_eq!(chain.0.borrow().broadcasts.len(), 1);
+        let sent = *n.lock().unwrap().proposed().unwrap();
+        assert_ne!(sent.id(), old.id());
+        assert_eq!(sent.checkpoint.seq, deposit);
+        assert_eq!(sent.epochs, 2, "both sealed epochs");
     }
 
     fn tmp(name: &str) -> PathBuf {

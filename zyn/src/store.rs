@@ -330,9 +330,20 @@ impl FileStore {
             e.bytes(SEALED_MAGIC);
             encode_checkpoint(&mut e, &s.checkpoint);
             e.u64(s.actions);
+            let head = e.finish().len();
             let snap = s.snapshot.encode();
             e.u32(snap.len() as u32).bytes(&snap);
-            self.write_atomic(&Self::sealed_name(chain_id, s.checkpoint.epoch), e.finish())?;
+            let name = Self::sealed_name(chain_id, s.checkpoint.epoch);
+            // A sealed epoch never changes, and this runs at every seal and
+            // every anchor pass: with anchors only on Zcash requests (§164)
+            // thousands can be pending, and rewriting each one (an fsync
+            // apiece) every time would stall the node. A file already holding
+            // this checkpoint, at this length, is left as it is.
+            let bytes = e.finish();
+            if Self::holds(&self.dir.join(&name), &bytes[..head], bytes.len()) {
+                continue;
+            }
+            self.write_atomic(&name, bytes)?;
         }
         let prefix = format!("pending-{}-", chain_id);
         for entry in fs::read_dir(&self.dir)? {
@@ -343,6 +354,17 @@ impl FileStore {
             }
         }
         Ok(())
+    }
+
+    /// Whether `path` is `len` bytes long and starts with `head`.
+    fn holds(path: &Path, head: &[u8], len: usize) -> bool {
+        use std::io::Read;
+        let Ok(mut f) = fs::File::open(path) else { return false };
+        if f.metadata().map(|m| m.len() != len as u64).unwrap_or(true) {
+            return false;
+        }
+        let mut have = vec![0u8; head.len()];
+        f.read_exact(&mut have).is_ok() && have == head
     }
 
     /// The pending epochs on disk, in epoch order.
@@ -710,6 +732,22 @@ mod tests {
         let back = store.load_pending::<SwapState>(11).unwrap();
         assert_eq!(back, n.pending().to_vec());
         assert_eq!(store.load_proposal(11).unwrap(), Some((a, 2)));
+        // A sealed epoch already on disk is not written again: the store
+        // runs at every seal, and rewriting thousands of files each time
+        // stalls the node (§164). A file that differs is rewritten.
+        let first = dir.join(FileStore::sealed_name(11, n.pending()[0].checkpoint.epoch));
+        let second = dir.join(FileStore::sealed_name(11, n.pending()[1].checkpoint.epoch));
+        let mut marked = fs::read(&first).unwrap();
+        let last = marked.len() - 1;
+        marked[last] ^= 0xff; // same checkpoint and length: taken as written
+        fs::write(&first, &marked).unwrap();
+        fs::write(&second, b"ZYNSEAL01 short").unwrap();
+        store.save_pending(11, n.pending()).unwrap();
+        assert_eq!(fs::read(&first).unwrap(), marked, "left as it was");
+        assert_ne!(fs::read(&second).unwrap(), b"ZYNSEAL01 short".to_vec(), "rewritten");
+        marked[last] ^= 0xff;
+        fs::write(&first, &marked).unwrap();
+        assert_eq!(store.load_pending::<SwapState>(11).unwrap(), n.pending().to_vec());
         // Anchoring the first epoch only leaves one pending file behind.
         store.save_pending(11, &n.pending()[1..]).unwrap();
         assert_eq!(store.load_pending::<SwapState>(11).unwrap().len(), 1);
