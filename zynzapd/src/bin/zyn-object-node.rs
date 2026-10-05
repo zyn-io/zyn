@@ -2766,6 +2766,11 @@ fn main() {
         eprintln!(
             "zyn-object-node: anchoring ON — roots are carried to Zcash and settle there"
         );
+        // When, in one line (§164): the state a reader of the log wants first.
+        match policy.max_seconds_per_anchor {
+            0 => eprintln!("zyn-object-node: anchors go out on Zcash requests only — ZEC exits and deposits; none on a timer"),
+            idle => eprintln!("zyn-object-node: anchors go out on Zcash requests — ZEC exits and deposits — and after {idle} s without one"),
+        }
         // Anchoring a root and backing an object are different promises, and
         // the banner keeps saying them separately. This line was
         // unconditional for as long as no bridge existed; now it reports
