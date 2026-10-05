@@ -121,6 +121,27 @@ pub fn vectors() -> Vec<(&'static str, String)> {
                 nonce: NONCE,
             }),
         ),
+        // Atomic routes (§167): a coin's curve, a pool, another coin's curve.
+        ("program_route", hex(&program::route().0)),
+        ("route_id", hex(&objectvm::route::route_id(&OWNER, &NONCE))),
+        ("route_leg_1", hex(&objectvm::route::leg_id(&objectvm::route::route_id(&OWNER, &NONCE), 1))),
+        (
+            "route",
+            enc(&Op::Route {
+                trader: OWNER,
+                program: program::route(),
+                hops: vec![
+                    objectvm::route::Hop::CurveSell { token: TOKEN },
+                    objectvm::route::Hop::Pool { pool, sell_a: false },
+                    objectvm::route::Hop::CurveBuy { token: [0xe1; 32] },
+                ],
+                amount_in: Fixed::whole(125_000),
+                min_out: Fixed(4_900_000_000_000_000_000),
+                inputs: input.clone(),
+                change: vec![change()],
+                nonce: NONCE,
+            }),
+        ),
         (
             "claim",
             enc(&Op::Claim {

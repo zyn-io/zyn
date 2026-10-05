@@ -51,6 +51,7 @@ pub mod lend;
 /// The lending rules `lend` runs on (zyn-io/zyn-lend), for readers of its state.
 pub use zyn_lend;
 pub mod curve;
+pub mod route;
 pub mod sale;
 pub mod market;
 
@@ -357,6 +358,18 @@ pub enum Op {
         fee_bps: u32,
         bond: Fixed,
     },
+    /// One order through up to four venues — a coin's curve, pools, another
+    /// coin's curve — settled in one seal, all or nothing (§167).
+    Route {
+        trader: AccountId,
+        program: ProgramId,
+        hops: Vec<route::Hop>,
+        amount_in: Fixed,
+        min_out: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+        nonce: Hash,
+    },
     /// Name an asset coins launch in, sized to graduate at `graduation_mc`
     /// of it fully diluted, with `bond` of it to create one (§166). A zero
     /// `graduation_mc` stops new coins in it. Operator only.
@@ -657,6 +670,7 @@ impl Op {
             | Op::AddLiquidity { inputs, .. }
             | Op::RemoveLiquidity { inputs, .. }
             | Op::Swap { inputs, .. }
+            | Op::Route { inputs, .. }
             | Op::Commit { inputs, .. }
             | Op::CreateCurve { inputs, .. }
             | Op::CurveTrade { inputs, .. }
@@ -699,6 +713,7 @@ impl Op {
             | Op::AddLiquidity { change, .. }
             | Op::RemoveLiquidity { change, .. }
             | Op::Swap { change, .. }
+            | Op::Route { change, .. }
             | Op::CreateCurve { change, .. }
             | Op::CurveTrade { change, .. }
             | Op::BuyTickets { change, .. }
@@ -1900,6 +1915,11 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_swap(trader, pool, *sell_a, *amount_in, *min_out, inputs, change, nonce)
             }),
+            Op::Route { trader, program, hops, amount_in, min_out, inputs, change, nonce } => one(if *program != program::route() {
+                Err("wrong program for a route")
+            } else {
+                self.apply_route(trader, hops, *amount_in, *min_out, inputs, change, nonce)
+            }),
             Op::Claim {
                 owner,
                 program,
@@ -2327,7 +2347,7 @@ impl MicrochainVm for ObjectVm {
             Op::CreatePool { provider, .. }
             | Op::AddLiquidity { provider, .. }
             | Op::RemoveLiquidity { provider, .. } => vec![*provider],
-            Op::Swap { trader, .. } => vec![*trader],
+            Op::Swap { trader, .. } | Op::Route { trader, .. } => vec![*trader],
             Op::Claim { owner, .. } => vec![*owner],
             Op::CreateLaunch { creator, .. } => vec![*creator],
             Op::Commit { buyer, .. } => vec![*buyer],
@@ -2720,6 +2740,13 @@ impl MicrochainVm for ObjectVm {
             }
             Op::SetCurveTerms { program, fee_bps, bond } => {
                 e.u8(25).bytes(&program.0).u32(*fee_bps).fixed(*bond);
+            }
+            Op::Route { trader, program, hops, amount_in, min_out, inputs, change, nonce } => {
+                e.u8(53).bytes(trader).bytes(&program.0);
+                route::put_hops(&mut e, hops);
+                e.fixed(*amount_in).fixed(*min_out).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
             }
             Op::SetCurveQuote { program, quote, graduation_mc, bond } => {
                 e.u8(52).bytes(&program.0).bytes(quote).fixed(*graduation_mc).fixed(*bond);
@@ -3398,6 +3425,16 @@ impl MicrochainVm for ObjectVm {
             }),
             49 => Some(Op::LendRules { program: ProgramId(d.hash().ok()?), version: d.u32().ok()? }),
             50 => Some(Op::LendTime { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
+            53 => Some(Op::Route {
+                trader: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                hops: route::read_hops(d)?,
+                amount_in: d.fixed().ok()?,
+                min_out: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
             52 => Some(Op::SetCurveQuote {
                 program: ProgramId(d.hash().ok()?),
                 quote: d.hash().ok()?,

@@ -23,7 +23,7 @@ const ETH_UNIT = mk.curveUnitFor(23n * mk.WAD);
 const quote = (asset, unit) => ({ asset, unit: String(unit), bond: '0', graduation_mc: String(unit * mk.GRADUATION_MC_UNITS) });
 const meta = Buffer.from(mk.encodeMeta({ symbol: 'ETHC', name: 'An ETH coin' })).toString('hex');
 const ethCurve = {
-  token: 'ab'.repeat(32), quote: ETH, meta, created_at: 1, fee_bps: 100, sold: 0, reserve: '0', graduation: '0', creator_fees: '0', bond: '0',
+  token: 'ab'.repeat(32), quote: ETH, meta, created_at: 1, fee_bps: 100, sold: 1000, reserve: '0', graduation: '0', creator_fees: '0', bond: '0',
   price_per_token: String(mk.curvePricePerToken(0, ETH_UNIT)), graduated: false, pool: '', pending: 0, unit: String(ETH_UNIT),
 };
 let market;
@@ -36,7 +36,10 @@ globalThis.fetch = async (url, init) => {
     default: return answer([]);
   }
 };
-const named = (quotes) => { market = { epoch: 5, epoch_seconds: 15, pools: [], curves: [ethCurve], curve_terms: { set: true, fee_bps: 100, bond: '0' }, curve_quotes: quotes }; };
+const zecCurve = { ...ethCurve, token: 'cd'.repeat(32), quote: ZEC, unit: String(mk.ZAT), price_per_token: String(mk.curvePricePerToken(0)), sold: 100 };
+const EZ = mk.compareBytes(Buffer.from(ETH, 'hex'), Buffer.from(ZEC, 'hex')) < 0;
+const ethZec = { id: 'ee'.repeat(32), a: EZ ? ETH : ZEC, b: EZ ? ZEC : ETH, lp: 'ff'.repeat(32), reserve_a: String(20n * mk.WAD), reserve_b: String(40n * mk.WAD), fee_bps: 30 };
+const named = (quotes) => { market = { epoch: 5, epoch_seconds: 15, pools: [ethZec], curves: [ethCurve, zecCurve], curve_terms: { set: true, fee_bps: 100, bond: '0' }, curve_quotes: quotes }; };
 
 test('a coin in ETH says it is priced in ETH and raises ~8.3 ETH', async () => {
   named([quote(ZEC, mk.ZAT), quote(ETH, ETH_UNIT)]);
@@ -60,4 +63,22 @@ test('a buy is held to the curve\'s own smallest buy', async () => {
   named([quote(ZEC, mk.ZAT), quote(ETH, ETH_UNIT)]);
   // 0.0001 ETH is below an ETH-sized curve's smallest buy (~0.00049 ETH).
   await assert.rejects(METHODS.zyn_curveBuy.prepare(ctx, { token: ethCurve.token, amount: '0.0001' }), /A buy is at least 0\.000488/);
+});
+
+test('a route from an ETH coin to a ZEC coin is checked hop by hop before Nap asks', async () => {
+  named([quote(ZEC, mk.ZAT), quote(ETH, ETH_UNIT)]);
+  const e2z = ethZec.a === ETH;
+  const good = [{ curveSell: ethCurve.token }, { pool: ethZec.id, sellA: e2z }, { curveBuy: zecCurve.token }];
+  // A valid route gets as far as the balance check: this wallet holds nothing.
+  await assert.rejects(METHODS.zyn_route.prepare(ctx, { hops: good, amount: '125000', minOut: '1' }), /does not hold enough/);
+  const cases = [
+    [[], /one to four/],
+    [[{ pool: ethZec.id, sellA: e2z }, { curveSell: ethCurve.token }], /can only start/],
+    [[{ curveBuy: zecCurve.token }, { pool: ethZec.id, sellA: !e2z }], /can only end/],
+    [[{ curveSell: ethCurve.token }, { pool: ethZec.id, sellA: !e2z }], /take what the hop before/],
+    [[{ pool: ethZec.id, sellA: e2z }, { pool: ethZec.id, sellA: !e2z }], /each venue once/],
+    [[{ pool: 'aa'.repeat(32), sellA: true }], /gone or empty/],
+  ];
+  for (const [hops, why] of cases) await assert.rejects(METHODS.zyn_route.prepare(ctx, { hops, amount: '1', minOut: '0' }), why);
+  await assert.rejects(METHODS.zyn_route.prepare(ctx, { hops: good, amount: '100', minOut: '1' }), /whole lots/);
 });

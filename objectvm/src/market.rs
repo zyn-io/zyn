@@ -335,6 +335,8 @@ pub struct Market {
     /// The assets coins launch in and how curves in each are sized (§166);
     /// empty until the operator names one.
     pub curve_quotes: BTreeMap<Address, crate::curve::QuoteTerms>,
+    /// This epoch's routes (§167), cleared at its seal.
+    pub routes: Vec<crate::route::Route>,
     /// Primary sales, by collection (`crate::sale`).
     pub sales: BTreeMap<Address, crate::sale::Sale>,
     /// Their tickets, by an id only each ticket's buyer can derive.
@@ -366,6 +368,7 @@ impl Market {
             && self.curve_orders.is_empty()
             && self.curve_terms.is_none()
             && self.curve_quotes.is_empty()
+            && self.routes.is_empty()
             && self.sales.is_empty()
             && self.tickets.is_empty()
             && self.burns.is_empty()
@@ -596,6 +599,10 @@ impl Market {
         if !self.lend.is_empty() {
             crate::lend::section(&mut e, &self.lend);
         }
+        // And routes, only while one waits for its seal (§167).
+        if !self.routes.is_empty() {
+            crate::route::section(&mut e, &self.routes);
+        }
         e.leaf()
     }
 
@@ -605,9 +612,11 @@ impl Market {
         // from before §160 can still read the state a newer one saved.
         // MARKET11 (§166) only once a quote asset is named or a curve is
         // sized for one; it carries MARKET10's lending state too.
-        let v11 = !self.curve_quotes.is_empty() || self.curves.values().any(|c| c.unit != crate::curve::ZAT);
+        let v12 = !self.routes.is_empty();
+        let v11 = v12 || !self.curve_quotes.is_empty() || self.curves.values().any(|c| c.unit != crate::curve::ZAT);
         let v10 = self.lend.v2() || v11;
-        e.bytes(if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        // MARKET12 (§167) only while a route waits: it carries MARKET11 too.
+        e.bytes(if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -684,6 +693,9 @@ impl Market {
         if v11 {
             crate::curve::encode_quotes(e, &self.curve_quotes, &self.curves);
         }
+        if v12 {
+            crate::route::encode(e, &self.routes);
+        }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -699,9 +711,10 @@ impl Market {
         // v9 predates lending rules v2 (§160) and reads as rules 0.
         // v10 predates quote assets (§166) and reads as none named.
         let tag = d.take_bytes(8).ok()?;
-        let v11 = tag == b"MARKET11";
+        let v12 = tag == b"MARKET12";
+        let v11 = v12 || tag == b"MARKET11";
         let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
-            b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -842,6 +855,9 @@ impl Market {
         }
         if v11 {
             m.curve_quotes = crate::curve::decode_quotes(d, &mut m.curves)?;
+        }
+        if v12 {
+            m.routes = crate::route::decode(d)?;
         }
         Some(m)
     }
@@ -1606,39 +1622,26 @@ impl ObjectVm {
         if self.market.is_empty() {
             return;
         }
-        // Curves first: a curve that graduates this epoch opens its pool
-        // here, and its pool's first swaps are next epoch's.
-        self.settle_curves();
-        // Lending before the pools clear: its auctions and liquidations are
-        // priced from the posted prices, not from this batch.
-        self.settle_lend();
-        let orders = std::mem::take(&mut self.market.orders);
-        let pools: Vec<Hash> = self.market.pools.keys().copied().collect();
-        for pid in pools {
-            let batch: Vec<Order> = orders.iter().filter(|o| o.pool == pid).copied().collect();
-            if batch.is_empty() {
-                continue;
+        if !self.market.routes.is_empty() {
+            // Routes waiting (§167): every venue clears once, a route's later
+            // hops after its earlier ones, all or nothing per route.
+            self.settle_routed();
+        } else {
+            // Curves first: a curve that graduates this epoch opens its pool
+            // here, and its pool's first swaps are next epoch's.
+            self.settle_curves();
+            // Lending before the pools clear: its auctions and liquidations are
+            // priced from the posted prices, not from this batch.
+            self.settle_lend();
+            let orders = std::mem::take(&mut self.market.orders);
+            let pools: Vec<Hash> = self.market.pools.keys().copied().collect();
+            for pid in pools {
+                let batch: Vec<Order> = orders.iter().filter(|o| o.pool == pid).copied().collect();
+                if batch.is_empty() {
+                    continue;
+                }
+                self.settle_pool(pid, &batch);
             }
-            let p = self.market.pools[&pid];
-            let c = clear(&p, &batch);
-            for (i, out) in &c.filled {
-                let o = &batch[*i];
-                let got = if o.sell_a { p.b } else { p.a };
-                self.market.pay(&o.id, 0, o.owner, got, *out);
-            }
-            for i in &c.refunded {
-                let o = &batch[*i];
-                let sold = if o.sell_a { p.a } else { p.b };
-                self.market.pay(&o.id, 1, o.owner, sold, o.amount_in);
-            }
-            self.market.pools.insert(
-                pid,
-                Pool {
-                    reserve_a: c.reserve_a,
-                    reserve_b: c.reserve_b,
-                    ..p
-                },
-            );
         }
         // Lending's backstop orders were in these batches; their results go
         // back to their lots before the root is taken.
@@ -1653,6 +1656,30 @@ impl ObjectVm {
         for t in due {
             self.close_launch(&t);
         }
+    }
+
+    /// One pool's batch, at one price.
+    pub(crate) fn settle_pool(&mut self, pid: Hash, batch: &[Order]) {
+        let p = self.market.pools[&pid];
+        let c = clear(&p, batch);
+        for (i, out) in &c.filled {
+            let o = &batch[*i];
+            let got = if o.sell_a { p.b } else { p.a };
+            self.market.pay(&o.id, 0, o.owner, got, *out);
+        }
+        for i in &c.refunded {
+            let o = &batch[*i];
+            let sold = if o.sell_a { p.a } else { p.b };
+            self.market.pay(&o.id, 1, o.owner, sold, o.amount_in);
+        }
+        self.market.pools.insert(
+            pid,
+            Pool {
+                reserve_a: c.reserve_a,
+                reserve_b: c.reserve_b,
+                ..p
+            },
+        );
     }
 
     fn close_launch(&mut self, token: &Address) {

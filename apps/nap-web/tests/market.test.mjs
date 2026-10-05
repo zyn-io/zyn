@@ -51,6 +51,20 @@ test('every derived id matches the Rust side', () => {
   assert.equal(hex(m.commitId(OWNER, NONCE)), v.commit_id);
   assert.equal(hex(m.liquidityId(OWNER, NONCE)), v.liquidity_id);
   assert.equal(hex(m.claimId(order, 0)), v.claim_id_order_0);
+  const route = m.routeId(OWNER, NONCE);
+  assert.equal(hex(route), v.route_id);
+  assert.equal(hex(m.routeLegId(route, 1)), v.route_leg_1);
+  assert.equal(m.MARKET_PROGRAM.route, v.program_route);
+});
+
+test('a route\'s preview is each hop\'s preview, fed by the one before', () => {
+  const pool = { reserve_a: String(20n * m.WAD), reserve_b: String(40n * m.WAD), fee_bps: 30 };
+  const coin = { sold: 200, fee_bps: 100, unit: String(m.ZAT) };
+  const venues = { pool: () => pool, curve: () => coin };
+  const r = m.previewRoute([{ pool: 'p', sellA: true }, { curveBuy: 'b' }], m.WAD, venues);
+  const zec = m.quoteAlone(pool, true, m.WAD);
+  assert.deepEqual(r.steps, [zec, m.previewCurveBuy(200, zec, 100).tokens]);
+  assert.equal(m.previewRoute([{ pool: 'p', sellA: true }], 0n, venues), null, 'nothing in, nothing out');
 });
 
 test('every market intent encodes to exactly the bytes Rust produces', () => {
@@ -67,6 +81,11 @@ test('every market intent encodes to exactly the bytes Rust produces', () => {
       softCap: W(10), hardCap: W(100), poolBps: 5000, feeBps: 30, closesAtEpoch: 4321, meta: new Uint8Array(32).fill(0x4d),
     }),
     commit: m.commitIntent({ buyer: OWNER, launch: TOKEN, amount: W(7), inputs, change, nonce: NONCE }),
+    // A route (§167): a coin's curve, a pool, another coin's curve.
+    route: m.routeIntent({
+      trader: OWNER, hops: [{ curveSell: TOKEN }, { pool, sellA: false }, { curveBuy: new Uint8Array(32).fill(0xe1) }],
+      amountIn: W(125_000), minOut: 4_900_000_000_000_000_000n, inputs, change, nonce: NONCE,
+    }),
   };
   for (const [name, bytes] of Object.entries(cases)) assert.equal(hex(bytes), v[name], `${name} moved`);
 });

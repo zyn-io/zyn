@@ -437,6 +437,67 @@ export const METHODS = {
     },
   },
 
+  // One order through up to four venues — a coin's curve, pools, another
+  // coin's curve — settled in one seal, all or nothing (§167).
+  zyn_route: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const market = await ledger.call(ctx.config, 'zyn_market');
+      const name = await namer(ctx, market);
+      if (!Array.isArray(p.hops) || p.hops.length < 1 || p.hops.length > 4) throw bad('A route is one to four hops');
+      const pools = new Map((market.pools || []).filter((x) => isHex(x.id)).map((x) => [x.id, x]));
+      const curves = new Map((market.curves || []).filter(validCurve).map((c) => [c.token, c]));
+      // Each hop as the chain stands: what it takes, what it gives.
+      const hops = p.hops.map((h, i) => {
+        if (h && isHex(h.pool) && typeof h.sellA === 'boolean') {
+          const x = pools.get(h.pool);
+          if (!x || !isInt(x.reserve_a) || !isInt(x.reserve_b) || BigInt(x.reserve_a) === 0n || BigInt(x.reserve_b) === 0n) throw bad('A pool on that route is gone or empty');
+          return { hop: { pool: unhex(h.pool), sellA: h.sellA }, key: { pool: h.pool, sellA: h.sellA }, input: h.sellA ? x.a : x.b, output: h.sellA ? x.b : x.a, venue: h.pool };
+        }
+        const t = h?.curveSell ?? h?.curveBuy;
+        const c = isHex(t) && curves.get(t);
+        if (!c || c.graduated) throw bad('A coin on that route is not on its curve; route through its pool');
+        if (h.curveSell && i !== 0) throw bad('A sale to a curve can only start a route');
+        if (h.curveBuy && i !== p.hops.length - 1) throw bad('A purchase from a curve can only end a route');
+        return h.curveSell
+          ? { hop: { curveSell: unhex(t) }, key: { curveSell: t }, input: c.token, output: c.quote, venue: t }
+          : { hop: { curveBuy: unhex(t) }, key: { curveBuy: t }, input: c.quote, output: c.token, venue: t };
+      });
+      if (new Set(hops.map((h) => h.venue)).size !== hops.length) throw bad('A route passes each venue once');
+      hops.forEach((h, i) => { if (i && hops[i - 1].output !== h.input) throw bad('Each hop must take what the hop before it gives'); });
+      const amountIn = amountOf(p.amount, 'amount');
+      const minOut = amountOf(p.minOut, 'minOut');
+      if (hops[0].hop.curveSell && amountIn % mk.LOT !== 0n) throw bad(`Sell whole lots of ${mk.CURVE.lotTokens.toLocaleString('en-US')} tokens`);
+      const venues = { pool: (id) => pools.get(hex(id)), curve: (t) => curves.get(hex(t)) };
+      const q = mk.previewRoute(hops.map((h) => h.hop), amountIn, venues);
+      if (!q) throw bad('That route delivers nothing at these prices');
+      const [start, end] = [hops[0].input, hops[hops.length - 1].output];
+      const path = [start, ...hops.map((h) => h.output)].map(name).join(' → ');
+      await mustHold(ctx, start, amountIn, name(start));
+      const show = (asset, raw) => (curves.has(asset) ? `${tokenText(raw)} ${name(asset)}` : `${wadText(raw)} ${name(asset)}`);
+      return {
+        title: `Swap ${name(start)} for ${name(end)}`,
+        danger: !minOut,
+        rows: [
+          ['Route', path],
+          ['You put in', show(start, amountIn)],
+          ['If nobody else trades this epoch', show(end, q.out)],
+          ['At least', minOut ? `${show(end, minOut)}, or the whole route comes back` : 'no floor — it fills at whatever the batches clear at'],
+          ['Settles', 'in one epoch, every hop together'],
+        ],
+        note: 'Each venue on the route clears once this epoch, at one price for everyone in it. If the end of the route would bring less than your floor, nothing on it happens and everything you put in comes back.',
+        run: async () => {
+          const h = await holdings(ctx);
+          const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(start), amountIn);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.routeIntent({
+            trader: ctx.identity.account, hops: hops.map((x) => x.hop), amountIn, minOut, nonce: n, inputs, change,
+          }));
+          return { order: hex(mk.routeId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
   zyn_swap: {
     kind: 'write',
     async prepare(ctx, p) {

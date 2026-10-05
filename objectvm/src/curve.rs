@@ -669,6 +669,13 @@ impl ObjectVm {
             if batch.is_empty() {
                 continue;
             }
+            self.settle_curve(token, batch);
+        }
+    }
+
+    /// One curve's batch: sells, then buys, then graduation if it sold out.
+    pub(crate) fn settle_curve(&mut self, token: Address, batch: Vec<CurveOrder>) {
+        {
             let c = self.market.curves[&token];
             let sells: Vec<CurveOrder> = batch.iter().filter(|o| !o.buy).copied().collect();
             let buys: Vec<CurveOrder> = batch.iter().filter(|o| o.buy).copied().collect();

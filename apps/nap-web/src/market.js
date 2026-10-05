@@ -56,9 +56,10 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['lendCollateral', 'lend-collateral'],
   ['lendInsure', 'lend-insure'],
   ['lendBid', 'lend-bid'],
+  ['route', 'route'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47, lendInsure: 51 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47, lendInsure: 51, route: 53 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -73,6 +74,9 @@ export const lpAsset = (pool) => id('objectvm.lp.v1', pool);
 export const tokenOf = (creator, nonce) => id('objectvm.token.v1', creator, nonce);
 export const launchSource = (creator, nonce) => id('objectvm.launch.v1', creator, nonce);
 export const orderId = (trader, nonce) => id('objectvm.order.v1', trader, nonce);
+/// A route's id (§167): where what it delivers, or its refund, waits.
+export const routeId = (trader, nonce) => id('objectvm.route.v1', trader, nonce);
+export const routeLegId = (route, hop) => id('objectvm.route-leg.v1', route, new Uint8Array([hop]));
 export const commitId = (buyer, nonce) => id('objectvm.commit.v1', buyer, nonce);
 export const liquidityId = (provider, nonce) => id('objectvm.liquidity.v1', provider, nonce);
 export const claimId = (source, k) => id('objectvm.claim.v1', source, new Uint8Array([k]));
@@ -114,6 +118,18 @@ export const swapIntent = (o) => concatBytes(
   new Uint8Array([TAG.swap]), o.trader, prog('ammSwap'), o.pool, bool(o.sellA),
   i128Bytes(o.amountIn), i128Bytes(o.minOut), o.nonce, inputs(o.inputs), outputs(o.change),
 );
+
+/// One order through up to four venues, all or nothing (§167). A hop is
+/// `{ pool, sellA }`, `{ curveSell: token }` (first only) or
+/// `{ curveBuy: token }` (last only).
+export function routeIntent(o) {
+  const hops = o.hops.map((h) => (h.pool ? concatBytes(new Uint8Array([0]), h.pool, bool(h.sellA))
+    : h.curveSell ? concatBytes(new Uint8Array([1]), h.curveSell) : concatBytes(new Uint8Array([2]), h.curveBuy)));
+  return concatBytes(
+    new Uint8Array([TAG.route]), o.trader, prog('route'), new Uint8Array([o.hops.length]), ...hops,
+    i128Bytes(o.amountIn), i128Bytes(o.minOut), o.nonce, inputs(o.inputs), outputs(o.change),
+  );
+}
 
 export function claimIntent(o) {
   const ids = [u32be(o.claims.length), ...o.claims];
@@ -231,6 +247,26 @@ export function quoteAlone(pool, sellA, amountIn) {
   const net = netOfFee(amountIn, pool.fee_bps);
   if (net <= 0n) return 0n;
   return sellA ? (net * y) / (x + 2n * net) : (net * x) / (y + 2n * net);
+}
+
+/// What a route delivers if it is alone in its venues' batches: each hop's
+/// preview fed by the one before. `venues` resolves a hop to its pool or
+/// curve as `zyn_market` lists them; `null` if a hop delivers nothing.
+export function previewRoute(hops, amountIn, venues) {
+  let amount = BigInt(amountIn);
+  const steps = [];
+  for (const h of hops) {
+    if (h.pool) {
+      amount = quoteAlone(venues.pool(h.pool), h.sellA, amount);
+    } else {
+      const c = venues.curve(h.curveSell || h.curveBuy);
+      const unit = c.unit && c.unit !== '0' ? BigInt(c.unit) : ZAT;
+      amount = h.curveSell ? previewCurveSell(c.sold, Number(amount / LOT), c.fee_bps, unit).net : previewCurveBuy(c.sold, amount, c.fee_bps, unit).tokens;
+    }
+    steps.push(amount);
+    if (amount <= 0n) return null;
+  }
+  return { out: amount, steps };
 }
 
 /// The minimum to sign for, `slippageBps` below the quote.

@@ -149,6 +149,12 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
             }),
         ),
         Op::CurveTrade { token, .. } => ("Curve trade", false, json!({ "token": hex(token) })),
+        // A route's venues are public objects, as a swap's pool is; who and how much are not.
+        Op::Route { hops, .. } => (
+            "Route",
+            false,
+            json!({ "venues": hops.iter().map(|h| match h.venue() { objectvm::route::Venue::Pool(p) => json!({ "pool": hex(&p) }), objectvm::route::Venue::Curve(t) => json!({ "token": hex(&t) }) }).collect::<Vec<_>>() }),
+        ),
         Op::SetCurveTerms { fee_bps, bond, .. } => ("Curve terms set", true, json!({ "fee_bps": fee_bps, "bond": bond.0.to_string() })),
         Op::SetCurveQuote { quote, graduation_mc, bond, .. } => ("Launch asset set", true, json!({ "quote": hex(quote), "graduation_mc": graduation_mc.0.to_string(), "bond": bond.0.to_string() })),
         Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
