@@ -131,7 +131,7 @@ const CLAIM_KINDS = [
   ['curve', ['Creator payout', 'Creator payout', 'Creator payout']],
   ['lend', ['Lending: shares, coins or collateral', 'Lending refund', 'Lending']],
   ['lend-lot', ['Left over after liquidation', 'Collateral back after liquidation', 'Liquidation']],
-  ['route', ['Route delivered', 'Route refunded whole — it would have delivered less than your floor', 'Route: unspent before the coin graduated']],
+  ['route', ['Route delivered', 'Route refunded whole — it would have delivered less than your floor', 'Route: change from its last step']],
 ];
 function claimKinds(identity, limit, from = 0) {
   const kinds = new Map();

@@ -526,3 +526,9 @@ main { position: relative; z-index: 1; flex: 1; width: 100%; padding: 12px var(-
 .create-quote .chip span:hover { color: var(--mineral); }
 .create-quote .chip input:checked + span { color: var(--mineral); background: var(--stone-2); box-shadow: inset 0 0 0 1px var(--line-2); }
 .create-quote .chip input:focus-visible + span { outline: 2px solid var(--mint); outline-offset: 1px; }
+
+/* Pay with / Receive (§167): another bridged coin, by a route. */
+.via { display: flex; align-items: center; gap: 8px; color: var(--steel); font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.via .seg { margin-left: auto; }
+.via .seg button { text-transform: none; letter-spacing: 0; }
+#trade-route { font: 500 11.5px/1.35 var(--mono); color: var(--mineral-2); }

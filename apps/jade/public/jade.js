@@ -138,6 +138,23 @@ function poolQuote(pool, sellA, amountIn) {
   const a = (amountIn * (BPS - BigInt(pool.fee_bps))) / BPS;
   return (a * y) / (x + 2n * a);
 }
+/// A route alone in its venues' batches (§167): each hop fed by the one
+/// before — Nap's `previewRoute`, on the same venues.
+function previewRoute(hops, amountIn, venues) {
+  let amount = BigInt(amountIn);
+  const steps = [];
+  for (const h of hops) {
+    if (h.pool) amount = poolQuote(venues.pool(h.pool), h.sellA, amount);
+    else {
+      const c = venues.curve(h.curveSell || h.curveBuy);
+      const unit = c.unit && c.unit !== '0' ? BigInt(c.unit) : ZAT;
+      amount = h.curveSell ? previewSell(c.sold, Number(amount / LOT), c.fee_bps, unit).net : previewBuy(c.sold, amount, c.fee_bps, unit).tokens;
+    }
+    steps.push(amount);
+    if (amount <= 0n) return null;
+  }
+  return { out: amount, steps };
+}
 
 /// A token's name lives in its 32 bytes of meta: 8 for the ticker, 24 for the name.
 /// The same rules as Nap's (market.js): printable ASCII, zero padding all the
@@ -868,6 +885,7 @@ async function renderCoin(token, fresh = false) {
   if (first) {
     // A new coin starts with a clean form, and its own last order status.
     tradeSide = 'buy';
+    tradeVia = null;
     $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === 'buy'));
     $('#trade-input').value = presetsFor(c)[2];
     showOrder(token);
@@ -1027,10 +1045,76 @@ function renderPosition() {
 
 const tradeInput = $('#trade-input');
 
-/// Buy presets sized to the coin's quote: 0.01, 0.05, 0.1 and 0.5 ZEC's
-/// worth of its curve, to two significant figures.
+// ---------------------------------------------------------------------------
+// Routes (§167): pay for a coin with another bridged coin, or sell it for one,
+// through the pools between bridged coins — one order, one epoch, all or nothing.
+
+/// What a buy pays with or a sale receives: the coin's quote unless another is picked.
+let tradeVia = null;
+const viaOf = (c) => (tradeVia && tradeVia !== c.quote ? tradeVia : c.quote);
+const venues = {
+  pool: (id) => pools.find((p) => p.id === id),
+  curve: (t) => curves.find((c) => c.token === t),
+};
+/// Pools between two bridged coins, with something in them.
+const basePools = () => pools.filter((p) => QUOTE_ASSETS[p.a] && QUOTE_ASSETS[p.b] && BigInt(p.reserve_a) > 0n && BigInt(p.reserve_b) > 0n);
+/// Every way from `from` to `to` through at most `max` base pools, as hops.
+function poolPaths(from, to, max) {
+  const out = [];
+  const walk = (at, hops, seen) => {
+    if (at === to && hops.length) { out.push(hops); return; }
+    if (hops.length === max) return;
+    for (const p of basePools()) {
+      if (seen.has(p.id) || (p.a !== at && p.b !== at)) continue;
+      const next = p.a === at ? p.b : p.a;
+      walk(next, [...hops, { pool: p.id, sellA: p.a === at }], new Set([...seen, p.id]));
+    }
+  };
+  walk(from, [], new Set());
+  return out;
+}
+/// The coin's own venue: its curve, or its pool once it has graduated.
+function coinHop(c, buy) {
+  if (!c.graduated) return buy ? { curveBuy: c.token } : { curveSell: c.token };
+  const p = poolOf(c);
+  return p ? { pool: p.id, sellA: buy ? p.a === c.quote : p.a === c.token } : null;
+}
+/// The best route for this coin, side and coin to pay or receive, for this
+/// amount: the one that delivers most if alone in its batches.
+function bestRoute(c, buy, via, amount) {
+  const own = coinHop(c, buy);
+  if (!own) return null;
+  const legs = buy ? poolPaths(via, c.quote, 2).map((p) => [...p, own]) : poolPaths(c.quote, via, 2).map((p) => [own, ...p]);
+  let best = null;
+  for (const hops of legs.filter((h) => h.length <= 4)) {
+    const q = previewRoute(hops, amount, venues);
+    if (q && (!best || q.out > best.q.out)) best = { hops, q };
+  }
+  return best;
+}
+/// The coins a buy can pay with (or a sale receive): the quote, and every
+/// launch coin a route reaches.
+function viaChoices(c, buy) {
+  const own = coinHop(c, buy);
+  const reach = (a) => a === c.quote || (own && (buy ? poolPaths(a, c.quote, 2) : poolPaths(c.quote, a, 2)).length > 0);
+  return [...new Set([c.quote, ...quotes.map((q) => q.asset)])].filter(reach);
+}
+const pathText = (c, hops, buy) => {
+  const assets = [buy ? viaOf(c) : c.token];
+  for (const h of hops) {
+    if (h.curveBuy) assets.push(c.token);
+    else if (h.curveSell) assets.push(c.quote);
+    else { const p = venues.pool(h.pool); assets.push(h.sellA ? p.b : p.a); }
+  }
+  return assets.map((a) => (a === c.token ? c.symbol : symOf(a))).join(' → ');
+};
+
+/// Buy presets sized to the coin it is paid with: 0.01, 0.05, 0.1 and 0.5
+/// ZEC's worth, to two significant figures.
 function presetsFor(c) {
-  const scale = Number(unitOf(c)) / Number(ZAT);
+  const via = viaOf(c);
+  const unit = via === c.quote ? unitOf(c) : (quotes.find((q) => q.asset === via)?.unit ?? ZAT);
+  const scale = Number(unit) / Number(ZAT);
   const nice = (v) => { const p = 10 ** (Math.floor(Math.log10(v)) - 1); return String(Number((Math.round(v / p) * p).toPrecision(2))); };
   return [0.01, 0.05, 0.1, 0.5].map((v) => nice(v * scale));
 }
@@ -1039,7 +1123,15 @@ function configureTrade() {
   const c = currentCoin;
   if (!c) return;
   const buying = tradeSide === 'buy';
-  $('#trade-unit').textContent = buying ? `${qsym(c)}.zy` : c.symbol;
+  const choices = viaChoices(c, buying);
+  if (!choices.includes(viaOf(c))) tradeVia = null;
+  const via = viaOf(c);
+  $('#trade-via-row').hidden = choices.length < 2;
+  $('#trade-via-label').textContent = buying ? 'Pay with' : 'Receive';
+  const viaHtml = choices.map((a) => `<button type="button" data-via="${a}" class="${a === via ? 'active' : ''}">${esc(symOf(a))}</button>`).join('');
+  const viaBox = $('#trade-via');
+  if (viaBox.jadeHtml !== viaHtml) { viaBox.innerHTML = viaHtml; viaBox.jadeHtml = viaHtml; }
+  $('#trade-unit').textContent = buying ? `${symOf(via)}.zy` : c.symbol;
   const presets = buying
     ? presetsFor(c).map((v) => `<button type="button" data-preset="${v}">${v}</button>`)
     : [25, 50, 100].map((p) => `<button type="button" data-pct="${p}">${p}%</button>`);
@@ -1060,9 +1152,9 @@ function configureTrade() {
       quote();
     }));
   }
-  const bal = balanceOf(c.quote);
+  const bal = balanceOf(via);
   $('#trade-balance').textContent = mine
-    ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol}${bal == null ? '' : ` · ${wad(bal, 4)} ${qsym(c)}.zy`}`
+    ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol}${bal == null ? '' : ` · ${wad(bal, 4)} ${symOf(via)}.zy`}`
     : 'Connect a wallet to see your balance.';
   const submit = $('.trade-submit');
   submit.textContent = wallet ? (buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`) : 'Connect wallet';
@@ -1083,9 +1175,12 @@ function quote() {
   if (!c) return null;
   if (wallet) submit.disabled = true;
   const slip = BigInt($('#trade-slip').value);
+  $('#trade-route-row').hidden = true;
   try {
     const value = parseDecimal($('#trade-input').value);
     if (value <= 0n) throw new Error('Enter an amount above zero');
+    const via = viaOf(c);
+    if (via !== c.quote) return quoteRoute(c, value, via, slip);
     const q$ = `${qsym(c)}.zy`;
     const bal = balanceOf(c.quote);
     if (tradeSide === 'buy' && bal != null && value > bal) throw new Error(`You have ${full(bal)} ${q$}`);
@@ -1132,6 +1227,45 @@ function quote() {
   }
 }
 
+/// A route's quote: what it delivers alone, its floor, and its path.
+function quoteRoute(c, value, via, slip) {
+  const out = $('#trade-output'), fee = $('#trade-fee'), min = $('#trade-min');
+  const buy = tradeSide === 'buy';
+  const v$ = `${symOf(via)}.zy`;
+  if (buy) {
+    const bal = balanceOf(via);
+    if (bal != null && value > bal) throw new Error(`You have ${full(bal)} ${v$}`);
+  } else {
+    if (!c.graduated && value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
+    if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
+  }
+  const r = bestRoute(c, buy, via, value);
+  if (!r) throw new Error(`No route to ${buy ? c.symbol : v$} at these prices`);
+  const toCurve = buy && !c.graduated;
+  // A curve delivers whole lots: the floor is whole lots too, at least one.
+  const floor = toCurve
+    ? (() => { const lots = (r.q.out / LOT * (BPS - slip)) / BPS; return (lots > 0n ? lots : 1n) * LOT; })()
+    : (r.q.out * (BPS - slip)) / BPS;
+  if (floor <= 0n) throw new Error('Too small to route');
+  out.textContent = buy ? `${wad(r.q.out, 0)} ${c.symbol}` : `${full(r.q.out)} ${v$}`;
+  const pools = r.hops.filter((h) => h.pool).map((h) => venues.pool(h.pool).fee_bps / 100);
+  fee.textContent = [!c.graduated && c.fee_bps ? `${c.fee_bps / 100}% on the curve` : null, ...pools.map((f) => `${f}% pool`)].filter(Boolean).join(' + ') || 'none';
+  $('#trade-route').textContent = `${pathText(c, r.hops, buy)} · one epoch`;
+  $('#trade-route-row').hidden = false;
+  min.textContent = buy ? `${wad(floor, 0)} ${c.symbol}` : `${full(floor)} ${v$}`;
+  if (wallet) $('.trade-submit').disabled = false;
+  return { kind: 'route', hops: r.hops, amount: value, minOut: floor, via };
+}
+
+$('#trade-via').addEventListener('click', (event) => {
+  const b = event.target.closest('[data-via]');
+  if (!b || !currentCoin) return;
+  tradeVia = b.dataset.via === currentCoin.quote ? null : b.dataset.via;
+  if (tradeSide === 'buy') $('#trade-input').value = presetsFor(currentCoin)[2];
+  $('#trade-presets').jadeHtml = null;
+  configureTrade();
+});
+
 function setSide(side) {
   tradeSide = side;
   $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === side));
@@ -1153,7 +1287,7 @@ $$('[data-jump]').forEach((b) => b.addEventListener('click', () => {
 /// After an order: wait for its epoch to seal, collect what it was paid, and
 /// say what arrived. Collecting needs no approval — it only moves what the
 /// ledger owes this wallet into it.
-async function settle(placedEpoch, token, side, symbol, quote, quoteBefore = null) {
+async function settle(placedEpoch, token, side, symbol, quote, quoteBefore = null, tracked = true) {
   const q$ = `${symOf(quote)}.zy`;
   const before = heldOf(token);
   let sealed = false;
@@ -1174,7 +1308,8 @@ async function settle(placedEpoch, token, side, symbol, quote, quoteBefore = nul
       await loadMine();
       const got = heldOf(token) - before;
       const after = balanceOf(quote);
-      if (got !== 0n && quoteBefore != null && after != null) recordFill(token, got, quoteBefore - after);
+      // Average cost counts trades in the coin's own quote only.
+      if (tracked && got !== 0n && quoteBefore != null && after != null) recordFill(token, got, quoteBefore - after);
       setOrder(token, got > 0n ? `Filled: +${wad(got, 0)} ${symbol}. It is in your wallet.`
         : got < 0n ? `Filled: sold. The ${q$} is in your wallet.`
           : side === 'buy' ? `Not filled — the price moved past your floor, so your ${q$} came back to your wallet.`
@@ -1196,16 +1331,19 @@ async function placeOrder() {
   if (button.disabled) return;
   button.disabled = true;
   const side = tradeSide, symbol = c.symbol;
-  const quoteBefore = balanceOf(c.quote);
+  // What it pays with or receives: the quote, or another coin by a route.
+  const via = q.kind === 'route' ? q.via : c.quote;
+  const quoteBefore = balanceOf(via);
   try {
     // Asked before anything is awaited: Nap may need to open its window.
-    const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
+    const pending = q.kind === 'route' ? ask('zyn_route', { hops: q.hops, amount: decimal(q.amount), minOut: decimal(q.minOut) })
+      : q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
       : q.kind === 'buy' ? ask('zyn_curveBuy', { token: c.token, amount: decimal(q.amount), minTokens: decimal(q.minTokens) })
         : ask('zyn_curveSell', { token: c.token, tokens: decimal(q.tokens), minZec: decimal(q.minZec) });
     await pending;
     const epoch = (await rpc('zyn_status')).epoch;
     setOrder(c.token, `Placed. Settling when epoch ${epoch} seals…`, 'sealing');
-    settle(epoch, c.token, side, symbol, c.quote, quoteBefore);
+    settle(epoch, c.token, side, symbol, via, quoteBefore, via === c.quote);
   } catch (e) {
     // 4001 is Nap's "no"; anything else says what happened in its own words.
     setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message, e.code === 4001 ? 'idle' : 'error');

@@ -21,8 +21,9 @@ function jadeFns() {
     grab(/function previewBuy\(sold, amountIn, feeBps, unit = ZAT\) \{[\s\S]*?\n\}/),
     grab(/function previewSell\(sold, lots, feeBps, unit = ZAT\) \{[\s\S]*?\n\}/),
     grab(/function poolQuote\(pool, sellA, amountIn\) \{[\s\S]*?\n\}/),
+    grab(/function previewRoute\(hops, amountIn, venues\) \{[\s\S]*?\n\}/),
     grab(/function decodeMeta\(hexMeta\) \{[\s\S]*?\n\}/),
-    'return { cost, lotsFor, previewBuy, previewSell, poolQuote, decodeMeta, CURVE };',
+    'return { cost, lotsFor, previewBuy, previewSell, poolQuote, previewRoute, decodeMeta, CURVE };',
   ].join('\n');
   return new Function(src)(); // eslint-disable-line no-new-func -- Jade's own source, checked in
 }
@@ -48,6 +49,21 @@ test('Jade\'s curve and pool arithmetic is Nap\'s, to the unit, at every size', 
     const pool = { reserve_a: String(BigInt(1 + rnd(1e9)) * 10n ** 12n), reserve_b: String(BigInt(1 + rnd(1e9)) * 10n ** 9n), fee_bps: [5, 30, 100][rnd(3)] };
     const sellA = rnd(2) === 0;
     assert.equal(j.poolQuote(pool, sellA, amountIn), mk.quoteAlone(pool, sellA, amountIn), 'pool quote');
+  }
+});
+
+test('Jade\'s route preview is Nap\'s, hop for hop', { skip: SKIP }, () => {
+  const j = jadeFns();
+  const pool = { reserve_a: String(20n * mk.WAD), reserve_b: String(40n * mk.WAD), fee_bps: 30 };
+  const eth = { sold: 900, fee_bps: 100, unit: String(mk.curveUnitFor(23n * mk.WAD)) };
+  const zec = { sold: 300, fee_bps: 100, unit: String(mk.ZAT) };
+  const venues = { pool: () => pool, curve: (t) => (t === 'e' ? eth : zec) };
+  for (const [hops, amount] of [
+    [[{ curveSell: 'e' }, { pool: 'p', sellA: true }, { curveBuy: 'z' }], 40n * mk.LOT],
+    [[{ pool: 'p', sellA: false }, { curveBuy: 'z' }], 3n * mk.WAD],
+    [[{ curveSell: 'e' }, { pool: 'p', sellA: true }], mk.LOT],
+  ]) {
+    assert.deepEqual(j.previewRoute(hops, amount, venues), mk.previewRoute(hops, amount, venues));
   }
 });
 

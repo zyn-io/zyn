@@ -17,6 +17,8 @@ const SYM = process.env.SYMBOL || 'ZTEST';
 // The coin it is priced in (§166), and a buy in it above its curve's smallest.
 const QUOTE = process.env.QUOTE || 'ZEC';
 const AMOUNT = process.env.AMOUNT || '0.001';
+// Pay for the buy with another bridged coin by a route (§167), e.g. VIA=BOLD.
+const VIA = process.env.VIA || '';
 const S = process.env.SHOTS || '/tmp';
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -59,7 +61,16 @@ async function trade(label, check) {
   await page.waitForFunction(() => /Filled|Settled/.test(document.querySelector('#trade-status').textContent), null, { timeout: 180000 }).catch(() => {});
   ok(/Filled/.test(await page.textContent('#trade-status')), `${label}, collected without a prompt: ${await page.textContent('#trade-status')}`);
 }
-await trade('buy', (t) => t.includes(`Buy ${SYM} with ${AMOUNT} ${QUOTE}.zy`) && /If nobody else buys this epoch/.test(t));
+if (VIA) {
+  await page.click(`#trade-via [data-via]:has-text("${VIA}")`);
+  await page.fill('#trade-input', AMOUNT);
+  await page.waitForTimeout(300);
+  const route = await page.textContent('#trade-route');
+  ok(!(await page.isHidden('#trade-route-row')) && route.startsWith(`${VIA} → `) && route.includes(SYM), `route: ${route}, gets ${await page.textContent('#trade-output')}, at least ${await page.textContent('#trade-min')}`);
+  await trade('buy', (t) => t.includes(`Swap ${VIA}.zy for ${SYM}`) && (t.includes(`Route${VIA}.zy →`) || t.includes(`Route ${VIA}.zy →`)) && /whole route comes back/.test(t));
+} else {
+  await trade('buy', (t) => t.includes(`Buy ${SYM} with ${AMOUNT} ${QUOTE}.zy`) && /If nobody else buys this epoch/.test(t));
+}
 await page.click('[data-trade="sell"]');
 await page.fill('#trade-input', '12500');
 await page.waitForTimeout(200);

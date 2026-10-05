@@ -193,12 +193,14 @@
           <section class="panel trade j-trade" id="trade" aria-label="Trade">
             <div class="sides" role="tablist" aria-label="Side"><button type="button" role="tab" data-trade="buy" class="active">Buy <kbd>B</kbd></button><button type="button" role="tab" data-trade="sell">Sell <kbd>S</kbd></button></div>
             <p class="balance" id="trade-balance">Connect a wallet to see your balance.</p>
+            <div class="via" id="trade-via-row" hidden><span id="trade-via-label">Pay with</span><div class="seg seg-sm" role="group" aria-labelledby="trade-via-label" id="trade-via"></div><button type="button" class="tip" data-tip="Another coin goes through the pools between bridged coins to this coin's curve or pool, all in one epoch. If the end of the route would bring less than your floor, nothing on it happens and everything comes back." aria-label="About routes" aria-expanded="false">i</button></div>
             <label class="amount"><span class="sr-only" id="trade-label">Amount</span><input id="trade-input" inputmode="decimal" autocomplete="off" value="0.1" /><b id="trade-unit">ZEC.zy</b></label>
             <div class="chips" id="trade-presets"></div>
             <div class="slip"><span>Slippage</span><div class="seg seg-sm" role="group" aria-label="Slippage" id="slip-seg"><button type="button" data-slip="100">1%</button><button type="button" data-slip="300" class="active">3%</button><button type="button" data-slip="500">5%</button><button type="button" data-slip="1000">10%</button></div><input type="hidden" id="trade-slip" value="300" /></div>
             <dl class="quote">
               <div><dt id="trade-output-label">You get<button type="button" class="tip" data-tip="What this order gets if it is alone in the batch. Other orders in the same epoch move the one price everyone gets; the floor below protects you." aria-label="About the quote" aria-expanded="false">i</button></dt><dd id="trade-output">—</dd></div>
               <div><dt>Fee</dt><dd id="trade-fee">—</dd></div>
+              <div id="trade-route-row" hidden><dt>Route</dt><dd id="trade-route">—</dd></div>
               <div><dt>At least</dt><dd id="trade-min">—</dd></div>
             </dl>
             <button class="primary trade-submit" type="button">Connect wallet</button>
