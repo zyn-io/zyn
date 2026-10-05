@@ -2,199 +2,276 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#06110e" />
-    <meta name="description" content="Jade is Zyn's launchpad: create a coin in one step, trade it on its bonding curve at one price per epoch, and it graduates into a locked pool." />
+    <meta name="description" content="Jade is Zyn's launchpad: coins on one bonding curve, traded in one-price batches per epoch, graduating into a locked pool." />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Jade — Zyn's launchpad" />
-    <meta property="og:description" content="Create a coin in one step. One curve, one price per epoch, a locked pool at graduation." />
+    <meta property="og:description" content="Coins on one bonding curve, one price per epoch, a locked pool at graduation." />
     <title>Jade</title>
     <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/jade.css?v=20261002-zyn1" />
+    <link rel="stylesheet" href="/jade.css?v=20261005-term1" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
     <header class="top">
-      <a class="lockup" href="/" data-route="gallery" aria-label="Jade coins">
-        <img src="/assets/zyn-mark-alpha-96.webp" srcset="/assets/zyn-mark-alpha-96.webp 1x, /assets/zyn-mark-alpha-192.webp 2x" width="34" height="34" alt="" />
+      <a class="lockup" href="/" data-route="board" aria-label="Jade board">
+        <img src="/assets/zyn-mark-alpha-96.webp" srcset="/assets/zyn-mark-alpha-96.webp 1x, /assets/zyn-mark-alpha-192.webp 2x" width="26" height="26" alt="" />
         <span>ZYN</span><span class="lockup-app">Jade</span>
       </a>
       <nav class="tabs" aria-label="Primary navigation">
-        <a href="/" data-route="gallery">Coins</a>
+        <a href="/" data-route="board">Board</a>
         <a href="/launch" data-route="launch">Create</a>
         <a href="/portfolio" data-route="portfolio">Portfolio</a>
       </nav>
+      <label class="j-search"><span class="sr-only">Search coins</span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><input id="search" type="search" placeholder="Search name, ticker or address" autocomplete="off" spellcheck="false" /><kbd>/</kbd></label>
       <div class="top-right">
+        <span class="j-epoch" id="epoch-pill" title="The current epoch"><i class="live" aria-hidden="true"></i><span id="epoch-text">Epoch —</span></span>
         <span class="j-zecusd" id="zec-usd" title="ZEC price, refreshed every few minutes">ZEC —</span>
         <a class="net" id="net" href="?network=testnet" title="Switch network">Mainnet</a>
         <button class="connect" id="wallet-button" type="button">Connect wallet</button>
       </div>
     </header>
 
+    <div class="tape" aria-label="Recent fills across coins">
+      <span class="tape-label">Fills<button type="button" class="tip" data-tip="Each entry is one coin's batch in one epoch, net of its buys and sells: side, ZEC moved and the market cap it cleared at. Zyn does not publish who traded." aria-label="About fills" aria-expanded="false">i</button></span>
+      <div class="tape-view" id="tape-view"><div class="tape-track" id="tape-track"><span class="tape-empty">Reading fills…</span></div></div>
+    </div>
+
     <main>
-      <!-- Coins -->
-      <section class="j-gallery" data-view="gallery" aria-labelledby="gallery-title">
-        <header class="intro">
-          <div>
-            <p class="eyebrow">Zyn Jade</p>
-            <h1 class="display" id="gallery-title">Coins</h1>
-            <p class="lede">Create a coin in one step. Every coin trades on the same curve and graduates into a locked pool.<button type="button" class="tip" data-tip="Each epoch (about 10 seconds) every buyer pays one price and every seller gets one, so nobody can get in ahead of you. At 51,098 of 80,000 lots (about 17 ZEC raised) the coin graduates: the rest of the supply and everything raised open a pool whose shares nobody holds." aria-label="How Jade works" aria-expanded="false">i</button></p>
-          </div>
-          <dl class="ledger">
+      <!-- Board -->
+      <section class="board" data-view="board" aria-labelledby="board-title">
+        <div class="board-head">
+          <h1 class="board-title" id="board-title">Board</h1>
+          <dl class="ledger" aria-label="Totals">
             <div><dt>Coins</dt><dd id="tally-all">—</dd></div>
             <div><dt>Graduated</dt><dd id="tally-grad">—</dd></div>
-            <div class="wide"><dt>ZEC in curves</dt><dd id="tally-zec">—</dd></div>
+            <div><dt>In curves</dt><dd id="tally-zec">—</dd></div>
+            <div><dt>Vol 24h</dt><dd id="tally-vol">—</dd></div>
+            <div><dt>Moves 24h</dt><dd id="tally-moves">—</dd></div>
           </dl>
-        </header>
-
-        <section class="j-spotlight" id="spotlight" hidden aria-label="Closest to graduating"></section>
-
-        <div class="j-tools">
-          <div class="j-sorts" role="tablist" aria-label="Sort coins">
-            <button type="button" role="tab" data-sort="movers" class="active" aria-selected="true">Movers</button>
-            <button type="button" role="tab" data-sort="new" aria-selected="false">New</button>
-            <button type="button" role="tab" data-sort="mcap" aria-selected="false">Market cap</button>
-            <button type="button" role="tab" data-sort="last" aria-selected="false">Last trade</button>
-            <button type="button" role="tab" data-sort="near" aria-selected="false">About to graduate</button>
-            <button type="button" role="tab" data-sort="grad" aria-selected="false">Graduated</button>
+          <div class="filters" role="group" aria-label="Filters">
+            <button type="button" data-filter="traded" aria-pressed="false">Traded 24h</button>
+            <button type="button" data-filter="bonded" aria-pressed="false">Bonded ≥ 10%</button>
+            <button type="button" data-filter="picture" aria-pressed="false">Has picture</button>
+            <button type="button" data-filter="held" aria-pressed="false" hidden>Held</button>
           </div>
-          <label class="j-search"><span class="sr-only">Search coins</span><input id="gallery-search" type="search" placeholder="Search name, ticker or address" autocomplete="off" /><kbd>/</kbd></label>
         </div>
-        <div class="j-grid" id="coin-gallery" aria-live="polite"></div>
-        <p class="j-note" id="gallery-status">Reading coins from the chain…</p>
+        <div class="col-tabs" role="tablist" aria-label="Columns">
+          <button type="button" role="tab" data-col-tab="new" aria-selected="true">New <b id="count-tab-new">0</b></button>
+          <button type="button" role="tab" data-col-tab="bonding" aria-selected="false">Bonding <b id="count-tab-bonding">0</b></button>
+          <button type="button" role="tab" data-col-tab="graduated" aria-selected="false">Graduated <b id="count-tab-graduated">0</b></button>
+        </div>
+        <div class="cols" id="cols" data-show="new">
+          <section class="col" data-col="new" aria-labelledby="col-new-title">
+            <header class="col-head"><h2 id="col-new-title">New</h2><span class="col-count" id="count-new">0</span><button type="button" class="tip" data-tip="Coins not yet traded, or made in the last 6 hours." aria-label="About New" aria-expanded="false">i</button></header>
+            <div class="col-sort" data-sorts="new"></div>
+            <div class="col-list" id="col-new" aria-live="polite"></div>
+          </section>
+          <section class="col" data-col="bonding" aria-labelledby="col-bonding-title">
+            <header class="col-head"><h2 id="col-bonding-title">Bonding</h2><span class="col-count" id="count-bonding">0</span><button type="button" class="tip" data-tip="Traded coins still on their curve, closest to graduating first. A coin graduates at 51,098 of 80,000 lots, about 17 ZEC raised." aria-label="About Bonding" aria-expanded="false">i</button></header>
+            <div class="col-sort" data-sorts="bonding"></div>
+            <div class="col-list" id="col-bonding" aria-live="polite"></div>
+          </section>
+          <section class="col" data-col="graduated" aria-labelledby="col-graduated-title">
+            <header class="col-head"><h2 id="col-graduated-title">Graduated</h2><span class="col-count" id="count-graduated">0</span><button type="button" class="tip" data-tip="Coins that finished their curve. The unsold lots and everything raised opened a pool whose shares nobody holds." aria-label="About Graduated" aria-expanded="false">i</button></header>
+            <div class="col-sort" data-sorts="graduated"></div>
+            <div class="col-list" id="col-graduated" aria-live="polite"></div>
+          </section>
+        </div>
+        <p class="j-note" id="board-status">Reading coins from the chain…</p>
       </section>
 
       <!-- Create -->
-      <section class="j-create" data-view="launch" hidden aria-labelledby="launch-title">
-        <form class="j-panel j-create-form" id="create-form" novalidate>
-          <p class="eyebrow">Create</p>
-          <h1 class="display display-s" id="launch-title">Create a coin</h1>
-          <label><span>Name</span><input id="create-name" type="text" maxlength="24" autocomplete="off" placeholder="Verdant Echo" /></label>
-          <label><span>Ticker</span><input id="create-symbol" type="text" maxlength="8" autocomplete="off" placeholder="VECHO" /><small>1–8 letters or digits</small></label>
-          <label><span>Description <em>(optional)</em></span><textarea id="create-description" rows="3" maxlength="400" placeholder="What is it?"></textarea></label>
-          <label class="j-file"><span>Picture <em>(optional)</em></span><input id="create-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk to under 300 KB on your device first.</small></label>
-          <p class="j-terms" id="create-terms">Reading this network's terms…</p>
-          <ul class="j-facts">
-            <li><b>1,000,000,000</b> supply, all sold on the curve or put in its pool. You get none unless you buy.</li>
-            <li>Graduates at <b>51,098 of 80,000 lots</b> (~17 ZEC raised, ~47 ZEC market cap).</li>
-            <li>Pool shares are <b>locked for good</b>; nobody can pull the liquidity.</li>
-          </ul>
-          <button id="create-go" class="j-primary" type="submit" disabled>Create coin</button>
-          <p id="create-status" class="j-status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
+      <section class="create" data-view="launch" hidden aria-labelledby="launch-title">
+        <form class="panel create-form" id="create-form" novalidate>
+          <header class="panel-head"><h1 id="launch-title">Create a coin</h1><span class="tag">one step</span></header>
+          <div class="create-fields">
+            <label><span>Name</span><input id="create-name" type="text" maxlength="24" autocomplete="off" placeholder="Verdant Echo" /></label>
+            <label><span>Ticker</span><input id="create-symbol" type="text" maxlength="8" autocomplete="off" placeholder="VECHO" /><small>1–8 letters or digits</small></label>
+            <label class="wide"><span>Description <em>(optional)</em></span><textarea id="create-description" rows="3" maxlength="400" placeholder="What is it?"></textarea></label>
+            <label class="wide j-file"><span>Picture <em>(optional)</em></span><input id="create-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" /><small>Square works best. Shrunk to under 300 KB on your device first.</small></label>
+          </div>
+          <p class="terms" id="create-terms">Reading this network's terms…</p>
+          <dl class="facts">
+            <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
+            <div><dt>Start cap</dt><dd>6.18 ZEC</dd></div>
+            <div><dt>Graduates at</dt><dd>51,098 / 80,000 lots</dd></div>
+            <div><dt>Raised by then</dt><dd>~17 ZEC</dd></div>
+            <div><dt>Cap at graduation</dt><dd>~47 ZEC</dd></div>
+            <div><dt>Pool shares</dt><dd>locked</dd></div>
+          </dl>
+          <p class="risk">You get none of the supply unless you buy. Nobody can pull a graduated coin's liquidity.</p>
+          <button id="create-go" class="primary" type="submit" disabled>Create coin</button>
+          <p id="create-status" class="status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
         </form>
-        <aside class="j-preview" aria-label="Preview">
-          <p class="eyebrow">Preview</p>
-          <div class="j-card j-card-preview">
-            <div class="j-thumb" id="preview-thumb"><span id="preview-letter">V</span></div>
-            <div class="j-card-body">
-              <h3 id="preview-name">Unnamed coin</h3>
-              <p class="j-ticker" id="preview-symbol">COIN</p>
-              <p class="j-desc" id="preview-description">No description.</p>
-              <div class="j-bar"><i style="width:0%"></i></div>
-              <p class="j-card-meta"><span>Market cap <b>6.18 ZEC</b></span><span>just now</span></p>
+        <aside class="create-preview" aria-label="Preview">
+          <p class="label">Preview · on the board</p>
+          <div class="col preview-col">
+            <div class="row row-preview">
+              <div class="j-thumb" id="preview-thumb"><span id="preview-letter">V</span></div>
+              <div class="c-coin"><p class="nm"><b id="preview-name">Unnamed coin</b></p><p class="sub"><span class="tk" id="preview-symbol">COIN</span><span class="ago">now</span><span class="tag-new">new</span></p></div>
+              <div class="c-num"><b>6.18</b><span id="preview-usd">ZEC</span></div>
+              <div class="c-num"><b class="flat">0.0%</b><span>0.0%</span></div>
+              <div class="c-num"><b>0</b><span>0 mv</span></div>
+              <div class="c-bond"><b>0.0%</b><i class="bar"><i style="width:0%"></i></i></div>
             </div>
+          </div>
+          <p class="label">Preview · its page</p>
+          <div class="panel preview-card">
+            <p class="desc" id="preview-description">No description.</p>
+            <dl class="facts facts-tight">
+              <div><dt>Price</dt><dd>0.0<sub>8</sub>6177 ZEC</dd></div>
+              <div><dt>MCap</dt><dd>6.18 ZEC</dd></div>
+              <div><dt>Bonded</dt><dd>0.00%</dd></div>
+              <div><dt>Holders</dt><dd>private</dd></div>
+            </dl>
           </div>
         </aside>
       </section>
 
       <!-- A coin -->
-      <section class="j-coin" data-view="coin" hidden aria-labelledby="coin-title">
-        <nav class="crumbs" aria-label="Breadcrumb"><a href="/" data-route="gallery">Coins</a><span>/</span><strong id="coin-crumb">—</strong></nav>
-        <header class="j-coin-head">
-          <div class="j-thumb j-thumb-lg" id="coin-thumb"><span>?</span></div>
-          <div class="j-coin-id">
-            <p class="eyebrow" id="coin-stage">—</p>
-            <h1 id="coin-title">—</h1>
-            <p class="j-coin-sub"><span id="coin-symbol">—</span> · <span id="coin-age">—</span> · <button type="button" class="j-copy" id="coin-copy" title="Copy the coin's address">—</button></p>
+      <section class="coin" data-view="coin" hidden aria-labelledby="coin-title">
+        <header class="coin-bar">
+          <a class="back" href="/" data-route="board" aria-label="Back to the board"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></a>
+          <div class="j-thumb" id="coin-thumb"><span>?</span></div>
+          <div class="coin-id">
+            <h1><span id="coin-title">—</span> <span class="tk" id="coin-symbol">—</span></h1>
+            <p class="coin-sub"><span class="stage" id="coin-stage">—</span><span id="coin-age">—</span><button type="button" class="copy" id="coin-copy" title="Copy the coin's address">—</button></p>
           </div>
-          <div class="j-coin-cap">
-            <span>Market cap</span>
-            <strong id="coin-mcap">—</strong>
-            <b id="coin-change">—</b>
+          <div class="stats-wrap">
+            <dl class="stats" id="coin-stats">
+              <div><dt>Price</dt><dd id="coin-price" data-k="price">—</dd></div>
+              <div class="hl"><dt>MCap</dt><dd id="coin-mcap" data-k="mcap">—</dd><dd class="sub" id="coin-mcap-usd"></dd></div>
+              <div><dt>5m</dt><dd id="coin-ch5">—</dd></div>
+              <div><dt>1h</dt><dd id="coin-ch1">—</dd></div>
+              <div><dt>24h</dt><dd id="coin-change">—</dd></div>
+              <div><dt>Vol 24h</dt><dd id="coin-vol" data-k="vol">—</dd></div>
+              <div><dt>Moves</dt><dd id="coin-moves" data-k="moves">—</dd></div>
+              <div class="bonded"><dt>Bonded</dt><dd id="curve-pct" data-k="pct">—</dd><dd class="bar"><i id="curve-bar" style="width:0%"></i></dd></div>
+              <div><dt id="coin-liq-label">In curve</dt><dd id="coin-liquidity" data-k="liq">—</dd></div>
+              <div><dt>Holders</dt><dd id="coin-holders">private<button type="button" class="tip" data-tip="Zyn does not publish who holds a coin or how much: balances are private to each wallet." aria-label="About holders" aria-expanded="false">i</button></dd></div>
+            </dl>
           </div>
         </header>
 
-        <div class="j-coin-grid">
-          <div class="j-coin-main">
-            <section class="j-panel j-chart-panel" aria-label="Price chart">
-              <div class="j-chart-tools">
-                <div class="j-tf" role="group" aria-label="Candle size">
-                  <button type="button" data-tf="60">1m</button><button type="button" data-tf="300" class="active">5m</button><button type="button" data-tf="900">15m</button><button type="button" data-tf="3600">1h</button><button type="button" data-tf="14400">4h</button><button type="button" data-tf="86400">1d</button>
-                </div>
-                <div class="j-tf" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
+        <div class="coin-grid">
+          <section class="panel chart-panel" aria-label="Price chart">
+            <div class="chart-tools">
+              <div class="seg" role="group" aria-label="Candle size">
+                <button type="button" data-tf="60">1m</button><button type="button" data-tf="300" class="active">5m</button><button type="button" data-tf="900">15m</button><button type="button" data-tf="3600">1h</button><button type="button" data-tf="14400">4h</button><button type="button" data-tf="86400">1d</button>
               </div>
-              <div class="j-chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
-              <p class="j-note" id="chart-note">Market cap per epoch<button type="button" class="tip" data-tip="Each candle is built from epoch batches: in every epoch all buyers pay one price and all sellers get one, so each batch is one point." aria-label="About the chart" aria-expanded="false">i</button></p>
-            </section>
+              <p class="legend" id="chart-legend" aria-hidden="true"></p>
+              <div class="seg" role="group" aria-label="Units"><button type="button" data-unit="zec" class="active">ZEC</button><button type="button" data-unit="usd">USD</button></div>
+            </div>
+            <div class="chart" id="chart" role="img" aria-label="Market cap candles over time"></div>
+            <p class="j-note" id="chart-note">Market cap per epoch batch<button type="button" class="tip" data-tip="Each candle is built from epoch batches: in every epoch all buyers pay one price and all sellers get one, so each batch is one point. Bars below are ZEC traded." aria-label="About the chart" aria-expanded="false">i</button></p>
+          </section>
 
-            <section class="j-panel j-progress" aria-label="Bonding curve">
-              <div class="j-progress-top"><span>Bonding curve</span><b id="curve-pct">—</b></div>
-              <div class="j-bar j-bar-lg"><i id="curve-bar" style="width:0%"></i></div>
-              <p id="curve-text">—</p>
-            </section>
-
-            <section class="j-panel j-fills" aria-labelledby="fills-title">
-              <div class="j-panel-head"><h2 id="fills-title">Fills</h2><span>per epoch batch<button type="button" class="tip" data-tip="Fills show each epoch's batch, not who traded: Zyn does not publish which accounts bought or sold." aria-label="About fills" aria-expanded="false">i</button></span></div>
-              <div class="j-table-wrap"><table class="j-table"><thead><tr><th>When</th><th>Side</th><th>Tokens</th><th>ZEC</th><th>Market cap</th></tr></thead><tbody id="fills"></tbody></table></div>
-            </section>
-          </div>
-
-          <aside class="j-coin-side">
-            <section class="j-panel j-trade" aria-label="Trade">
-              <div class="j-sides"><button type="button" data-trade="buy" class="active">Buy</button><button type="button" data-trade="sell">Sell</button></div>
-              <p class="j-balance" id="trade-balance">Connect a wallet to see your balance.</p>
-              <label class="j-amount"><span class="sr-only" id="trade-label">Amount</span><input id="trade-input" inputmode="decimal" autocomplete="off" value="0.1" /><b id="trade-unit">ZEC.zy</b></label>
-              <div class="j-presets" id="trade-presets"></div>
-              <dl class="j-quote">
-                <div><dt id="trade-output-label">You get (if you are alone this epoch)</dt><dd id="trade-output">—</dd></div>
-                <div><dt>Fee</dt><dd id="trade-fee">—</dd></div>
-                <div><dt>Slippage</dt><dd><select id="trade-slip" aria-label="Slippage"><option value="100">1%</option><option value="300" selected>3%</option><option value="500">5%</option><option value="1000">10%</option></select></dd></div>
-                <div><dt>At least</dt><dd id="trade-min">—</dd></div>
-              </dl>
-              <button class="j-primary trade-submit" type="button">Connect wallet</button>
-              <p id="trade-hint" class="j-hint" role="status" aria-live="polite"></p>
-              <p id="trade-status" class="j-status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
-            </section>
-
-            <section class="j-panel j-about" aria-labelledby="about-title">
-              <h2 id="about-title">About</h2>
-              <p class="j-desc" id="coin-description">No description.</p>
-              <dl class="j-facts-list">
-                <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
-                <div><dt>Price / token</dt><dd id="coin-price">—</dd></div>
-                <div><dt>ZEC in it</dt><dd id="coin-liquidity">—</dd></div>
-                <div><dt>Graduation pot</dt><dd id="coin-pot">—</dd></div>
-                <div><dt>Fee</dt><dd id="coin-fee">—</dd></div>
-                <div><dt>Creator</dt><dd>not shown</dd></div>
-                <div><dt>Holders</dt><dd id="coin-holders">private</dd></div>
-              </dl>
-              <details class="j-curve-mini"><summary>The curve</summary>
-                <svg class="price-chart" viewBox="0 0 900 390" role="img" aria-label="The bonding curve and where this coin is on it">
-                  <g class="chart-grid"><path d="M54 30V342H870"/><path d="M54 264H870M54 186H870M54 108H870"/></g>
-                  <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/><path class="chart-line" d="M54 342 L870 64"/>
-                  <circle class="chart-end" id="chart-point" cx="54" cy="342" r="9"/>
+          <section class="panel batch" id="batch" aria-labelledby="batch-title">
+            <header class="panel-head"><h2 id="batch-title">Batch<button type="button" class="tip" data-tip="Orders placed during an epoch are not filled one by one. When the epoch seals, every buyer pays one price and every seller gets one, so the order you place in doesn't matter and nobody can get in ahead of you." aria-label="About batches" aria-expanded="false">i</button></h2><span class="mono" id="batch-epoch">epoch —</span></header>
+            <div class="batch-body">
+              <div class="ring" id="ring">
+                <svg viewBox="0 0 100 100" aria-hidden="true">
+                  <defs><linearGradient id="ring-jade" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7af5cf"/><stop offset=".45" stop-color="#1fb489"/><stop offset="1" stop-color="#0b7a61"/></linearGradient></defs>
+                  <circle class="ring-bg" cx="50" cy="50" r="43"/>
+                  <circle class="ring-fg" id="ring-fg" cx="50" cy="50" r="43" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
                 </svg>
-                <p class="j-note">Lot i costs 7,721 + i zatoshi, for every coin. The dot is this coin.</p>
-              </details>
-            </section>
-          </aside>
+                <div class="ring-text"><b id="ring-secs">—</b><span id="ring-label">to seal</span></div>
+              </div>
+              <dl class="batch-facts">
+                <div class="pending"><dt>In this batch</dt><dd><b id="batch-pending">—</b> <span id="batch-pending-unit">orders</span></dd></div>
+                <div><dt>Last clearing</dt><dd id="batch-clear">—</dd></div>
+                <div><dt>Last fill</dt><dd id="batch-last">—</dd></div>
+              </dl>
+            </div>
+            <div class="spark" id="batch-spark" aria-label="Recent batches"></div>
+          </section>
+
+          <section class="panel trade j-trade" id="trade" aria-label="Trade">
+            <div class="sides" role="tablist" aria-label="Side"><button type="button" role="tab" data-trade="buy" class="active">Buy <kbd>B</kbd></button><button type="button" role="tab" data-trade="sell">Sell <kbd>S</kbd></button></div>
+            <p class="balance" id="trade-balance">Connect a wallet to see your balance.</p>
+            <label class="amount"><span class="sr-only" id="trade-label">Amount</span><input id="trade-input" inputmode="decimal" autocomplete="off" value="0.1" /><b id="trade-unit">ZEC.zy</b></label>
+            <div class="chips" id="trade-presets"></div>
+            <div class="slip"><span>Slippage</span><div class="seg seg-sm" role="group" aria-label="Slippage" id="slip-seg"><button type="button" data-slip="100">1%</button><button type="button" data-slip="300" class="active">3%</button><button type="button" data-slip="500">5%</button><button type="button" data-slip="1000">10%</button></div><input type="hidden" id="trade-slip" value="300" /></div>
+            <dl class="quote">
+              <div><dt id="trade-output-label">You get<button type="button" class="tip" data-tip="What this order gets if it is alone in the batch. Other orders in the same epoch move the one price everyone gets; the floor below protects you." aria-label="About the quote" aria-expanded="false">i</button></dt><dd id="trade-output">—</dd></div>
+              <div><dt>Fee</dt><dd id="trade-fee">—</dd></div>
+              <div><dt>At least</dt><dd id="trade-min">—</dd></div>
+            </dl>
+            <button class="primary trade-submit" type="button">Connect wallet</button>
+            <p id="trade-hint" class="hint" role="status" aria-live="polite"></p>
+            <ol class="steps" id="trade-steps" aria-hidden="true" data-step="idle"><li data-s="placed">Placed</li><li data-s="sealing">Sealing</li><li data-s="done">Settled</li></ol>
+            <p id="trade-status" class="status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
+            <p class="risk">Coins can go to zero. Prices move with every batch.</p>
+            <p class="keys" aria-hidden="true"><kbd>B</kbd> buy <kbd>S</kbd> sell <kbd>↵</kbd> place <kbd>Esc</kbd> clear</p>
+          </section>
+
+          <section class="panel coin-tabs" aria-label="Coin details">
+            <div class="tabbar" role="tablist" aria-label="Details">
+              <button type="button" role="tab" data-pane="batches" aria-selected="true">Batches</button>
+              <button type="button" role="tab" data-pane="position" aria-selected="false">Your position</button>
+              <button type="button" role="tab" data-pane="about" aria-selected="false">About</button>
+            </div>
+            <div class="pane" data-pane-body="batches">
+              <div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Epoch</th><th>Side</th><th class="r">Tokens</th><th class="r">ZEC</th><th class="r">Price</th><th class="r">MCap</th></tr></thead><tbody id="fills"></tbody></table></div>
+            </div>
+            <div class="pane" data-pane-body="position" hidden>
+              <dl class="facts facts-wide" id="position"></dl>
+            </div>
+            <div class="pane about" data-pane-body="about" hidden>
+              <p class="desc" id="coin-description">No description.</p>
+              <div class="progress"><div class="progress-top"><span>Bonding curve</span><b id="curve-pct-2">—</b></div><i class="bar bar-lg"><i id="curve-bar-2" style="width:0%"></i></i><p id="curve-text">—</p></div>
+              <div class="about-grid">
+                <dl class="facts">
+                  <div><dt>Supply</dt><dd>1,000,000,000</dd></div>
+                  <div><dt>Graduation pot</dt><dd id="coin-pot">—</dd></div>
+                  <div><dt>Fee</dt><dd id="coin-fee">—</dd></div>
+                  <div><dt>Creator</dt><dd>not shown</dd></div>
+                  <div><dt>Address</dt><dd class="addr" id="coin-addr">—</dd></div>
+                </dl>
+                <figure class="curve-mini">
+                  <svg class="price-chart" viewBox="0 0 900 390" role="img" aria-label="The bonding curve and where this coin is on it">
+                    <g class="chart-grid"><path d="M54 30V342H870"/><path d="M54 264H870M54 186H870M54 108H870"/></g>
+                    <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/><path class="chart-line" d="M54 342 L870 64"/>
+                    <circle class="chart-end" id="chart-point" cx="54" cy="342" r="9"/>
+                  </svg>
+                  <figcaption class="j-note">Lot i costs 7,721 + i zatoshi, for every coin. The dot is this coin.</figcaption>
+                </figure>
+              </div>
+            </div>
+          </section>
         </div>
+        <nav class="m-trade" aria-label="Trade shortcuts"><button type="button" data-jump="buy">Buy</button><button type="button" data-jump="sell">Sell</button></nav>
       </section>
 
       <!-- Portfolio -->
-      <section class="j-portfolio" data-view="portfolio" hidden aria-labelledby="portfolio-title">
-        <p class="eyebrow">Zyn Jade</p>
-        <h1 class="display display-s" id="portfolio-title">Portfolio</h1>
+      <section class="portfolio" data-view="portfolio" hidden aria-labelledby="portfolio-title">
+        <div class="board-head">
+          <h1 class="board-title" id="portfolio-title">Portfolio</h1>
+          <dl class="ledger" aria-label="Totals">
+            <div><dt>ZEC.zy</dt><dd id="pf-zec">—</dd></div>
+            <div><dt>Positions</dt><dd id="held-total">—</dd></div>
+            <div><dt>24h</dt><dd id="pf-24h">—</dd></div>
+            <div><dt>Coins held</dt><dd id="pf-count">—</dd></div>
+          </dl>
+        </div>
         <p class="j-note" id="portfolio-status">Connect a wallet to see what you hold and what you made.</p>
-        <div class="j-panel"><div class="j-panel-head"><h2>Held</h2><span id="held-total">—</span></div><div class="j-table-wrap"><table class="j-table"><thead><tr><th>Coin</th><th>Tokens</th><th>Worth</th><th></th></tr></thead><tbody id="held"></tbody></table></div></div>
-        <div class="j-panel"><div class="j-panel-head"><h2>Made by you</h2><span>visible only to you</span></div><div class="j-grid j-grid-small" id="made"></div></div>
+        <section class="panel">
+          <header class="panel-head"><h2>Positions</h2><span>valued at each coin's next price</span></header>
+          <div class="table-wrap"><table class="table table-pf"><thead><tr><th>Coin</th><th class="r">Holding</th><th class="r">Price</th><th class="r">Value</th><th class="r">24h</th><th class="r">Bonded</th><th class="r">Avg cost<button type="button" class="tip" data-tip="From trades placed and settled in this browser only. Zyn does not publish your fills, so trades made elsewhere are not counted." aria-label="About average cost" aria-expanded="false">i</button></th><th></th></tr></thead><tbody id="held"></tbody></table></div>
+        </section>
+        <section class="panel">
+          <header class="panel-head"><h2>Made by you</h2><span>visible only to you</span></header>
+          <div class="table-wrap"><table class="table table-pf"><thead><tr><th>Coin</th><th class="r">MCap</th><th class="r">24h</th><th class="r">Vol 24h</th><th class="r">Bonded</th><th class="r">Made</th><th></th></tr></thead><tbody id="made"></tbody></table></div>
+        </section>
       </section>
     </main>
 
     <dialog class="jade-wallet" id="jade-wallet" aria-labelledby="jade-wallet-title">
       <form method="dialog"><button class="jade-wallet-x" aria-label="Close">×</button></form>
-      <p class="eyebrow">Wallet</p><h2 id="jade-wallet-title">Connect wallet</h2>
+      <h2 id="jade-wallet-title">Connect wallet</h2>
       <div class="jade-wallet-body"></div>
     </dialog>
     <footer class="foot">
@@ -206,6 +283,6 @@
         <a href="https://scan.zyn-network.com/">ZynScan</a>
       </nav>
     </footer>
-    <script type="module" src="/jade.js?v=20261002-zyn1"></script>
+    <script type="module" src="/jade.js?v=20261005-term1"></script>
   </body>
 </html>

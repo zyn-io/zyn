@@ -1,10 +1,15 @@
-// Jade — Zyn's launchpad (DECISIONS §141).
+// Jade — Zyn's launchpad (DECISIONS §141), as a trading terminal.
 //
 // Reads come from the chain's public RPC: curves, prices, per-epoch fills —
 // anyone can browse without a wallet. Pictures and descriptions come
 // from this site's own store, attached by each coin's creator with a proof.
 // Everything that moves value goes through Nap (Nap Connect), which shows the
 // holder what the chain says and asks them to approve it in Nap's window.
+//
+// The gateway limits each client (about 8 requests a second), so the page is
+// frugal: the board reads the market every 10 s and a coin's fills only when
+// its last trade changed; a coin view reads every 5 s, and the epoch every
+// second only while a coin view is open (that is how the seal is timed).
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 import { createChart } from './vendor/lightweight-charts.js';
@@ -62,15 +67,30 @@ const full = (raw) => { const v = BigInt(raw); const f = (v % WAD).toString().pa
 /// The page's own links keep the network, so a coin opened in a new tab is
 /// the same coin on the same chain.
 const withNet = (path) => (NETWORK === 'testnet' ? `${path}?network=testnet` : path);
-const zecText = (zec) => (zec >= 1000 ? zec.toLocaleString('en-US', { maximumFractionDigits: 0 }) : zec >= 1 ? zec.toLocaleString('en-US', { maximumFractionDigits: 2 }) : zec.toLocaleString('en-US', { maximumSignificantDigits: 3 }));
+const zecText = (zec) => (zec >= 1000 ? zec.toLocaleString('en-US', { maximumFractionDigits: 0 }) : zec >= 1 ? zec.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : zec.toLocaleString('en-US', { maximumSignificantDigits: 3 }));
 const usdText = (usd) => (usd >= 1e6 ? `$${(usd / 1e6).toFixed(2)}M` : usd >= 1e3 ? `$${(usd / 1e3).toFixed(1)}K` : `$${usd.toFixed(2)}`);
 function ago(t) {
   if (!t) return '—';
   const s = Math.max(0, now() - t);
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
 }
+/// The same, as a terminal shows it in a cell: "42s", "7m", "3h", "12d".
+const agoShort = (t) => (t ? ago(t).replace(' ago', '') : '—');
 const pct = (a, b) => (b > 0 ? ((a - b) / b) * 100 : null);
 const changeText = (p) => (p == null ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(p >= 100 || p <= -100 ? 0 : 1)}%`);
+const changeCls = (p) => (p == null || Math.abs(p) < 0.05 ? 'flat' : p > 0 ? 'up' : 'down');
+/// ZEC amounts in a cell: short, never in exponent form.
+const zecCell = (zec) => (zec === 0 ? '0' : zec >= 1e6 ? `${(zec / 1e6).toFixed(2)}M` : zec >= 1e4 ? `${(zec / 1e3).toFixed(1)}K` : zec >= 100 ? zec.toFixed(0) : zec >= 1 ? zec.toFixed(2) : zec >= 0.0001 ? zec.toFixed(4).replace(/0+$/, '').replace(/\.$/, '') : zec.toLocaleString('en-US', { maximumSignificantDigits: 2, maximumFractionDigits: 12 }));
+/// A price per token, which is tiny: the zeros after the point counted as a
+/// subscript, the way trading screens write it — 0.0₈6295 is 0.000000006295.
+/// Markup (a <sub>); `plain` gives the same as text.
+function priceText(v, plain = false) {
+  if (!Number.isFinite(v) || v <= 0) return '—';
+  if (v >= 0.001) return v.toLocaleString('en-US', { maximumSignificantDigits: 5 });
+  const zeros = Math.floor(-Math.log10(v));
+  const digits = Math.round(v * 10 ** (zeros + 4)).toString().slice(0, 5).replace(/0+$/, '') || '0';
+  return plain ? `0.0${String(zeros).split('').map((d) => '₀₁₂₃₄₅₆₇₈₉'[d]).join('')}${digits}` : `0.0<sub>${zeros}</sub>${digits}`;
+}
 
 // The curve's own arithmetic, for previews. Each epoch's orders settle
 // together at one price, so these are what an order gets alone.
@@ -122,20 +142,45 @@ let terms = { set: false, fee_bps: 0, bond: '0' };
 let usd = null;
 let wallet = null;
 let mine = null; // { zec, holdings: Map token -> amount, created: [] }
-let sortBy = 'movers';
 let currentCoin = null;
 let tradeSide = 'buy';
 let unit = 'zec';
 let tf = 300;
+let marketRead = false;
+/// The chain's epoch as last read, and when it was seen to change: the seal
+/// cadence is timed here, from the page's own polling (the chain publishes no
+/// seal times). `epochSeconds` is what the market says, until it is measured.
+let epochSeconds = 60;
+const live = { epoch: null, seen: 0, changedAt: 0, cadence: null };
 /// Each coin's epoch points, by token, so one coin's chart never shows under another.
 const histories = new Map();
 const historyOf = (token) => histories.get(token) || [];
+/// When each history was read, and the coin's last trade then: a history is
+/// read again only when the coin has traded since.
+const historyRead = new Map();
 /// The last order's status, per coin: written by the order, kept across the
 /// page's refreshes, shown only on its own coin's page.
 const orderStatus = new Map();
-function setOrder(token, text) {
-  orderStatus.set(token, text);
-  if (currentCoin?.token === token) $('#trade-status').textContent = text;
+function setOrder(token, text, step = 'idle') {
+  orderStatus.set(token, { text, step });
+  if (currentCoin?.token === token) showOrder(token);
+}
+function showOrder(token) {
+  const o = orderStatus.get(token);
+  $('#trade-status').textContent = o ? o.text : 'One price per epoch for every buyer, another for every seller.';
+  $('#trade-status').classList.toggle('lit', !!o);
+  const steps = $('#trade-steps');
+  const step = o?.step || 'idle';
+  steps.dataset.step = step;
+  const order = ['placed', 'sealing', 'done'];
+  const at = { placed: 0, sealing: 1, done: 2, missed: 2, error: 0 }[step] ?? -1;
+  steps.classList.toggle('bad', step === 'missed' || step === 'error');
+  steps.querySelectorAll('li').forEach((li) => {
+    const i = order.indexOf(li.dataset.s);
+    li.classList.toggle('done', i < at || (step === 'done' && i === at));
+    li.classList.toggle('now', i === at && step !== 'done');
+  });
+  steps.querySelector('[data-s="done"]').textContent = step === 'missed' ? 'Not filled' : 'Settled';
 }
 let creating = false;
 const content = new Map(); // token -> {description, image} | null (none) | 'loading'
@@ -169,13 +214,17 @@ async function loadMarket() {
     const [m, s] = await Promise.all([rpc('zyn_market'), rpc('zyn_curveStats').catch(() => [])]);
     terms = m.curve_terms || terms;
     pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b));
-    curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, ...decodeMeta(c.meta) }));
+    curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, pending: Number.isSafeInteger(c.pending) && c.pending > 0 ? c.pending : 0, ...decodeMeta(c.meta) }));
     stats = new Map((Array.isArray(s) ? s : []).filter((x) => isHex(x.token)).map((x) => [x.token, x]));
-    $('#gallery-status').textContent = curves.length ? `Live, ${NETWORK}. A coin is its address; names and tickers may repeat.` : '';
+    if (Number.isSafeInteger(m.epoch_seconds) && m.epoch_seconds > 0) epochSeconds = m.epoch_seconds;
+    if (Number.isSafeInteger(m.epoch)) noteEpoch(m.epoch, false);
+    marketRead = true;
+    $('#board-status').textContent = curves.length ? `Live on ${NETWORK}. A coin is its address; names and tickers may repeat.` : '';
   } catch (e) {
-    $('#gallery-status').textContent = `The chain is not answering: ${e.message}`;
+    $('#board-status').textContent = `The chain is not answering: ${e.message}`;
   }
   render();
+  refreshHistories();
 }
 
 async function loadUsd() {
@@ -208,8 +257,26 @@ function zecSet(c) {
 const progress = (c) => (c.graduated ? 1 : Math.min(1, c.sold / CURVE.graduateAt));
 const change24 = (c) => { const s = stats.get(c.token); return s?.price_24h ? pct(Number(price(c)), Number(s.price_24h)) : null; };
 const change1h = (c) => { const s = stats.get(c.token); return s?.price_1h ? pct(Number(price(c)), Number(s.price_1h)) : null; };
+/// The change since `secs` ago, from the coin's own batches (5m is not in the stats).
+function changeSince(c, secs) {
+  const cut = now() - secs;
+  let ref = null;
+  for (const p of historyOf(c.token)) { if (!isInt(p.price)) continue; if (p.time <= cut) ref = p; else break; }
+  return ref ? pct(Number(price(c)), Number(ref.price)) : null;
+}
+const vol24 = (c) => { const v = stats.get(c.token)?.volume_24h; return isInt(v) ? num(v) : 0; };
+const moves24 = (c) => stats.get(c.token)?.moves_24h || 0;
+const pendingOf = (c) => (c.graduated ? (poolOf(c)?.pending || 0) : c.pending) || 0;
 const capText = (zec) => (unit === 'usd' && usd ? usdText(zec * usd) : `${zecText(zec)} ZEC`);
 const capBoth = (zec) => `${zecText(zec)} ZEC${usd ? ` · ${usdText(zec * usd)}` : ''}`;
+
+/// A batch fill's side and size, from either venue.
+function fillOf(p) {
+  const dz = BigInt(p.delta_zec || '0');
+  const buy = p.venue === 'curve' ? p.delta_lots > 0 : dz > 0n;
+  return { buy, zec: Math.abs(Number(dz)) / 1e18, zecRaw: dz < 0n ? -dz : dz, tokens: p.venue === 'curve' ? BigInt(Math.abs(p.delta_lots)) * CURVE.lotTokens : null };
+}
+const moved = (p) => p.delta_lots !== 0 || (p.delta_zec && p.delta_zec !== '0');
 
 // ---------------------------------------------------------------------------
 // Pictures and descriptions.
@@ -231,94 +298,270 @@ function thumbInner(c) {
   return k && k !== 'loading' && k.image ? `<img src="${esc(k.image)}" alt="" />` : `<span>${esc([...c.symbol][0] || '?')}</span>`;
 }
 const thumb = (c) => `<div class="j-thumb">${thumbInner(c)}</div>`;
+const hasPicture = (c) => { const k = content.get(c.token); return !!(k && k !== 'loading' && k.image); };
 
 // ---------------------------------------------------------------------------
-// Coins.
+// Histories: every coin's batches, read politely. The board's tape and the
+// coin view's chart both come from these.
+
+let historyBusy = false;
+async function loadHistory(token) {
+  const last = stats.get(token)?.last_trade_time || 0;
+  try {
+    const h = await rpc('zyn_history', { token });
+    if (Array.isArray(h)) histories.set(token, h.filter((p) => Number.isSafeInteger(p.time) && Number.isSafeInteger(p.epoch)).sort((a, b) => a.time - b.time || a.epoch - b.epoch));
+    historyRead.set(token, { last, at: Date.now() });
+  } catch { if (!histories.has(token)) histories.set(token, []); }
+}
+/// The 24 most recently traded coins, each read again only once it has traded
+/// since; two at a time, so a first visit stays far under the gateway's limit.
+async function refreshHistories() {
+  if (historyBusy || document.hidden) return;
+  historyBusy = true;
+  try {
+    const want = curves.map((c) => [c.token, stats.get(c.token)?.last_trade_time || 0])
+      .filter(([, t]) => t).sort((a, b) => b[1] - a[1]).slice(0, 24)
+      .filter(([token, t]) => historyRead.get(token)?.last !== t)
+      .map(([token]) => token);
+    if (!want.length) return;
+    const queue = [...want];
+    await Promise.all([0, 1].map(async () => { while (queue.length) await loadHistory(queue.shift()); }));
+    renderTape();
+    if (pathRoute().view === 'board') scheduleBoard();
+  } finally { historyBusy = false; }
+}
+
+// ---------------------------------------------------------------------------
+// The tape: the latest batch fills across every coin read so far.
+
+let tapeKey = '';
+let tapeNewest = 0;
+function renderTape() {
+  const fills = [];
+  for (const c of curves) {
+    for (const p of historyOf(c.token)) if (moved(p) && isInt(p.price)) fills.push({ c, p });
+  }
+  fills.sort((a, b) => b.p.time - a.p.time || b.p.epoch - a.p.epoch);
+  const top = fills.slice(0, 30);
+  const key = top.map(({ c, p }) => `${c.token.slice(0, 8)}${p.epoch}`).join(',') + (usd ? 'u' : '');
+  const track = $('#tape-track');
+  if (!top.length) {
+    if (marketRead && tapeKey !== 'none') { track.className = 'tape-track'; track.innerHTML = `<span class="tape-empty">${curves.length ? 'No fills yet.' : 'No coins yet.'}</span>`; tapeKey = 'none'; }
+    return;
+  }
+  if (key === tapeKey) { tickAgo(track); return; }
+  tapeKey = key;
+  const before = tapeNewest;
+  tapeNewest = Math.max(tapeNewest, top[0].p.time);
+  const item = ({ c, p }) => {
+    const f = fillOf(p);
+    return `<a class="tp${before && p.time > before ? ' fresh' : ''}" href="${withNet(`/coin/${c.token}`)}" data-go="${c.token}" title="${esc(c.name)} · epoch ${p.epoch}">
+      ${thumb(c)}<b>${esc(c.symbol)}</b><span class="s ${f.buy ? 'up' : 'down'}">${f.buy ? '▲ Buy' : '▼ Sell'}</span><span>${zecCell(f.zec)} ZEC</span><span class="t">MC ${zecCell(mcapOf(p.price))}</span><span class="t" data-ago="${p.time}"></span></a>`;
+  };
+  const html = top.map(item).join('');
+  track.className = 'tape-track';
+  track.style.removeProperty('--tape-dur');
+  track.innerHTML = html;
+  tickAgo(track);
+  // A tape longer than the screen runs; one that fits stays still.
+  requestAnimationFrame(() => {
+    const view = $('#tape-view');
+    const w = track.scrollWidth;
+    if (w > view.clientWidth + 8 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      track.innerHTML = html + html.replace(/ fresh"/g, '"');
+      tickAgo(track);
+      track.style.setProperty('--tape-dur', `${Math.max(30, w / 38)}s`);
+      track.classList.add('run');
+    }
+  });
+}
+
+/// Every "ago" on screen, kept current once a second without re-rendering.
+function tickAgo(root = document) {
+  root.querySelectorAll('[data-ago]').forEach((el) => {
+    const t = Number(el.dataset.ago);
+    const text = el.dataset.agoLong ? ago(t) : agoShort(t);
+    if (el.textContent !== text) el.textContent = text;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The board: New, Bonding, Graduated.
 
 const views = Object.fromEntries($$('[data-view]').map((view) => [view.dataset.view, view]));
-const search = $('#gallery-search');
+const search = $('#search');
+const SIX_HOURS = 6 * 3600;
+const filters = new Set();
+const COLS = ['new', 'bonding', 'graduated'];
+const colSort = { new: { key: 'age', dir: -1 }, bonding: { key: 'bonded', dir: -1 }, graduated: { key: 'mc', dir: -1 } };
+const SORTS = [
+  [null],
+  ['l', ['age', 'Age'], ['last', 'Last']],
+  ['', ['mc', 'MCap']],
+  ['', ['ch1', '1h'], ['ch24', '24h']],
+  ['', ['vol', 'Vol'], ['moves', 'Moves']],
+  ['', ['bonded', 'Bonded']],
+];
 
-function sorted() {
+function columnOf(c) {
+  if (c.graduated) return 'graduated';
+  const made = stats.get(c.token)?.created_time || 0;
+  return c.sold === 0 || (made && now() - made < SIX_HOURS) ? 'new' : 'bonding';
+}
+function matches(c) {
   const q = search.value.trim().toLocaleLowerCase();
-  let list = curves.filter((c) => !q || `${c.name} ${c.symbol} ${c.token}`.toLocaleLowerCase().includes(q));
-  const st = (c) => stats.get(c.token) || {};
-  if (sortBy === 'near') list = list.filter((c) => !c.graduated);
-  if (sortBy === 'grad') list = list.filter((c) => c.graduated);
-  const by = {
-    movers: (a, b) => Math.abs(change1h(b) ?? change24(b) ?? 0) - Math.abs(change1h(a) ?? change24(a) ?? 0) || (st(b).last_trade_time || 0) - (st(a).last_trade_time || 0),
-    new: (a, b) => (st(b).created_time || b.created_at) - (st(a).created_time || a.created_at),
-    mcap: (a, b) => mcap(b) - mcap(a),
-    last: (a, b) => (st(b).last_trade_time || 0) - (st(a).last_trade_time || 0),
-    near: (a, b) => progress(b) - progress(a),
-    grad: (a, b) => mcap(b) - mcap(a),
-  }[sortBy];
-  return list.sort(by);
-}
-
-const coinCard = (c) => {
+  if (q && !`${c.name} ${c.symbol} ${c.token}`.toLocaleLowerCase().includes(q)) return false;
   const s = stats.get(c.token) || {};
-  const ch = change24(c);
-  const k = content.get(c.token);
-  return `<a class="j-card" href="${withNet(`/coin/${c.token}`)}" data-coin="${c.token}">
-      ${thumb(c)}
-      <div class="j-card-body">
-        <h3>${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></h3>
-        ${k && k !== 'loading' && k.description ? `<p class="j-desc">${esc(k.description)}</p>` : ''}
-        <p class="j-card-cap"><b>${esc(capText(mcap(c)))}</b> <span class="${ch == null ? '' : ch >= 0 ? 'up' : 'down'}">${changeText(ch)}</span></p>
-        <div class="j-bar"><i style="width:${(progress(c) * 100).toFixed(1)}%"></i></div>
-        <p class="j-card-meta"><span>${c.graduated ? 'graduated · in its pool' : `${(progress(c) * 100).toFixed(1)}% bonded`}</span><span>${s.created_time ? `made ${ago(s.created_time)}` : ''}${s.last_trade_time ? ` · traded ${ago(s.last_trade_time)}` : ''}</span></p>
-      </div>
-    </a>`;
-};
-
-/// The coin nearest graduation, with what is left to raise.
-function renderSpotlight() {
-  const box = $('#spotlight');
-  const open = curves.filter((c) => !c.graduated && c.sold > 0).sort((a, b) => progress(b) - progress(a));
-  const c = open[0];
-  if (!c || search.value.trim()) { box.hidden = true; return; }
-  const left = cost(c.sold, CURVE.graduateAt - c.sold);
-  const k = content.get(c.token);
-  box.hidden = false;
-  box.innerHTML = `<a class="j-spot" href="${withNet(`/coin/${c.token}`)}">
-      <div class="j-thumb j-thumb-lg">${thumbInner(c)}</div>
-      <div class="j-spot-body">
-        <p class="eyebrow">Closest to graduating</p>
-        <h2>${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></h2>
-        ${k && k !== 'loading' && k.description ? `<p class="j-desc">${esc(k.description)}</p>` : ''}
-      </div>
-      <div class="j-spot-figs">
-        <div><span>Market cap</span><b>${esc(capBoth(mcap(c)))}</b></div>
-        <div><span>To graduate</span><b>~${wad(left, 2)} ZEC</b></div>
-      </div>
-      <div class="j-spot-bar"><div class="j-bar j-bar-lg"><i style="width:${(progress(c) * 100).toFixed(1)}%"></i></div><span>${(progress(c) * 100).toFixed(1)}% bonded</span></div>
-    </a>`;
+  if (filters.has('traded') && !(moves24(c) > 0 || (s.last_trade_time && now() - s.last_trade_time < 86400))) return false;
+  if (filters.has('bonded') && progress(c) < 0.1) return false;
+  if (filters.has('picture') && !hasPicture(c)) return false;
+  if (filters.has('held') && heldOf(c.token) <= 0n) return false;
+  return true;
+}
+function sortValue(c, key) {
+  const s = stats.get(c.token) || {};
+  switch (key) {
+    case 'age': return s.created_time || 0;
+    case 'last': return s.last_trade_time || 0;
+    case 'mc': return mcap(c);
+    case 'ch1': return change1h(c) ?? -Infinity;
+    case 'ch24': return change24(c) ?? -Infinity;
+    case 'vol': return vol24(c);
+    case 'moves': return moves24(c);
+    default: return progress(c);
+  }
 }
 
-function renderGallery() {
-  renderSpotlight();
-  const list = sorted();
-  $('#coin-gallery').innerHTML = list.length ? list.map(coinCard).join('') : `<div class="j-empty">${curves.length ? 'No coins match.' : 'No coins yet. <a href="/launch">Create the first one.</a>'}</div>`;
+function renderSortHeads() {
+  for (const col of COLS) {
+    const box = $(`[data-sorts="${col}"]`);
+    const { key, dir } = colSort[col];
+    box.innerHTML = SORTS.map(([align, ...keys]) => (align === null ? '<span></span>'
+      : `<div class="grp ${align}">${keys.map(([k, label]) => `<button type="button" data-sort="${k}" data-col="${col}" class="${k === key ? `on${dir > 0 ? ' asc' : ''}` : ''}" aria-pressed="${k === key}">${label}</button>`).join('')}</div>`)).join('');
+  }
+}
+document.addEventListener('click', (event) => {
+  const b = event.target.closest('[data-sort]');
+  if (!b) return;
+  const s = colSort[b.dataset.col];
+  if (s.key === b.dataset.sort) s.dir = -s.dir; else { s.key = b.dataset.sort; s.dir = -1; }
+  renderSortHeads();
+  renderBoard();
+});
+
+const rowEls = new Map();
+const rowSnap = new Map();
+let boardPainted = false;
+
+function rowHtml(c) {
+  const s = stats.get(c.token) || {};
+  const mc = mcap(c);
+  const h1 = change1h(c), h24 = change24(c);
+  const q = pendingOf(c);
+  const cut = progress(c) * 100;
+  return `<div class="j-thumb">${thumbInner(c)}${q ? '<i class="dot" aria-hidden="true"></i>' : ''}</div>
+    <div class="c-coin"><p class="nm"><b>${esc(c.name)}</b></p>
+      <p class="sub"><span class="tk">${esc(c.symbol)}</span>${s.created_time ? `<span class="ago" data-ago="${s.created_time}" title="Age"></span>` : ''}${s.last_trade_time ? `<span class="lt" data-ago="${s.last_trade_time}" title="Last trade"></span>` : ''}${q ? `<span class="tag-q">${q} in batch</span>` : ''}</p></div>
+    <div class="c-num"><b data-k="mc">${zecCell(mc)}</b><span>${usd ? usdText(mc * usd) : 'ZEC'}</span></div>
+    <div class="c-num"><b data-k="h1" class="${changeCls(h1)}">${changeText(h1)}</b><span data-k="h24" class="${changeCls(h24)}">${changeText(h24)}</span></div>
+    <div class="c-num"><b data-k="vol">${zecCell(vol24(c))}</b><span data-k="mv">${moves24(c)} mv</span></div>
+    <div class="c-bond">${c.graduated ? '<span class="grad">pool</span>' : `<b data-k="bd">${cut < 10 ? cut.toFixed(2) : cut.toFixed(1)}%</b>`}<i class="bar"><i style="width:${cut.toFixed(2)}%"></i></i></div>`;
+}
+
+/// A cell whose number changed since the last read flashes mint up, oxide down.
+function flashCells(el, token, vals) {
+  const prev = rowSnap.get(token);
+  rowSnap.set(token, vals);
+  if (!prev) return;
+  for (const [k, v] of Object.entries(vals)) {
+    if (prev[k] == null || v == null || prev[k] === v) continue;
+    const cell = el.querySelector(`[data-k="${k}"]`);
+    if (!cell) continue;
+    cell.classList.remove('fl-up', 'fl-dn');
+    void cell.offsetWidth;
+    cell.classList.add(v > prev[k] ? 'fl-up' : 'fl-dn');
+  }
+}
+
+function renderColumn(col, list) {
+  const box = $(`#col-${col}`);
+  const els = list.map((c) => {
+    let el = rowEls.get(c.token);
+    if (!el) {
+      el = document.createElement('a');
+      el.className = 'row';
+      el.dataset.coin = c.token;
+      el.href = withNet(`/coin/${c.token}`);
+      if (boardPainted) el.classList.add('fresh');
+      rowEls.set(c.token, el);
+    }
+    const html = rowHtml(c);
+    if (el.jadeHtml !== html) { el.innerHTML = html; el.jadeHtml = html; }
+    flashCells(el, c.token, { mc: mcap(c), h1: change1h(c), h24: change24(c), vol: vol24(c), mv: moves24(c), bd: progress(c) });
+    return el;
+  });
+  if (!els.length) {
+    const any = curves.some((c) => columnOf(c) === col);
+    const text = !marketRead ? 'Reading coins…'
+      : any ? 'No coins match.'
+        : col === 'graduated' ? 'No coin has graduated yet.'
+          : col === 'bonding' ? 'No coins on their curve with trades yet.'
+            : `No new coins. <a href="${withNet('/launch')}">Create one.</a>`;
+    const html = `<div class="col-empty">${text}</div>`;
+    if (box.jadeEmpty !== html) { box.innerHTML = html; box.jadeEmpty = html; }
+    return;
+  }
+  box.jadeEmpty = '';
+  const cur = [...box.children];
+  if (els.length !== cur.length || els.some((e, i) => e !== cur[i])) box.replaceChildren(...els);
+  tickAgo(box);
+}
+
+function renderBoard() {
+  const by = { new: [], bonding: [], graduated: [] };
+  for (const c of curves) if (matches(c)) by[columnOf(c)].push(c);
+  for (const col of COLS) {
+    const { key, dir } = colSort[col];
+    by[col].sort((a, b) => (sortValue(a, key) - sortValue(b, key)) * dir || (sortValue(b, 'last') - sortValue(a, 'last')));
+    renderColumn(col, by[col]);
+    $(`#count-${col}`).textContent = by[col].length;
+    $(`#count-tab-${col}`).textContent = by[col].length;
+  }
+  boardPainted = marketRead;
   $('#tally-all').textContent = curves.length;
   $('#tally-grad').textContent = curves.filter((c) => c.graduated).length;
   $('#tally-zec').textContent = `${wad(curves.reduce((s, c) => s + zecSet(c), 0n), 4)} ZEC`;
+  $('#tally-vol').textContent = `${zecCell(curves.reduce((s, c) => s + vol24(c), 0))} ZEC`;
+  $('#tally-moves').textContent = curves.reduce((s, c) => s + moves24(c), 0);
+  $('[data-filter="held"]').hidden = !mine;
   // Pictures for what is on screen, a few at a time.
-  for (const c of list.slice(0, 48)) {
-    if (!content.has(c.token)) loadContent(c.token).then((k) => { if (k) renderGallery(); });
+  for (const c of curves.slice(0, 90)) {
+    if (!content.has(c.token)) loadContent(c.token).then((k) => { if (k) { scheduleBoard(); renderTape(); } });
   }
 }
+let boardFrame = 0;
+const scheduleBoard = () => { if (!boardFrame) boardFrame = requestAnimationFrame(() => { boardFrame = 0; if (pathRoute().view === 'board') renderBoard(); }); };
 
-$$('[data-sort]').forEach((b) => b.addEventListener('click', () => {
-  sortBy = b.dataset.sort;
-  $$('[data-sort]').forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-selected', String(x === b)); });
-  renderGallery();
+$$('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+  const f = b.dataset.filter;
+  if (filters.has(f)) filters.delete(f); else filters.add(f);
+  b.setAttribute('aria-pressed', String(filters.has(f)));
+  renderBoard();
 }));
-search.addEventListener('input', renderGallery);
-document.addEventListener('keydown', (event) => {
-  if (event.key === '/' && document.activeElement !== search && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) {
-    event.preventDefault();
-    search.focus();
-  }
+$$('[data-col-tab]').forEach((b) => b.addEventListener('click', () => {
+  $('#cols').dataset.show = b.dataset.colTab;
+  $$('[data-col-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+}));
+search.addEventListener('input', () => {
+  if (pathRoute().view !== 'board') navigate('/');
+  else renderBoard();
+});
+search.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { search.blur(); return; }
+  if (event.key !== 'Enter') return;
+  // Enter opens the first coin on screen that matches.
+  const first = $$('.cols .row').find((r) => r.offsetParent);
+  if (first) { event.preventDefault(); search.blur(); navigate(`/coin/${first.dataset.coin}`); }
 });
 
 // ---------------------------------------------------------------------------
@@ -327,17 +570,21 @@ document.addEventListener('keydown', (event) => {
 let chart = null;
 let candles = null;
 let volume = null;
+let chartRows = [];
 
 function ensureChart() {
   if (chart) return;
   const el = $('#chart');
+  const local = (t) => new Date(t * 1000);
   chart = createChart(el, {
     autoSize: true,
-    layout: { background: { color: 'transparent' }, textColor: '#8a9691', fontFamily: 'Geist Mono, ui-monospace, monospace' },
-    grid: { vertLines: { color: 'rgba(242,241,235,.04)' }, horzLines: { color: 'rgba(242,241,235,.05)' } },
-    timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(242,241,235,.09)' },
-    rightPriceScale: { borderColor: 'rgba(242,241,235,.09)' },
-    crosshair: { mode: 0 },
+    layout: { background: { color: 'transparent' }, textColor: '#8a9691', fontFamily: 'Geist Mono, ui-monospace, monospace', fontSize: 11 },
+    grid: { vertLines: { color: 'rgba(242,241,235,.035)' }, horzLines: { color: 'rgba(242,241,235,.045)' } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(242,241,235,.09)',
+      tickMarkFormatter: (t, type) => (type >= 3 ? local(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : local(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })) },
+    localization: { timeFormatter: (t) => local(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) },
+    rightPriceScale: { borderColor: 'rgba(242,241,235,.09)', scaleMargins: { top: 0.1, bottom: 0.22 } },
+    crosshair: { mode: 0, vertLine: { color: 'rgba(88,232,187,.35)', labelBackgroundColor: '#173029' }, horzLine: { color: 'rgba(88,232,187,.35)', labelBackgroundColor: '#173029' } },
   });
   candles = chart.addCandlestickSeries({ upColor: '#35e6ae', downColor: '#e8794f', borderVisible: false, wickUpColor: '#35e6ae', wickDownColor: '#e8794f', priceFormat: { type: 'custom', formatter: (v) => capText(v / (unit === 'usd' && usd ? usd : 1)) , minMove: 1e-9 },
     // A quiet coin moves a hair: show at least ±2% around it, not a hair blown up to the full height.
@@ -351,6 +598,20 @@ function ensureChart() {
     } });
   volume = chart.addHistogramSeries({ priceScaleId: '', priceFormat: { type: 'volume' }, color: 'rgba(53,230,174,.18)', lastValueVisible: false, priceLineVisible: false });
   volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  chart.subscribeCrosshairMove((param) => {
+    const row = param?.time != null ? chartRows.find((r) => r.time === param.time) : null;
+    legend(row);
+  });
+}
+
+/// Open, high, low, close and volume of the candle under the cursor, or the last one.
+function legend(row = chartRows[chartRows.length - 1]) {
+  const el = $('#chart-legend');
+  if (!row) { el.textContent = ''; return; }
+  const factor = unit === 'usd' && usd ? usd : 1;
+  const f = (v) => esc(capText(v / factor));
+  const ch = pct(row.close, row.open);
+  el.innerHTML = `<span class="muted">O</span> <b>${f(row.open)}</b><span class="muted">H</span> <b>${f(row.high)}</b><span class="muted">L</span> <b>${f(row.low)}</b><span class="muted">C</span> <b class="${changeCls(ch)}">${f(row.close)}</b><span class="muted">Vol</span> <b>${zecCell(row.vol)} ZEC</b>`;
 }
 
 /// Candles of market cap, one bucket per `tf` seconds, from the epoch points.
@@ -376,21 +637,151 @@ function drawChart() {
     buckets.set(t, { time: t, open: v, high: v, low: v, close: v, vol: 0 });
   }
   const rows = [...buckets.values()].sort((a, b) => a.time - b.time);
+  chartRows = rows;
   candles.setData(rows.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
   volume.setData(rows.map((r) => ({ time: r.time, value: r.vol, color: r.close >= r.open ? 'rgba(53,230,174,.22)' : 'rgba(232,121,79,.22)' })));
   // Few candles stay candle-sized; many fit the width.
   if (rows.length > 40) chart.timeScale().fitContent();
   else { chart.timeScale().applyOptions({ barSpacing: 14, rightOffset: 6 }); chart.timeScale().scrollToRealTime(); }
+  legend();
 }
 
 function renderFills() {
   if (!currentCoin) return;
-  const moves = historyOf(currentCoin.token).filter((p) => p.delta_lots !== 0 || (p.delta_zec && p.delta_zec !== '0')).slice(-60).reverse();
+  const moves = historyOf(currentCoin.token).filter(moved).slice(-80).reverse();
   $('#fills').innerHTML = moves.length ? moves.map((p) => {
-    const buy = p.venue === 'curve' ? p.delta_lots > 0 : BigInt(p.delta_zec) > 0n;
-    const tokens = p.venue === 'curve' ? (BigInt(Math.abs(p.delta_lots)) * CURVE.lotTokens).toLocaleString('en-US') : '—';
-    return `<tr><td>${ago(p.time)}</td><td class="${buy ? 'up' : 'down'}">${buy ? 'Buy' : 'Sell'}</td><td>${tokens}</td><td>${wad(BigInt(p.delta_zec) < 0n ? -BigInt(p.delta_zec) : BigInt(p.delta_zec), 5)}</td><td>${esc(capText(mcapOf(p.price)))}</td></tr>`;
-  }).join('') : '<tr><td colspan="5" class="j-muted">No fills yet. The first buyers all pay one price.</td></tr>';
+    const f = fillOf(p);
+    return `<tr><td data-ago="${p.time}" data-ago-long="1">${ago(p.time)}</td><td class="muted">${p.epoch.toLocaleString('en-US')}</td><td><span class="${f.buy ? 'side-b' : 'side-s'}">${f.buy ? 'Buy' : 'Sell'}</span></td><td class="r">${f.tokens == null ? '—' : f.tokens.toLocaleString('en-US')}</td><td class="r ${f.buy ? 'up' : 'down'}">${wad(f.zecRaw, 5)}</td><td class="r">${priceText(num(p.price))}</td><td class="r">${esc(capText(mcapOf(p.price)))}</td></tr>`;
+  }).join('') : '<tr><td colspan="7" class="empty">No fills yet. The first buyers all pay one price.</td></tr>';
+}
+
+/// The batch panel: what waits in this epoch, the last clearing, recent batches.
+function renderBatch() {
+  const c = currentCoin;
+  const e = live.epoch;
+  $('#batch-epoch').textContent = e != null ? `epoch ${e.toLocaleString('en-US')}` : 'epoch —';
+  const box = $('#batch .pending');
+  if (!c) {
+    $('#batch-pending').textContent = '—';
+    $('#batch-clear').textContent = '—';
+    $('#batch-last').textContent = '—';
+    $('#batch-spark').innerHTML = '';
+    box.classList.remove('on');
+    return;
+  }
+  const q = pendingOf(c);
+  $('#batch-pending').textContent = q;
+  $('#batch-pending-unit').textContent = q === 1 ? 'order' : 'orders';
+  box.classList.toggle('on', q > 0);
+  const fills = historyOf(c.token).filter(moved);
+  const last = fills[fills.length - 1];
+  if (last) {
+    const f = fillOf(last);
+    $('#batch-clear').innerHTML = `${priceText(num(last.price))} <span class="muted">· MC ${esc(zecCell(mcapOf(last.price)))}</span>`;
+    $('#batch-last').innerHTML = `<span class="${f.buy ? 'up' : 'down'}">${f.buy ? 'Buy' : 'Sell'} ${zecCell(f.zec)} ZEC</span> <span class="muted" data-ago="${last.time}" data-ago-long="1">${ago(last.time)}</span>`;
+  } else {
+    $('#batch-clear').textContent = 'no fills yet';
+    $('#batch-last').textContent = '—';
+  }
+  // The last 36 batches that moved, as bars: height is ZEC, colour is side.
+  const recent = fills.slice(-36);
+  const max = Math.max(...recent.map((p) => fillOf(p).zec), 0);
+  const spark = $('#batch-spark');
+  const html = recent.length ? recent.map((p) => { const f = fillOf(p); return `<i class="${f.buy ? '' : 's'}" style="height:${Math.max(8, (f.zec / (max || 1)) * 100).toFixed(0)}%" title="epoch ${p.epoch}: ${f.buy ? 'buy' : 'sell'} ${zecCell(f.zec)} ZEC"></i>`; }).join('') : '<span class="spark-empty">No batches yet</span>';
+  if (spark.jadeHtml !== html) { spark.innerHTML = html; spark.jadeHtml = html; }
+  tickRing();
+}
+
+/// The countdown to the seal. Measured: the moment the page saw the epoch
+/// change, plus the cadence it measured (or the market's epoch length until
+/// it has). Before that, an estimate from the last fill's time, marked "~".
+function sealIn() {
+  const e = live.epoch;
+  if (e == null) return null;
+  const cadence = live.cadence || epochSeconds;
+  if (live.changedAt) return { left: live.changedAt / 1000 + cadence - Date.now() / 1000, cadence, sure: true };
+  let lastPt = null;
+  for (const [, h] of histories) { const p = h[h.length - 1]; if (p && (!lastPt || p.epoch > lastPt.epoch)) lastPt = p; }
+  if (lastPt && e - lastPt.epoch <= 5 && e > lastPt.epoch) {
+    const left = lastPt.time + (e - lastPt.epoch) * cadence - Date.now() / 1000;
+    if (left > -2 && left < cadence + 2) return { left, cadence, sure: false };
+  }
+  return null;
+}
+function tickRing() {
+  if (pathRoute().view !== 'coin') return;
+  const ring = $('#ring');
+  const s = sealIn();
+  const fg = $('#ring-fg');
+  if (!s) {
+    ring.className = 'ring wait';
+    fg.setAttribute('stroke-dashoffset', '0');
+    $('#ring-secs').textContent = '…';
+    $('#ring-label').textContent = 'timing';
+    return;
+  }
+  const left = Math.max(0, s.left);
+  const done = Math.min(1, Math.max(0, 1 - left / s.cadence));
+  ring.className = `ring${left <= 0.5 ? ' sealing' : ''}`;
+  fg.setAttribute('stroke-dashoffset', String((100 - done * 100).toFixed(2)));
+  $('#ring-secs').textContent = left <= 0.5 ? '0s' : `${s.sure ? '' : '~'}${Math.ceil(left)}s`;
+  $('#ring-label').textContent = left <= 0.5 ? 'sealing' : 'to seal';
+}
+
+/// What the page knows of the epoch. `timed` is true only for the 1 s poll,
+/// whose changes are close enough to the seal to time it by.
+function noteEpoch(e, timed = true) {
+  if (!Number.isSafeInteger(e)) return;
+  const t = Date.now();
+  // The 1 s poll times the seal; a slower read must not reset its clock.
+  if (!timed && live.seen && t - live.seen < 2500) return;
+  if (live.epoch != null && e > live.epoch) {
+    if (timed && live.changedAt && live.seen && t - live.seen < 2500) {
+      const per = (t - live.changedAt) / 1000 / (e - live.epoch);
+      if (per > 2 && per < 900) live.cadence = live.cadence ? live.cadence * 0.6 + per * 0.4 : per;
+    }
+    live.changedAt = timed && live.seen && t - live.seen < 2500 ? t : 0;
+    sealed(e);
+  }
+  if (live.epoch == null || e >= live.epoch) live.epoch = e;
+  if (timed) live.seen = t;
+  renderEpoch();
+}
+function renderEpoch() {
+  $('#epoch-text').textContent = live.epoch != null ? `Epoch ${live.epoch.toLocaleString('en-US')}` : 'Epoch —';
+  $('#epoch-pill').classList.toggle('stale', live.epoch == null);
+}
+/// An epoch sealed while a coin is open: read its batch as soon as it is out.
+let sealTimer = 0;
+function sealed() {
+  if (pathRoute().view !== 'coin') return;
+  clearTimeout(sealTimer);
+  sealTimer = setTimeout(refreshCoin, 1500);
+}
+
+/// Markup, written only when it changed (a rewrite would close an open bubble
+/// or reload a picture).
+function setHtml(id, html) {
+  const el = $(`#${id}`);
+  if (el.jadeHtml !== html) { el.innerHTML = html; el.jadeHtml = html; tickAgo(el); }
+  return el;
+}
+function setText(id, text, cls) {
+  const el = $(`#${id}`);
+  if (el.textContent !== text) el.textContent = text;
+  if (cls !== undefined) el.className = cls;
+  return el;
+}
+const coinSnap = new Map();
+function flashStats(token, vals) {
+  const prev = coinSnap.get(token);
+  coinSnap.set(token, vals);
+  if (!prev) return;
+  for (const [id, v] of Object.entries(vals)) {
+    if (prev[id] == null || prev[id] === v) continue;
+    const el = $(`#${id}`);
+    el.classList.remove('fl-up', 'fl-dn'); void el.offsetWidth; el.classList.add(v > prev[id] ? 'fl-up' : 'fl-dn');
+  }
 }
 
 async function renderCoin(token, fresh = false) {
@@ -399,12 +790,22 @@ async function renderCoin(token, fresh = false) {
     currentCoin = null;
     $('#coin-title').textContent = curves.length ? 'Coin not found' : 'Reading coins…';
     // Nothing of the last coin stays on screen under this one's address.
-    for (const id of ['coin-crumb', 'coin-symbol', 'coin-age', 'coin-mcap', 'coin-change', 'coin-price', 'coin-liquidity', 'coin-pot', 'coin-fee', 'coin-holders', 'curve-pct', 'curve-text', 'trade-output', 'trade-fee', 'trade-min', 'trade-balance']) { const el = $(`#${id}`); if (el) el.textContent = '—'; }
+    for (const id of ['coin-symbol', 'coin-age', 'coin-stage', 'coin-copy', 'coin-mcap', 'coin-change', 'coin-ch5', 'coin-ch1', 'coin-vol', 'coin-moves', 'coin-price', 'coin-liquidity', 'coin-pot', 'coin-fee', 'coin-holders', 'coin-addr', 'curve-pct', 'curve-pct-2', 'curve-text', 'trade-output', 'trade-fee', 'trade-min', 'trade-balance']) { const el = $(`#${id}`); if (el) { el.textContent = '—'; el.jadeHtml = null; } }
+    $('#coin-mcap-usd').textContent = '';
+    setHtml('coin-thumb', '<span>?</span>');
+    $('#curve-bar').style.width = '0%';
     $('#coin-description').textContent = curves.length
       ? `No coin priced in ZEC.zy has this address on ${NETWORK}.${NETWORK === 'mainnet' ? ' A testnet coin? Add ?network=testnet to the address.' : ''}`
       : '';
     $('#fills').innerHTML = '';
+    $('#position').innerHTML = '';
     $('#trade-status').textContent = '';
+    $('#trade-steps').dataset.step = 'idle';
+    $('.trade-submit').textContent = wallet ? 'Not available' : 'Connect wallet';
+    if (chart) { candles.setData([]); volume.setData([]); chartRows = []; legend(); }
+    renderBatch();
+    // A missing coin opens on About, where it says why.
+    if (curves.length) showPane('about');
     return;
   }
   const first = currentCoin?.token !== token;
@@ -414,58 +815,159 @@ async function renderCoin(token, fresh = false) {
     tradeSide = 'buy';
     $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === 'buy'));
     $('#trade-input').value = '0.1';
-    $('#trade-status').textContent = orderStatus.get(token) || 'One price per epoch for every buyer, another for every seller.';
+    showOrder(token);
+    if (chart) { candles.setData([]); volume.setData([]); chartRows = []; }
+    showPane(paneNow);
   }
   const s = stats.get(token) || {};
-  $('#coin-crumb').textContent = c.name;
-  $('#coin-title').textContent = c.name;
-  $('#coin-symbol').textContent = c.symbol;
-  $('#coin-age').textContent = s.created_time ? `made ${ago(s.created_time)}` : `made in epoch ${c.created_at}`;
-  $('#coin-copy').textContent = short(c.token);
+  const mc = mcap(c);
+  setText('coin-title', c.name);
+  setText('coin-symbol', c.symbol);
+  setHtml('coin-age', s.created_time ? `made <span data-ago="${s.created_time}" data-ago-long="1">${ago(s.created_time)}</span>` : `made in epoch ${c.created_at}`);
+  if (!/copied/.test($('#coin-copy').textContent)) setText('coin-copy', short(c.token, 4));
   $('#coin-description').textContent ||= 'No description.';
-  $('#coin-stage').textContent = c.graduated ? 'GRADUATED · TRADING IN ITS LOCKED POOL' : 'ON ITS BONDING CURVE';
-  $('#coin-mcap').textContent = capBoth(mcap(c));
-  const ch = change24(c);
-  $('#coin-change').textContent = `${changeText(ch)} 24h`;
-  $('#coin-change').className = ch == null ? '' : ch >= 0 ? 'up' : 'down';
-  $('#coin-price').textContent = `${num(price(c)).toLocaleString('en-US', { maximumSignificantDigits: 4, maximumFractionDigits: 20 })} ZEC`;
-  $('#coin-liquidity').textContent = `${wad(zecSet(c), 4)} ZEC.zy ${c.graduated ? 'in its pool' : 'in its curve'}`;
+  setText('coin-stage', c.graduated ? 'Graduated' : 'Bonding curve', `stage${c.graduated ? ' grad' : ''}`);
+  setHtml('coin-price', `${priceText(num(price(c)))} ZEC`);
+  setText('coin-mcap', `${zecText(mc)} ZEC`);
+  setText('coin-mcap-usd', usd ? usdText(mc * usd) : '');
+  const ch5 = changeSince(c, 300), ch1 = change1h(c), ch = change24(c);
+  setText('coin-ch5', changeText(ch5), changeCls(ch5));
+  setText('coin-ch1', changeText(ch1), changeCls(ch1));
+  setText('coin-change', changeText(ch), changeCls(ch));
+  setText('coin-vol', `${zecCell(vol24(c))} ZEC`);
+  setText('coin-moves', String(moves24(c)));
+  setText('coin-liq-label', c.graduated ? 'In pool' : 'In curve');
+  setText('coin-liquidity', `${wad(zecSet(c), 4)} ZEC`);
+  setHtml('coin-holders', `private${tip('Zyn does not publish who holds a coin or how much: balances are private to each wallet.', 'About holders')}`);
   $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ZEC.zy`;
   $('#coin-fee').textContent = c.graduated ? `${poolOf(c)?.fee_bps ?? 30} bps, kept by the pool` : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
-  $('#coin-holders').textContent = c.graduated ? 'private' : `private — ${(100 - (c.sold / CURVE.lots) * 100).toFixed(1)}% of supply is still in the curve`;
+  $('#coin-addr').textContent = c.token;
   const cut = progress(c);
-  $('#curve-pct').textContent = `${(cut * 100).toFixed(2)}%`;
+  setText('curve-pct', `${(cut * 100).toFixed(2)}%`);
+  setText('curve-pct-2', `${(cut * 100).toFixed(2)}%`);
   $('#curve-bar').style.width = `${(cut * 100).toFixed(2)}%`;
+  $('#curve-bar-2').style.width = `${(cut * 100).toFixed(2)}%`;
   $('#curve-text').textContent = c.graduated
     ? 'Graduated. Every unsold lot and everything the curve raised opened a pool whose shares nobody holds.'
     : `${wad(c.reserve, 4)} ZEC.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold), 3)} ZEC.zy of buying to graduate · it graduates at ~47 ZEC market cap${usd ? ` (${usdText(47 * usd)})` : ''}`;
   $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
   $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
-  document.title = `${c.symbol} ${capText(mcap(c))} — Jade`;
+  flashStats(token, { 'coin-price': Number(price(c)), 'coin-mcap': mc, 'coin-vol': vol24(c), 'coin-moves': moves24(c), 'curve-pct': cut, 'coin-liquidity': Number(zecSet(c)) });
+  document.title = `${c.symbol} ${capText(mc)} — Jade`;
+  renderBatch();
+  renderPosition();
   const k = await loadContent(token);
   if (currentCoin?.token !== token) return;
-  $('#coin-thumb').innerHTML = thumbInner(c);
+  setHtml('coin-thumb', thumbInner(c));
   $('#coin-description').textContent = k && k !== 'loading' && k.description ? k.description : 'No description.';
   if (first || fresh || !histories.has(token)) {
-    try { histories.set(token, await rpc('zyn_history', { token })); } catch { if (!histories.has(token)) histories.set(token, []); }
+    await loadHistory(token);
     if (currentCoin?.token !== token) return;
   }
+  setText('coin-ch5', changeText(changeSince(c, 300)), changeCls(changeSince(c, 300)));
   drawChart();
   renderFills();
+  renderBatch();
   configureTrade();
 }
 
+/// A coin view's own refresh: the market, and its fills when it has traded.
+let coinBusy = false;
+async function refreshCoin() {
+  const route = pathRoute();
+  if (route.view !== 'coin' || coinBusy) return;
+  coinBusy = true;
+  try {
+    await loadMarket();
+    const read = historyRead.get(route.token);
+    const last = stats.get(route.token)?.last_trade_time || 0;
+    if (!read || read.last !== last || Date.now() - read.at > 30_000) await loadHistory(route.token);
+    if (currentCoin?.token !== route.token || pathRoute().token !== route.token) return;
+    drawChart();
+    renderFills();
+    renderBatch();
+    renderTape();
+  } finally { coinBusy = false; }
+}
+
+let paneNow = 'batches';
+function showPane(name) {
+  paneNow = name;
+  $$('[data-pane]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.pane === name)));
+  $$('[data-pane-body]').forEach((p) => { p.hidden = p.dataset.paneBody !== name; });
+}
+$$('[data-pane]').forEach((b) => b.addEventListener('click', () => showPane(b.dataset.pane)));
+
 $('#coin-copy').addEventListener('click', async () => {
   if (!currentCoin) return;
-  try { await navigator.clipboard.writeText(currentCoin.token); $('#coin-copy').textContent = 'copied'; setTimeout(() => { $('#coin-copy').textContent = short(currentCoin.token); }, 1200); } catch { /* the address is on screen */ }
+  try { await navigator.clipboard.writeText(currentCoin.token); $('#coin-copy').textContent = 'copied'; setTimeout(() => { if (currentCoin) $('#coin-copy').textContent = short(currentCoin.token, 4); }, 1200); } catch { /* the address is on screen */ }
 });
 $$('[data-tf]').forEach((b) => b.addEventListener('click', () => { tf = Number(b.dataset.tf); $$('[data-tf]').forEach((x) => x.classList.toggle('active', x === b)); drawChart(); }));
 $$('[data-unit]').forEach((b) => b.addEventListener('click', () => { unit = b.dataset.unit; $$('[data-unit]').forEach((x) => x.classList.toggle('active', x === b)); render(); }));
 
 // ---------------------------------------------------------------------------
-// Trading.
+// Your position, and the average cost of what this browser bought.
 
 const heldOf = (token) => (mine?.holdings.get(token) ?? 0n);
+const costKey = () => (wallet ? `jade.cost.${NETWORK}.${wallet.session.account}` : null);
+function costBook() {
+  const k = costKey();
+  if (!k) return {};
+  try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch { return {}; }
+}
+/// A settled order, as this browser saw it: tokens in or out, ZEC.zy out or in.
+/// A sale takes its share of the cost out, so the average of what is left stays.
+function recordFill(token, gotTokens, spentZec) {
+  const k = costKey();
+  if (!k || gotTokens === 0n) return;
+  const book = costBook();
+  const e = book[token] || { tokens: '0', zec: '0' };
+  let t = BigInt(e.tokens), z = BigInt(e.zec);
+  if (gotTokens > 0n && spentZec > 0n) { t += gotTokens; z += spentZec; }
+  else if (gotTokens < 0n && t > 0n) { const out = -gotTokens > t ? t : -gotTokens; z -= (z * out) / t; t -= out; }
+  book[token] = { tokens: t.toString(), zec: z.toString() };
+  try { localStorage.setItem(k, JSON.stringify(book)); } catch { /* this tab only */ }
+}
+function avgCost(token) {
+  const e = costBook()[token];
+  if (!e) return null;
+  const t = BigInt(e.tokens), z = BigInt(e.zec);
+  return t > 0n && z > 0n ? { perToken: (z * WAD) / t, tokens: t, zec: z } : null;
+}
+
+function renderPosition() {
+  const box = $('#position');
+  const c = currentCoin;
+  if (!c) { box.innerHTML = ''; return; }
+  if (!wallet || !mine) {
+    box.innerHTML = `<div class="note">${wallet ? "Nap's window is closed. Connect again with the wallet button to read your holdings." : 'Connect a wallet to see your position.'}</div>`;
+    return;
+  }
+  const held = heldOf(c.token);
+  const worth = num((price(c) * held) / WAD);
+  const ac = avgCost(c.token);
+  const ch = change24(c);
+  const cells = [
+    ['Holding', `${wad(held, 0)} ${esc(c.symbol)}`],
+    ['Value', `${zecText(worth)} ZEC${usd ? ` <span class="muted">${usdText(worth * usd)}</span>` : ''}`],
+    ['24h', `<span class="${changeCls(ch)}">${changeText(ch)}</span>`],
+    ['Share of supply', `${((Number(held / WAD) / 1e9) * 100).toFixed(4)}%`],
+    ['Sellable lots', c.graduated ? 'any amount' : (held / LOT).toLocaleString('en-US')],
+    ['ZEC.zy free', `${wad(mine.zec, 4)}`],
+  ];
+  if (ac && held > 0n) {
+    const tracked = ac.tokens < held ? ac.tokens : held;
+    const pnl = num((price(c) * tracked) / WAD) - num((ac.perToken * tracked) / WAD);
+    cells.push(['Avg cost', `${priceText(num(ac.perToken))} ZEC`], ['P/L, tracked', `<span class="${changeCls(pnl)}">${pnl >= 0 ? '+' : '−'}${zecText(Math.abs(pnl))} ZEC</span>`]);
+  }
+  box.innerHTML = cells.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')
+    + `<div class="note">${ac ? 'Average cost counts only trades placed and settled in this browser.' : 'Average cost appears after a trade placed here settles; Zyn does not publish your fills.'}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Trading.
+
+const tradeInput = $('#trade-input');
 
 function configureTrade() {
   const c = currentCoin;
@@ -473,22 +975,31 @@ function configureTrade() {
   const buying = tradeSide === 'buy';
   $('#trade-unit').textContent = buying ? 'ZEC.zy' : c.symbol;
   const presets = buying
-    ? ['0.01', '0.05', '0.1', '0.5'].map((v) => `<button type="button" data-preset="${v}">${v} ZEC</button>`)
-    : [25, 50, 75, 100].map((p) => `<button type="button" data-pct="${p}">${p}%</button>`);
-  $('#trade-presets').innerHTML = presets.join('');
-  $$('[data-preset]').forEach((b) => b.addEventListener('click', () => { $('#trade-input').value = b.dataset.preset; quote(); }));
-  $$('[data-pct]').forEach((b) => b.addEventListener('click', () => {
-    const lotsHeld = heldOf(c.token) / LOT;
-    let lots = c.graduated ? heldOf(c.token) * BigInt(b.dataset.pct) / 100n : (lotsHeld * BigInt(b.dataset.pct)) / 100n * LOT;
-    // A share of a few lots can round to none: then the smallest sale there is.
-    if (!c.graduated && lots === 0n && lotsHeld > 0n) lots = LOT;
-    $('#trade-input').value = decimal(lots);
-    quote();
-  }));
+    ? ['0.01', '0.05', '0.1', '0.5'].map((v) => `<button type="button" data-preset="${v}">${v}</button>`)
+    : [25, 50, 100].map((p) => `<button type="button" data-pct="${p}">${p}%</button>`);
+  const box = $('#trade-presets');
+  const html = presets.join('');
+  if (box.jadeHtml !== html) {
+    box.innerHTML = html;
+    box.jadeHtml = html;
+    box.classList.toggle('three', !buying);
+    $$('[data-preset]').forEach((b) => b.addEventListener('click', () => { tradeInput.value = b.dataset.preset; quote(); }));
+    $$('[data-pct]').forEach((b) => b.addEventListener('click', () => {
+      const cc = currentCoin;
+      const lotsHeld = heldOf(cc.token) / LOT;
+      let lots = cc.graduated ? heldOf(cc.token) * BigInt(b.dataset.pct) / 100n : (lotsHeld * BigInt(b.dataset.pct)) / 100n * LOT;
+      // A share of a few lots can round to none: then the smallest sale there is.
+      if (!cc.graduated && lots === 0n && lotsHeld > 0n) lots = LOT;
+      tradeInput.value = decimal(lots);
+      quote();
+    }));
+  }
   $('#trade-balance').textContent = mine
     ? `You hold ${wad(heldOf(c.token), 0)} ${c.symbol} · ${wad(mine.zec, 4)} ZEC.zy`
     : 'Connect a wallet to see your balance.';
-  $('.trade-submit').textContent = wallet ? (buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`) : 'Connect wallet';
+  const submit = $('.trade-submit');
+  submit.textContent = wallet ? (buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`) : 'Connect wallet';
+  submit.classList.toggle('sell', !!wallet && !buying);
   quote();
 }
 
@@ -501,6 +1012,7 @@ function quote() {
   const hint = $('#trade-hint');
   hint.textContent = '';
   const submit = $('.trade-submit');
+  $$('#trade-presets [data-preset]').forEach((b) => b.classList.toggle('picked', b.dataset.preset === tradeInput.value.trim()));
   if (!c) return null;
   if (wallet) submit.disabled = true;
   const slip = BigInt($('#trade-slip').value);
@@ -550,29 +1062,39 @@ function quote() {
   }
 }
 
-$$('[data-trade]').forEach((button) => button.addEventListener('click', () => {
-  tradeSide = button.dataset.trade;
-  $$('[data-trade]').forEach((item) => item.classList.toggle('active', item === button));
+function setSide(side) {
+  tradeSide = side;
+  $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === side));
   $('#trade-input').value = tradeSide === 'buy' ? '0.1' : '';
   configureTrade();
-}));
+}
+$$('[data-trade]').forEach((button) => button.addEventListener('click', () => setSide(button.dataset.trade)));
 $('#trade-input').addEventListener('input', quote);
-$('#trade-slip').addEventListener('change', quote);
+$$('[data-slip]').forEach((b) => b.addEventListener('click', () => {
+  $('#trade-slip').value = b.dataset.slip;
+  $$('[data-slip]').forEach((x) => x.classList.toggle('active', x === b));
+  quote();
+}));
+$$('[data-jump]').forEach((b) => b.addEventListener('click', () => {
+  setSide(b.dataset.jump);
+  $('#trade').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}));
 
 /// After an order: wait for its epoch to seal, collect what it was paid, and
 /// say what arrived. Collecting needs no approval — it only moves what the
 /// ledger owes this wallet into it.
-async function settle(placedEpoch, token, side, symbol) {
+async function settle(placedEpoch, token, side, symbol, zecBefore = null) {
   const before = heldOf(token);
   let sealed = false;
-  for (let i = 0; i < 120 && !sealed; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    let epoch;
-    try { epoch = (await rpc('zyn_status')).epoch; } catch { continue; }
-    if (epoch > placedEpoch) sealed = true;
+  // The coin view's 1 s poll, while it is fresh; otherwise the chain every 3 s.
+  for (let i = 0; i < 360 && !sealed; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    let epoch = live.epoch != null && Date.now() - live.seen < 2500 ? live.epoch : null;
+    if (epoch == null && i % 3 === 2) { try { epoch = (await rpc('zyn_status')).epoch; noteEpoch(epoch, false); } catch { continue; } }
+    if (epoch != null && epoch > placedEpoch) sealed = true;
   }
   if (!sealed) {
-    setOrder(token, `Still waiting for epoch ${placedEpoch} to seal. Your order is safe; it settles when it does.`);
+    setOrder(token, `Still waiting for epoch ${placedEpoch} to seal. Your order is safe; it settles when it does.`, 'sealing');
     return;
   }
   try {
@@ -580,26 +1102,29 @@ async function settle(placedEpoch, token, side, symbol) {
       await ask('zyn_collect', {});
       await loadMine();
       const got = heldOf(token) - before;
+      if (got !== 0n && zecBefore != null && mine) recordFill(token, got, zecBefore - mine.zec);
       setOrder(token, got > 0n ? `Filled: +${wad(got, 0)} ${symbol}. It is in your wallet.`
         : got < 0n ? 'Filled: sold. The ZEC.zy is in your wallet.'
           : side === 'buy' ? 'Not filled — the price moved past your floor, so your ZEC.zy came back to your wallet.'
-            : `Not filled — the price moved past your floor, so your ${symbol} came back to your wallet.`);
+            : `Not filled — the price moved past your floor, so your ${symbol} came back to your wallet.`, got !== 0n ? 'done' : 'missed');
     } else {
-      setOrder(token, "Settled. Open Nap's window to collect it.");
+      setOrder(token, "Settled. Open Nap's window to collect it.", 'done');
     }
-  } catch (e) { setOrder(token, e.message); }
+  } catch (e) { setOrder(token, e.message, 'error'); }
   await loadMarket();
 }
 
-$('.trade-submit').addEventListener('click', async () => {
+async function placeOrder() {
   const c = currentCoin;
   if (!c) return;
   if (!wallet) return pickWallet();
   const q = quote();
   if (!q) return;
   const button = $('.trade-submit');
+  if (button.disabled) return;
   button.disabled = true;
   const side = tradeSide, symbol = c.symbol;
+  const zecBefore = mine ? mine.zec : null;
   try {
     // Asked before anything is awaited: Nap may need to open its window.
     const pending = q.kind === 'swap' ? ask('zyn_swap', { pool: q.pool, sellA: q.sellA, amount: decimal(q.amount), slippageBps: q.slippageBps })
@@ -607,14 +1132,46 @@ $('.trade-submit').addEventListener('click', async () => {
         : ask('zyn_curveSell', { token: c.token, tokens: decimal(q.tokens), minZec: decimal(q.minZec) });
     await pending;
     const epoch = (await rpc('zyn_status')).epoch;
-    setOrder(c.token, `Placed. Settling when epoch ${epoch} seals…`);
-    settle(epoch, c.token, side, symbol);
+    setOrder(c.token, `Placed. Settling when epoch ${epoch} seals…`, 'sealing');
+    settle(epoch, c.token, side, symbol, zecBefore);
   } catch (e) {
     // 4001 is Nap's "no"; anything else says what happened in its own words.
-    setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message);
+    setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message, e.code === 4001 ? 'idle' : 'error');
   } finally {
     button.disabled = false;
     quote();
+  }
+}
+$('.trade-submit').addEventListener('click', placeOrder);
+
+// Keys: / search, B buy, S sell, Enter place, Esc clear.
+document.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  const el = document.activeElement;
+  const typing = el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+  if (event.key === '/' && !typing) {
+    event.preventDefault();
+    search.focus();
+    search.select();
+    return;
+  }
+  if ($('#jade-wallet').open || pathRoute().view !== 'coin' || !currentCoin) return;
+  if (event.key === 'Escape') {
+    if (el === tradeInput) { tradeInput.value = ''; quote(); tradeInput.blur(); }
+    return;
+  }
+  if (typing && el !== tradeInput) return;
+  const k = event.key.toLowerCase();
+  if (!typing && (k === 'b' || k === 's')) {
+    event.preventDefault();
+    if (tradeSide !== (k === 'b' ? 'buy' : 'sell')) setSide(k === 'b' ? 'buy' : 'sell');
+    tradeInput.focus();
+    tradeInput.select();
+    return;
+  }
+  if (event.key === 'Enter' && (el === tradeInput || el === document.body || !el)) {
+    event.preventDefault();
+    placeOrder();
   }
 });
 
@@ -690,27 +1247,44 @@ function renderWallet() {
 // ---------------------------------------------------------------------------
 // Portfolio.
 
+const coinCell = (c) => `<a class="coin-cell" href="${withNet(`/coin/${c.token}`)}">${thumb(c)}<span>${esc(c.name)}</span> <span class="tk">${esc(c.symbol)}</span></a>`;
+const bondCell = (c) => (c.graduated ? '<span class="up">pool</span>' : `${(progress(c) * 100).toFixed(2)}%<i class="bar"><i style="width:${(progress(c) * 100).toFixed(2)}%"></i></i>`);
+
 function renderPortfolio() {
   if (!wallet || !mine) {
     $('#portfolio-status').textContent = wallet ? "Nap's window is closed. Connect again with the wallet button to read your holdings." : 'Connect a wallet to see what you hold and what you made.';
-    $('#held').innerHTML = '';
-    $('#made').innerHTML = '';
-    $('#held-total').textContent = '—';
+    $('#held').innerHTML = '<tr><td colspan="8" class="empty">No wallet connected.</td></tr>';
+    $('#made').innerHTML = '<tr><td colspan="7" class="empty">No wallet connected.</td></tr>';
+    for (const id of ['held-total', 'pf-zec', 'pf-24h', 'pf-count']) $(`#${id}`).textContent = '—';
+    $('#pf-24h').className = '';
     return;
   }
   $('#portfolio-status').textContent = `${wad(mine.zec, 4)} ZEC.zy ready to trade.`;
-  let total = 0;
-  const rows = [...mine.holdings].map(([token, amount]) => {
+  let total = 0, before = 0, count = 0;
+  const rows = [...mine.holdings].filter(([, amount]) => amount > 0n).map(([token, amount]) => {
     const c = curves.find((x) => x.token === token);
     if (!c) return '';
+    count++;
     const worth = num((price(c) * amount) / WAD);
+    const ch = change24(c);
     total += worth;
-    return `<tr><td><a href="${withNet(`/coin/${token}`)}">${esc(c.name)} <span class="j-ticker">${esc(c.symbol)}</span></a></td><td>${wad(amount, 0)}</td><td>${esc(capText(worth))}</td><td><a href="${withNet(`/coin/${token}`)}">Trade →</a></td></tr>`;
+    before += ch == null ? worth : worth / (1 + ch / 100);
+    const ac = avgCost(token);
+    return `<tr><td>${coinCell(c)}</td><td class="r">${wad(amount, 0)}</td><td class="r">${priceText(num(price(c)))}</td><td class="r">${esc(zecText(worth))} ZEC${usd ? ` <span class="muted">${usdText(worth * usd)}</span>` : ''}</td><td class="r ${changeCls(ch)}">${changeText(ch)}</td><td class="r">${bondCell(c)}</td><td class="r">${ac ? priceText(num(ac.perToken)) : '<span class="muted">—</span>'}</td><td class="r"><a href="${withNet(`/coin/${token}`)}">Trade</a></td></tr>`;
   });
-  $('#held').innerHTML = rows.join('') || '<tr><td colspan="4" class="j-muted">Nothing yet.</td></tr>';
-  $('#held-total').textContent = `worth ~${capText(total)}`;
+  $('#held').innerHTML = rows.join('') || '<tr><td colspan="8" class="empty">Nothing held yet.</td></tr>';
+  $('#held-total').textContent = `${zecText(total)} ZEC${usd ? ` · ${usdText(total * usd)}` : ''}`;
+  $('#pf-zec').textContent = wad(mine.zec, 4);
+  $('#pf-count').textContent = count;
+  const ch = before > 0 ? pct(total, before) : null;
+  $('#pf-24h').textContent = changeText(ch);
+  $('#pf-24h').className = changeCls(ch);
   const made = mine.created.map((t) => curves.find((c) => c.token === t)).filter(Boolean);
-  $('#made').innerHTML = made.length ? made.map(coinCard).join('') : '<div class="j-empty">No coins made from this wallet yet. <a href="/launch">Create one.</a></div>';
+  $('#made').innerHTML = made.length ? made.map((c) => {
+    const s = stats.get(c.token) || {};
+    const ch24 = change24(c);
+    return `<tr><td>${coinCell(c)}</td><td class="r">${esc(capText(mcap(c)))}</td><td class="r ${changeCls(ch24)}">${changeText(ch24)}</td><td class="r">${zecCell(vol24(c))} ZEC</td><td class="r">${bondCell(c)}</td><td class="r muted">${s.created_time ? ago(s.created_time) : '—'}</td><td class="r"><a href="${withNet(`/coin/${c.token}`)}">Open</a></td></tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty">No coins made from this wallet yet. <a href="${withNet('/launch')}">Create one.</a></td></tr>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -771,6 +1345,7 @@ function renderPreview() {
   $('#preview-symbol').textContent = symbol;
   $('#preview-description').textContent = descInput.value.trim() || 'No description.';
   $('#preview-thumb').innerHTML = imageData ? `<img src="${esc(imageData)}" alt="" />` : `<span id="preview-letter">${esc(symbol[0] || '?')}</span>`;
+  $('#preview-usd').textContent = usd ? usdText(6.1768 * usd) : 'ZEC';
   launchButton.disabled = !ok || creating;
   const bond = BigInt(terms.bond || '0');
   $('#create-terms').textContent = terms.set
@@ -856,27 +1431,29 @@ function pathRoute() {
   if (path === '/launch') return { view: 'launch' };
   if (path === '/portfolio') return { view: 'portfolio' };
   const match = path.match(/^\/coin\/([0-9a-f]{64})$/i);
-  return match ? { view: 'coin', token: match[1].toLowerCase() } : { view: 'gallery' };
+  return match ? { view: 'coin', token: match[1].toLowerCase() } : { view: 'board' };
 }
 
 function render() {
   renderWallet();
+  renderEpoch();
   const route = pathRoute();
-  if (route.view === 'gallery') renderGallery();
+  if (route.view === 'board') renderBoard();
   if (route.view === 'coin') renderCoin(route.token);
   if (route.view === 'launch') renderPreview();
   if (route.view === 'portfolio') renderPortfolio();
+  renderTape();
 }
 
 function syncRoute({ scroll = true } = {}) {
   const route = pathRoute();
   Object.entries(views).forEach(([name, view]) => { view.hidden = name !== route.view; });
   $$('.tabs [data-route]').forEach((link) => {
-    if (link.dataset.route === route.view || (route.view === 'coin' && link.dataset.route === 'gallery')) link.setAttribute('aria-current', 'page');
+    if (link.dataset.route === route.view || (route.view === 'coin' && link.dataset.route === 'board')) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
   document.body.dataset.route = route.view;
-  if (route.view !== 'coin') document.title = { gallery: 'Jade', launch: 'Create a coin — Jade', portfolio: 'Portfolio — Jade' }[route.view];
+  if (route.view !== 'coin') document.title = { board: 'Jade', launch: 'Create — Jade', portfolio: 'Portfolio — Jade' }[route.view];
   if (route.view === 'coin') renderCoin(route.token, true); else render();
   if (route.view === 'portfolio') loadMine().then(renderPortfolio);
   if (scroll) window.scrollTo({ top: 0, behavior: 'instant' });
@@ -886,7 +1463,7 @@ function navigate(path) {
   history_push(path);
   syncRoute();
 }
-const history_push = (path) => window.history.pushState({}, '', path + location.search);
+const history_push = (path) => window.history.pushState({}, '', path.replace(/\?network=testnet$/, '') + location.search);
 
 document.addEventListener('click', (event) => {
   const link = event.target.closest('a[href^="/"]');
@@ -897,22 +1474,19 @@ document.addEventListener('click', (event) => {
 });
 window.addEventListener('popstate', () => syncRoute());
 
-// Live: a coin page every 5 seconds (epochs are about 10), the list every 20.
+// Live. A coin view: its market every 5 s and the epoch every second (the
+// seal countdown). Elsewhere: the market every 10 s. Nothing while hidden.
+let statusBusy = false;
 setInterval(async () => {
-  if (document.hidden) return;
-  const route = pathRoute();
-  if (route.view !== 'coin') return;
-  await loadMarket();
-  try {
-    const h = await rpc('zyn_history', { token: route.token });
-    histories.set(route.token, h);
-  } catch { /* keep */ }
-  if (currentCoin?.token !== route.token || pathRoute().token !== route.token) return;
-  drawChart();
-  renderFills();
-}, 5_000);
-setInterval(() => { if (!document.hidden && pathRoute().view !== 'coin') loadMarket(); }, 20_000);
+  if (document.hidden || pathRoute().view !== 'coin' || statusBusy) return;
+  statusBusy = true;
+  try { noteEpoch((await rpc('zyn_status')).epoch); } catch { /* the next second */ } finally { statusBusy = false; }
+}, 1_000);
+setInterval(() => { if (!document.hidden) refreshCoin(); }, 5_000);
+setInterval(() => { if (!document.hidden && pathRoute().view !== 'coin') loadMarket(); }, 10_000);
 setInterval(loadUsd, 300_000);
+setInterval(() => { if (document.hidden) return; tickAgo(); tickRing(); }, 1_000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { live.changedAt = 0; live.seen = 0; } });
 
 // The network pill: what this page reads, and a link to the other one.
 const net = $('#net');
@@ -920,6 +1494,8 @@ net.textContent = NETWORK === 'testnet' ? 'Testnet' : 'Mainnet';
 net.href = NETWORK === 'testnet' ? '/' : '/?network=testnet';
 net.title = NETWORK === 'testnet' ? 'Switch to mainnet' : 'Switch to testnet';
 installTips();
+renderSortHeads();
+if (matchMedia('(max-width: 780px)').matches) search.placeholder = 'Search coins';
 
 syncRoute({ scroll: false });
 loadMarket();

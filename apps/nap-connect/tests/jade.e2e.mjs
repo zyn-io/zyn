@@ -22,8 +22,9 @@ const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('jade error:', e.message));
 await page.goto(`${JADE}/?network=testnet&nap=${NAP}`);
 await page.waitForSelector(`[data-coin="${TOKEN}"]`, { timeout: 20000 });
-ok(await page.textContent(`[data-coin="${TOKEN}"]`).then((t) => t.includes(NAME)) && /ZEC/.test(await page.textContent(`[data-coin="${TOKEN}"] .j-card-cap`)), `the list lists ${SYM} with its market cap, from the public chain, without a wallet`);
-await page.screenshot({ path: `${S}/jade-coins.png` });
+// The board's row: name and ticker, and its market cap in ZEC (a number; the column says ZEC).
+ok(await page.textContent(`[data-coin="${TOKEN}"]`).then((t) => t.includes(NAME) && t.includes(SYM)) && /^\d[\d.,KM]*$/.test((await page.textContent(`[data-coin="${TOKEN}"] [data-k="mc"]`)).trim()), `the board lists ${SYM} with its market cap, from the public chain, without a wallet`);
+await page.screenshot({ path: `${S}/jade-board.png` });
 await page.click(`[data-coin="${TOKEN}"]`);
 await page.waitForSelector(`#coin-title:has-text("${NAME}")`);
 await page.waitForFunction(() => /ZEC/.test(document.querySelector('#coin-mcap').textContent));
