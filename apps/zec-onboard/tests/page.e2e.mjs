@@ -35,17 +35,15 @@ for (const [w, h, scheme] of [[1280, 900, 'light'], [390, 844, 'light'], [390, 8
   await page.screenshot({ path: `${SHOTS}/full-${tag}.png`, fullPage: true });
 
   if (w === 1280 && scheme === 'light') {
-    // Testnet swaps the copy.
-    await page.click('.net button[data-net="test"]');
-    check(await page.isVisible('text=Valar testnet faucet'), 'testnet: faucet step shows');
-    check(!(await page.isVisible('text=such as Coinbase')), 'testnet: exchange step hidden');
+    // Testnet is switched off for now: the switch is hidden and the page stays on mainnet.
+    check(!(await page.isVisible('.net')), 'network switch hidden');
+    check((await page.getAttribute('html', 'data-net')) === 'main', 'page is on mainnet');
 
     // Ticks survive a reload, and so does the network.
     await page.click('button.done[data-step="1"]');
     await page.click('button.done[data-step="3"]');
     await page.reload({ waitUntil: 'networkidle' });
     check((await page.textContent('#count')) === '2 of 6 done', 'ticks survive a reload');
-    check((await page.getAttribute('html', 'data-net')) === 'test', 'network survives a reload');
     check((await page.getAttribute('button.done[data-step="3"]', 'aria-pressed')) === 'true', 'step 3 shows done');
 
     // Address checker.
@@ -55,10 +53,9 @@ for (const [w, h, scheme] of [[1280, 900, 'light'], [390, 844, 'light'], [390, 8
       await page.waitForTimeout(50);
       return page.textContent('#addr-out');
     };
-    check(/Transparent address.*testnet/.test(await addr('tmAMWUnnjjpM7TDb81PykSxGJpThsw453ND')), 'checker: tm address');
-    check(/mainnet address; this page is set to testnet/.test(await addr('t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4')), 'checker: wrong network warned');
+    check(/Transparent address.*mainnet/.test(await addr('t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4')), 'checker: t1 address');
+    check(/testnet address; this page is set to mainnet/.test(await addr('tmAMWUnnjjpM7TDb81PykSxGJpThsw453ND')), 'checker: wrong network warned');
     check(/checksum/.test(await addr('t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR5')), 'checker: typo caught');
-    await page.click('.net button[data-net="main"]');
     check(/Unified address, mainnet/.test(await addr('u1kc38pww6c8ahz0z20g9kv9s7afrc2npmr8s6nngw00qufveq43q5m2vh8u7wxpaltl0vjs7etr7y7d0pcm5dtc24pqhu5qfe5cwtyc2u')), 'checker: u1 address');
 
     // Transaction lookup.

@@ -28,6 +28,8 @@ const BECH = {
   textest: { kind: 'tex', net: 'testnet', name: 'TEX address', m: true },
   uview: { kind: 'viewing', net: 'mainnet', name: 'Unified viewing key', m: true },
   uviewtest: { kind: 'viewing', net: 'testnet', name: 'Unified viewing key', m: true },
+  uivk: { kind: 'viewing', net: 'mainnet', name: 'Unified incoming viewing key', m: true },
+  uivktest: { kind: 'viewing', net: 'testnet', name: 'Unified incoming viewing key', m: true },
 };
 
 async function sha256(bytes) {
@@ -86,7 +88,7 @@ export async function identify(input) {
   if (!s) return { kind: null, reason: '' };
   if (/\s/.test(s)) return { kind: null, reason: 'An address has no spaces.' };
 
-  if (/^(t1|t3|tm|t2|zc|zt)/.test(s)) {
+  if (/^(t1|t3|tm|t2|zc|zt(?!estsapling))/.test(s)) {
     const raw = base58(s);
     if (!raw || raw.length !== (s.startsWith('z') ? 70 : 26)) {
       return { kind: null, reason: 'This starts like a Zcash address but has the wrong length or characters.' };
@@ -120,13 +122,13 @@ export async function identify(input) {
 export const DESCRIBE = {
   transparent: {
     pool: 'Transparent',
-    seen: 'Public. Anyone can see what this address receives, from where, and its balance.',
+    seen: 'Public. Anyone can see what this address receives and sends, and its balance.',
     nap: 'Nap can pay it. The payment leaves the shielded pool (unshielding), and a memo cannot be attached.',
   },
   unified: {
     pool: 'Shielded (usually)',
     seen: 'The chain does not show this address when it is paid through its shielded receiver, which wallets use whenever they can. A payment from a transparent address still shows its amount.',
-    nap: 'Nap can pay it through its shielded receiver, with a memo.',
+    nap: 'Nap can pay it, with a memo, if it has an Orchard or Ironwood receiver, as current wallets\' addresses do.',
   },
   sapling: {
     pool: 'Shielded (Sapling)',

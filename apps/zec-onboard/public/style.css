@@ -63,6 +63,7 @@ html[data-net="main"] .t, html[data-net="test"] .m { display: none !important; }
 .mark circle { fill: var(--zec); }
 .mark path { fill: none; stroke: var(--zec-ink); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .net { display: flex; align-items: center; gap: 4px; }
+.net[hidden] { display: none; }
 .net > button {
   border: 1px solid var(--line); background: var(--sheet); color: var(--mute);
   font: 600 14px Schibsted, sans-serif; padding: 7px 12px; cursor: pointer;

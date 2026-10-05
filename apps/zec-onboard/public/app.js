@@ -13,6 +13,8 @@ function save(state) {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private window: this visit only */ }
 }
 const state = { net: 'main', done: [], ...load() };
+// Testnet is off until Nap signs for NU7 there; earlier visitors may have it saved.
+state.net = 'main';
 if (!Array.isArray(state.done)) state.done = [];
 
 const EXPLORER = {
