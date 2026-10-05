@@ -28,3 +28,8 @@ resolver = "2"
 # Borrowed from elastic-perps: silent wrapping in a value engine mints money.
 [profile.release]
 overflow-checks = true
+
+# NU7 on testnet (DECISIONS §165): zcash_protocol 0.10.5 with NU7's branch id and
+# testnet height, until 0.11 is final.
+[patch.crates-io]
+zcash_protocol = { path = "vendor/zcash_protocol" }

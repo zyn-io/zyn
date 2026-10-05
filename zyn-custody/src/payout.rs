@@ -419,6 +419,11 @@ pub const EXPIRY_DELTA_NU7: u32 = 120;
 /// it and everything keyed on it below takes effect.
 pub const NU7_BRANCH_ID: u32 = 0x7719_0AD9;
 
+/// This build must know NU7 (DECISIONS §165: the vendored zcash_protocol and
+/// `--cfg zcash_unstable="nu7"` in .cargo/config.toml). A build that lost the
+/// flag stops here instead of skipping NU7 transactions on testnet.
+const _: fn() -> BranchId = || BranchId::Nu7;
+
 /// How many blocks now make the time one block made before NU7: 1, or 3 once
 /// the next block is under NU7's 25-second spacing. For the waits counted in
 /// blocks — confirmations, expiry — that mean a length of time.
@@ -899,6 +904,29 @@ mod envelope_tests {
     }
 
     #[test]
+    fn nu7_on_testnet_from_its_activation_height() {
+        // ZIP 259's id, both ways.
+        assert_eq!(u32::from(BranchId::Nu7), NU7_BRANCH_ID);
+        assert_eq!(BranchId::try_from(NU7_BRANCH_ID).unwrap(), BranchId::Nu7);
+        let at = Network::TestNetwork.activation_height(NetworkUpgrade::Nu7).unwrap();
+        assert_eq!(u32::from(at), 4_465_026);
+        assert_eq!(BranchId::for_height(&Network::TestNetwork, at - 1), BranchId::Nu6_3);
+        assert_eq!(BranchId::for_height(&Network::TestNetwork, at), BranchId::Nu7);
+        // Mainnet has no NU7 height.
+        assert_eq!(Network::MainNetwork.activation_height(NetworkUpgrade::Nu7), None);
+        // The tip just before: the next block is NU7's first, signed under it,
+        // with NU7's longer expiry.
+        let env = Envelope::next(Network::TestNetwork, 4_465_025, NU7_BRANCH_ID).unwrap();
+        assert_eq!(env.branch, BranchId::Nu7);
+        assert_eq!(u32::from(env.expiry), 4_465_026 + EXPIRY_DELTA_NU7);
+        assert!(Envelope::next(Network::TestNetwork, 4_465_024, NU6_3).is_ok());
+        assert!(Envelope::next(Network::TestNetwork, 4_465_025, NU6_3).is_err());
+        // Same Orchard and Ironwood bundles as NU6.3.
+        assert_eq!(env.bundle_version().ok(), Envelope::testnet_at(4_465_024).bundle_version().ok());
+        assert!(env.bundle_version_for(ValuePool::Ironwood).is_ok());
+    }
+
+    #[test]
     fn a_node_ahead_or_behind_is_refused_too() {
         // This build knows an upgrade the node has not reached, or the other
         // way round: the two disagree, and nothing is signed.
@@ -1206,6 +1234,17 @@ mod tests {
     /// envelope is right — every cheaper one stops at the bundle.
     #[test]
     fn a_payout_becomes_a_valid_v5_transaction() {
+        payout_round_trip(4_300_000);
+    }
+
+    #[test]
+    fn under_nu7_a_payout_is_still_a_valid_transaction() {
+        // NU7's first testnet block (DECISIONS §165): built, proved, signed,
+        // read back by the standard reader under NU7's branch.
+        payout_round_trip(4_465_026);
+    }
+
+    fn payout_round_trip(height: u32) {
         let keys: Vec<(Identifier, crate::ceremony::VaultKeys)> = Ceremony::new(2, 3)
             .unwrap()
             .run(&mut rand::rngs::OsRng)
@@ -1224,7 +1263,7 @@ mod tests {
         )
         .unwrap();
 
-        let env = Envelope::testnet_at(4_300_000);
+        let env = Envelope::testnet_at(height);
         let sighash = payout.sighash(&env).unwrap();
         payout.finalize_io(sighash, rand::rngs::OsRng).unwrap();
         let pk = proving_key(env.bundle_version().unwrap());

@@ -6779,3 +6779,14 @@ Supersedes 159.3's idle cadence.
 | 164.6 | **Unchanged:** one anchor in flight, exits held while one is, `hold_sends` while an exit payment confirms, abandoned anchors release their exits, `follow_up` until Zcash records it | ✅ |
 | 164.7 | **Pending epochs are written once.** With anchors rare, thousands of sealed epochs can wait; the store rewrote (and fsynced) every one at each seal and anchor pass, under the node lock. A file already holding the epoch's checkpoint at its length is now left alone | ✅ |
 | 164.8 | **Mainnet: `ZYN_EPOCH_SECS` 60 → 15, `ZYN_ANCHOR_IDLE_SECS=0`.** Safe for lending: rules v2 run on `LendTime` (every 10 s whatever the epoch) and price posts, not epochs (160.2); 15 s seals only make lots, auctions and the published figures follow sooner. Once ZEC is listed every epoch has a tick, so ~5,760 epochs a day seal and wait for the next anchor (~2.5 KB each in memory and on disk, one journal file each) | ⏳ the user deploys |
+
+## §165 — NU7 on testnet: patched crates (5 Oct 2026)
+
+| # | Decision | Status |
+|---|---|---|
+| 165.1 | **NU7 activates on public Zcash testnet at 4,465,026 (~6 Oct; Zebra 7.0.0-rc.0).** Without it, testnet's ZEC side would refuse every signature (§156, as designed), skip post-activation deposits silently (the scanner cannot parse NU7 transactions and moves its cursor past them), and stall lightd at the activation block | 🔒 |
+| 165.2 | **Stopgap: `vendor/zcash_protocol` = 0.10.5 with NU7's real branch id (`0x77190AD9`, ZIP 259) and its testnet height; mainnet has no NU7 height.** Patched into both workspaces; `--cfg zcash_unstable="nu7"` on every target (no `zip-233`, so the v6 header is as Zebra 7 reads it). A compile-time guard fails any build that loses the flag | ✅ built |
+| 165.3 | Tested: NU6.3 up to 4,465,025 and NU7 from 4,465,026 with the 120-block expiry; NU7 shares NU6.3's Orchard/Ironwood bundles; a payout built at NU7's first block proves, signs and reads back under NU7. zyn-custody 154 and zynzapd 456 tests pass | ✅ |
+| 165.4 | **Hetzner:** Zebra to 7.0.0-rc.0 (state v28→v29: snapshot first; rollback needs it), the NU7 node and lightd, `ZYN_CONFIRMATIONS` 6→18 (25-second blocks). If installed after activation, lower the bridge cursor to 4,465,025 first so skipped deposits are scanned again | ⏳ user runs |
+| 165.5 | Nap web, the extension and the iOS app need the rebuilt wasm before they can send testnet ZEC again; mainnet is unaffected until NU7 has a mainnet height | ⏳ |
+| 165.6 | Remove when `zcash_protocol` 0.11 / `zcash_primitives` 0.31 are final (RUNBOOK §NU7) | ⏳ |

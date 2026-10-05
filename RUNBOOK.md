@@ -4449,8 +4449,15 @@ pinned `zfnd/zebra:<version>`, rebuilt from the old container's own settings
 
 1. **Crates.** Bump `zcash_protocol`, `zcash_primitives`, `orchard`,
    `zcash_transparent`, `zcash_address`, `sapling-crypto` to the NU7 releases
-   in the workspace and in `apps/nap-web/zec-core`. No `zcash_unstable` flag:
-   use only a release where NU7 has its real branch id and heights.
+   in the workspace and in `apps/nap-web/zec-core`. **Testnet stopgap (5 Oct
+   2026, DECISIONS §165):** NU7 activates on public testnet at 4,465,026
+   before those releases are final, so `vendor/zcash_protocol` (0.10.5 with
+   NU7's branch id `0x77190AD9` and the testnet height; mainnet has none) is
+   patched in for both workspaces and `--cfg zcash_unstable="nu7"` is set in
+   `.cargo/config.toml` and `apps/nap-web/zec-core/.cargo/config.toml` (no
+   `zip-233`). When `zcash_protocol` 0.11 / `zcash_primitives` 0.31 are final:
+   bump to them, delete `vendor/`, the `[patch.crates-io]` entries and the
+   flag, and keep the tests.
 2. **Check.** `cargo test -p zyn-custody envelope_tests zebra::tests` and add
    the case that now must pass:
    `Envelope::next(TestNetwork, <NU7 height − 1>, NU7_BRANCH_ID)` is `Ok`,
