@@ -1268,6 +1268,9 @@ $('#trade-via').addEventListener('click', (event) => {
 
 function setSide(side) {
   tradeSide = side;
+  // Each side starts from the coin's own quote: paying with BOLD does not
+  // make the next sale a route to BOLD.
+  tradeVia = null;
   $$('[data-trade]').forEach((item) => item.classList.toggle('active', item.dataset.trade === side));
   $('#trade-input').value = tradeSide === 'buy' && currentCoin ? presetsFor(currentCoin)[2] : '';
   configureTrade();
