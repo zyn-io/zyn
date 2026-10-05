@@ -16,10 +16,10 @@ function jadeFns() {
   const src = [
     grab(/const CURVE = Object\.freeze\([^;]+\);/),
     'const WAD = 10n ** 18n; const ZAT = 10_000_000_000n; const LOT = CURVE.lotTokens * WAD; const BPS = 10_000n;',
-    grab(/const cost = \(q, d\) => \{[^\n]+\n/),
-    grab(/function lotsFor\(q, budget, cap\) \{[\s\S]*?\n\}/),
-    grab(/function previewBuy\(sold, amountIn, feeBps\) \{[\s\S]*?\n\}/),
-    grab(/function previewSell\(sold, lots, feeBps\) \{[\s\S]*?\n\}/),
+    grab(/const cost = \(q, d, unit = ZAT\) => \{[^\n]+\n/),
+    grab(/function lotsFor\(q, budget, cap, unit = ZAT\) \{[\s\S]*?\n\}/),
+    grab(/function previewBuy\(sold, amountIn, feeBps, unit = ZAT\) \{[\s\S]*?\n\}/),
+    grab(/function previewSell\(sold, lots, feeBps, unit = ZAT\) \{[\s\S]*?\n\}/),
     grab(/function poolQuote\(pool, sellA, amountIn\) \{[\s\S]*?\n\}/),
     grab(/function decodeMeta\(hexMeta\) \{[\s\S]*?\n\}/),
     'return { cost, lotsFor, previewBuy, previewSell, poolQuote, decodeMeta, CURVE };',
@@ -27,7 +27,7 @@ function jadeFns() {
   return new Function(src)(); // eslint-disable-line no-new-func -- Jade's own source, checked in
 }
 
-test('Jade\'s curve and pool arithmetic is Nap\'s, to the unit', { skip: SKIP }, () => {
+test('Jade\'s curve and pool arithmetic is Nap\'s, to the unit, at every size', { skip: SKIP }, () => {
   const j = jadeFns();
   assert.deepEqual({ ...j.CURVE }, { lots: mk.CURVE.lots, lotTokens: mk.CURVE.lotTokens, baseZat: mk.CURVE.baseZat, slopeZat: mk.CURVE.slopeZat, graduateAt: mk.CURVE.graduateAt });
   let seed = 7;
@@ -36,12 +36,14 @@ test('Jade\'s curve and pool arithmetic is Nap\'s, to the unit', { skip: SKIP },
     const sold = rnd(51_098);
     const amountIn = BigInt(1 + rnd(1e9)) * 10n ** BigInt(8 + rnd(9));
     const fee = [0, 30, 100][rnd(3)];
-    const a = j.previewBuy(sold, amountIn, fee);
-    const b = mk.previewCurveBuy(sold, amountIn, fee);
-    assert.deepEqual([a.lots, a.tokens, a.paid, a.fee], [b.lots, b.tokens, b.paid, b.fee], `buy sold=${sold} in=${amountIn} fee=${fee}`);
+    // ZEC's size, ETH at 23 ETH and BOLD at 63,000 BOLD (§166).
+    const unit = [mk.ZAT, mk.curveUnitFor(23n * mk.WAD), mk.curveUnitFor(63_000n * mk.WAD)][rnd(3)];
+    const a = j.previewBuy(sold, amountIn, fee, unit);
+    const b = mk.previewCurveBuy(sold, amountIn, fee, unit);
+    assert.deepEqual([a.lots, a.tokens, a.paid, a.fee], [b.lots, b.tokens, b.paid, b.fee], `buy sold=${sold} in=${amountIn} fee=${fee} unit=${unit}`);
     const lots = 1 + rnd(Math.max(1, sold));
-    const c = j.previewSell(sold, lots, fee);
-    const d = mk.previewCurveSell(sold, lots, fee);
+    const c = j.previewSell(sold, lots, fee, unit);
+    const d = mk.previewCurveSell(sold, lots, fee, unit);
     assert.deepEqual([c.gross, c.fee, c.net], [d.gross, d.fee, d.net], `sell sold=${sold} lots=${lots}`);
     const pool = { reserve_a: String(BigInt(1 + rnd(1e9)) * 10n ** 12n), reserve_b: String(BigInt(1 + rnd(1e9)) * 10n ** 9n), fee_bps: [5, 30, 100][rnd(3)] };
     const sellA = rnd(2) === 0;
@@ -65,8 +67,8 @@ test('the fixes from the 27 Sep review stay in', () => {
   // The last order's status has its own line that a refresh never wipes.
   assert.match(jade, /hint\.textContent = e\.message;/);
   assert.doesNotMatch(jade, /\$\('#trade-status'\)\.textContent = '';\n  if \(!c\) return null;/);
-  // A buy over the wallet's balance is refused on the page.
-  assert.match(jade, /value > mine\.zec\) throw new Error/);
+  // A buy over the wallet's balance of the coin's quote is refused on the page.
+  assert.match(jade, /bal != null && value > bal\) throw new Error/);
   // Creating is one at a time, and the coin is reported even if its picture fails.
   assert.match(jade, /if \(creating\) return;/);
   assert.match(jade, /The coin exists from here on, whatever happens to the picture\./);
