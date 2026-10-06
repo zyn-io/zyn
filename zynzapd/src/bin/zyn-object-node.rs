@@ -3239,6 +3239,22 @@ fn main() {
 
     // Carry roots to Zcash, and publish what lets anyone check them.
     if let Some((mut settler, da_dir, da_key, data_dir, mut exits)) = anchoring {
+        // Repair, deliberately awkward to reach (§50.6), as on the retired
+        // chain: when a fork took a settled anchor off Zcash, the operator
+        // names its epoch here and restarts. The anchor is re-sent from the
+        // epoch's own published bundle once the vault has a spendable note;
+        // until then the lineage stays refused, never silently extended.
+        if let Ok(list) = std::env::var("ZYN_REANCHOR_EPOCHS") {
+            for epoch in list.split(',').filter_map(|e| e.trim().parse::<u64>().ok()) {
+                match zynzapd::publish::read_local(&da_dir, chain, epoch) {
+                    Err(e) => eprintln!("zyn-object-node: re-anchor {epoch}: cannot read the published bundle: {e}"),
+                    Ok(b) => {
+                        settler.queue_reanchor(b.anchor);
+                        eprintln!("zyn-object-node: re-anchor of epoch {epoch} queued; it goes out when the vault has a spendable note");
+                    }
+                }
+            }
+        }
         // Bundles written only to this box are bundles that die with it. The
         // retired chain pushed its DA to the mirror so a third party could
         // verify a root without asking us; the object ledger had no such push
