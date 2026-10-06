@@ -1,4 +1,4 @@
-// Mainnet's bridges: ETH.zy is a capped pilot under a Safe; BOLD.zy waits
+// Mainnet's bridges: ETH.zy is uncapped under a Safe (§170); BOLD.zy waits
 // until the chain lists it and the vault's Safe has registered Liquity BOLD
 // under asset id 2 — read from the vault itself (`assets(2)`), through Nap's
 // one-call relay (functions/eth). Anything short of that answer keeps it shut.
@@ -33,12 +33,12 @@ test('the vault registry reads as token, decimals, registered — from the live 
   assert.equal(readVaultAsset(undefined), null);
 });
 
-test('mainnet ETH is the capped pilot under the Safe; its asset id is the chain\'s', () => {
+test('mainnet ETH is under the Safe, uncapped; its asset id is the chain\'s', () => {
   const eth = bridgesOf(mainnet).find((b) => b.key === 'eth');
   assert.equal(eth.asset, ETH_ZY);
   assert.equal(eth.chainId, 1);
   assert.equal(eth.vault, VAULT);
-  assert.equal(eth.capWei, '10000000000000000');
+  assert.ok(!eth.capWei, 'uncapped since §170');
   assert.equal(eth.custody, '2-of-3 Safe');
   assert.match(eth.safe, /^0x[0-9a-fA-F]{40}$/);
   assert.equal(eth.checkVault, undefined, 'ETH is the native asset: nothing to wait for');
@@ -102,9 +102,9 @@ test('no BOLD deposit code while the vault does not take it — and no nonce spe
   assert.equal(r.to, VAULT);
   assert.equal(r.token.toLowerCase(), BOLD);
   assert.equal(r.chainId, 1);
-  // ETH: the pilot's cap travels with the deposit, for the page to check.
+  // ETH: no cap travels with the deposit (§170); one set in config would.
   const e = await METHODS.zyn_bridgeDeposit.run(ctx, { key: 'eth' });
-  assert.equal(e.capWei, '10000000000000000');
+  assert.ok(!e.capWei);
   const listed = await METHODS.zyn_bridges.run(ctx);
   const eth = listed.bridges.find((x) => x.key === 'eth');
   assert.equal(eth.safe, mainnet.bridges.eth.safe);
