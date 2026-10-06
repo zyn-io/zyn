@@ -76,9 +76,9 @@ if (token) {
   ok((await page.textContent('#coin-mcap')).endsWith(` ${QUOTE}`), `its page prices it in ${QUOTE}: ${await page.textContent('#coin-mcap')}`);
   await page.waitForSelector('#coin-thumb img', { timeout: 20000 }).catch(() => {});
   ok(await page.locator('#coin-thumb img').count() === 1, 'the coin page shows its picture');
-  const content = await (await fetch(`${JADE}/api/content/${token}`)).json();
+  const content = await (await fetch(`${JADE}/api/content/${token}?network=testnet`)).json();
   ok(/^data:image\//.test(content.image || '') && /end-to-end test/.test(content.description || ''), 'the content store serves the picture and description');
-  const again = await fetch(`${JADE}/api/content/${token}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: { description: 'hijack', image: '' }, proof: { publicKey: '00'.repeat(32), nonce: '00'.repeat(32), signature: '00'.repeat(64) } }) });
+  const again = await fetch(`${JADE}/api/content/${token}?network=testnet`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: { description: 'hijack', image: '' }, proof: { publicKey: '00'.repeat(32), nonce: '00'.repeat(32), signature: '00'.repeat(64) } }) });
   ok(again.status === 409 || again.status === 403, `a second attach is refused (${again.status})`);
   await page.screenshot({ path: `${S}/jade-create-coin.png`, fullPage: true });
 }
