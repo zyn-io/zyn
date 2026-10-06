@@ -165,7 +165,7 @@
       <div class="disclose">
         <h2 data-cubes="section">What you are trusting</h2>
         <p><b>One operator orders transactions.</b> Zyn is operator-sequenced, with no fraud proofs and no validity proofs.</p>
-        <p><b>Withdrawals depend on our custodians.</b> Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault run by the Zyn team. Bridged ETH, a pilot capped at 0.01 ETH, sits in an unaudited contract that answers to the team's 2-of-3 Safe.</p>
+        <p><b>Withdrawals depend on our custodians.</b> Bridged ZEC is backed by ZEC in a 2-of-3 threshold vault run by the Zyn team. Bridged ETH and BOLD sit in an unaudited contract that answers to the team's 2-of-3 Safe.</p>
         <p><b>Zcash keeps time; it does not check our work.</b> It records deposits, withdrawals and anchor commitments, but does not validate Zyn state transitions. Zyn does not inherit Zcash's security.</p>
         <p><b>Private from the public, visible to the operator.</b> Who holds and trades what is not published. The operator and authorised verifiers can see it today; we are working toward a version where they cannot.</p>
       </div>
@@ -222,7 +222,7 @@
           </details>
           <details class="qa">
             <summary>Are the SOL, ETH and BTC bridges live?</summary>
-            <p>ETH is live on Ethereum mainnet as a pilot: at most 0.01 ETH in total, and deposits past that are refunded by hand rather than credited. Its vault contract is unaudited and answers to a 2-of-3 Safe held by the Zyn team, whose owners approve every payout (so sending out can take hours) and could move what the vault holds. SOL, ETH and BTC also run on test networks (Solana devnet, Ethereum Sepolia, Bitcoin signet) with their test keys on a single machine, through two channels. The transparent one takes any amount; the other chain shows the address and the amount. The private one takes fixed sizes into a pool and moves them with a zero-knowledge proof each way, so the other chain shows a note entering or leaving the pool, not which one is yours. Its testnet proving keys come from a one-party setup and are for testing only.</p>
+            <p>ETH and BOLD are live on Ethereum mainnet. Their vault contract is unaudited and answers to a 2-of-3 Safe held by the Zyn team, whose owners approve every payout (so sending out can take hours) and could move what the vault holds. SOL, ETH and BTC also run on test networks (Solana devnet, Ethereum Sepolia, Bitcoin signet) with their test keys on a single machine, through two channels. The transparent one takes any amount; the other chain shows the address and the amount. The private one takes fixed sizes into a pool and moves them with a zero-knowledge proof each way, so the other chain shows a note entering or leaving the pool, not which one is yours. Its testnet proving keys come from a one-party setup and are for testing only.</p>
           </details>
           <details class="qa">
             <summary>Can I build my own app on Zyn?</summary>
