@@ -44,7 +44,10 @@ const { METHODS } = await import('./src/connect-ops.js');
 const { x25519 } = await import('@noble/curves/ed25519.js');
 
 const net = JSON.parse(readFileSync(new URL('./public/config.json', import.meta.url), 'utf8')).networks.find((n) => n.id === 'testnet');
-const config = { ...net, id: 'testnet', rpcUrl: 'https://zyn-rpc.cavebro.win/object' };
+// ZYN_WALLET_RPC points it at a local devnet (chain 212, http://127.0.0.1:…) for rehearsals.
+const rpc = process.env.ZYN_WALLET_RPC || 'https://zyn-rpc.cavebro.win/object';
+if (process.env.ZYN_WALLET_RPC && !/^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/.test(rpc)) throw new Error('ZYN_WALLET_RPC is for a devnet on this machine');
+const config = { ...net, id: 'testnet', rpcUrl: rpc };
 
 const phraseFile = join(DIR, `${name}.phrase`);
 if (!existsSync(phraseFile)) {
@@ -62,8 +65,10 @@ const nameOf = (a) => names[a] || `${a.slice(0, 8)}…`;
 
 switch (cmd) {
   case 'new': {
-    const r = await obj.objectCall(config.rpcUrl, 'zyn_depositAddress', { account: identity.accountHex });
-    if (!r.registered) await ledger.submitIntent(config, identity, obj.registerIntent(identity.account, x25519.getPublicKey(identity.viewing)));
+    // A devnet custodies no vault and gives no deposit address: ask for the viewing key instead.
+    const registered = await obj.objectCall(config.rpcUrl, 'zyn_depositAddress', { account: identity.accountHex }).then((r) => r.registered)
+      .catch(() => obj.objectCall(config.rpcUrl, 'zyn_viewingKey', { account: identity.accountHex }).then(() => true, () => false));
+    if (!registered) await ledger.submitIntent(config, identity, obj.registerIntent(identity.account, x25519.getPublicKey(identity.viewing)));
     console.log(`${name}: account ${identity.accountHex}`);
     break;
   }

@@ -291,13 +291,20 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
         .iter()
         .map(|(a, c)| {
             format!(
-                "{{\"asset\":\"{}\",\"creator\":\"{}\",\"quote\":\"{}\",\"fee_bps\":{},\"floor\":\"{}\",\"outstanding\":\"{}\"}}",
+                "{{\"asset\":\"{}\",\"creator\":\"{}\",\"quote\":\"{}\",\"fee_bps\":{},\"floor\":\"{}\",\"outstanding\":\"{}\",\"minted\":{},\"cap\":{}}}",
                 hex(a),
                 hex(&c.creator),
                 hex(&c.quote),
                 c.fee_bps,
                 c.floor.0,
-                vm.issued.get(a).map(|f| f.0).unwrap_or(0)
+                // Items that exist and can still be redeemed — the count a
+                // redemption divides the floor by. (It once read the issued
+                // amount of the collection's own address, which is never
+                // issued, so every collection looked empty and nobody could
+                // redeem.)
+                c.outstanding,
+                c.minted,
+                c.cap
             )
         })
         .collect();
