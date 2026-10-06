@@ -109,7 +109,10 @@ test('the terms page says what it does not prove', async () => {
   assert.match(page, /has not happened yet/i);
 });
 
-test('the landing page offers the terms', async () => {
+// Waitlist stage (6 Oct 2026): the landing page sends visitors to the list
+// and names none of the sale's routes. The terms stay published at /terms.
+test('the landing page points to the list, not to the sale', async () => {
   const landing = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(landing, /href="\/terms"/);
+  assert.match(landing, /href="\/whitelist"/);
+  assert.doesNotMatch(landing, /href="\/(mint|market|deposit|terms|items|exit)"/);
 });

@@ -60,7 +60,8 @@ test('the whitelist function refuses a body that is not a form', () => {
 
 test('the landing page no longer says sealed', () => {
   assert.doesNotMatch(index, /sealed|unrevealed/i);
-  assert.match(index, /<a class="enter-button" href="\/mint">/);
+  // Waitlist stage: the button leads to the list, not the sale.
+  assert.match(index, /<a class="enter-button" href="\/whitelist">/);
 });
 
 test('nothing widens a phone screen', () => {
