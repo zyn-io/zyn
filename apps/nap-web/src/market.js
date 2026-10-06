@@ -271,7 +271,8 @@ export function previewRoute(hops, amountIn, venues) {
       amount = quoteAlone(venues.pool(h.pool), h.sellA, amount);
     } else {
       const c = venues.curve(h.curveSell || h.curveBuy);
-      const unit = c.unit && c.unit !== '0' ? BigInt(c.unit) : ZAT;
+      // Only a plain positive integer is a unit; anything else is a ZEC-sized curve.
+      const unit = typeof c.unit === 'string' && /^[1-9]\d{0,39}$/.test(c.unit) ? BigInt(c.unit) : ZAT;
       amount = h.curveSell ? previewCurveSell(c.sold, Number(amount / LOT), c.fee_bps, unit).net : previewCurveBuy(c.sold, amount, c.fee_bps, unit).tokens;
     }
     steps.push(amount);

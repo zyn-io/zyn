@@ -106,6 +106,16 @@ const validCurve = (c) => isHex(c.token) && isHex(c.quote) && isHex(c.meta)
   && ['reserve', 'graduation', 'creator_fees', 'bond', 'price_per_token'].every((k) => isInt(c[k]))
   && Number.isSafeInteger(c.sold) && c.sold >= 0 && typeof c.graduated === 'boolean';
 
+/// A coin's address in a card row: names and tickers repeat, addresses do not
+/// (audit, 6 Oct 2026: a copycat "PEPE" read the same as the real one).
+const addrText = (a) => `${a.slice(0, 8)}…${a.slice(-6)}`;
+/// Other coins on a curve under the same ticker, which a card must say.
+const lookalikes = (curves, c) => curves.filter((x) => x.token !== c.token && x.symbol === c.symbol).length;
+/// How far a floor sits below what the order would get alone, in percent.
+const floorGap = (preview, floor) => (preview > 0n ? Number(((preview - (floor < preview ? floor : preview)) * 10_000n) / preview) / 100 : 0);
+/// Above this gap a floor protects little and the card says so in red.
+const LOOSE_FLOOR = 10;
+
 /// A curve's size (§166): the ledger amount one unit of its shape stands
 /// for. A node from before §166 says nothing, and every curve was ZEC-sized.
 const unitOf = (c) => (isInt(c?.unit) && c.unit !== '0' ? BigInt(c.unit) : mk.ZAT);
@@ -389,18 +399,22 @@ export const METHODS = {
       if (q.lots === 0) throw bad('That buys less than one lot at the current price');
       const minLots = p.minTokens != null ? BigInt(amountOf(p.minTokens, 'minTokens')) / mk.LOT : 0n;
       await mustHold(ctx, c.quote, amount, q$);
+      const gap = floorGap(q.tokens, minLots * mk.LOT);
+      const twins = lookalikes((await curveBook(ctx)).curves, c);
       return {
         title: `Buy ${c.symbol} with ${wadText(amount)} ${q$}`,
-        // No floor means filling at whatever price the batch clears: said, in red.
-        danger: !minLots,
+        // No floor, or one far below the preview, fills at whatever the batch
+        // clears; a ticker other coins share may not be the coin meant: red.
+        danger: !minLots || gap > LOOSE_FLOOR || twins > 0,
         rows: [
           ['Token', `${c.name} (${c.symbol})`],
+          ['Address', `${addrText(c.token)}${twins ? ` — ${twins} other coin${twins > 1 ? 's use' : ' uses'} the ticker ${c.symbol}; check this address` : ''}`],
           ['If nobody else buys this epoch', `${tokenText(q.tokens)} tokens`],
           ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
           ['Unspent', `${wadText(q.refund)} ${q$} comes back`],
-          ['At least', minLots ? `${tokenText(minLots * mk.LOT)} tokens, or the whole buy comes back` : 'no floor — it fills at whatever price the batch clears'],
+          ['At least', minLots ? `${tokenText(minLots * mk.LOT)} tokens${gap > LOOSE_FLOOR ? ` — ${gap.toFixed(1)}% below the preview` : ''}, or the whole buy comes back` : 'no floor — it fills at whatever price the batch clears'],
         ],
-        note: 'Everyone buying this epoch pays one price, set when it closes; nobody can buy ahead of you. Collect the tokens once it settles.',
+        note: 'Everyone buying this epoch pays one price, set when it closes; other buyers in the same epoch move it. Collect the tokens once it settles.',
         run: async () => {
           const h = await holdings(ctx);
           const { inputs, change } = mk.fund(ctx.identity, h.held, unhex(c.quote), amount);
@@ -425,13 +439,15 @@ export const METHODS = {
       const q = mk.previewCurveSell(c.sold, lots, c.fee_bps, unitOf(c));
       const minZec = p.minZec != null ? amountOf(p.minZec, 'minZec') : 0n;
       await mustHold(ctx, c.token, tokens, c.symbol);
+      const gap = floorGap(q.net, minZec);
       return {
         title: `Sell ${tokenText(tokens)} ${c.symbol}`,
-        danger: !minZec,
+        danger: !minZec || gap > LOOSE_FLOOR,
         rows: [
+          ['Address', addrText(c.token)],
           ['If nobody else sells this epoch', `${wadText(q.net)} ${q$}`],
           ['Fee', c.fee_bps ? `${wadText(q.fee)} ${q$} (${c.fee_bps / 100}%)` : 'none'],
-          ['At least', minZec ? `${wadText(minZec)} ${q$}, or the tokens come back` : 'no floor — it sells at whatever price the batch clears'],
+          ['At least', minZec ? `${wadText(minZec)} ${q$}${gap > LOOSE_FLOOR ? ` — ${gap.toFixed(1)}% below the preview` : ''}, or the tokens come back` : 'no floor — it sells at whatever price the batch clears'],
         ],
         note: `Sellers this epoch share one price, set when it closes. Collect the ${q$} once it settles.`,
         run: async () => {
@@ -480,18 +496,38 @@ export const METHODS = {
       const venues = { pool: (id) => pools.get(hex(id)), curve: (t) => curves.get(hex(t)) };
       const q = mk.previewRoute(hops.map((h) => h.hop), amountIn, venues);
       if (!q) throw bad('That route delivers nothing at these prices');
+      // How far below the pools' own prices the route fills, hop by hop
+      // (audit, 6 Oct 2026: a thin pool on a route lost half the value and
+      // nothing said so). Curve hops are priced by the curve, not a pool.
+      let kept = 1;
+      let into = amountIn;
+      hops.forEach((h, i) => {
+        if (h.hop.pool) {
+          const x = pools.get(h.key.pool);
+          const [rin, rout] = h.key.sellA ? [BigInt(x.reserve_a), BigInt(x.reserve_b)] : [BigInt(x.reserve_b), BigInt(x.reserve_a)];
+          const spot = (into * rout) / rin;
+          if (spot > 0n) kept *= Number(q.steps[i]) / Number(spot);
+        }
+        into = q.steps[i];
+      });
+      const impact = Math.max(0, (1 - kept) * 100);
+      const gap = floorGap(q.out, minOut);
       const [start, end] = [hops[0].input, hops[hops.length - 1].output];
       const path = [start, ...hops.map((h) => h.output)].map(name).join(' → ');
       await mustHold(ctx, start, amountIn, name(start));
-      const show = (asset, raw) => (curves.has(asset) ? `${tokenText(raw)} ${name(asset)}` : `${wadText(raw)} ${name(asset)}`);
+      // Whole tokens where the amount is whole; never a floor rounded to "0".
+      const show = (asset, raw) => (curves.has(asset) && BigInt(raw) % WAD === 0n ? `${tokenText(raw)} ${name(asset)}` : `${wadText(raw)} ${name(asset)}`);
+      const endCurve = curves.get(end);
       return {
         title: `Swap ${name(start)} for ${name(end)}`,
-        danger: !minOut,
+        danger: !minOut || gap > LOOSE_FLOOR || impact >= 5,
         rows: [
           ['Route', path],
+          ...(endCurve ? [['Address', addrText(end)]] : []),
+          ['Below the pools\' prices', `${impact.toFixed(2)}%${impact >= 5 ? ' — the pools on this route are thin for this amount' : ''}`],
           ['You put in', show(start, amountIn)],
           ['If nobody else trades this epoch', show(end, q.out)],
-          ['At least', minOut ? `${show(end, minOut)}, or the whole route comes back` : 'no floor — it fills at whatever the batches clear at'],
+          ['At least', minOut ? `${show(end, minOut)}${gap > LOOSE_FLOOR ? ` — ${gap.toFixed(1)}% below the preview` : ''}, or the whole route comes back` : 'no floor — it fills at whatever the batches clear at'],
           ['Settles', 'in one epoch, every hop together'],
         ],
         note: 'Each venue on the route clears once this epoch, at one price for everyone in it. If the end of the route would bring less than your floor, nothing on it happens and everything you put in comes back.',
