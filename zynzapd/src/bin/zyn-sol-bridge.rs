@@ -7,7 +7,17 @@
 //!   zyn-sol-bridge once       credit new deposits, pay revealed exits, stop
 //!   zyn-sol-bridge run        the same, every ZYN_SOL_POLL seconds (and the relayer)
 //!   zyn-sol-bridge relay      only the private channel's relayer (no vault needed)
+//!   zyn-sol-bridge proposer-key <file>   a new keypair for Squads mode; prints its address
 //! ```
+//!
+//! **Squads mode (§171), the only mode on mainnet:** with `ZYN_SOL_SQUADS`
+//! set, the vault is that Squads v4 multisig's vault, and this holds no key
+//! that can move it. It proposes each payout batch — a vault transaction and
+//! its proposal, from a proposer key that is a member with Initiate only —
+//! after simulating the payouts as the vault would make them. Two owners
+//! approve and execute it in the Squads app; this settles the exits once the
+//! execution is final. A proposal the owners reject or cancel is not proposed
+//! again until its record is deleted.
 //!
 //! **In:** a transfer into the vault carrying `zyn:<commitment>` becomes a
 //! `DepositCommitted`, recorded once by the transaction's signature; the
@@ -28,12 +38,15 @@
 //! ```text
 //!   ZYN_SOL_NODE         the object ledger's JSON-RPC     (http://127.0.0.1:8499)
 //!   ZYN_SUBMIT_TOKEN     the operator door's token (read from the node's env)
-//!   ZYN_SOL_CLUSTER      devnet | testnet                              (devnet)
+//!   ZYN_SOL_CLUSTER      devnet | testnet | mainnet                    (devnet)
 //!   ZYN_SOL_RPC          Solana JSON-RPC               (https://api.devnet.solana.com)
-//!   ZYN_SOL_PUBLIC       dir holding the vault's public.bin            (required)
-//!   ZYN_SOL_CUSTODIANS   host:port,… of the share holders              (required)
+//!   ZYN_SOL_SQUADS       the Squads multisig whose vault this is   (Squads mode)
+//!   ZYN_SOL_PROPOSER     keypair file of its Initiate-only member  (Squads mode)
+//!   ZYN_SOL_VAULT_INDEX  which of the multisig's vaults                     (0)
+//!   ZYN_SOL_PUBLIC       dir holding the vault's public.bin    (custodians mode)
+//!   ZYN_SOL_CUSTODIANS   host:port,… of the share holders      (custodians mode)
 //!   ZYN_SOL_THRESHOLD    shares needed to sign                              (2)
-//!   ZYN_SOL_NONCE        the vault's durable nonce account             (required)
+//!   ZYN_SOL_NONCE        the vault's durable nonce account     (custodians mode)
 //!   ZYN_SOL_MINTS        SPL tokens it also carries, `mint:decimals,…`  (none)
 //!   ZYN_SOL_STATE        dir for the deposit cursors and payments in flight
 //!   ZYN_SOL_POLL         seconds between passes in `run`                   (20)
@@ -67,6 +80,7 @@ use zyn_custody::solana::{base58_encode, Cluster, Rpc, TxStatus};
 use zyn_vm::spec::MicrochainVm;
 use zyn_vm::{program, Fixed};
 use zynzapd::sol_pool;
+use zynzapd::squads;
 use zynzapd::sol_bridge::{as_pool_destination, base64, base64_encode, decode_deposit, decode_token_deposit, fixed_of, fixed_of_units, lamports_of, pool_address, pool_events, tx_ref, units_of, NETWORK_FEE};
 
 fn env(k: &str, d: &str) -> String {
@@ -87,11 +101,9 @@ struct Bridge {
     rpc_url: String,
     network: &'static [u8],
     asset: [u8; 32],
-    public: SolanaPublicPackage,
+    custody: Custody,
     vault: String,
-    custodians: Vec<String>,
-    threshold: u16,
-    nonce: String,
+    vault_key: [u8; 32],
     state: std::path::PathBuf,
     agent: ureq::Agent,
     tokens: Vec<Token>,
@@ -100,6 +112,26 @@ struct Bridge {
     pools: Vec<(u64, String)>,
     /// The pools' exit authority (testnet: one key, §158.4).
     pool_key: Option<String>,
+}
+
+/// Who signs for the vault.
+enum Custody {
+    /// The custodians' threshold key is the vault (testnet, §146).
+    Custodians { public: SolanaPublicPackage, custodians: Vec<String>, threshold: u16, nonce: String },
+    /// The vault is a Squads multisig's; this only proposes (§171).
+    Squads { multisig: [u8; 32], vault_index: u8, proposer: sol_pool::Signer },
+}
+
+/// The most payouts one Squads proposal carries, so the owners can read it.
+const SQUADS_BATCH: usize = 8;
+
+/// Each cluster's genesis hash: what an endpoint must answer to be it.
+fn genesis_of(cluster: Cluster) -> &'static str {
+    match cluster {
+        Cluster::Devnet => "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        Cluster::Testnet => "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY",
+        Cluster::MainnetBeta => "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    }
 }
 
 /// An SPL token this bridge carries.
@@ -140,22 +172,60 @@ fn bridge() -> Result<Bridge, String> {
     let (cluster, network): (Cluster, &'static [u8]) = match env("ZYN_SOL_CLUSTER", "devnet").as_str() {
         "devnet" => (Cluster::Devnet, b"solana-devnet"),
         "testnet" => (Cluster::Testnet, b"solana-devnet"),
-        other => return Err(format!("ZYN_SOL_CLUSTER is devnet or testnet here, not {other} — mainnet SOL waits for federated custody (§36.7)")),
+        "mainnet" => (Cluster::MainnetBeta, b"solana"),
+        other => return Err(format!("ZYN_SOL_CLUSTER is devnet, testnet or mainnet, not {other}")),
     };
     let rpc_url = env("ZYN_SOL_RPC", "https://api.devnet.solana.com");
-    let rpc = Rpc::connect(&rpc_url, cluster).map_err(|e| format!("Solana: {e:?}"))?;
-    let dir = env("ZYN_SOL_PUBLIC", "");
-    if dir.is_empty() {
-        return Err("set ZYN_SOL_PUBLIC to the directory with the vault's public.bin".into());
-    }
-    let public: SolanaPublicPackage = zyn_custody::shares::load_public::<zyn_custody::ceremony::Solana>(std::path::Path::new(&dir)).map_err(|e| format!("{dir}/public.bin: {e}"))?;
-    let vault = base58_encode(&custody::vault_address_of(&public));
-    let custodians: Vec<String> = env("ZYN_SOL_CUSTODIANS", "").split(',').filter(|s| !s.is_empty()).map(String::from).collect();
-    let nonce = env("ZYN_SOL_NONCE", "");
-    if nonce.is_empty() {
-        return Err("set ZYN_SOL_NONCE to the vault's durable nonce account".into());
-    }
-    let vault_key = custody::vault_address_of(&public);
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build();
+    let squads_ms = env("ZYN_SOL_SQUADS", "");
+    let custody = if !squads_ms.is_empty() {
+        let multisig = zyn_custody::solana::pubkey(&squads_ms).ok_or_else(|| format!("ZYN_SOL_SQUADS {squads_ms} is not a Solana address"))?;
+        let keyfile = env("ZYN_SOL_PROPOSER", "");
+        if keyfile.is_empty() {
+            return Err("Squads mode needs ZYN_SOL_PROPOSER, the keypair file of the multisig's Initiate-only member".into());
+        }
+        let vault_index: u8 = env("ZYN_SOL_VAULT_INDEX", "0").parse().map_err(|_| "ZYN_SOL_VAULT_INDEX must be 0-255".to_string())?;
+        Custody::Squads { multisig, vault_index, proposer: sol_pool::Signer::load(&keyfile)? }
+    } else {
+        // The custodians' key never runs on mainnet: there the vault answers
+        // to the team's multisig (§171).
+        if cluster == Cluster::MainnetBeta {
+            return Err("mainnet SOL runs only in Squads mode: set ZYN_SOL_SQUADS and ZYN_SOL_PROPOSER".into());
+        }
+        let dir = env("ZYN_SOL_PUBLIC", "");
+        if dir.is_empty() {
+            return Err("set ZYN_SOL_PUBLIC to the directory with the vault's public.bin".into());
+        }
+        let public: SolanaPublicPackage = zyn_custody::shares::load_public::<zyn_custody::ceremony::Solana>(std::path::Path::new(&dir)).map_err(|e| format!("{dir}/public.bin: {e}"))?;
+        let nonce = env("ZYN_SOL_NONCE", "");
+        if nonce.is_empty() {
+            return Err("set ZYN_SOL_NONCE to the vault's durable nonce account".into());
+        }
+        Custody::Custodians {
+            public,
+            custodians: env("ZYN_SOL_CUSTODIANS", "").split(',').filter(|s| !s.is_empty()).map(String::from).collect(),
+            threshold: env("ZYN_SOL_THRESHOLD", "2").parse().map_err(|_| "ZYN_SOL_THRESHOLD must be a number".to_string())?,
+            nonce,
+        }
+    };
+    // The custody client refuses mainnet outright, as it should for the
+    // custodians' key; Squads mode only reads and proposes, so it checks the
+    // endpoint's cluster itself.
+    let rpc = match &custody {
+        Custody::Custodians { .. } => Rpc::connect(&rpc_url, cluster).map_err(|e| format!("Solana: {e:?}"))?,
+        Custody::Squads { .. } => {
+            let found = solana_call(&agent, &rpc_url, "getGenesisHash", json!([]))?;
+            if found.as_str() != Some(genesis_of(cluster)) {
+                return Err(format!("{rpc_url} is not Solana {} (genesis {found})", env("ZYN_SOL_CLUSTER", "devnet")));
+            }
+            Rpc::connect_unchecked(&rpc_url, cluster)
+        }
+    };
+    let vault_key = match &custody {
+        Custody::Custodians { public, .. } => custody::vault_address_of(public),
+        Custody::Squads { multisig, vault_index, .. } => squads::vault_pda(multisig, *vault_index),
+    };
+    let vault = base58_encode(&vault_key);
     let mut tokens = Vec::new();
     for entry in env("ZYN_SOL_MINTS", "").split(',').filter(|s| !s.is_empty()) {
         let (mint, decimals) = entry.split_once(':').ok_or_else(|| format!("ZYN_SOL_MINTS entry {entry} is not mint:decimals"))?;
@@ -186,13 +256,11 @@ fn bridge() -> Result<Bridge, String> {
         rpc_url,
         network,
         asset: asset_of(network, b""),
-        public,
+        custody,
         vault,
-        custodians,
-        threshold: env("ZYN_SOL_THRESHOLD", "2").parse().map_err(|_| "ZYN_SOL_THRESHOLD must be a number".to_string())?,
-        nonce,
+        vault_key,
         state,
-        agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(30)).build(),
+        agent,
         tokens,
         pool_program,
         pools,
@@ -382,7 +450,8 @@ impl Bridge {
                 TxStatus::Failed => eprintln!("zyn-sol-bridge: {} failed on Solana; its exits stay unpaid", f.signature),
                 TxStatus::Confirmed => keep.push(f),
                 TxStatus::Unknown => {
-                    let now = hex(&self.rpc.nonce_value(&self.nonce).map_err(|e| format!("{e:?}"))?);
+                    let Custody::Custodians { nonce, .. } = &self.custody else { return Err("a custodians' payment in flight in Squads mode".into()) };
+                    let now = hex(&self.rpc.nonce_value(nonce).map_err(|e| format!("{e:?}"))?);
                     if now != f.nonce {
                         eprintln!("zyn-sol-bridge: NONCE MOVED under {} without it landing — dropped; investigate before paying again", f.signature);
                     } else {
@@ -398,8 +467,10 @@ impl Bridge {
         Ok(busy)
     }
 
-    /// Pay the revealed exits that fit one transaction.
-    fn pay(&self) -> Result<(), String> {
+    /// The revealed exits owed, as payouts, and the exits they cover — or,
+    /// when a private exit's pool cannot back it yet, the pool and the size
+    /// to fund it with first (§158.4).
+    fn owed(&self) -> Result<(Vec<zyn_bridge::solana::SolPayout>, Vec<u32>, Option<([u8; 32], u64)>), String> {
         // SOL first, then each token: one transaction can carry both.
         let mut payouts = Vec::new();
         let mut covers = Vec::new();
@@ -431,11 +502,19 @@ impl Bridge {
                 covers.push(index as u32);
             }
         }
+        let funding = self.private_exits(&private)?;
+        Ok((payouts, covers, funding))
+    }
+
+    /// Custodians' mode: pay the revealed exits that fit one transaction.
+    fn pay(&self) -> Result<(), String> {
+        let Custody::Custodians { public, custodians, threshold, nonce: nonce_account } = &self.custody else { return Err("not in custodians' mode".into()) };
+        let (mut payouts, mut covers, funding) = self.owed()?;
         // Private exits are inserted as notes with the pools' key. One that
         // its pool cannot back yet is funded first: one size from the vault
         // into the pool, alone in its payment (it settles no exit), with the
         // network fee on top so the pool receives the size exactly.
-        if let Some((pool, lamports)) = self.private_exits(&private)? {
+        if let Some((pool, lamports)) = funding {
             payouts = vec![zyn_bridge::solana::SolPayout::native(pool, lamports + NETWORK_FEE)];
             covers = Vec::new();
             println!("out: funding a pool with {lamports} lamports from the vault for a private exit");
@@ -444,8 +523,8 @@ impl Bridge {
             return Ok(());
         }
         let accounts = zyn_bridge::solana::VaultAccounts {
-            vault: custody::vault_address_of(&self.public),
-            nonce_account: zyn_custody::solana::pubkey(&self.nonce).ok_or("ZYN_SOL_NONCE is not a Solana address")?,
+            vault: self.vault_key,
+            nonce_account: zyn_custody::solana::pubkey(nonce_account).ok_or("ZYN_SOL_NONCE is not a Solana address")?,
         };
         let mut group = zyn_bridge::solana::chunk(accounts, &payouts).map_err(|e| format!("{e:?}"))?.remove(0);
         covers.truncate(group.len());
@@ -458,10 +537,10 @@ impl Bridge {
             }
             first.lamports -= NETWORK_FEE;
         }
-        let mut quorum = RemoteSolanaQuorum::new(self.custodians.clone());
+        let mut quorum = RemoteSolanaQuorum::new(custodians.clone());
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let nonce = self.rpc.nonce_value(&self.nonce).map_err(|e| format!("{e:?}"))?;
-        let payment = custody::prepare_with(&self.rpc, &mut quorum, self.threshold, &self.public, &self.nonce, &group, now).map_err(|e| format!("signing: {e:?}"))?;
+        let nonce = self.rpc.nonce_value(nonce_account).map_err(|e| format!("{e:?}"))?;
+        let payment = custody::prepare_with(&self.rpc, &mut quorum, *threshold, public, nonce_account, &group, now).map_err(|e| format!("signing: {e:?}"))?;
         let entry = InFlight { signature: payment.id(), nonce: hex(&nonce), transaction: hex(&payment.transaction), covers: covers.clone() };
         let mut v = self.inflight();
         v.push(entry);
@@ -469,6 +548,186 @@ impl Bridge {
         match custody::broadcast(&self.rpc, &payment) {
             Ok(sig) => println!("out: {sig} — {} exit(s) paid, waiting for finality", covers.len()),
             Err(e) => eprintln!("zyn-sol-bridge: broadcast deferred: {e:?}"),
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------- Squads mode
+
+    fn account(&self, address: &str, commitment: &str) -> Result<Option<Vec<u8>>, String> {
+        let r = self.solana("getAccountInfo", json!([address, { "encoding": "base64", "commitment": commitment }]))?;
+        if r["value"].is_null() {
+            return Ok(None);
+        }
+        r["value"]["data"][0].as_str().and_then(base64).map(Some).ok_or_else(|| format!("{address}: account data is not base64"))
+    }
+
+    fn multisig(&self) -> Result<squads::Multisig, String> {
+        let Custody::Squads { multisig, .. } = &self.custody else { return Err("not in Squads mode".into()) };
+        let raw = self.account(&base58_encode(multisig), "confirmed")?.ok_or("the Squads multisig account does not exist on this cluster")?;
+        squads::Multisig::decode(&raw).ok_or_else(|| "the ZYN_SOL_SQUADS account is not a Squads v4 multisig".into())
+    }
+
+    fn proposal_path(&self) -> std::path::PathBuf {
+        self.state.join("proposal.json")
+    }
+
+    /// The finalized transaction that executed a vault transaction, if any.
+    fn executed_by(&self, transaction: &str) -> Result<Option<String>, String> {
+        let rows = self.solana("getSignaturesForAddress", json!([transaction, { "commitment": "finalized", "limit": 50 }]))?;
+        for r in rows.as_array().into_iter().flatten() {
+            let Some(sig) = r["signature"].as_str() else { continue };
+            if !r["err"].is_null() {
+                continue;
+            }
+            let tx = self.solana("getTransaction", json!([sig, { "encoding": "json", "maxSupportedTransactionVersion": 0, "commitment": "finalized" }]))?;
+            let ran = tx["meta"]["logMessages"].as_array().into_iter().flatten().filter_map(Value::as_str).any(|l| l.contains("Instruction: VaultTransactionExecute"));
+            if ran && tx["meta"]["err"].is_null() {
+                return Ok(Some(sig.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Record a final payment's exits. False when the ledger refused one: the
+    /// record is then kept, and nothing more is proposed until it is settled.
+    fn settle(&self, covers: &Value, sig: &str) -> Result<bool, String> {
+        let mut ok = true;
+        for index in covers.as_array().into_iter().flatten().filter_map(Value::as_u64) {
+            let r = self.submit(&Op::SettleExit { program: program::settle_exit(), index: index as u32, txid: tx_ref(sig) })?;
+            if r.contains("Refused") && !r.contains("already settled") {
+                eprintln!("zyn-sol-bridge: SETTLEMENT REFUSED — exit {index} was paid by {sig} and the ledger will not record it: {r}. Nothing more is proposed until it is.");
+                ok = false;
+            }
+        }
+        Ok(ok)
+    }
+
+    /// Run the payouts as the vault would, without signatures: owners are
+    /// only asked to approve a batch the vault can pay.
+    fn simulate_as_vault(&self, payer: &[u8; 32], ixs: &[sol_pool::Ix]) -> Result<(), String> {
+        let msg = sol_pool::message(payer, ixs, &[0u8; 32]);
+        let signers = msg[0] as usize;
+        let mut tx = vec![signers as u8];
+        tx.extend(std::iter::repeat(0u8).take(64 * signers));
+        tx.extend_from_slice(&msg);
+        let r = self.solana("simulateTransaction", json!([base64_encode(&tx), { "encoding": "base64", "sigVerify": false, "replaceRecentBlockhash": true, "commitment": "confirmed" }]))?;
+        if r["value"]["err"].is_null() {
+            return Ok(());
+        }
+        let logs: Vec<&str> = r["value"]["logs"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        Err(format!("the payouts would fail if the multisig executed them — not proposing: {} {}", r["value"]["err"], logs.join(" | ")))
+    }
+
+    /// Squads mode: propose a payout batch to the multisig, or follow the one
+    /// proposed until its owners execute (or reject) it.
+    fn pay_squads(&self) -> Result<(), String> {
+        let Custody::Squads { multisig, vault_index, proposer } = &self.custody else { return Err("not in Squads mode".into()) };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Ok(raw) = std::fs::read(self.proposal_path()) {
+            // A damaged record is not "nothing proposed": that would propose again.
+            let p: Value = serde_json::from_slice(&raw).unwrap_or_else(|_| panic!("{} is damaged — fix it before proposing again", self.proposal_path().display()));
+            let index = p["index"].as_u64().ok_or("proposal.json has no index")?;
+            let sig = p["sig"].as_str().unwrap_or("").to_string();
+            let transaction = base58_encode(&squads::transaction_pda(multisig, index));
+            let proposal = self.account(&base58_encode(&squads::proposal_pda(multisig, index)), "confirmed")?;
+            let Some((_, status)) = proposal.as_deref().and_then(squads::decode_proposal) else {
+                // Not on chain: the proposal is made in the same transaction
+                // as the batch, so neither landed — or both did and the
+                // accounts were closed after execution.
+                match self.rpc.signature_status(&sig).map_err(|e| format!("{e:?}"))? {
+                    TxStatus::Failed => {
+                        eprintln!("zyn-sol-bridge: proposing batch {index} failed on Solana ({sig}); proposing again");
+                        std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
+                    }
+                    // Unseen after its blockhash expired, it can no longer land.
+                    TxStatus::Unknown if now > p["at"].as_u64().unwrap_or(0) + 180 => {
+                        eprintln!("zyn-sol-bridge: batch {index} ({sig}) never landed; proposing again");
+                        std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
+                    }
+                    TxStatus::Finalized => match self.executed_by(&transaction)? {
+                        Some(paid) => {
+                            if self.settle(&p["covers"], &paid)? {
+                                println!("out: {paid} executed by the multisig and final — {} exit(s) settled", p["covers"].as_array().map_or(0, Vec::len));
+                                std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
+                            }
+                        }
+                        None => eprintln!("zyn-sol-bridge: batch {index}'s proposal account is gone and no execution of it is on chain — investigate before proposing again"),
+                    },
+                    _ => {} // landing
+                }
+                return Ok(());
+            };
+            match status {
+                squads::Status::Executed => {
+                    let Some(paid) = self.executed_by(&transaction)? else { return Ok(()) }; // executed; waiting for finality
+                    if self.settle(&p["covers"], &paid)? {
+                        println!("out: {paid} executed by the multisig and final — {} exit(s) settled", p["covers"].as_array().map_or(0, Vec::len));
+                        std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
+                    }
+                }
+                squads::Status::Rejected | squads::Status::Cancelled => {
+                    eprintln!("zyn-sol-bridge: the owners {} batch {index}; its exits wait. Delete {} to propose them again.", if status == squads::Status::Rejected { "rejected" } else { "cancelled" }, self.proposal_path().display());
+                }
+                _ => {
+                    if index <= self.multisig()?.stale_transaction_index {
+                        eprintln!("zyn-sol-bridge: batch {index} went stale (the multisig's settings changed); its exits wait. Delete {} to propose them again.", self.proposal_path().display());
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        let (mut payouts, mut covers, funding) = self.owed()?;
+        // A pool that cannot back a private exit is funded first, alone. The
+        // executing owner pays the network fee, so the pool gets the size.
+        if let Some((pool, lamports)) = funding {
+            payouts = vec![zyn_bridge::solana::SolPayout::native(pool, lamports)];
+            covers = Vec::new();
+        }
+        if payouts.is_empty() {
+            return Ok(());
+        }
+        let ms = self.multisig()?;
+        let me = proposer.pubkey();
+        match ms.permissions(&me) {
+            Some(p) if p == squads::INITIATE => {}
+            Some(_) => return Err(format!("the proposer {} may vote or execute in the multisig; give it Initiate only", base58_encode(&me))),
+            None => return Err(format!("the proposer {} is not a member of the multisig; add it with Initiate only", base58_encode(&me))),
+        }
+        let index = ms.transaction_index + 1;
+        payouts.truncate(SQUADS_BATCH);
+        covers.truncate(payouts.len());
+        let bh = blockhash(&self.agent, &self.rpc_url)?;
+        // The batch and its proposal go in one transaction; fewer payouts
+        // until it fits.
+        let (ixs, sig, tx) = loop {
+            let ixs = squads::payout_ixs(&self.vault_key, &payouts)?;
+            let message = squads::transaction_message(&self.vault_key, &ixs)?;
+            let memo = format!("Zyn bridge: pay out {} withdrawal(s)", payouts.len());
+            let create = squads::vault_transaction_create(multisig, index, &me, *vault_index, &message, &memo);
+            let propose = squads::proposal_create(multisig, index, &me);
+            let (sig, tx) = proposer.transaction(&[create, propose], &bh);
+            if tx.len() <= zyn_bridge::solana::MAX_TRANSACTION_BYTES {
+                break (ixs, sig, tx);
+            }
+            if payouts.len() == 1 {
+                return Err("one payout does not fit a proposal".into());
+            }
+            payouts.pop();
+            covers.truncate(payouts.len());
+        };
+        self.simulate_as_vault(&me, &ixs)?;
+        let record = json!({ "index": index, "covers": covers, "sig": sig, "at": now, "transaction": base58_encode(&squads::transaction_pda(multisig, index)) });
+        std::fs::write(self.proposal_path(), serde_json::to_vec_pretty(&record).unwrap()).map_err(|e| e.to_string())?;
+        match send_raw(&self.agent, &self.rpc_url, &tx) {
+            Ok(_) => println!("out: {} withdrawal(s) proposed to the multisig as transaction {index} ({sig}) — waiting for its owners", covers.len()),
+            // Refused at preflight: nothing went out, so nothing is recorded.
+            Err(e) if e.starts_with("Solana refused") => {
+                std::fs::remove_file(self.proposal_path()).map_err(|e| e.to_string())?;
+                return Err(format!("proposing batch {index}: {e}"));
+            }
+            Err(e) => eprintln!("zyn-sol-bridge: proposal {sig} may not have gone out ({e}); following it"),
         }
         Ok(())
     }
@@ -556,10 +815,15 @@ impl Bridge {
 
     fn once(&self) -> Result<(), String> {
         self.deposits()?;
-        if !self.follow_up()? {
-            self.pay()?;
+        match self.custody {
+            Custody::Squads { .. } => self.pay_squads(),
+            Custody::Custodians { .. } => {
+                if !self.follow_up()? {
+                    self.pay()?;
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
 
@@ -768,6 +1032,13 @@ fn relay_from_env() -> Result<Relay, String> {
 
 fn main() {
     let cmd = std::env::args().nth(1).unwrap_or_else(|| "status".into());
+    if cmd == "proposer-key" {
+        if let Err(e) = proposer_key(std::env::args().nth(2)) {
+            eprintln!("zyn-sol-bridge proposer-key: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if cmd == "relay" {
         match relay_from_env() {
             Ok(r) => r.serve(&env("ZYN_POOL_RELAY", "127.0.0.1:8497")),
@@ -790,7 +1061,30 @@ fn main() {
             for t in &b.tokens {
                 println!("token    {} ({} decimals) → {} · vault account {}", t.mint, t.decimals, hex(&t.asset), t.ata);
             }
-            println!("in flight {}", b.inflight().len());
+            match &b.custody {
+                Custody::Custodians { .. } => println!("in flight {}", b.inflight().len()),
+                Custody::Squads { multisig, vault_index, proposer } => {
+                    let ms = b.multisig()?;
+                    println!("custody  Squads multisig {} (vault {vault_index}), {} of {} owners, time lock {}s", base58_encode(multisig), ms.threshold, ms.voters(), ms.time_lock);
+                    for (k, perms) in &ms.members {
+                        let can: Vec<&str> = [(squads::INITIATE, "initiate"), (squads::VOTE, "vote"), (squads::EXECUTE, "execute")].iter().filter(|(bit, _)| perms & bit != 0).map(|(_, n)| *n).collect();
+                        println!("         member {} — {}", base58_encode(k), can.join(", "));
+                    }
+                    let me = proposer.pubkey();
+                    let bal = b.solana("getBalance", json!([base58_encode(&me), { "commitment": "confirmed" }]))?;
+                    let role = match ms.permissions(&me) {
+                        Some(p) if p == squads::INITIATE => "a member with Initiate only — ready",
+                        Some(_) => "a member that may also vote or execute — give it Initiate only",
+                        None => "NOT a member yet — add it in Squads with Initiate only",
+                    };
+                    println!("proposer {} ({} lamports for proposal rent): {role}", base58_encode(&me), bal["value"]);
+                    println!("next     transaction {}", ms.transaction_index + 1);
+                    match std::fs::read_to_string(b.proposal_path()) {
+                        Ok(p) => println!("proposed {}", p.split_whitespace().collect::<Vec<_>>().join(" ")),
+                        Err(_) => println!("proposed nothing waiting"),
+                    }
+                }
+            }
             if let Some(p) = &b.pool_program {
                 println!("pools    program {p}");
                 for (lamports, pool) in &b.pools {
@@ -833,10 +1127,29 @@ fn main() {
                 std::thread::sleep(Duration::from_secs(every));
             }
         }
-        other => Err(format!("unknown command {other}: status | register | once | run")),
+        other => Err(format!("unknown command {other}: status | register | once | run | relay | proposer-key <file>")),
     });
     if let Err(e) = result {
         eprintln!("zyn-sol-bridge {cmd}: {e}");
         std::process::exit(1);
     }
+}
+
+/// A new keypair file (Solana CLI format, owner-only) for the Squads
+/// proposer. Refuses to overwrite: a key already added to the multisig must
+/// not be replaced by accident.
+fn proposer_key(path: Option<String>) -> Result<(), String> {
+    use rand::RngCore as _;
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let path = path.ok_or("proposer-key <file>")?;
+    let mut secret = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut secret);
+    let key = ed25519_dalek::SigningKey::from_bytes(&secret);
+    let mut bytes = secret.to_vec();
+    bytes.extend_from_slice(&key.verifying_key().to_bytes());
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| format!("{path}: {e}"))?;
+    f.write_all(serde_json::to_string(&bytes).unwrap().as_bytes()).map_err(|e| format!("{path}: {e}"))?;
+    println!("{}", base58_encode(&key.verifying_key().to_bytes()));
+    Ok(())
 }

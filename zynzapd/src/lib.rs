@@ -43,6 +43,7 @@ pub mod eth_bridge;
 pub mod evm_pool;
 pub mod sol_bridge;
 pub mod sol_pool;
+pub mod squads;
 pub mod tickets;
 pub mod settle;
 pub mod treasury;
