@@ -6,3 +6,11 @@ pages_build_output_dir = "dist"
 [[kv_namespaces]]
 binding = "CAVE_WHITELIST"
 id = "8181407749be40ff89d7691132723ae7"
+
+# The whitelist itself (§168): approved handles, their codes' hashes, linked
+# accounts, listed or not. Applications stay in CAVE_WHITELIST above.
+[[d1_databases]]
+binding = "CAVE_MEMBERS"
+database_name = "cave-whitelist"
+database_id = "8aeac0af-7dc2-410e-89e3-3b2ad61542e5"
+migrations_dir = "migrations"
