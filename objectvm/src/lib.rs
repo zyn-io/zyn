@@ -370,6 +370,21 @@ pub enum Op {
         change: Vec<Output>,
         nonce: Hash,
     },
+    /// Gate a sale to a list (§168): only listed accounts buy tickets or
+    /// claim burn tickets; each pays the ticket price for its first `base`
+    /// tickets and one more ticket price for each after. Operator only,
+    /// before the sale's first ticket.
+    GateSale {
+        program: ProgramId,
+        collection: Address,
+        base: u32,
+    },
+    /// Put accounts on a gated sale's list, by `sale::allow_key`. Operator only.
+    AllowBuyers {
+        program: ProgramId,
+        collection: Address,
+        keys: Vec<Hash>,
+    },
     /// Name an asset coins launch in, sized to graduate at `graduation_mc`
     /// of it fully diluted, with `bond` of it to create one (§166). A zero
     /// `graduation_mc` stops new coins in it. Operator only.
@@ -643,6 +658,8 @@ pub enum Receipt {
     CurveCreated { token: Address },
     CurveTermsSet { fee_bps: u32, bond: Fixed },
     CurveQuoteSet { quote: Address, unit: i128, bond: Fixed },
+    SaleGated { collection: Address, base: u32 },
+    BuyersAllowed { collection: Address, added: u32 },
     SaleOpened { collection: Address },
     TicketsBought { first: Hash, count: u32 },
     SaleClosed { collection: Address, tickets: u32 },
@@ -2095,6 +2112,16 @@ impl MicrochainVm for ObjectVm {
                 self.market.curve_terms = Some(curve::CurveTerms { fee_bps: *fee_bps, bond: *bond });
                 vec![Receipt::CurveTermsSet { fee_bps: *fee_bps, bond: *bond }]
             }
+            Op::GateSale { program, collection, base } => one(if *program != program::sale_open() {
+                Err("wrong program for a sale's gate")
+            } else {
+                self.apply_gate_sale(collection, *base)
+            }),
+            Op::AllowBuyers { program, collection, keys } => one(if *program != program::sale_open() {
+                Err("wrong program for a sale's list")
+            } else {
+                self.apply_allow_buyers(collection, keys)
+            }),
             Op::SetCurveQuote { program, quote, graduation_mc, bond } => {
                 if *program != program::configure_curves() {
                     return vec![Receipt::Refused("wrong program for curve terms")];
@@ -2740,6 +2767,15 @@ impl MicrochainVm for ObjectVm {
             }
             Op::SetCurveTerms { program, fee_bps, bond } => {
                 e.u8(25).bytes(&program.0).u32(*fee_bps).fixed(*bond);
+            }
+            Op::GateSale { program, collection, base } => {
+                e.u8(54).bytes(&program.0).bytes(collection).u32(*base);
+            }
+            Op::AllowBuyers { program, collection, keys } => {
+                e.u8(55).bytes(&program.0).bytes(collection).u32(keys.len() as u32);
+                for k in keys {
+                    e.bytes(k);
+                }
             }
             Op::Route { trader, program, hops, amount_in, min_out, inputs, change, nonce } => {
                 e.u8(53).bytes(trader).bytes(&program.0);
@@ -3425,6 +3461,22 @@ impl MicrochainVm for ObjectVm {
             }),
             49 => Some(Op::LendRules { program: ProgramId(d.hash().ok()?), version: d.u32().ok()? }),
             50 => Some(Op::LendTime { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
+            54 => Some(Op::GateSale { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, base: d.u32().ok()? }),
+            55 => Some(Op::AllowBuyers {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                keys: {
+                    let n = d.u32().ok()? as usize;
+                    if n > crate::sale::MAX_ALLOW_PER_OP {
+                        return None;
+                    }
+                    let mut v = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        v.push(d.hash().ok()?);
+                    }
+                    v
+                },
+            }),
             53 => Some(Op::Route {
                 trader: d.account().ok()?,
                 program: ProgramId(d.hash().ok()?),

@@ -118,6 +118,15 @@ function launchAssets(ctx, market, terms) {
   return [{ asset: ctx.config.zecAsset, unit: mk.ZAT, bond: BigInt(terms.bond || '0') }];
 }
 
+/// This account on a sale's list (§168), as the chain has it.
+async function saleAccess(ctx, collection) {
+  const key = hex(mk.saleAllowKey(unhex(collection), ctx.identity.account));
+  const r = await ledger.call(ctx.config, 'zyn_saleAllow', { collection, key }).catch(() => null);
+  // A node from before §168 has no gates: every sale is open to all.
+  if (!r) return { gated: false, listed: true, bought: 0, base: null };
+  return { gated: !!r.gated, listed: !!r.listed, bought: Number(r.bought) || 0, base: r.base ?? null };
+}
+
 async function curveBook(ctx) {
   const market = await ledger.call(ctx.config, 'zyn_market');
   const curves = (market.curves || []).filter(validCurve).map((c) => ({ ...c, ...(mk.decodeMeta(c.meta) || { symbol: '?', name: 'Unnamed' }) }));
@@ -1248,6 +1257,20 @@ export const METHODS = {
       return { sale: s.sale, drawPosted: !!s.draw, openPosted: !!s.open, remaining: s.open ? s.sale.open_count - s.sale.open_next : null };
     },
   },
+  // This wallet's place in a gated sale (§168): on the list or not, tickets
+  // bought, and what the next ones cost. In an ungated sale, everyone's.
+  zyn_saleAccess: {
+    kind: 'read',
+    run: async (ctx, p) => {
+      const collection = saleCollection(p);
+      const s = await ledger.loadSale(ctx.config, collection);
+      if (!s) return { sale: null };
+      const a = await saleAccess(ctx, collection);
+      const prices = a.gated ? Array.from({ length: 20 }, (_, i) => String(mk.gatedPrice(s.sale.ticket_price, a.base, a.bought + i + 1))) : null;
+      return { gated: a.gated, listed: a.listed, bought: a.bought, base: a.base, next: prices ? prices[0] : s.sale.ticket_price, prices };
+    },
+  },
+
   zyn_saleTickets: {
     kind: 'read',
     run: async (ctx, p) => {
@@ -1283,13 +1306,24 @@ export const METHODS = {
       const s = await ledger.loadSale(ctx.config, collection);
       if (!s) throw bad('There is no sale for that collection');
       if (s.sale.phase !== 'open') throw bad('The sale is closed');
-      const total = BigInt(s.sale.ticket_price) * BigInt(count);
+      // A gated sale (§168): this account must be on the list, and pays
+      // more for each ticket past the base.
+      const a = await saleAccess(ctx, collection);
+      if (!a.listed) throw bad('This wallet is not on the sale\'s list. Link your whitelist code to it first.');
+      const total = a.gated ? mk.gatedTotal(s.sale.ticket_price, a.base, a.bought, count) : BigInt(s.sale.ticket_price) * BigInt(count);
       if (p.pay != null && amountOf(p.pay, 'pay') !== total) throw bad('The price changed since the page loaded; reload and try again');
       const q = await quoteName(ctx, s.quote);
       await mustHold(ctx, s.quote, total, q);
+      const each = a.gated ? Array.from({ length: count }, (_, i) => mk.gatedPrice(s.sale.ticket_price, a.base, a.bought + i + 1)) : null;
+      const rising = each && each.some((x) => x !== BigInt(s.sale.ticket_price));
       return {
         title: `Buy ${count} ticket${count > 1 ? 's' : ''} in the ${collection === CAVE_Z ? 'Collection Z' : `${collection.slice(0, 6)}…`} sale`,
-        rows: [['Per ticket', `${wadText(s.sale.ticket_price)} ${q}`], ['Tickets', String(count)], ['You pay', `${wadText(total)} ${q}`]],
+        rows: [
+          ['Per ticket', rising ? `${each.map((x) => wadText(x)).join(', ')} ${q}` : `${wadText(s.sale.ticket_price)} ${q}`],
+          ['Tickets', a.gated ? `${count} (your ${a.bought + 1}${count > 1 ? `–${a.bought + count}` : ''})` : String(count)],
+          ...(a.gated ? [['Price rule', `${wadText(s.sale.ticket_price)} each for your first ${a.base}, then ${wadText(s.sale.ticket_price)} more for each one after`]] : []),
+          ['You pay', `${wadText(total)} ${q}`],
+        ],
         note: 'Each ticket is drawn after the sale closes. A winning ticket claims its items at the claim price; the ticket price is not refunded.',
         run: async () => {
           const h = await holdings(ctx);
@@ -1311,8 +1345,15 @@ export const METHODS = {
       if (!s || s.sale.phase !== 'drawn') throw bad('Claims open after the draw is posted and close when the open mint starts');
       if (!s.draw) throw bad('The posted draw does not match the chain; nothing can be claimed until it does');
       const index = new Map(s.draw.won.map((w, i) => [w.ticket, i]));
-      const mine = (await ledger.loadTickets(ctx.config, ctx.identity, collection)).filter((t) => !t.claimed && index.has(t.ticket));
+      let mine = (await ledger.loadTickets(ctx.config, ctx.identity, collection)).filter((t) => !t.claimed && index.has(t.ticket));
       if (!mine.length) throw bad('This wallet has no unclaimed winning tickets');
+      // In a gated sale (§168) a burn ticket is claimed only from a listed account.
+      const access = await saleAccess(ctx, collection);
+      if (!access.listed) {
+        const before = mine.length;
+        mine = mine.filter((t) => !t.voucher);
+        if (!mine.length) throw bad('Burn tickets in this sale are claimed only from a wallet on the sale\'s list. Link your whitelist code to this wallet first.');
+      }
       const serials = mine.flatMap((t) => s.draw.won[index.get(t.ticket)].serials);
       const total = BigInt(s.sale.claim_price) * BigInt(serials.length);
       const q = await quoteName(ctx, s.quote);

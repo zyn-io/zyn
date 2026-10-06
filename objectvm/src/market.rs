@@ -344,6 +344,8 @@ pub struct Market {
     /// Burns already turned into tickets (§145), by the burn's id, so none is
     /// posted twice.
     pub burns: BTreeMap<Hash, Address>,
+    /// Gated sales' lists and per-account counts (§168), by collection.
+    pub sale_gates: BTreeMap<Address, crate::sale::Gate>,
     /// Assets bridged from other chains beside ZEC, by address (§146).
     pub bridged: BTreeMap<Address, crate::bridge::Origin>,
     /// Committed deposits waiting for their depositor, by `deposit_key`.
@@ -369,6 +371,7 @@ impl Market {
             && self.curve_terms.is_none()
             && self.curve_quotes.is_empty()
             && self.routes.is_empty()
+            && self.sale_gates.is_empty()
             && self.sales.is_empty()
             && self.tickets.is_empty()
             && self.burns.is_empty()
@@ -603,6 +606,10 @@ impl Market {
         if !self.routes.is_empty() {
             crate::route::section(&mut e, &self.routes);
         }
+        // And sale gates, once a sale is gated (§168).
+        if !self.sale_gates.is_empty() {
+            crate::sale::gates_section(&mut e, &self.sale_gates);
+        }
         e.leaf()
     }
 
@@ -612,11 +619,13 @@ impl Market {
         // from before §160 can still read the state a newer one saved.
         // MARKET11 (§166) only once a quote asset is named or a curve is
         // sized for one; it carries MARKET10's lending state too.
-        let v12 = !self.routes.is_empty();
+        let v13 = !self.sale_gates.is_empty();
+        let v12 = v13 || !self.routes.is_empty();
         let v11 = v12 || !self.curve_quotes.is_empty() || self.curves.values().any(|c| c.unit != crate::curve::ZAT);
         let v10 = self.lend.v2() || v11;
         // MARKET12 (§167) only while a route waits: it carries MARKET11 too.
-        e.bytes(if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        // MARKET13 (§168) once a sale is gated: it carries MARKET12's tail too.
+        e.bytes(if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -696,6 +705,9 @@ impl Market {
         if v12 {
             crate::route::encode(e, &self.routes);
         }
+        if v13 {
+            crate::sale::encode_gates(e, &self.sale_gates);
+        }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -711,10 +723,11 @@ impl Market {
         // v9 predates lending rules v2 (§160) and reads as rules 0.
         // v10 predates quote assets (§166) and reads as none named.
         let tag = d.take_bytes(8).ok()?;
-        let v12 = tag == b"MARKET12";
+        let v13 = tag == b"MARKET13";
+        let v12 = v13 || tag == b"MARKET12";
         let v11 = v12 || tag == b"MARKET11";
         let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
-            b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -858,6 +871,9 @@ impl Market {
         }
         if v12 {
             m.routes = crate::route::decode(d)?;
+        }
+        if v13 {
+            m.sale_gates = crate::sale::decode_gates(d)?;
         }
         Some(m)
     }

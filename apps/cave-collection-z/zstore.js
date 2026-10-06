@@ -474,12 +474,17 @@ async function mintPage() {
   const gen = generation;
   let sale = null;
   let cfg = null;
+  // A gated sale (§168): this wallet's place on the list and its next prices,
+  // as Nap reads them from the chain. Null when the sale is not gated.
+  let access = null;
+  const gated = () => !!sale?.gate;
+  const ticketsTotal = (n) => (gated() && access?.prices ? access.prices.slice(0, n).reduce((t, x) => t + BigInt(x), 0n) : BigInt(sale.ticket_price) * BigInt(n));
   const burnMax = () => Math.max(0, Math.min(20, Number(sale?.voucher_cap || 0) - Number(sale?.voucher_tickets || 0)));
   const setTotal = () => {
     if (!sale || !el('total')) return;
     const n = whole('count-in', 20);
-    el('total').textContent = n ? `${exact(BigInt(sale.ticket_price) * BigInt(n))} ZEC.zy` : 'a whole number from 1 to 20';
-    el('buy').disabled = !n;
+    el('total').textContent = n ? `${exact(ticketsTotal(n))} ZEC.zy` : 'a whole number from 1 to 20';
+    el('buy').disabled = !n || (gated() && !access?.listed);
   };
   const setBurnTotal = () => {
     if (!cfg || !el('burn-total')) return;
@@ -525,11 +530,15 @@ async function mintPage() {
       el('lede-price').textContent = `${zec(sale.ticket_price)} ZEC.zy`;
       el('claim-price').textContent = `${zec(sale.claim_price)} ZEC.zy`;
       el('open-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
+      await readAccess();
+      if (gen !== generation) return;
       setTotal();
       cfg = await burnToken();
       if (gen !== generation) return;
       const left = burnMax();
-      el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0);
+      // In a gated sale only listed wallets get burn tickets' items: no burn
+      // offered to anyone else.
+      el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0 && (!gated() || access?.listed));
       if (cfg) {
         document.querySelectorAll('[data-burn-symbol]').forEach((x) => { x.textContent = cfg.symbol; });
         el('burn-rate').textContent = `${units(cfg.per_ticket, cfg.decimals)} ${cfg.symbol}`;
@@ -569,6 +578,48 @@ async function mintPage() {
       show('broke');
     }
   };
+  // Where this wallet stands in a gated sale, and what the box says about it.
+  const readAccess = async () => {
+    const box = el('gate');
+    if (!box) return;
+    box.hidden = !gated() || sale?.phase !== 'open';
+    if (!gated()) { access = null; el('buy-box').hidden = false; return; }
+    access = null;
+    if (current && (await quietly())) access = await ask('zyn_saleAccess', {}).catch(() => null);
+    const say = el('gate-say');
+    const listed = !!access?.listed;
+    el('gate-link').hidden = !current || listed;
+    el('buy-box').hidden = !listed;
+    if (!current) say.textContent = 'This sale is for the whitelist. Connect Nap to check your place.';
+    else if (!access) say.textContent = 'This sale is for the whitelist. Nap could not check this wallet\u2019s place yet \u2014 update Nap, or try again in a moment.';
+    else if (listed) {
+      const base = Number(access.base);
+      const bought = Number(access.bought);
+      say.textContent = bought < base
+        ? `On the list. ${zec(sale.ticket_price)} ZEC.zy per ticket for your first ${base} (${bought} bought), then ${zec(sale.ticket_price)} more for each ticket after.`
+        : `On the list. You have ${bought} tickets; your next one is ${zec(access.next)} ZEC.zy, and each after that ${zec(sale.ticket_price)} more.`;
+    } else say.textContent = 'This sale is for the whitelist, and this wallet is not on it yet. Enter the code you were sent to link it.';
+  };
+  el('gate-go').onclick = async () => {
+    const out = el('out-gate');
+    out.classList.remove('bad');
+    if (!current) return pick();
+    const code = el('gate-code').value.trim();
+    if (!code) { out.textContent = 'Enter the code you were sent.'; out.classList.add('bad'); return; }
+    el('gate-go').disabled = true;
+    try {
+      const r = await fetch('/api/whitelist/bind', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, account: current.session.account }), credentials: 'omit' });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      out.textContent = 'Linked. This wallet goes on the sale\u2019s list when the next batch is posted on Zyn \u2014 this page shows it then.';
+      el('gate-code').value = '';
+      for (const wait of [60000, 300000, 900000]) setTimeout(read, wait);
+    } catch (e) {
+      out.textContent = e.message;
+      out.classList.add('bad');
+    } finally { if (el('gate-go')) el('gate-go').disabled = false; }
+  };
+
   const act = (button, out, method, p, done, no) => async () => {
     if (!current) return pick();
     const params_ = p();
@@ -615,7 +666,7 @@ async function mintPage() {
   el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {
     const count = whole('count-in', 20);
     if (!count) { el('out').textContent = 'Enter a whole number of tickets, 1 to 20.'; el('out').classList.add('bad'); return null; }
-    return { count, pay: exact(BigInt(sale.ticket_price) * BigInt(count)) };
+    return { count, pay: exact(ticketsTotal(count)) };
   }, (r) => `${r?.tickets?.length || 0} ticket${r?.tickets?.length === 1 ? '' : 's'} bought. They are drawn once the door shuts.`, 'Not bought. Nothing was paid.');
   el('claim').onclick = act('claim', 'out-claim', 'zyn_claimItems', () => ({}), (r) => `Claimed ${r?.claimed?.length || 0}. They are in your Nap wallet once the epoch seals — about a minute.`, 'Not claimed. Nothing was paid.');
   el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => {

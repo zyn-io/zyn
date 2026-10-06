@@ -5,6 +5,8 @@
 //! ```text
 //!   zyn-sale-draw status      the sale's phase, tickets and what comes next
 //!   zyn-sale-draw open        SetSale at the terms' prices (once)
+//!   zyn-sale-draw gate <n>    whitelist only, rising past n tickets each (§168)
+//!   zyn-sale-draw allow <f>   put the accounts in file f on the list
 //!   zyn-sale-draw close       CloseSale, once Zcash reaches the announced close
 //!   zyn-sale-draw draw        run the draw over every ticket and post its root
 //!   zyn-sale-draw open-mint   end claims; post the order the rest sell in
@@ -371,6 +373,32 @@ fn open_mint(c: &Ctx) -> Result<(), String> {
     )
 }
 
+/// Gate the sale to its list (§168): listed accounts only, the ticket price
+/// for each one's first `base` tickets and one more ticket price per ticket
+/// after. Before the first ticket.
+fn gate(c: &Ctx) -> Result<(), String> {
+    let base: u32 = std::env::args().nth(2).and_then(|b| b.parse().ok()).ok_or("usage: zyn-sale-draw gate <tickets at the base price>")?;
+    c.submit("gate", &Op::GateSale { program: program::sale_open(), collection: c.collection(), base })
+}
+
+/// Put accounts on the list: a file of Zyn account ids, one per line (the
+/// whitelist's linked accounts). Each goes on blinded; already-listed ones are
+/// left as they are.
+fn allow(c: &Ctx) -> Result<(), String> {
+    let path = std::env::args().nth(2).ok_or("usage: zyn-sale-draw allow <file of account ids>")?;
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+    let mut keys = Vec::new();
+    for (i, line) in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).enumerate() {
+        let account = unhex32(line).ok_or_else(|| format!("{path}: line {} is not a 64-hex account", i + 1))?;
+        keys.push(objectvm::sale::allow_key(&c.collection(), &account));
+    }
+    println!("allow: {} account(s)", keys.len());
+    for chunk in keys.chunks(objectvm::sale::MAX_ALLOW_PER_OP) {
+        c.submit("allow", &Op::AllowBuyers { program: program::sale_open(), collection: c.collection(), keys: chunk.to_vec() })?;
+    }
+    Ok(())
+}
+
 fn main() {
     let cmd = std::env::args().nth(1).unwrap_or_else(|| "status".into());
     let result = ctx().and_then(|c| match cmd.as_str() {
@@ -379,7 +407,9 @@ fn main() {
         "close" => close(&c),
         "draw" => draw(&c),
         "open-mint" => open_mint(&c),
-        other => Err(format!("unknown command {other}: status | open | close | draw | open-mint")),
+        "gate" => gate(&c),
+        "allow" => allow(&c),
+        other => Err(format!("unknown command {other}: status | open | gate | allow | close | draw | open-mint")),
     });
     if let Err(e) = result {
         eprintln!("zyn-sale-draw {cmd}: {e}");

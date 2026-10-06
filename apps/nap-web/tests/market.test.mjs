@@ -266,3 +266,9 @@ test('a redeemed item\'s floor share is found from the spent item note', async (
   ]);
   assert.deepEqual([...ids.keys()], [hex(m.claimId(m.redemptionSource(Buffer.from(item, 'hex')), 0))], 'one-unit notes only');
 });
+
+test('a gated sale\'s key and prices are the ledger\'s', () => {
+  assert.equal(hex(m.saleAllowKey(TOKEN, OWNER)), v.sale_allow_key);
+  assert.equal(m.gatedTotal(10n ** 16n, 10, 10, 2).toString(), v.sale_gated_total_10_2);
+  assert.deepEqual([10, 11, 12].map((n) => m.gatedPrice(10n ** 16n, 10, n)), [10n ** 16n, 2n * 10n ** 16n, 3n * 10n ** 16n]);
+});

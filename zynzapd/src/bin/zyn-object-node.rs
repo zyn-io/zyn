@@ -365,6 +365,9 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
                 "open_next": s.open_next,
                 "voucher_cap": s.voucher_cap,
                 "voucher_tickets": s.voucher_tickets,
+                // A gated sale (§168): who is on the list stays blinded; how
+                // many are, and the price rule, are public.
+                "gate": vm.market.sale_gates.get(&s.collection).map(|g| serde_json::json!({ "base": g.base, "listed": g.allowed.len() })),
             })
             .to_string()
         })
@@ -1062,6 +1065,24 @@ fn handle(
         // A sale's tickets (§144). By `collection`: every ticket in the order
         // the draw runs over — ids only, which nobody but each buyer can link
         // to anyone. By `ids`: just those, for a wallet finding its own.
+        // An account's place on a gated sale's list, by its blinded key
+        // (`sale::allow_key`): listed or not, and tickets bought so far — what
+        // a wallet needs to price its next ticket.
+        "zyn_saleAllow" => {
+            let get = |k: &str| field(body, k).and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok());
+            let (Some(collection), Some(key)) = (get("collection"), get("key")) else {
+                return err("zyn_saleAllow needs a collection and a key");
+            };
+            let n = node.lock().unwrap();
+            let gate = n.state().market.sale_gates.get(&collection);
+            let v = serde_json::json!({
+                "gated": gate.is_some(),
+                "listed": gate.is_none_or(|g| g.allowed.contains_key(&key)),
+                "bought": gate.and_then(|g| g.allowed.get(&key)).copied().unwrap_or(0),
+                "base": gate.map(|g| g.base),
+            });
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
+        }
         "zyn_tickets" => {
             let n = node.lock().unwrap();
             let tickets = &n.state().market.tickets;

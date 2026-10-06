@@ -156,6 +156,9 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
             json!({ "venues": hops.iter().map(|h| match h.venue() { objectvm::route::Venue::Pool(p) => json!({ "pool": hex(&p) }), objectvm::route::Venue::Curve(t) => json!({ "token": hex(&t) }) }).collect::<Vec<_>>() }),
         ),
         Op::SetCurveTerms { fee_bps, bond, .. } => ("Curve terms set", true, json!({ "fee_bps": fee_bps, "bond": bond.0.to_string() })),
+        Op::GateSale { collection, base, .. } => ("Sale gated to its list", true, json!({ "collection": hex(collection), "base": base })),
+        // The list's keys are blinded; how many were added is public.
+        Op::AllowBuyers { collection, keys, .. } => ("Accounts added to a sale's list", true, json!({ "collection": hex(collection), "added": keys.len() })),
         Op::SetCurveQuote { quote, graduation_mc, bond, .. } => ("Launch asset set", true, json!({ "quote": hex(quote), "graduation_mc": graduation_mc.0.to_string(), "bond": bond.0.to_string() })),
         Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
             "Sale opened",

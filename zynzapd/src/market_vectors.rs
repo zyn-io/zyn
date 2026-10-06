@@ -122,6 +122,9 @@ pub fn vectors() -> Vec<(&'static str, String)> {
             }),
         ),
         // Atomic routes (§167): a coin's curve, a pool, another coin's curve.
+        // A gated sale's list (§168): an account's blinded key, and prices.
+        ("sale_allow_key", hex(&objectvm::sale::allow_key(&TOKEN, &OWNER))),
+        ("sale_gated_total_10_2", objectvm::sale::gated_total(Fixed(10_000_000_000_000_000), 10, 10, 2).unwrap().to_string()),
         ("program_route", hex(&program::route().0)),
         ("route_id", hex(&objectvm::route::route_id(&OWNER, &NONCE))),
         ("route_leg_1", hex(&objectvm::route::leg_id(&objectvm::route::route_id(&OWNER, &NONCE), 1))),

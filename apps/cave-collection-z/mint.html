@@ -361,6 +361,18 @@
               Tickets are paid in <strong>ZEC.zy</strong> — ZEC you have brought into Nap. No address to
               send to and no confirmations to wait for: the ticket is yours as soon as Nap signs it.
             </p>
+            <div class="gate" id="gate" hidden>
+              <p class="say" id="gate-say">This sale is for the whitelist.</p>
+              <div class="gate-link" id="gate-link" hidden>
+                <label class="field">
+                  <span>Whitelist code</span>
+                  <input id="gate-code" type="text" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX" />
+                </label>
+                <button class="act ghost" id="gate-go" type="button">Link to this wallet</button>
+              </div>
+              <p class="out" id="out-gate" role="status" aria-live="polite"></p>
+            </div>
+            <div id="buy-box">
             <label class="field">
               <span>Tickets</span>
               <input id="count-in" type="number" min="1" max="20" step="1" value="1" />
@@ -385,6 +397,7 @@
               <a class="act ghost" href="/deposit">Bring ZEC in</a>
             </div>
             <p class="out" id="out" role="status" aria-live="polite"></p>
+            </div>
 
             <div class="burn" id="burn" hidden>
               <p class="say">

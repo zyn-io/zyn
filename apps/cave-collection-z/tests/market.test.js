@@ -71,7 +71,11 @@ test('the store reads only public things itself, and nothing with an account in 
   // navigation), the burn token's config, and Solana's RPC — asked for a
   // blockhash and the token accounts of a Solana address the holder is about
   // to make public by burning (§145).
-  assert.deepEqual([...new Set(fetches)].sort(), ["'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
+  // One exception, and only when the holder acts (§74.13, §168): linking a
+  // whitelist code sends this site the account the code is linked to, since
+  // the operator must put that account on the sale's list.
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/whitelist/bind'", "'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
+  assert.match(zstore, /fetch\('\/api\/whitelist\/bind', \{ method: 'POST'/, 'the account goes only in the holder\'s own link request');
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   // Every chain read goes through one helper that sends no params: nothing
   // with an account in it.

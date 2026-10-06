@@ -76,6 +76,17 @@ export const launchSource = (creator, nonce) => id('objectvm.launch.v1', creator
 export const orderId = (trader, nonce) => id('objectvm.order.v1', trader, nonce);
 /// A route's id (§167): where what it delivers, or its refund, waits.
 export const routeId = (trader, nonce) => id('objectvm.route.v1', trader, nonce);
+/// An account's place on a gated sale's list (§168), blinded: `sale::allow_key`.
+export const saleAllowKey = (collection, account) => id('objectvm.sale-allow.v1', collection, account);
+/// What a listed account's `n`th ticket (from 1) costs: the ticket price up to
+/// `base`, then one more ticket price per ticket — `sale::gated_price`.
+export const gatedPrice = (price, base, n) => BigInt(price) * BigInt(n <= base ? 1 : n - base + 1);
+/// Tickets `bought+1 ..= bought+count` together — `sale::gated_total`.
+export function gatedTotal(price, base, bought, count) {
+  let t = 0n;
+  for (let n = bought + 1; n <= bought + count; n++) t += gatedPrice(price, base, n);
+  return t;
+}
 export const routeLegId = (route, hop) => id('objectvm.route-leg.v1', route, new Uint8Array([hop]));
 export const commitId = (buyer, nonce) => id('objectvm.commit.v1', buyer, nonce);
 export const liquidityId = (provider, nonce) => id('objectvm.liquidity.v1', provider, nonce);

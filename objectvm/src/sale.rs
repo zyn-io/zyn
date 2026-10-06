@@ -450,8 +450,20 @@ impl ObjectVm {
         if self.market.tickets.contains_key(&first) {
             return Err("that nonce was already used");
         }
-        let total = s.ticket_price.0.checked_mul(count as i128).ok_or("payment overflow")?;
+        // A gated sale (§168) sells only to listed accounts, each at the
+        // base price for its first tickets and more for each after.
+        let key = allow_key(collection, buyer);
+        let total = match self.market.sale_gates.get(collection) {
+            None => s.ticket_price.0.checked_mul(count as i128).ok_or("payment overflow")?,
+            Some(g) => {
+                let bought = *g.allowed.get(&key).ok_or("only accounts on the sale's list can buy tickets")?;
+                gated_total(s.ticket_price, g.base, bought, count).ok_or("payment overflow")?
+            }
+        };
         self.take_sale_payment(buyer, collection, &first, Fixed(total), inputs, change)?;
+        if let Some(n) = self.market.sale_gates.get_mut(collection).and_then(|g| g.allowed.get_mut(&key)) {
+            *n += count;
+        }
         let epoch = self.epoch;
         for k in 0..count {
             self.market
@@ -573,6 +585,10 @@ impl ObjectVm {
         inputs: &[(Hash, Hash)],
         change: &[Output],
     ) -> Result<Receipt, &'static str> {
+        // Burn tickets are the list's too in a gated sale (§168).
+        if !self.sale_allows(collection, buyer) {
+            return Err("only accounts on the sale's list can claim burn tickets");
+        }
         self.claim_ticket(buyer, collection, voucher_ticket_id(&voucher_commitment(buyer, secret), k), serials, proof, items, inputs, change)
     }
 
@@ -671,5 +687,124 @@ impl ObjectVm {
         self.mint_checked(collection, serial, item, c)?;
         self.market.sales.get_mut(collection).expect("checked above").open_next = s.open_next + 1;
         Ok(Receipt::ItemsClaimed { created: vec![c] })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The whitelist gate (§168): only listed accounts buy tickets or claim burn
+// tickets, and each listed account pays the base price for its first `base`
+// tickets and one more base price for every ticket after — the 11th at twice
+// the price, the 12th at three times. Beside the sale, not in it, so a sale
+// without a gate hashes and saves exactly as before.
+
+/// Accounts one `AllowBuyers` adds at most.
+pub const MAX_ALLOW_PER_OP: usize = 256;
+
+/// A gated sale's list: blinded keys of the accounts on it, and how many
+/// tickets each has bought.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Gate {
+    /// Tickets each account buys at the base price before it rises.
+    pub base: u32,
+    pub allowed: std::collections::BTreeMap<Hash, u32>,
+}
+
+/// An account's place on a sale's list, by a key that names it only to whoever
+/// already knows the account.
+pub fn allow_key(collection: &Address, account: &AccountId) -> Hash {
+    id(b"objectvm.sale-allow.v1", &[collection, account])
+}
+
+/// What the account's `n`th ticket (from 1) costs: the base price up to
+/// `base`, then one more base price for each ticket past it.
+pub fn gated_price(price: Fixed, base: u32, n: u32) -> Option<i128> {
+    let step = if n <= base { 1 } else { (n - base + 1) as i128 };
+    price.0.checked_mul(step)
+}
+
+/// What tickets `bought+1 ..= bought+count` cost together.
+pub fn gated_total(price: Fixed, base: u32, bought: u32, count: u32) -> Option<i128> {
+    (bought + 1..=bought + count).try_fold(0i128, |t, n| t.checked_add(gated_price(price, base, n)?))
+}
+
+fn gate_leaf(collection: &Address, g: &Gate) -> Hash {
+    let leaves: Vec<Hash> = g.allowed.iter().map(|(k, n)| {
+        let mut e = Encoder::new();
+        e.bytes(b"objectvm.sale-allow-leaf.v1").bytes(k).u32(*n);
+        e.leaf()
+    }).collect();
+    let mut e = Encoder::new();
+    e.bytes(b"objectvm.sale-gate-leaf.v1").bytes(collection).u32(g.base).u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
+    e.leaf()
+}
+
+/// The gates' part of the market's leaf, joined only once a sale is gated.
+pub(crate) fn gates_section(e: &mut Encoder, gates: &std::collections::BTreeMap<Address, Gate>) {
+    let leaves: Vec<Hash> = gates.iter().map(|(c, g)| gate_leaf(c, g)).collect();
+    e.bytes(b"objectvm.sale-gates.v1").u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
+}
+
+pub(crate) fn encode_gates(e: &mut Encoder, gates: &std::collections::BTreeMap<Address, Gate>) {
+    e.u32(gates.len() as u32);
+    for (c, g) in gates {
+        e.bytes(c).u32(g.base).u32(g.allowed.len() as u32);
+        for (k, n) in &g.allowed {
+            e.bytes(k).u32(*n);
+        }
+    }
+}
+
+pub(crate) fn decode_gates(d: &mut Decoder) -> Option<std::collections::BTreeMap<Address, Gate>> {
+    let mut gates = std::collections::BTreeMap::new();
+    for _ in 0..d.u32().ok()? {
+        let c = d.hash().ok()?;
+        let base = d.u32().ok()?;
+        let mut allowed = std::collections::BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            allowed.insert(d.hash().ok()?, d.u32().ok()?);
+        }
+        gates.insert(c, Gate { base, allowed });
+    }
+    Some(gates)
+}
+
+impl ObjectVm {
+    /// Gate a sale (operator): before its first ticket, so nobody bought
+    /// under rules it then changed. `base` may be reset until then.
+    pub(crate) fn apply_gate_sale(&mut self, collection: &Address, base: u32) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase != Phase::Open || s.tickets > 0 {
+            return Err("a sale is gated before its first ticket");
+        }
+        let g = self.market.sale_gates.entry(*collection).or_default();
+        g.base = base;
+        Ok(Receipt::SaleGated { collection: *collection, base })
+    }
+
+    /// Put accounts on a gated sale's list (operator), by their blinded keys.
+    /// Add-only: an account already on it keeps its count.
+    pub(crate) fn apply_allow_buyers(&mut self, collection: &Address, keys: &[Hash]) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase != Phase::Open && s.phase != Phase::Closed && s.phase != Phase::Drawn {
+            return Err("the sale's list is closed");
+        }
+        if keys.is_empty() || keys.len() > MAX_ALLOW_PER_OP {
+            return Err("add 1 to 256 accounts at a time");
+        }
+        let g = self.market.sale_gates.get_mut(collection).ok_or("that sale is not gated")?;
+        let mut added = 0;
+        for k in keys {
+            if !g.allowed.contains_key(k) {
+                g.allowed.insert(*k, 0);
+                added += 1;
+            }
+        }
+        Ok(Receipt::BuyersAllowed { collection: *collection, added })
+    }
+
+    /// Whether `who` may take part in a sale: anyone in an ungated one, a
+    /// listed account in a gated one.
+    pub(crate) fn sale_allows(&self, collection: &Address, who: &AccountId) -> bool {
+        self.market.sale_gates.get(collection).is_none_or(|g| g.allowed.contains_key(&allow_key(collection, who)))
     }
 }

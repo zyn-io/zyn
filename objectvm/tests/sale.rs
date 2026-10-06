@@ -351,3 +351,85 @@ fn an_empty_closed_sale_can_be_set_again_and_a_sold_one_cannot() {
     assert!(c.refused(set()).contains("prices are fixed"), "not after a close with tickets in it");
 }
 
+
+/// A gated sale (§168): only listed accounts buy or claim burn tickets, and
+/// each pays the ticket price for its first `base` tickets, then one more
+/// ticket price per ticket — the 11th at 0.02, the 12th at 0.03.
+#[test]
+fn a_gated_sale_sells_only_to_its_list_at_rising_prices() {
+    use objectvm::sale::{allow_key, gated_price, gated_total, voucher_commitment};
+    let mut c = Chain::new();
+    for who in [ALICE, BOB, CAROL] {
+        c.mint(who, 5);
+    }
+    c.ok(Op::RegisterCollection { program: program::register_collection(), asset: CAVE, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 40 });
+    c.ok(Op::SetSale { program: program::sale_open(), collection: CAVE, ticket_price: TICKET, claim_price: CLAIM, open_price: OPEN, treasury_bps: 1_000 });
+    let state = c.vm.state_root();
+    assert!(!c.vm.encode().windows(8).any(|w| w == b"MARKET13"));
+
+    // Operator-only, and only on the program that opens sales.
+    let gate = Op::GateSale { program: program::sale_open(), collection: CAVE, base: 10 };
+    assert_eq!(ObjectVm::intent_authorities(&gate), Vec::<AccountId>::new());
+    assert!(c.refused(Op::GateSale { program: program::sale_tickets(), collection: CAVE, base: 10 }).contains("wrong program"));
+    c.ok(gate);
+    assert_ne!(c.vm.state_root(), state, "the gate is in the root");
+    assert!(c.vm.encode().windows(8).any(|w| w == b"MARKET13"));
+    let allow = |keys: Vec<Hash>| Op::AllowBuyers { program: program::sale_open(), collection: CAVE, keys };
+    assert_eq!(c.ok(allow(vec![allow_key(&CAVE, &ALICE), allow_key(&CAVE, &BOB)])), Receipt::BuyersAllowed { collection: CAVE, added: 2 });
+    assert_eq!(c.ok(allow(vec![allow_key(&CAVE, &ALICE)])), Receipt::BuyersAllowed { collection: CAVE, added: 0 }, "add-only");
+
+    // Carol is not on the list.
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(CAROL, TICKET);
+    let why = c.refused(Op::BuyTickets { buyer: CAROL, program: program::sale_tickets(), collection: CAVE, count: 1, nonce, inputs, change });
+    assert!(why.contains("only accounts on the sale's list"), "{why}");
+
+    // Alice: 10 at 0.01, then 0.02, 0.03 …
+    assert_eq!((gated_price(TICKET, 10, 10), gated_price(TICKET, 10, 11), gated_price(TICKET, 10, 12)), (Some(TICKET.0), Some(2 * TICKET.0), Some(3 * TICKET.0)));
+    let buy = |c: &mut Chain, who: AccountId, count: u32, pay: i128| {
+        let nonce = c.fresh();
+        let (inputs, change) = c.fund(who, Fixed(pay));
+        c.apply(Op::BuyTickets { buyer: who, program: program::sale_tickets(), collection: CAVE, count, nonce, inputs, change })
+    };
+    let floor = c.floor();
+    assert!(matches!(buy(&mut c, ALICE, 10, 10 * TICKET.0), Receipt::TicketsBought { count: 10, .. }));
+    assert_eq!(c.floor().0 - floor.0, floor_share(Fixed(10 * TICKET.0)));
+    // Paying for two more at 0.01 each is not enough: they cost 0.02 + 0.03.
+    assert!(matches!(buy(&mut c, ALICE, 2, 2 * TICKET.0), Receipt::Refused(_)));
+    assert_eq!(gated_total(TICKET, 10, 10, 2), Some(5 * TICKET.0));
+    let floor = c.floor();
+    assert!(matches!(buy(&mut c, ALICE, 2, 5 * TICKET.0), Receipt::TicketsBought { count: 2, .. }));
+    assert_eq!(c.floor().0 - floor.0, floor_share(Fixed(5 * TICKET.0)));
+    assert_eq!(c.vm.market.sale_gates[&CAVE].allowed[&allow_key(&CAVE, &ALICE)], 12);
+    // Bob's count is his own.
+    assert!(matches!(buy(&mut c, BOB, 1, TICKET.0), Receipt::TicketsBought { count: 1, .. }));
+
+    // The gate is set before the first ticket, never after.
+    assert!(c.refused(Op::GateSale { program: program::sale_open(), collection: CAVE, base: 20 }).contains("before its first ticket"));
+
+    // Burn tickets: posted for anyone's commitment, claimed only from a listed account.
+    c.ok(Op::SetVoucherCap { program: program::sale_vouchers(), collection: CAVE, cap: 4 });
+    let (sb, sc) = ([0x5b; 32], [0x5c; 32]);
+    c.ok(Op::PostVoucher { program: program::sale_vouchers(), collection: CAVE, burn: [1; 32], commitment: voucher_commitment(&BOB, &sb), count: 1 });
+    c.ok(Op::PostVoucher { program: program::sale_vouchers(), collection: CAVE, burn: [2; 32], commitment: voucher_commitment(&CAROL, &sc), count: 1 });
+    c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 10, zcash_hash: [7; 32] });
+    let wins: Vec<(Hash, Vec<u32>)> = vec![
+        (objectvm::sale::voucher_ticket_id(&voucher_commitment(&BOB, &sb), 0), vec![30]),
+        (objectvm::sale::voucher_ticket_id(&voucher_commitment(&CAROL, &sc), 0), vec![31]),
+    ];
+    let leaves: Vec<Hash> = wins.iter().map(|(t, s)| draw_leaf(t, s)).collect();
+    c.ok(Op::PostDraw { program: program::sale_draw(), collection: CAVE, root: merkle_root(&leaves) });
+    let claim = |c: &mut Chain, who: AccountId, secret: Hash, serial: u32, i: usize| {
+        let items = c.items(who, &[serial]);
+        let (inputs, change) = c.fund(who, CLAIM);
+        c.apply(Op::ClaimVoucherItems { buyer: who, program: program::sale_claim(), collection: CAVE, secret, k: 0, serials: vec![serial], proof: merkle_proof(&leaves, i), items, inputs, change })
+    };
+    assert!(matches!(claim(&mut c, BOB, sb, 30, 0), Receipt::ItemsClaimed { .. }));
+    match claim(&mut c, CAROL, sc, 31, 1) {
+        Receipt::Refused(why) => assert!(why.contains("only accounts on the sale's list"), "{why}"),
+        r => panic!("{r:?}"),
+    }
+    // Added to the list later, Carol claims.
+    c.ok(allow(vec![allow_key(&CAVE, &CAROL)]));
+    assert!(matches!(claim(&mut c, CAROL, sc, 31, 1), Receipt::ItemsClaimed { .. }));
+}
