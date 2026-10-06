@@ -391,11 +391,16 @@ fn once_a_quote_is_named_only_named_quotes_take_new_coins() {
     assert_eq!(cv.unit, ZAT);
     assert_eq!(cv.reserve.0, cost(0, cv.sold));
 
-    // A zero size stops new coins in it again.
-    assert!(matches!(c.quote(ZEC, Fixed::ZERO, Fixed::ZERO), Receipt::CurveQuoteSet { unit: 0, .. }));
-    assert!(c.vm.market.curve_quotes.is_empty());
+    // The last named asset cannot be removed: with none named, every asset
+    // would price curves at ZEC's size again (audit, 6 Oct 2026).
     let why = match c.quote(ZEC, Fixed::ZERO, Fixed::ZERO) { Receipt::Refused(w) => w, r => panic!("{r:?}") };
-    assert!(why.contains("not launched"), "{why}");
+    assert!(why.contains("last asset"), "{why}");
+    // With another named, a zero size stops new coins in it.
+    c.quote(ETH, Fixed::whole(23), Fixed::ZERO);
+    assert!(matches!(c.quote(ZEC, Fixed::ZERO, Fixed::ZERO), Receipt::CurveQuoteSet { unit: 0, .. }));
+    assert_eq!(c.vm.market.curve_quotes.keys().collect::<Vec<_>>(), vec![&ETH]);
+    let why = match c.quote(ZEC, Fixed::ZERO, Fixed::ZERO) { Receipt::Refused(w) => w, r => panic!("{r:?}") };
+    assert!(why.contains("not launched") || why.contains("last asset"), "{why}");
 }
 
 /// Sized for BOLD (63,000 BOLD fully diluted), the smallest buy scales too:

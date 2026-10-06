@@ -89,6 +89,60 @@ fn state_path(dir: &str, chain: u32) -> std::path::PathBuf {
     std::path::Path::new(dir).join(format!("chain-{}.object-state", chain))
 }
 
+/// Holder intents one account may have sequenced in one epoch.
+const PER_ACCOUNT_PER_EPOCH: u32 = 12;
+static ADMITTED: Mutex<(u64, Vec<([u8; 32], u32)>)> = Mutex::new((0, Vec::new()));
+
+/// Count this intent against its signers' share of the epoch; why not, if not.
+fn admit(epoch: u64, signers: &[[u8; 32]]) -> Option<&'static str> {
+    let mut g = ADMITTED.lock().unwrap();
+    if g.0 != epoch {
+        *g = (epoch, Vec::new());
+    }
+    for s in signers {
+        if g.1.iter().any(|(a, n)| a == s && *n >= PER_ACCOUNT_PER_EPOCH) {
+            return Some("this account has sent its share of this epoch's intents; try again next epoch");
+        }
+    }
+    for s in signers {
+        match g.1.iter_mut().find(|(a, _)| a == s) {
+            Some((_, n)) => *n += 1,
+            None => g.1.push((*s, 1)),
+        }
+    }
+    None
+}
+
+/// Why the node stopped taking intents, if it has (audit, 6 Oct 2026). A write
+/// that failed, or a seal after which the books do not balance, means the
+/// next receipt would describe a chain no replica can rebuild — so the node
+/// refuses every intent and every seal until an operator fixes the cause and
+/// restarts it. Reads keep working.
+static HALT: std::sync::OnceLock<Mutex<Option<String>>> = std::sync::OnceLock::new();
+
+fn halt(reason: String) {
+    let h = HALT.get_or_init(|| Mutex::new(None));
+    let mut g = h.lock().unwrap();
+    if g.is_none() {
+        eprintln!("zyn-object-node: HALTED — {reason}. No intent is accepted and no epoch seals until an operator fixes this and restarts the node.");
+        *g = Some(reason);
+    }
+}
+
+fn halted() -> Option<String> {
+    HALT.get().and_then(|h| h.lock().unwrap().clone())
+}
+
+/// After a seal: the books must balance, or the node stops.
+fn check_books(vm: &ObjectVm) {
+    if let Err(e) = vm.conserved() {
+        halt(format!("conservation failed after sealing epoch {}: {e}", vm.epoch));
+    }
+    if let Err(e) = vm.reconciled() {
+        halt(format!("reconciliation failed after sealing epoch {}: {e}", vm.epoch));
+    }
+}
+
 /// Save the whole state under a temporary name and rename it into place.
 ///
 /// A half-written state file is worse than none: the node would come back
@@ -97,11 +151,17 @@ fn state_path(dir: &str, chain: u32) -> std::path::PathBuf {
 fn save(dir: &str, chain: u32, vm: &ObjectVm) {
     let path = state_path(dir, chain);
     let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, vm.encode())
-        .and_then(|_| std::fs::rename(&tmp, &path))
-        .is_err()
-    {
-        eprintln!("zyn-object-node: could not save state");
+    // Synced before the rename, so a crash cannot leave the new name on
+    // contents that never reached the disk.
+    let wrote = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&vm.encode())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if let Err(e) = wrote {
+        halt(format!("could not save state at seq {}: {e}", vm.seq));
     }
 }
 
@@ -216,11 +276,22 @@ fn load_published(dir: &str, chain: u32) -> Published {
 }
 
 fn load(dir: &str, chain: u32) -> Option<ObjectVm> {
-    let bytes = std::fs::read(state_path(dir, chain)).ok()?;
-    let vm = ObjectVm::decode(&bytes)?;
+    let path = state_path(dir, chain);
+    let bytes = std::fs::read(&path).ok()?;
+    // A state file that exists and does not read is never "no chain yet":
+    // starting over would begin a new genesis beside a history that exists
+    // (a binary older than the state's format does exactly this). Stop.
+    let Some(vm) = ObjectVm::decode(&bytes) else {
+        eprintln!("zyn-object-node: {} does not decode — a binary older than the state's format, or a damaged file. Refusing to start a new chain over it.", path.display());
+        std::process::exit(1);
+    };
     // A state file from another chain is not a state file for this one, and
     // continuing from it would produce a chain whose history never happened.
-    (vm.chain_id == chain).then_some(vm)
+    if vm.chain_id != chain {
+        eprintln!("zyn-object-node: {} is chain {}, not {chain}. Refusing to start.", path.display(), vm.chain_id);
+        std::process::exit(1);
+    }
+    Some(vm)
 }
 
 /// Pools and sales, public by design. Amounts are raw WAD integers as
@@ -423,12 +494,29 @@ fn recent_anchors(da_dir: Option<&std::path::Path>, chain: u32, limit: usize) ->
     all[from..].to_vec()
 }
 
+/// The root and the reconciliation, per (seq, epoch): both walk the whole
+/// state, and the public polls this every second. Nothing they read changes
+/// until the next intent or seal, which moves seq or epoch.
+static STATUS_CACHE: Mutex<Option<((u64, u64), bool, String)>> = Mutex::new(None);
+
 fn status_json(
     vm: &ObjectVm,
     anchoring: bool,
     last: Option<&zynzapd::publish::IndexEntry>,
     sync: &SyncProgress,
 ) -> String {
+    let key = (vm.seq, vm.epoch);
+    let (reconciled, root) = {
+        let mut c = STATUS_CACHE.lock().unwrap();
+        match c.as_ref() {
+            Some((k, r, h)) if *k == key => (*r, h.clone()),
+            _ => {
+                let v = (vm.reconciled().is_ok(), hex(&vm.state_root()));
+                *c = Some((key, v.0, v.1.clone()));
+                v
+            }
+        }
+    };
     format!(
         concat!(
             "{{\"chain\":{},\"epoch\":{},\"seq\":{},\"accounts\":{},",
@@ -450,7 +538,7 @@ fn status_json(
         // without needing a key (A120).
         vm.live.len(),
         vm.nullifiers.len(),
-        vm.reconciled().is_ok(),
+        reconciled,
         vm.offers.len(),
         vm.exits.len(),
         last.map(|a| a.epoch).unwrap_or(0),
@@ -473,7 +561,7 @@ fn status_json(
         // A JSON string, so a scanner error with a quote in it cannot break
         // the document it is being reported in.
         escape(&sync.error),
-        hex(&vm.state_root()),
+        root,
         // The status is what a reader believes without asking anyone. It said
         // "devnet" while the node was carrying roots to Zcash, which is the
         // wrong lie to tell in either direction.
@@ -1594,6 +1682,14 @@ fn handle(
                 return err("frame is truncated");
             };
             let epoch_now = node.lock().unwrap().state().epoch;
+            // Inclusion, not consensus (audit, 6 Oct 2026): an order refunded at
+            // the seal costs nothing, so one account could fill a curve's,
+            // pool's or the routes' batch with dust every epoch. The
+            // sequencer takes at most PER_ACCOUNT_PER_EPOCH intents from one
+            // account in one epoch.
+            if let Some(why) = admit(epoch_now, &ObjectVm::intent_authorities(authorized.intent())) {
+                return err(why);
+            }
             if let Some(r) = REPLAY.get() {
                 let mut r = r.lock().unwrap();
                 r.prune(epoch_now);
@@ -2194,6 +2290,10 @@ fn apply_authorized(
     dir: &str,
     chain: u32,
 ) -> Vec<objectvm::Receipt> {
+        if let Some(why) = halted() {
+            eprintln!("zyn-object-node: refused an intent while halted ({why})");
+            return vec![objectvm::Receipt::Refused("the node has stopped taking intents while the operator fixes a fault; nothing was applied")];
+        }
         let op = authorized.intent().clone();
         let encoded = zyn_vm::verify::encode_authorized::<ObjectVm>(&authorized);
         let mut n = node.lock().unwrap();
@@ -2226,19 +2326,23 @@ fn apply_authorized(
             // vouched for the intent rather than implying a signature
             // nobody made.
             if let Err(err) = j.record(epoch_for_record, step.seq, &encoded) {
-                eprintln!("zyn-object-node: could not journal seq {}: {}", step.seq, err);
+                halt(format!("could not journal seq {}: {err}", step.seq));
             }
             if step.sealed.is_some() {
                 let seal = zyn_vm::verify::encode_authorized::<ObjectVm>(
                     &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
                 );
-                let _ = j.record(epoch_for_record, step.seq.saturating_add(1), &seal);
+                if let Err(err) = j.record(epoch_for_record, step.seq.saturating_add(1), &seal) {
+                    halt(format!("could not journal the seal of epoch {epoch_for_record}: {err}"));
+                }
             }
             // Always. The writer buffers, so an intent recorded and not
             // flushed is one a verifier fetching this epoch will not find
             // — and the node had exactly that bug, leaving a file holding
             // nothing but its header.
-            let _ = j.sync();
+            if let Err(err) = j.sync() {
+                halt(format!("could not flush the journal at seq {}: {err}", step.seq));
+            }
         }
         // `submit` seals itself when the policy is due, so most seals
         // happen here rather than on the timer. Log from both, or a chain
@@ -2251,6 +2355,7 @@ fn apply_authorized(
                 hex(&n.state().state_root())
             );
             take_lend_snapshot(n.state());
+            check_books(n.state());
         }
         if !step.receipts.iter().any(ObjectVm::rejected) {
             let mut p = pub_log.lock().unwrap();
@@ -2739,6 +2844,15 @@ fn main() {
             }
         }
         None => {
+            // No state, but a journal: the state was lost, not never made.
+            // Starting a genesis here would append a second history to the
+            // first one's epoch files (audit, 6 Oct 2026).
+            let jdir = std::path::Path::new(&dir).join("journal").join(format!("chain-{chain}"));
+            let has_journal = std::fs::read_dir(&jdir).map(|mut d| d.next().is_some()).unwrap_or(false);
+            if has_journal && std::env::var("ZYN_ALLOW_NEW_CHAIN").as_deref() != Ok("1") {
+                eprintln!("zyn-object-node: no state file but {} holds a journal — restore the state (or replay the journal) instead of starting over. Refusing to start a new chain.", jdir.display());
+                std::process::exit(1);
+            }
             eprintln!("zyn-object-node: new chain {}", chain);
             Node::new(chain, Limits { max_io }, policy, Economics::flat(1))
         }
@@ -3043,6 +3157,9 @@ fn main() {
             // before rules v2, prices aged and auctions stepped per epoch),
             // so while anything is listed epochs keep sealing on the clock.
             let lending = !n.state().market.lend.listed.is_empty();
+            if halted().is_some() {
+                continue;
+            }
             let sealed = n.seal_if_due(now_secs()).is_some()
                 || ((sale_open || lending) && n.seal_on_clock(now_secs()).is_some());
             // The public lending figures move only at a seal.
@@ -3064,10 +3181,13 @@ fn main() {
                         &zyn_vm::verify::Authorized::operator(ObjectVm::seal_intent()),
                     );
                     if let Err(e) = j.record(closed, n.state().seq(), &seal) {
-                        eprintln!("zyn-object-node: could not journal the timer seal: {e}");
+                        halt(format!("could not journal the timer seal of epoch {closed}: {e}"));
                     }
-                    let _ = j.sync();
+                    if let Err(e) = j.sync() {
+                        halt(format!("could not flush the journal after the timer seal: {e}"));
+                    }
                 }
+                check_books(n.state());
                 eprintln!(
                     "zyn-object-node: sealed epoch {} on the timer — root {}",
                     n.state().epoch,

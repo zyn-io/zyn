@@ -451,7 +451,10 @@ pub(crate) fn clear_sells(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOr
         let lots = lots as u32;
         let total = if lots == 0 { 0 } else { cost_at(sold - lots, lots, unit) };
         let mut filled = Vec::new();
-        let mut unmet = None;
+        // Every order whose minimum this price misses drops together, then
+        // the rest reprice: which of two conflicting orders fills never
+        // depends on which arrived first (audit, 6 Oct 2026; as `market::clear`).
+        let mut unmet = Vec::new();
         for (i, o) in orders.iter().enumerate() {
             if !active[i] {
                 continue;
@@ -461,17 +464,17 @@ pub(crate) fn clear_sells(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOr
             let gross = if lots == 0 { 0 } else { total * mine / lots as i128 };
             let fee = fee_of(Fixed(gross), fee_bps).map(|f| f.0).unwrap_or(0);
             if gross - fee < o.min_out.0 {
-                unmet = Some(i);
-                break;
+                unmet.push(i);
+                continue;
             }
             filled.push((i, gross, fee));
         }
-        match unmet {
-            Some(i) => active[i] = false,
-            None => {
-                let refunded = (0..orders.len()).filter(|i| !active[*i]).collect();
-                return SellFill { filled, refunded, lots };
-            }
+        if unmet.is_empty() {
+            let refunded = (0..orders.len()).filter(|i| !active[*i]).collect();
+            return SellFill { filled, refunded, lots };
+        }
+        for i in unmet {
+            active[i] = false;
         }
     }
 }
@@ -509,7 +512,7 @@ pub(crate) fn clear_buys(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrd
         let lots = if total_budget <= 0 { 0 } else { lots_for_at(sold, total_budget, cap, unit) };
         let total = cost_at(sold, lots, unit);
         let mut filled = Vec::new();
-        let mut unmet = None;
+        let mut unmet = Vec::new();
         for (i, o) in orders.iter().enumerate() {
             if !active[i] {
                 continue;
@@ -523,19 +526,19 @@ pub(crate) fn clear_buys(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrd
                 mine -= 1;
             }
             if (mine as i128) * LOT.0 < o.min_out.0 {
-                unmet = Some(i);
-                break;
+                unmet.push(i);
+                continue;
             }
             let paid = paid_for(mine);
             filled.push((i, mine, paid, fee_for(paid)));
         }
-        match unmet {
-            Some(i) => active[i] = false,
-            None => {
-                let taken = filled.iter().map(|f| f.1).sum();
-                let refunded = (0..orders.len()).filter(|i| !active[*i]).collect();
-                return BuyFill { filled, refunded, lots: taken };
-            }
+        if unmet.is_empty() {
+            let taken = filled.iter().map(|f| f.1).sum();
+            let refunded = (0..orders.len()).filter(|i| !active[*i]).collect();
+            return BuyFill { filled, refunded, lots: taken };
+        }
+        for i in unmet {
+            active[i] = false;
         }
     }
 }

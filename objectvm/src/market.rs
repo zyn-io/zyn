@@ -492,7 +492,9 @@ impl Market {
             Some(_) => {
                 // A different owner or asset under one id cannot be derived by
                 // honest wallets; keep the first debt and record nothing new
-                // rather than overwrite it.
+                // rather than overwrite it. Loud in tests: dropping a payment
+                // here breaks conservation, as a duplicate route id did.
+                debug_assert!(false, "a second claim under one id in another asset or owner was dropped");
             }
             None => {
                 self.claims.insert(id, Claim { owner, asset, amount });
@@ -1169,6 +1171,9 @@ impl ObjectVm {
             || self.market.curve_orders.iter().any(|o| &o.id == source)
             || self.market.curves.values().any(|c| &c.source == source)
             || self.market.commits.contains_key(source)
+            // A route waiting for its seal (§167): two routes under one id
+            // would share their legs and one would vanish (audit, 6 Oct 2026).
+            || self.market.routes.iter().any(|r| &r.id == source)
             || crate::lend::source_in_use(&self.market.lend, source)
         {
             return Err("that nonce was already used");
@@ -1456,7 +1461,10 @@ impl ObjectVm {
         meta: &Hash,
     ) -> Result<Receipt, &'static str> {
         let token = token_of(creator, nonce);
-        if self.market.launches.contains_key(&token) || self.issued.contains_key(&token) {
+        // A curve's token is not issued until its first lot sells, so the
+        // issued check alone let a curve's creator open a launch for the same
+        // token and mint it outside the curve (audit, 6 Oct 2026).
+        if self.market.launches.contains_key(&token) || self.issued.contains_key(&token) || self.market.curves.contains_key(&token) {
             return Err("that token exists");
         }
         let source = launch_source(creator, nonce);

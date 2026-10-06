@@ -2131,6 +2131,11 @@ impl MicrochainVm for ObjectVm {
                 }
                 if graduation_mc.0 == 0 {
                     // Stops new coins in it; coins already made keep their size.
+                    // Never the last one: with none named, every deposited asset
+                    // would price curves at ZEC's size again (audit, 6 Oct 2026).
+                    if self.market.curve_quotes.len() == 1 && self.market.curve_quotes.contains_key(quote) {
+                        return vec![Receipt::Refused("that is the last asset coins launch in; name another first")];
+                    }
                     return match self.market.curve_quotes.remove(quote) {
                         Some(_) => vec![Receipt::CurveQuoteSet { quote: *quote, unit: 0, bond: Fixed::ZERO }],
                         None => vec![Receipt::Refused("coins are not launched in that asset")],

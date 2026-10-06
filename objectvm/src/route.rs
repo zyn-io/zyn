@@ -185,7 +185,14 @@ pub(crate) fn read_hops(d: &mut Decoder) -> Option<Vec<Hop>> {
     let mut hops = Vec::with_capacity(n);
     for _ in 0..n {
         hops.push(match d.u8().ok()? {
-            0 => Hop::Pool { pool: d.hash().ok()?, sell_a: d.u8().ok()? == 1 },
+            0 => Hop::Pool {
+                pool: d.hash().ok()?,
+                sell_a: match d.u8().ok()? {
+                    0 => false,
+                    1 => true,
+                    _ => return None,
+                },
+            },
             1 => Hop::CurveSell { token: d.hash().ok()? },
             2 => Hop::CurveBuy { token: d.hash().ok()? },
             _ => return None,
@@ -336,7 +343,7 @@ impl ObjectVm {
                 let leg = leg_id(&r.id, 0);
                 self.market.orders.retain(|o| o.id != leg);
                 self.market.curve_orders.retain(|o| o.id != leg);
-                let start = self.hop_assets(&r.hops[0]).map(|a| a.0).expect("checked when placed; venues outlive a seal");
+                let start = self.hop_assets_settled(&r.hops[0]).0;
                 self.market.pay(&r.id, 1, r.owner, start, r.amount_in);
             }
         }
@@ -378,7 +385,14 @@ impl ObjectVm {
                 let out = self.market.claims.remove(&claim_id(&leg, 0)).map(|c| c.amount).unwrap_or(Fixed::ZERO);
                 let back = self.market.claims.remove(&claim_id(&leg, 1));
                 let last = i + 1 == r.hops.len();
-                if last {
+                if last && back.is_some() && matches!(r.hops[i], Hop::Pool { .. }) {
+                    // A last pool that refunded delivers nothing the route asked
+                    // for: it drops out on the copy and is refunded whole, never
+                    // left holding the coin before it (audit, 6 Oct 2026).
+                    if let Some(b) = back {
+                        self.market.pay(&r.id, 1, r.owner, b.asset, b.amount);
+                    }
+                } else if last {
                     let got = self.hop_assets_settled(&r.hops[i]).1;
                     self.market.pay(&r.id, 0, r.owner, got, out);
                     if let Some(b) = back {
