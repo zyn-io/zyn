@@ -145,9 +145,21 @@ function claimKinds(identity, limit, from = 0) {
   return kinds;
 }
 
+/// Where a redeemed item's floor share waits: under the item note's own
+/// commitment (`objectvm::market::redemption_source`), which no nonce gives.
+/// Every spent one-unit note this account owned may have been an item it
+/// redeemed; asking about the ones that were not costs a lookup, nothing more.
+export function redemptionClaims(gone) {
+  return new Map(gone.filter((g) => g.amount === 10n ** 18n)
+    .map((g) => [hex(mk.claimId(mk.redemptionSource(unhex(g.commitment)), 0)), 'Floor share for a redeemed item']));
+}
+
 export async function loadOwed(config, identity) {
   await ensureNonces(config, identity);
   const kinds = claimKinds(identity, nonceCount(config, identity) + LOOKAHEAD);
+  // A restore finds these too: the spent notes are still published.
+  const { gone } = await loadHoldings(config, identity, []).catch(() => ({ gone: [] }));
+  for (const [id, kind] of redemptionClaims(gone || [])) kinds.set(id, kind);
   const ids = [...kinds.keys()];
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
@@ -370,7 +382,7 @@ export async function loadOffers(config) {
 /// items (asked by asset, which says nothing a listing does not).
 export async function loadHoldings(config, identity, offers) {
   const published = await call(config, 'zyn_published');
-  const { held, balances } = scan(published, { secret: identity.viewing, nkey: identity.nullifier, owner: identity.account });
+  const { held, balances, gone } = scan(published, { secret: identity.viewing, nkey: identity.nullifier, owner: identity.account });
   const items = new Map();
   for (const o of offers) if (o.serial >= 0) items.set(o.asset, { collection: o.collection, serial: o.serial });
   const unknown = [...new Set(held.map((h) => h.asset))].filter((a) => a !== config.zecAsset && !items.has(a));
@@ -380,7 +392,7 @@ export async function loadHoldings(config, identity, offers) {
       if (isHex(i.asset) && isHex(i.collection) && isSmall(i.serial)) items.set(i.asset, { collection: i.collection, serial: i.serial });
     }
   }
-  return { held, balances, items };
+  return { held, balances, items, gone };
 }
 
 /// Submit an intent that carries a nonce, taking the next nonce and trying

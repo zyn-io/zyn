@@ -147,6 +147,9 @@ const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''
 export function scan(published, { secret, nkey, owner }) {
   const spent = new Set(published.nullifiers || []);
   const held = [];
+  // This account's notes that have been spent: a redeemed item's floor share
+  // waits under an id made from the item's own commitment, not a nonce.
+  const gone = [];
   const byAsset = new Map();
 
   for (const o of published.outputs || []) {
@@ -156,13 +159,16 @@ export function scan(published, { secret, nkey, owner }) {
     // The pairing is checked, not assumed.
     const commit = commitment(note, owner);
     if (hex(commit) !== o.commitment) continue;
-    if (spent.has(hex(nullifierOf(nkey, commit)))) continue;
+    if (spent.has(hex(nullifierOf(nkey, commit)))) {
+      gone.push({ commitment: hex(commit), asset: hex(note.asset), amount: note.amount });
+      continue;
+    }
 
     const asset = hex(note.asset);
     held.push({ commitment: hex(commit), asset, amount: note.amount });
     byAsset.set(asset, (byAsset.get(asset) || 0n) + note.amount);
   }
-  return { held, balances: byAsset };
+  return { held, balances: byAsset, gone };
 }
 
 export function unhex(s) {

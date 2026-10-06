@@ -254,3 +254,15 @@ test('Zyn Lend v2: adding to a pool\'s insurance is laid out as the ledger reads
   if (v.lend_insure) assert.equal(hex(insure), v.lend_insure);
 });
 const unhexBytes = (h) => Uint8Array.from(h.match(/../g), (x) => parseInt(x, 16));
+
+/// A redeemed item's floor share waits under the item note's own commitment;
+/// Nap finds it from the spent notes it scans, which a restore sees too.
+test('a redeemed item\'s floor share is found from the spent item note', async () => {
+  const { redemptionClaims } = await import('../src/ledger.js');
+  const item = 'ab'.repeat(32);
+  const ids = redemptionClaims([
+    { commitment: item, asset: 'cd'.repeat(32), amount: 10n ** 18n },
+    { commitment: 'ef'.repeat(32), asset: 'cd'.repeat(32), amount: 5n },
+  ]);
+  assert.deepEqual([...ids.keys()], [hex(m.claimId(m.redemptionSource(Buffer.from(item, 'hex')), 0))], 'one-unit notes only');
+});
