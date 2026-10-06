@@ -1084,7 +1084,18 @@ fn handle(
         // Per token: first seen, last moved, price an hour and a day ago, a
         // day's volume. What a gallery sorts by.
         "zyn_curveStats" => {
-            let stats = HISTORY.get().and_then(|h| h.lock().ok()).map(|h| h.stats(now_secs())).unwrap_or(serde_json::json!([]));
+            // Every point of every coin, so once per 10 s, not per visitor.
+            static STATS: Mutex<Option<(u64, String)>> = Mutex::new(None);
+            let now = now_secs();
+            let cached = STATS.lock().unwrap().as_ref().filter(|(at, _)| now < at + 10).map(|(_, v)| v.clone());
+            let stats = match cached {
+                Some(v) => v,
+                None => {
+                    let v = HISTORY.get().and_then(|h| h.lock().ok()).map(|h| h.stats(now)).unwrap_or(serde_json::json!([])).to_string();
+                    *STATS.lock().unwrap() = Some((now, v.clone()));
+                    v
+                }
+            };
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", stats)
         }
         // Zyn Lend, public: pools, rates, posted prices and open auction lots
@@ -2965,10 +2976,12 @@ fn main() {
         let node = Arc::clone(&node);
         std::thread::spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
+            // The history first, then the node: waiting on the history (a
+            // stats read) while holding the node would stall sealing (audit,
+            // 6 Oct 2026). The node is held only while it is looked at.
+            let Some(Ok(mut h)) = HISTORY.get().map(|h| h.lock()) else { continue };
             let Ok(n) = node.lock() else { continue };
-            if let Some(Ok(mut h)) = HISTORY.get().map(|h| h.lock()) {
-                h.observe(n.state(), now_secs());
-            }
+            h.observe(n.state(), now_secs());
         });
     }
 

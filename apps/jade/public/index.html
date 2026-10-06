@@ -70,7 +70,7 @@
             <div class="col-list" id="col-new" aria-live="polite"></div>
           </section>
           <section class="col" data-col="bonding" aria-labelledby="col-bonding-title">
-            <header class="col-head"><h2 id="col-bonding-title">Bonding</h2><span class="col-count" id="count-bonding">0</span><button type="button" class="tip" data-tip="Traded coins still on their curve, closest to graduating first. A coin graduates at 51,098 of 80,000 lots, about 17 ZEC raised." aria-label="About Bonding" aria-expanded="false">i</button></header>
+            <header class="col-head"><h2 id="col-bonding-title">Bonding</h2><span class="col-count" id="count-bonding">0</span><button type="button" class="tip" data-tip="Traded coins still on their curve, closest to graduating first. A coin graduates at 51,098 of 80,000 lots: about 17 ZEC raised for a ZEC coin, the same in dollars for a coin priced in another." aria-label="About Bonding" aria-expanded="false">i</button></header>
             <div class="col-sort" data-sorts="bonding"></div>
             <div class="col-list" id="col-bonding" aria-live="polite"></div>
           </section>
@@ -103,7 +103,7 @@
             <div><dt>Cap at graduation</dt><dd id="fact-cap">~47 ZEC</dd></div>
             <div><dt>Pool shares</dt><dd>locked</dd></div>
           </dl>
-          <p class="risk">You get none of the supply unless you buy. Nobody can pull a graduated coin's liquidity.</p>
+          <p class="risk">You get none of the supply unless you buy. Your bond comes back only if the coin graduates. Nobody can pull a graduated coin's liquidity.</p>
           <button id="create-go" class="primary" type="submit" disabled>Create coin</button>
           <p id="create-status" class="status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
         </form>
@@ -207,7 +207,7 @@
             <p id="trade-hint" class="hint" role="status" aria-live="polite"></p>
             <ol class="steps" id="trade-steps" aria-hidden="true" data-step="idle"><li data-s="placed">Placed</li><li data-s="sealing">Sealing</li><li data-s="done">Settled</li></ol>
             <p id="trade-status" class="status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
-            <p class="risk">Coins can go to zero. Prices move with every batch.</p>
+            <p class="risk">Coins can go to zero. Prices move with every batch. Zyn runs on one operator today: withdrawals to Zcash need two of three team-held custodian keys, and there is no forced exit yet.</p>
             <p class="keys" aria-hidden="true"><kbd>B</kbd> buy <kbd>S</kbd> sell <kbd>↵</kbd> place <kbd>Esc</kbd> clear</p>
           </section>
 
@@ -240,7 +240,7 @@
                     <path class="chart-fill" d="M54 342 L870 64 L870 342 Z"/><path class="chart-line" d="M54 342 L870 64"/>
                     <circle class="chart-end" id="chart-point" cx="54" cy="342" r="9"/>
                   </svg>
-                  <figcaption class="j-note">Lot i costs 7,721 + i zatoshi, for every coin. The dot is this coin.</figcaption>
+                  <figcaption class="j-note">Lot i costs 7,721 + i units of the coin it is priced in (one unit is a zatoshi for ZEC). The dot is this coin.</figcaption>
                 </figure>
               </div>
             </div>

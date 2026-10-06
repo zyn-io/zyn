@@ -380,7 +380,7 @@ export const METHODS = {
           const token = mk.tokenOf(ctx.identity.account, nonce);
           if (!content) return { token: hex(token), quote };
           const hash = contentHash(content);
-          return { token: hex(token), quote, content: { hash: hex(hash), proof: await contentProof(ctx.identity.secretKey, nonce, token, hash) } };
+          return { token: hex(token), quote, content: { hash: hex(hash), proof: await contentProof(ctx.identity.secretKey, nonce, token, hash, ctx.config.chain) } };
         },
       };
     },

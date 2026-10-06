@@ -248,14 +248,15 @@ async function rpc(method, fields = {}) {
   return body.result;
 }
 
-const validCurve = (c) => isHex(c.token) && isHex(c.meta) && !!QUOTE_ASSETS[c.quote] && Number.isSafeInteger(c.sold) && c.sold >= 0
+const validCurve = (c) => isHex(c.token) && isHex(c.meta) && !!QUOTE_ASSETS[c.quote] && Number.isSafeInteger(c.sold) && c.sold >= 0 && Number.isSafeInteger(c.created_at)
   && ['reserve', 'graduation', 'price_per_token'].every((k) => isInt(c[k])) && typeof c.graduated === 'boolean';
 
 /// A coin's quote: its symbol, size, and dollars per unit of it.
 const symOf = (asset) => QUOTE_ASSETS[asset] || `${String(asset).slice(0, 6)}…`;
 const qsym = (c) => symOf(c?.quote || XZEC);
 const unitOf = (c) => (isInt(c?.unit) && c.unit !== '0' ? BigInt(c.unit) : ZAT);
-const usdPer = (c) => usdBy[qsym(c)] ?? null;
+// Testnet coins are worth nothing: no dollar figures on them (audit, 6 Oct 2026).
+const usdPer = (c) => (NETWORK === 'testnet' ? null : usdBy[qsym(c)] ?? null);
 /// Its market cap at graduation, in its quote.
 const gradMc = (unit) => num(GRADUATION_MC_UNITS * unit);
 /// What this wallet holds of a quote asset, or null when its Nap does not say.
@@ -268,7 +269,7 @@ function balanceOf(asset) {
 function sumText(by, cell = zecCell) {
   const parts = [...by].filter(([, v]) => v > 0);
   if (!parts.length) return '0';
-  if (parts.every(([s]) => usdBy[s])) return usdText(parts.reduce((t, [s, v]) => t + v * usdBy[s], 0));
+  if (NETWORK !== 'testnet' && parts.every(([s]) => usdBy[s])) return usdText(parts.reduce((t, [s, v]) => t + v * usdBy[s], 0));
   return parts.map(([s, v]) => `${cell(v)} ${s}`).join(' · ');
 }
 
@@ -282,7 +283,9 @@ async function loadMarket() {
       : [{ asset: XZEC, symbol: 'ZEC', unit: ZAT, bond: BigInt(terms.bond || '0') }];
     pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b));
     curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, pending: Number.isSafeInteger(c.pending) && c.pending > 0 ? c.pending : 0, ...decodeMeta(c.meta) }));
-    stats = new Map((Array.isArray(s) ? s : []).filter((x) => isHex(x.token)).map((x) => [x.token, x]));
+    // Numbers that reach the page's markup are numbers, whatever the node sends.
+    const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
+    stats = new Map((Array.isArray(s) ? s : []).filter((x) => isHex(x.token)).map((x) => [x.token, { ...x, created_time: n(x.created_time), last_trade_time: n(x.last_trade_time), moves_24h: n(x.moves_24h) }]));
     if (Number.isSafeInteger(m.epoch_seconds) && m.epoch_seconds > 0) epochSeconds = m.epoch_seconds;
     if (Number.isSafeInteger(m.epoch)) noteEpoch(m.epoch, false);
     marketRead = true;
@@ -356,7 +359,7 @@ async function loadContent(token) {
   if (content.has(token)) return content.get(token);
   content.set(token, 'loading');
   try {
-    const r = await fetch(`/api/content/${token}`, { credentials: 'omit' });
+    const r = await fetch(`/api/content/${token}?network=${NETWORK}`, { credentials: 'omit' });
     const v = r.ok ? await r.json() : null;
     const image = typeof v?.image === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v.image) ? v.image : '';
     content.set(token, v ? { description: String(v.description || ''), image } : null);
@@ -379,8 +382,18 @@ let historyBusy = false;
 async function loadHistory(token) {
   const last = stats.get(token)?.last_trade_time || 0;
   try {
-    const h = await rpc('zyn_history', { token });
-    if (Array.isArray(h)) histories.set(token, h.filter((p) => Number.isSafeInteger(p.time) && Number.isSafeInteger(p.epoch)).sort((a, b) => a.time - b.time || a.epoch - b.epoch));
+    // Only what is newer than the last point held (the node keeps the newest
+    // 5,000), merged by epoch: a trading coin no longer re-sends its whole
+    // history every few seconds (audit, 6 Oct 2026).
+    const held = histories.get(token) || [];
+    const since = held.length ? held[held.length - 1].time : 0;
+    const h = await rpc('zyn_history', since ? { token, since: String(since) } : { token });
+    if (Array.isArray(h)) {
+      const fresh = h.filter((p) => Number.isSafeInteger(p.time) && Number.isSafeInteger(p.epoch));
+      const byEpoch = new Map(held.map((p) => [p.epoch, p]));
+      for (const p of fresh) byEpoch.set(p.epoch, p);
+      histories.set(token, [...byEpoch.values()].sort((a, b) => a.time - b.time || a.epoch - b.epoch).slice(-5000));
+    }
     historyRead.set(token, { last, at: Date.now() });
   } catch { if (!histories.has(token)) histories.set(token, []); }
 }
@@ -606,9 +619,20 @@ function renderBoard() {
   $('#tally-vol').textContent = sumText(bySym(vol24));
   $('#tally-moves').textContent = curves.reduce((s, c) => s + moves24(c), 0);
   $('[data-filter="held"]').hidden = !mine;
-  // Pictures for what is on screen, a few at a time.
-  for (const c of curves.slice(0, 90)) {
-    if (!content.has(c.token)) loadContent(c.token).then((k) => { if (k) { scheduleBoard(); renderTape(); } });
+  // Pictures for the rows at the top of each column, four at a time — the
+  // ones a visitor sees, not the first 90 by address (audit, 6 Oct 2026).
+  const wanted = COLS.flatMap((col) => by[col].slice(0, 30)).map((c) => c.token).filter((t) => !content.has(t));
+  queuePictures(wanted);
+}
+const pictureQueue = [];
+let picturesBusy = 0;
+function queuePictures(tokens) {
+  for (const t of tokens) if (!pictureQueue.includes(t)) pictureQueue.push(t);
+  while (picturesBusy < 4 && pictureQueue.length) {
+    const t = pictureQueue.shift();
+    if (content.has(t)) continue;
+    picturesBusy++;
+    loadContent(t).then((k) => { if (k) { scheduleBoard(); renderTape(); } }).finally(() => { picturesBusy--; queuePictures([]); });
   }
 }
 let boardFrame = 0;
@@ -916,7 +940,7 @@ async function renderCoin(token, fresh = false) {
   setText('coin-liquidity', `${wad(zecSet(c), 4)} ${q}`);
   setHtml('coin-holders', `private${tip('Zyn does not publish who holds a coin or how much: balances are private to each wallet.', 'About holders')}`);
   $('#coin-pot').textContent = c.graduated ? 'in its pool' : `${wad(c.graduation, 6)} ${q}.zy`;
-  $('#coin-fee').textContent = c.graduated ? `${poolOf(c)?.fee_bps ?? 30} bps, kept by the pool` : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
+  $('#coin-fee').textContent = c.graduated ? (poolOf(c) ? `${poolOf(c).fee_bps} bps, kept by the pool` : '—') : c.fee_bps ? `${c.fee_bps / 100}% a trade` : 'none';
   $('#coin-addr').textContent = c.token;
   const cut = progress(c);
   setText('curve-pct', `${(cut * 100).toFixed(2)}%`);
@@ -925,7 +949,7 @@ async function renderCoin(token, fresh = false) {
   $('#curve-bar-2').style.width = `${(cut * 100).toFixed(2)}%`;
   $('#curve-text').textContent = c.graduated
     ? 'Graduated. Every unsold lot and everything the curve raised opened a pool whose shares nobody holds.'
-    : `${wad(c.reserve, 4)} ${q}.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold, unitOf(c)), 3)} ${q}.zy of buying to graduate · it graduates at ~${zecText(gradMc(unitOf(c)))} ${q} market cap${per ? ` (${usdText(gradMc(unitOf(c)) * per)})` : ''}`;
+    : `${wad(c.reserve, 4)} ${q}.zy in the curve · ${wad(cost(c.sold, CURVE.graduateAt - c.sold, unitOf(c)), 3)} ${q}.zy of buying to graduate (before the ${c.fee_bps / 100}% fee) · it graduates at ~${zecText(gradMc(unitOf(c)))} ${q} market cap${per ? ` (${usdText(gradMc(unitOf(c)) * per)})` : ''}`;
   $('#chart-point').setAttribute('cx', String(54 + 816 * cut));
   $('#chart-point').setAttribute('cy', String(342 - 278 * cut));
   flashStats(token, { 'coin-price': Number(price(c)), 'coin-mcap': mc, 'coin-vol': vol24(c), 'coin-moves': moves24(c), 'curve-pct': cut, 'coin-liquidity': Number(zecSet(c)) });
@@ -1109,6 +1133,22 @@ const pathText = (c, hops, buy) => {
   return assets.map((a) => (a === c.token ? c.symbol : symOf(a))).join(' → ');
 };
 
+/// Percent below the pools' spot prices a route's pool hops fill at, alone.
+function routeImpact(hops, amountIn, steps) {
+  let kept = 1;
+  let into = BigInt(amountIn);
+  hops.forEach((h, i) => {
+    if (h.pool) {
+      const p = venues.pool(h.pool);
+      const [rin, rout] = h.sellA ? [BigInt(p.reserve_a), BigInt(p.reserve_b)] : [BigInt(p.reserve_b), BigInt(p.reserve_a)];
+      const spot = rin > 0n ? (into * rout) / rin : 0n;
+      if (spot > 0n) kept *= Number(steps[i]) / Number(spot);
+    }
+    into = steps[i];
+  });
+  return Math.max(0, (1 - kept) * 100);
+}
+
 /// Buy presets sized to the coin it is paid with: 0.01, 0.05, 0.1 and 0.5
 /// ZEC's worth, to two significant figures.
 function presetsFor(c) {
@@ -1191,10 +1231,13 @@ function quote() {
       if (tradeSide === 'sell' && mine && value > heldOf(c.token)) throw new Error(`You hold ${full(heldOf(c.token))}`);
       const q = poolQuote(p, sellA, value);
       if (q <= 0n) throw new Error('Too small to trade');
+      const impact = routeImpact([{ pool: p.id, sellA }], value, [q]);
+      if (impact > 30) throw new Error(`Its pool is too thin for this amount: it would fill ${impact.toFixed(1)}% below the pool's price. Try less.`);
+      if (impact >= 5) hint.textContent = `This fills ${impact.toFixed(1)}% below the pool's price.`;
       out.textContent = `${full(q)} ${tradeSide === 'buy' ? c.symbol : q$}`;
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
       min.textContent = `${full((q * (BPS - slip)) / BPS)}`;
-      if (wallet) submit.disabled = false;
+      if (wallet && !placing) submit.disabled = false;
       return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip) };
     }
     if (tradeSide === 'buy') {
@@ -1208,7 +1251,7 @@ function quote() {
       out.textContent = `${wad(q.tokens, 0)} ${c.symbol}`;
       fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
       min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
-      if (wallet) submit.disabled = false;
+      if (wallet && !placing) submit.disabled = false;
       return { kind: 'buy', amount: value, minTokens };
     }
     if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
@@ -1219,7 +1262,7 @@ function quote() {
     out.textContent = `${full(q.net)} ${q$}`;
     fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
     min.textContent = `${full(minZec)} ${q$}`;
-    if (wallet) submit.disabled = false;
+    if (wallet && !placing) submit.disabled = false;
     return { kind: 'sell', tokens: value, minZec };
   } catch (e) {
     hint.textContent = e.message;
@@ -1241,6 +1284,11 @@ function quoteRoute(c, value, via, slip) {
   }
   const r = bestRoute(c, buy, via, value);
   if (!r) throw new Error(`No route to ${buy ? c.symbol : v$} at these prices`);
+  // How far below the pools' own prices the route fills, hop by hop — Nap's
+  // card says the same. A thin pool on a route can take half the value
+  // (audit, 6 Oct 2026): warned from 5%, refused past 30%.
+  const impact = routeImpact(r.hops, value, r.q.steps);
+  if (impact > 30) throw new Error(`The pools on this route are too thin for this amount: it would fill ${impact.toFixed(1)}% below their prices. Try less.`);
   const toCurve = buy && !c.graduated;
   // A curve delivers whole lots: the floor is whole lots too, at least one.
   const floor = toCurve
@@ -1250,10 +1298,12 @@ function quoteRoute(c, value, via, slip) {
   out.textContent = buy ? `${wad(r.q.out, 0)} ${c.symbol}` : `${full(r.q.out)} ${v$}`;
   const pools = r.hops.filter((h) => h.pool).map((h) => venues.pool(h.pool).fee_bps / 100);
   fee.textContent = [!c.graduated && c.fee_bps ? `${c.fee_bps / 100}% on the curve` : null, ...pools.map((f) => `${f}% pool`)].filter(Boolean).join(' + ') || 'none';
-  $('#trade-route').textContent = `${pathText(c, r.hops, buy)} · one epoch`;
+  $('#trade-route').textContent = `${pathText(c, r.hops, buy)} · ${impact.toFixed(1)}% below the pools' prices`;
+  $('#trade-route').classList.toggle('warn', impact >= 5);
+  if (impact >= 5) $('#trade-hint').textContent = `This route fills ${impact.toFixed(1)}% below the pools' prices: they are thin for this amount.`;
   $('#trade-route-row').hidden = false;
   min.textContent = buy ? `${wad(floor, 0)} ${c.symbol}` : `${full(floor)} ${v$}`;
-  if (wallet) $('.trade-submit').disabled = false;
+  if (wallet && !placing) $('.trade-submit').disabled = false;
   return { kind: 'route', hops: r.hops, amount: value, minOut: floor, via };
 }
 
@@ -1324,15 +1374,22 @@ async function settle(placedEpoch, token, side, symbol, quote, quoteBefore = nul
   await loadMarket();
 }
 
+/// An order waiting for Nap: no second one until it is answered — the
+/// page's own refresh re-enables the button, and Nap queues a second card
+/// behind the first (audit, 6 Oct 2026).
+let placing = false;
+
 async function placeOrder() {
   const c = currentCoin;
-  if (!c) return;
+  if (!c || placing) return;
   if (!wallet) return pickWallet();
   const q = quote();
   if (!q) return;
   const button = $('.trade-submit');
   if (button.disabled) return;
+  placing = true;
   button.disabled = true;
+  setOrder(c.token, "Approve it in Nap's window.", 'idle');
   const side = tradeSide, symbol = c.symbol;
   // What it pays with or receives: the quote, or another coin by a route.
   const via = q.kind === 'route' ? q.via : c.quote;
@@ -1351,6 +1408,7 @@ async function placeOrder() {
     // 4001 is Nap's "no"; anything else says what happened in its own words.
     setOrder(c.token, e.code === 4001 ? 'Not placed. Nothing left your wallet.' : e.message, e.code === 4001 ? 'idle' : 'error');
   } finally {
+    placing = false;
     button.disabled = false;
     quote();
   }
@@ -1576,7 +1634,7 @@ function renderPreview() {
   if (picker.jadeHtml !== chips) { picker.innerHTML = chips; picker.jadeHtml = chips; }
   $('#create-quote-row').hidden = quotes.length < 2;
   const start = num(CURVE.baseZat * BigInt(CURVE.lots) * qt.unit);
-  const per = usdBy[qt.symbol];
+  const per = NETWORK === 'testnet' ? null : usdBy[qt.symbol];
   const both = (v) => `${zecText(v)} ${qt.symbol}${per ? ` · ${usdText(v * per)}` : ''}`;
   $('#fact-start').textContent = both(start);
   $('#fact-raise').textContent = `~${both(num(cost(0, CURVE.graduateAt, qt.unit)))}`;
@@ -1614,13 +1672,32 @@ form.querySelectorAll('input,textarea').forEach((input) => input.addEventListene
 /// Attach a coin's picture and description with the proof Nap made once.
 /// Kept for this tab until it succeeds, so a failed upload can be retried.
 async function attach(token, pending) {
-  const up = await fetch(`/api/content/${token}`, {
+  const up = await fetch(`/api/content/${token}?network=${NETWORK}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(pending),
   });
-  if (up.ok || up.status === 409) { try { sessionStorage.removeItem(`jade.attach.${token}`); } catch { /* none kept */ } content.delete(token); return null; }
+  const done = () => { try { sessionStorage.removeItem(`jade.attach.${NETWORK}.${token}`); } catch { /* none kept */ } content.delete(token); return null; };
+  if (up.ok) return done();
+  if (up.status === 409) {
+    // Already attached: ours only if it is the same content (audit, 6 Oct 2026).
+    const kept = await fetch(`/api/content/${token}?network=${NETWORK}`, { credentials: 'omit', cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+    if (kept && kept.description === pending.content.description && (kept.image || '') === (pending.content.image || '')) return done();
+  }
   return (await up.json().catch(() => ({}))).error || `HTTP ${up.status}`;
+}
+
+/// A picture that did not attach before the page was reloaded: its proof was
+/// kept for this tab, so it can still go (it is made only once, at creation).
+async function retryAttachments() {
+  let keys = [];
+  try { keys = Object.keys(sessionStorage).filter((k) => k.startsWith(`jade.attach.${NETWORK}.`)); } catch { return; }
+  for (const k of keys) {
+    const token = k.slice(`jade.attach.${NETWORK}.`.length);
+    let pending;
+    try { pending = JSON.parse(sessionStorage.getItem(k)); } catch { continue; }
+    if (isHex(token) && pending?.proof) await attach(token, pending).catch(() => null);
+  }
 }
 
 form.addEventListener('submit', async (event) => {
@@ -1645,7 +1722,7 @@ form.addEventListener('submit', async (event) => {
     let note = `Created ${symbol} (${short(token)}). It can be traded right away.`;
     if (r.content?.proof && (description || imageData)) {
       const pending = { content: { description, image: imageData }, proof: r.content.proof };
-      try { sessionStorage.setItem(`jade.attach.${token}`, JSON.stringify(pending)); } catch { /* this call only */ }
+      try { sessionStorage.setItem(`jade.attach.${NETWORK}.${token}`, JSON.stringify(pending)); } catch { /* this call only */ }
       let err;
       try { err = await attach(token, pending); } catch { err = 'the upload did not go through'; }
       note += err ? ` The picture and description were not attached yet (${err}). ` : ' Picture and description attached.';
@@ -1745,7 +1822,15 @@ installTips();
 renderSortHeads();
 if (matchMedia('(max-width: 780px)').matches) search.placeholder = 'Search coins';
 
+// Testnet looks like mainnet except for this line; it must not (audit, 6 Oct 2026).
+if (NETWORK === 'testnet') {
+  const b = document.createElement('div');
+  b.className = 'j-testnet';
+  b.textContent = 'Testnet — coins here are for trying things out and are worth nothing.';
+  document.body.prepend(b);
+}
 syncRoute({ scroll: false });
 loadMarket();
 loadUsd();
+retryAttachments();
 document.documentElement.dataset.jadeReady = 'true';
