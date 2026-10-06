@@ -6852,3 +6852,16 @@ The user: "cancel the bridge limit". §155's pilot cap (0.01 ETH) and §163's BO
 |---|---|---|
 | 170.1 | **No caps.** `ZYN_ETH_CAPS` and `ZYN_ETH_CAP_WEI` are removed from Contabo's `/etc/zyn/zyn-eth-bridge.env` (the capped file is kept beside it as `.capped-20261006151742`), and the bridge was restarted. The code is unchanged: setting either variable again restores a cap. No deposit had been held over a cap, so nothing waits for a refund | ✅ |
 | 170.2 | **What still bounds the vault:** every payout batch needs two of the Safe's three owners; the bridge holds no signing key and only proposes. Nothing now limits how much ETH or BOLD the Safe holds | ✅ |
+
+## §171 — SOL on mainnet: the vault answers to the team's Squads multisig (6 Oct 2026)
+
+The user: "how far are we from bridging solana on mainnet" → "multisig ready 23bHgTpb8kcbBXcKP66MdjrRfM4UgAtjDDFkidWYLwnU". That address is the vault of Squads v4 multisig `A334BUsBudh3RzkSpxgKu3wcCsyVYk4iP2iXMk9pFSvh` (2 of 3, no time lock, no config authority, made 6 Oct). It does for SOL what §155's Safe does for ETH, and closes 155.7's first item.
+
+| # | Decision | |
+|---|---|---|
+| 171.1 | **Squads mode, the only mode on mainnet.** With `ZYN_SOL_SQUADS`, `zyn-sol-bridge`'s vault is the multisig's vault PDA (`squads::vault_pda`, pinned to the team's multisig). The bridge holds a proposer key (`ZYN_SOL_PROPOSER`, made by `zyn-sol-bridge proposer-key`) that must be a member with Initiate only; it refuses to propose with any other permission. The custodians' key stays refused on mainnet | ✅ |
+| 171.2 | **A payout batch is one vault transaction plus its proposal**, in one Solana transaction from the proposer, at most 8 payouts. The payouts are simulated as the vault first, so owners are only asked to approve a batch the vault can pay. The executing owner pays the network fee, so a SOL exit is paid in full. Rent for the two accounts (about 0.005 SOL a batch) comes from the proposer; the multisig has no rent collector, so it is not reclaimed | ✅ |
+| 171.3 | **Settling:** the bridge follows the proposal; once it reads Executed, it finds the finalized transaction that ran `VaultTransactionExecute` on that vault transaction and records `SettleExit` under its signature. Rejected, cancelled or stale: its exits wait until `proposal.json` is deleted. A batch that never landed is proposed again | ✅ |
+| 171.4 | **Rehearsed on Solana devnet (6 Oct)** against a throwaway 2-of-3 multisig with the proposer as an Initiate-only member and a stand-in node: a memo deposit credited; a 0.01 SOL exit proposed, approved by two owners, executed and settled; a two-payout batch rejected and held, then re-proposed, executed (recipient +0.025 SOL) and settled; an unpayable batch refused before proposing | ✅ |
+| 171.5 | **SOL.zy on mainnet** = `bridged("solana", "")` = `0f61f434…95c9f6df`. Public RPC: Solana's own endpoint for the bridge on Contabo; browsers use publicnode (Solana's refuses them) | ✅ |
+| 171.6 | **Left:** deploy on Contabo (binary, proposer key, env, unit, `register`); the user adds the proposer to the multisig with Initiate only and sends it about 0.05 SOL; Nap's and Lend's mainnet config (SOL deposits shut until the chain lists SOL.zy; payouts disclosed as waiting for the multisig's owners); a first round trip | ⏳ |
