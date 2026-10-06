@@ -6843,3 +6843,12 @@ The user: "jade will seed the lending vault. We should push jade first. audit it
 | 169.2 | **Node:** it halts intake and sealing on a journal or state write failure, or when the books do not balance after a seal; the state file is fsynced. It refuses a new genesis over an undecodable state or beside an existing journal. Intake is capped at 12 holder intents per account per epoch. Status and stats are cached, and the history lock order is fixed | ✅ |
 | 169.3 | **Nap and Jade:** cards show the coin's address and flag tickers other coins share. A loose floor is shown in red with the gap. Routes and pool swaps show their impact against the pools' prices (warn at 5%; Jade refuses above 30%). One order waits at a time. Content is per network, with a v2 proof that names the chain. Testnet is labelled, and the operator and custody risks are stated inline | ✅ |
 | 169.4 | **Open, for the user:** the ETH and BOLD launch assets on mainnet (the ETH bond exceeds the ETH cap; a BOLD coin cannot graduate under the BOLD cap). How Jade "seeds Lend": the pot is keyless and locked by §68.6/§71.22/§138.3, graduated pools lock their shares, and Lend refuses memecoin pools, so the seed is treasury capital unless those decisions change. Before real money: the reserve top-up, an off-host journal copy and the first anchor; the NU7 plan (Zebra before about 2 Nov, mainnet height about 20 Oct); a custody drill; the gateway blocking operator methods; alerts | ⏳ |
+
+## §170 — The mainnet ETH bridge carries no caps (6 Oct 2026)
+
+The user: "cancel the bridge limit". §155's pilot cap (0.01 ETH) and §163's BOLD cap (1,000) made §166's ETH and BOLD launch terms unusable: the ETH bond (0.025) exceeded the whole ETH cap, and a BOLD coin needs about 22,760 BOLD to graduate. Supersedes the caps in §155 and §163; resolves the first item of 169.4.
+
+| # | Decision | |
+|---|---|---|
+| 170.1 | **No caps.** `ZYN_ETH_CAPS` and `ZYN_ETH_CAP_WEI` are removed from Contabo's `/etc/zyn/zyn-eth-bridge.env` (the capped file is kept beside it as `.capped-20261006151742`), and the bridge was restarted. The code is unchanged: setting either variable again restores a cap. No deposit had been held over a cap, so nothing waits for a refund | ✅ |
+| 170.2 | **What still bounds the vault:** every payout batch needs two of the Safe's three owners; the bridge holds no signing key and only proposes. Nothing now limits how much ETH or BOLD the Safe holds | ✅ |
