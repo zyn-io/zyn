@@ -1196,14 +1196,22 @@ fn handle(
             };
             let proposals: Vec<serde_json::Value> = d.proposals.iter().rev().map(|(id, p)| {
                 let until = match p.state { objectvm::dao::State::Backing { until } | objectvm::dao::State::Voting { until } => Some(until), _ => None };
+                // A strict proposal's own terms: what it needs, against the
+                // items outstanding when its vote opened (§173).
+                let terms = p.terms.map(|t| serde_json::json!({
+                    "backers": t.backers, "window_blocks": t.window, "quorum_bps": t.quorum_bps, "base": t.base,
+                    "quorum": ((t.base as u64 * t.quorum_bps as u64).div_ceil(10_000)).max(1),
+                }));
                 serde_json::json!({
-                    "id": id, "text": hex(&p.text), "state": p.state.word(), "until": until,
+                    "id": id, "text": hex(&p.text), "state": p.state.word(), "until": until, "strict": p.terms.is_some(), "terms": terms,
                     "pay": p.pay.map(|x| serde_json::json!({ "asset": hex(&x.asset), "amount": x.amount.0.to_string(), "to": hex(&x.to) })),
                     "backers": p.backers.len(), "yes": p.yes.len(), "no": p.no.len(),
                 })
             }).collect();
             let v = serde_json::json!({
                 "set": true, "epoch": st.epoch, "epoch_seconds": n.policy().max_seconds_per_epoch,
+                "strict": d.strict.is_some(), "frozen": d.strict.is_some_and(|x| x.frozen),
+                "clock": st.market.dao_clock.map(|(h, x)| serde_json::json!({ "height": h, "hash": hex(&x) })), "block_seconds": 75,
                 "backers": d.backers, "voting_epochs": d.voting_epochs, "quorum_bps": d.quorum_bps,
                 "outstanding": st.market.collections.get(&collection).map(|t| t.outstanding),
                 "treasury": d.treasury.iter().map(|(a, v)| serde_json::json!({ "asset": hex(a), "amount": v.0.to_string() })).collect::<Vec<_>>(),
@@ -2597,6 +2605,31 @@ fn zec_asset() -> [u8; 32] {
 /// find its notes, and a custodian quorum to authorise the spend. Missing any
 /// one of them is a devnet, not a misconfiguration, so this returns `None`
 /// rather than failing — and the caller says which it got.
+/// How far under the Zcash tip the DAO clock reads, so a reorg near the tip
+/// cannot leave a height on the ledger whose hash Zcash no longer has.
+const DAO_CLOCK_DEPTH: u64 = 10;
+/// Blocks between clock posts: windows close within about 20 minutes of due.
+/// `ZYN_DAO_CLOCK_EVERY` may set it lower (testnet ticks every block).
+const DAO_CLOCK_EVERY: u64 = 16;
+
+/// A Zcash node for the DAO clock, from the same settings the bridge uses.
+fn dao_clock_zebra() -> Option<zyn_custody::zebra::Zebra> {
+    use zyn_custody::zebra::{Network, Zebra};
+    let host = std::env::var("ZYN_ZEBRA_HOST").ok()?;
+    let port: u16 = std::env::var("ZYN_ZEBRA_PORT").ok()?.parse().ok()?;
+    let network = match env("ZYN_NETWORK", "testnet").as_str() {
+        "mainnet" => Network::Mainnet,
+        _ => Network::Testnet,
+    };
+    let user = std::env::var("ZYN_ZEBRA_USER").ok();
+    let pass = std::env::var("ZYN_ZEBRA_PASSWORD").ok();
+    let auth = match (&user, &pass) {
+        (Some(u), Some(p)) => Some((u.as_str(), p.as_str())),
+        _ => None,
+    };
+    Zebra::connect(&host, port, auth, network).ok()
+}
+
 fn build_anchoring(chain: u32, dir: &str) -> Option<Anchoring> {
     use zyn_custody::zebra::{Network, Zebra};
 
@@ -3169,6 +3202,47 @@ fn main() {
         });
     }
 
+    // The Zcash clock DAOs' strict windows run on (§173): a height 10 blocks
+    // under the tip and its hash, posted every 16 blocks (about 20 minutes)
+    // while any DAO exists. Anyone with a Zcash node can check each one.
+    if let Some(zebra) = dao_clock_zebra() {
+        let every: u64 = env("ZYN_DAO_CLOCK_EVERY", &DAO_CLOCK_EVERY.to_string()).parse().unwrap_or(DAO_CLOCK_EVERY).max(1);
+        let node = Arc::clone(&node);
+        let journal = Arc::clone(&journal);
+        let pub_log = Arc::clone(&pub_log);
+        let dir = dir.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            if halted().is_some() {
+                continue;
+            }
+            let (has_dao, clock) = match node.lock() {
+                Ok(n) => (!n.state().market.daos.is_empty(), n.state().clock_height()),
+                Err(_) => continue,
+            };
+            if !has_dao {
+                continue;
+            }
+            let height = match zebra.block_count() {
+                Ok(t) => t.saturating_sub(DAO_CLOCK_DEPTH),
+                Err(e) => {
+                    eprintln!("zyn-object-node: the Zcash clock cannot read the tip: {e:?}");
+                    continue;
+                }
+            };
+            if clock.is_some_and(|c| height < c + every) {
+                continue;
+            }
+            let Ok(hash) = zebra.block_hash(height) else { continue };
+            let op = Op::DaoClock { program: zyn_vm::program::dao_configure(), height: height as u32, hash };
+            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                if let objectvm::Receipt::Refused(why) = r {
+                    eprintln!("zyn-object-node: Zcash clock at {height} refused: {why}");
+                }
+            }
+        });
+    }
+
     // Seal on a timer, so a chain with no traffic still advances and a wallet
     // scanning it sees epochs go by rather than wondering if it is alive.
     {
@@ -3211,16 +3285,11 @@ fn main() {
             // before rules v2, prices aged and auctions stepped per epoch),
             // so while anything is listed epochs keep sealing on the clock.
             let lending = !n.state().market.lend.listed.is_empty();
-            // And a DAO's open proposals (§172): their windows are counted in
-            // epochs, so while one is open epochs keep their length.
-            let dao_open = n.state().market.daos.values().any(|d| {
-                d.proposals.values().any(|p| matches!(p.state, objectvm::dao::State::Backing { .. } | objectvm::dao::State::Voting { .. }))
-            });
             if halted().is_some() {
                 continue;
             }
             let sealed = n.seal_if_due(now_secs()).is_some()
-                || ((sale_open || lending || dao_open) && n.seal_on_clock(now_secs()).is_some());
+                || ((sale_open || lending) && n.seal_on_clock(now_secs()).is_some());
             // The public lending figures move only at a seal.
             if sealed {
                 take_lend_snapshot(n.state());

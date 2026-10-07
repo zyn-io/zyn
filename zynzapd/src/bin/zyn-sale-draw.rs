@@ -9,7 +9,11 @@
 //!   zyn-sale-draw allow <f>   put the accounts in file f on the list
 //!   zyn-sale-draw dao <backers> <voting epochs> <quorum bps>
 //!                             give the collection its DAO (§172): its creator
-//!                             shares go to the DAO's treasury from then on
+//!                             shares go to the DAO's treasury from then on.
+//!                             Refused once the Zcash clock has started
+//!   zyn-sale-draw dao-terms <backers> <window blocks> <quorum bps>
+//!                             strict terms (§173): windows in Zcash blocks,
+//!                             fixed once the DAO has a proposal
 //!   zyn-sale-draw close       CloseSale, once Zcash reaches the announced close
 //!   zyn-sale-draw draw        run the draw over every ticket and post its root
 //!   zyn-sale-draw open-mint   end claims; post the order the rest sell in
@@ -396,6 +400,16 @@ fn dao(c: &Ctx) -> Result<(), String> {
     c.submit("dao", &Op::SetDao { program: program::dao_configure(), collection: c.collection(), backers, voting_epochs, quorum_bps })
 }
 
+/// Strict DAO terms (§173), once the node's Zcash clock has started.
+fn dao_terms(c: &Ctx) -> Result<(), String> {
+    let usage = "usage: zyn-sale-draw dao-terms <backers> <window blocks> <quorum bps>";
+    let arg = |i: usize| std::env::args().nth(i).ok_or(usage);
+    let backers: u32 = arg(2)?.parse().map_err(|_| usage)?;
+    let window_blocks: u64 = arg(3)?.parse().map_err(|_| usage)?;
+    let quorum_bps: u32 = arg(4)?.parse().map_err(|_| usage)?;
+    c.submit("dao-terms", &Op::SetDaoTerms { program: program::dao_configure(), collection: c.collection(), backers, window_blocks, quorum_bps })
+}
+
 /// Put accounts on the list: a file of Zyn account ids, one per line (the
 /// whitelist's linked accounts). Each goes on blinded; already-listed ones are
 /// left as they are.
@@ -425,7 +439,8 @@ fn main() {
         "gate" => gate(&c),
         "allow" => allow(&c),
         "dao" => dao(&c),
-        other => Err(format!("unknown command {other}: status | open | gate | allow | dao | close | draw | open-mint")),
+        "dao-terms" => dao_terms(&c),
+        other => Err(format!("unknown command {other}: status | open | gate | allow | dao | dao-terms | close | draw | open-mint")),
     });
     if let Err(e) = result {
         eprintln!("zyn-sale-draw {cmd}: {e}");

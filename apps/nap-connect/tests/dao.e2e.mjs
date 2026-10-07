@@ -3,9 +3,10 @@
 // chain then recognises, a proposal backed by the member's item, a yes vote,
 // and the vote closing as passed — each step read back from the chain itself.
 //
-// Needs testnet's Collection Z DAO set with 1 backer and a short vote
-// (zyn-sale-draw dao 1 40 500: one item meets a 5% quorum of up to 20), and a
-// wallet holding a Collection Z item. EXPECT=passed asserts the vote passes.
+// Needs testnet's DAO on strict rules with 1 backer and a short window
+// (zyn-sale-draw dao-terms 1 8 500: 8 Zcash blocks, one item meets a 5% quorum
+// of up to 20) and the clock ticking every block (ZYN_DAO_CLOCK_EVERY=1), and a
+// wallet holding a batch-one item. EXPECT=passed asserts the vote passes.
 //
 //   MEMBER_PHRASE=<file>  node tests/dao.e2e.mjs
 import { chromium } from 'playwright-core';
@@ -31,7 +32,7 @@ const until = async (what, test, ms = 300000) => {
 };
 
 const dao = await rpc('zyn_dao', { collection: CAVE_Z });
-if (!dao?.set) throw new Error('testnet Collection Z has no DAO — run zyn-sale-draw dao 1 40 500 on the node first');
+if (!dao?.set) throw new Error('testnet has no DAO — run zyn-sale-draw dao-terms 1 8 500 on the node first');
 const before = dao.proposals.length;
 
 const b = await chromium.launch({ executablePath: process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
@@ -110,13 +111,14 @@ ok(voted.yes > 0, `${voted.yes} yes counted for #${mine.id}`);
 const closed = await until('the vote to close', async () => {
   const p = (await rpc('zyn_dao', { collection: CAVE_Z })).proposals.find((x) => x.id === mine.id);
   return ['passed', 'failed', 'unfunded'].includes(p.state) ? p : null;
-}, 900000);
+}, 2400000);
 // The ledger's rule (§172.6): more yes than no, and turnout at least the
 // quorum of outstanding items, rounded up, and at least one.
+// A strict proposal (§173) carries its own quorum, fixed when its vote opened.
 const terms = await rpc('zyn_dao', { collection: CAVE_Z });
-const quorum = Math.max(1, Math.ceil((terms.outstanding * terms.quorum_bps) / 10000));
+const quorum = closed.terms?.quorum ?? Math.max(1, Math.ceil((terms.outstanding * terms.quorum_bps) / 10000));
 const expect = closed.yes > closed.no && closed.yes + closed.no >= quorum ? 'passed' : 'failed';
-ok(closed.state === expect, `the vote closed ${closed.state} (${closed.yes} yes, ${closed.no} no, quorum ${quorum} of ${terms.outstanding}), as the rule says`);
+ok(closed.state === expect, `the vote closed ${closed.state} (${closed.yes} yes, ${closed.no} no, quorum ${quorum}), as the rule says`);
 ok(process.env.EXPECT !== 'passed' || closed.state === 'passed', 'and it passed, as this run was set up to');
 await page.screenshot({ path: `${S}/dao-e2e.png`, fullPage: true });
 await b.close();

@@ -79,24 +79,38 @@ test('a role sign-up keeps to its role, its limits and one entry per contact', a
   assert.equal((await post({ ...good, note: 'x'.repeat(281) })).ok, false);
   assert.deepEqual(await post(good), { ok: true });
   assert.deepEqual(await post(good), { ok: true, already: true });
-  assert.equal(JSON.parse(m.get('role:lookout:@alice')).note, 'run a mainnet replica');
+  const kept = [...m.keys()].filter((k) => k.startsWith('role:lookout:@alice:'));
+  assert.equal(kept.length, 1);
+  assert.equal(JSON.parse(m.get(kept[0])).note, 'run a mainnet replica');
+  // Someone else's entry under the same handle does not block this one.
+  assert.deepEqual(await post({ ...good, note: 'squatter' }), { ok: true });
+  assert.equal([...m.keys()].filter((k) => k.startsWith('role:lookout:@alice:')).length, 2);
   // The honeypot answers as accepted and stores nothing.
   assert.deepEqual(await post({ ...good, role: 'digger', burrow: 'x' }), { ok: true });
-  assert.equal(m.get('role:digger:@alice'), undefined);
+  assert.equal([...m.keys()].filter((k) => k.startsWith('role:digger:')).length, 0);
 });
 
-test('a proposal text is kept only under its own hash', async () => {
+test('a proposal text is kept only once the chain has a proposal with its hash', async () => {
   const fn = await import('../functions/api/proposal-text.js');
   const m = new Map();
   const env = { CAVE_WHITELIST: { get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); } } };
-  const post = (text) => fn.onRequestPost({ env, request: new Request('https://cavebro.win/api/proposal-text', { method: 'POST', body: JSON.stringify({ text }) }) }).then((r) => r.json());
-  const r = await post('  Fund a mainnet replica for a year.  ');
   const { createHash } = await import('node:crypto');
-  assert.equal(r.hash, createHash('sha256').update('Fund a mainnet replica for a year.').digest('hex'), 'trimmed, as Nap hashes it');
-  const got = await fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${r.hash}`) }).then((x) => x.json());
-  assert.equal(got.text, 'Fund a mainnet replica for a year.');
-  assert.equal((await post('x'.repeat(4001))).ok, false);
-  assert.equal((await fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${'0'.repeat(64)}`) })).status, 404);
+  const words = 'Fund a mainnet replica for a year.';
+  const hash = createHash('sha256').update(words).digest('hex');
+  let onChain = [];
+  const chain = async () => new Response(JSON.stringify({ result: { set: true, proposals: onChain.map((text) => ({ text })) } }));
+  const post = (text, network = 'testnet') => fn.onRequestPost({ env, request: new Request('https://cavebro.win/api/proposal-text', { method: 'POST', body: JSON.stringify({ text, network }) }) }, chain);
+  // Not proposed yet: refused, and nothing is stored.
+  assert.equal((await post(`  ${words}  `)).status, 409);
+  assert.equal(m.size, 0, 'an unproposed text leaves nothing behind');
+  onChain = [hash];
+  const r = await (await post(`  ${words}  `)).json();
+  assert.equal(r.hash, hash, 'trimmed, as Nap hashes it');
+  const get = (h, network = 'testnet') => fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${h}&network=${network}`) });
+  assert.equal((await (await get(hash)).json()).text, words);
+  assert.equal((await get(hash, 'mainnet')).status, 404, 'kept per network');
+  assert.equal((await post('x'.repeat(4001))).status, 400);
+  assert.equal((await get('0'.repeat(64))).status, 404);
 });
 
 test('a proposal made closes its form, so the list behind it can be used', async () => {

@@ -716,11 +716,19 @@ async function daoPage() {
   // Membership: Nap lists this wallet's items; only the count is used, here.
   let wanted = false;
   let members = 0;
-  let daoSet = false;
   let dao = null;
+  // 'loading' | 'set' | 'unset' | 'error': an unreachable chain is not "no DAO".
+  let daoState = 'loading';
   // Set once the proposal list can be drawn: a membership check that answers
   // before the page has finished loading draws it then, not earlier.
   let proposalsReady = false;
+  // What this visit already voted, so its buttons do not offer it again.
+  const acted = new Set();
+  const memberActs = () => {
+    const on = members > 0 && daoState === 'set';
+    el('get-pass').hidden = !on;
+    el('new-prop').hidden = !on;
+  };
   const check = async () => {
     const out = el('member-out');
     if (!current) { wanted = true; pick(); return; }
@@ -734,8 +742,7 @@ async function daoPage() {
       out.textContent = n ? `You are a member: ${n} item${n === 1 ? '' : 's'}, ${n} vote${n === 1 ? '' : 's'}.` : 'No Cave item in this wallet yet.';
       out.classList.add(n ? 'good' : 'bad');
       members = n;
-      el('get-pass').hidden = !(n && daoSet);
-      el('new-prop').hidden = !(n && daoSet);
+      memberActs();
       if (proposalsReady) drawProposals();
     } catch (e) {
       if (gen !== generation) return;
@@ -744,9 +751,18 @@ async function daoPage() {
     }
   };
   el('check').onclick = check;
+  // Another account (or none): what the last one held no longer counts.
+  walletListeners.add(() => {
+    members = 0;
+    acted.clear();
+    el('pass-box').hidden = true;
+    memberActs();
+    if (proposalsReady) drawProposals();
+    if (wanted && current) check();
+  });
 
   // A member pass (§172): Nap proves one item to the ledger and hands back a
-  // code for the members' chat; the ledger keeps only the code's hash.
+  // code; the ledger keeps only the code's hash.
   el('get-pass').onclick = async () => {
     const out = el('member-out');
     el('get-pass').disabled = true;
@@ -757,7 +773,7 @@ async function daoPage() {
       if (gen !== generation) return;
       el('pass-code').textContent = r.token;
       el('pass-box').hidden = false;
-      out.textContent = 'Pass made. It is valid once the next epoch seals, and while you hold the item.';
+      out.textContent = 'Pass made. It lasts while you hold the item.';
       out.classList.add('good');
     } catch (e) {
       out.textContent = failText(e, 'No pass was made.');
@@ -765,7 +781,6 @@ async function daoPage() {
     } finally { el('get-pass').disabled = false; }
   };
   el('pass-copy').onclick = () => navigator.clipboard?.writeText(el('pass-code').textContent).then(() => { el('pass-copy').textContent = 'Copied'; }).catch(() => {});
-  walletListeners.add(() => { if (wanted && current) check(); });
 
   // Roles: a note to the team until names carry roles.
   const dialog = el('role-dialog');
@@ -798,7 +813,7 @@ async function daoPage() {
       });
       const body = await r.json().catch(() => ({}));
       if (!body.ok) throw new Error(body.error || `Not sent (HTTP ${r.status}).`);
-      out.textContent = body.already ? 'Already noted for this role.' : 'Sent. The team will reach out.';
+      out.textContent = body.already ? 'Already noted.' : 'Sent. The team will reach out.';
       out.classList.add('good');
     } catch (err) {
       out.textContent = err.message.replace(/^./, (c) => c.toUpperCase());
@@ -806,83 +821,120 @@ async function daoPage() {
     } finally { send.disabled = false; }
   };
 
-  // What the team publishes.
+  // What the team publishes: the setup steps.
   let data = null;
   try {
     const r = await fetch('/dao.json', { credentials: 'omit', cache: 'no-cache' });
     data = r.ok ? await r.json() : null;
   } catch { data = null; }
   if (gen !== generation) return;
-  // Proposals: from the ledger once the DAO is set (§172), each text read by
-  // its hash and checked against it; the published file before that.
+
+  // A proposal's text, read by its hash and checked against it.
   const texts = new Map();
   const textOf = async (h) => {
     if (texts.has(h)) return texts.get(h);
     let t = null;
     try {
-      const r = await fetch(`/api/proposal-text?hash=${h}`, { credentials: 'omit' });
+      const r = await fetch(`/api/proposal-text?hash=${h}&network=${NETWORK}`, { credentials: 'omit' });
       const b = r.ok ? await r.json() : null;
       if (typeof b?.text === 'string') {
         const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(b.text));
         if ([...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('') === h) t = b.text;
       }
     } catch { t = null; }
-    texts.set(h, t);
+    if (t !== null) texts.set(h, t);
     return t;
   };
-  // The node keeps its epochs this long while a proposal is open.
-  const left = (until) => {
-    const m = Math.max(0, Math.round(((until - (dao?.epoch ?? 0)) * (dao?.epoch_seconds || 15)) / 60));
-    return m >= 2880 ? `${Math.round(m / 1440)} days left` : m >= 120 ? `${Math.round(m / 60)} hours left` : `${m} min left`;
+
+  // Chain data is checked before it is drawn: numbers are whole, ids are hex.
+  const whole = (v) => Number.isSafeInteger(v) && v >= 0;
+  const STATES = ['backing', 'voting', 'passed', 'unfunded', 'failed', 'lapsed'];
+  const validProp = (x) => whole(x?.id) && isHex(x.text) && STATES.includes(x.state) && whole(x.backers) && whole(x.yes) && whole(x.no)
+    && (x.until == null || whole(x.until)) && (x.pay == null || (isInt(x.pay.amount) && isHex(x.pay.asset) && isHex(x.pay.to)))
+    && (x.terms == null || (whole(x.terms.backers) && whole(x.terms.quorum)));
+  const short = (h) => `${h.slice(0, 8)}…${h.slice(-6)}`;
+  const span = (secs) => {
+    const m = Math.max(0, Math.floor(secs / 60));
+    return m >= 2880 ? `${Math.floor(m / 1440)} days` : m >= 120 ? `${Math.floor(m / 60)} hours` : `${m} min`;
   };
+  // Strict proposals end at a Zcash height (§173); first-rules ones at an epoch.
+  const left = (x) => {
+    if (x.strict) {
+      const h = dao?.clock?.height;
+      if (!whole(h)) return 'time left unknown';
+      return `about ${span((x.until - h) * (dao.block_seconds || 75))} left`;
+    }
+    return `about ${span((x.until - (dao?.epoch ?? 0)) * (dao?.epoch_seconds || 15))} left`;
+  };
+
   async function drawProposals() {
     if (gen !== generation) return;
-    if (!daoSet) {
-      const props = Array.isArray(data?.proposals) ? data.proposals : [];
+    try {
+      if (daoState !== 'set') {
+        el('props-count').textContent = '—';
+        el('props').innerHTML = `<p class="say">${daoState === 'error' ? 'The DAO could not be read from the chain. Try again shortly.' : daoState === 'loading' ? 'Loading…' : "This network's DAO is not set yet."}</p>`;
+        return;
+      }
+      const props = (dao.proposals || []).filter(validProp);
       el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
-      el('props').innerHTML = props.length
-        ? props.map((x) => `<div class="prop"><div class="prop-head">${esc(x.title)} <span class="tag">${esc(x.state)}</span></div></div>`).join('')
-        : '<p class="say">No proposals yet. The first ones open with the sale.</p>';
-      return;
+      if (!props.length) { el('props').innerHTML = `<p class="say">No proposals yet.${members ? ' Yours can be the first.' : ''}</p>`; return; }
+      const rows = await Promise.all(props.map(async (x) => {
+        const t = await textOf(x.text);
+        const pay = x.pay ? `Pays ${zec(x.pay.amount)} ${x.pay.asset === ZEC_ZY ? 'ZEC.zy' : `of ${short(x.pay.asset)}`} to ${short(x.pay.to)}` : 'Pays nothing';
+        const need = x.terms ? x.terms.backers : dao.backers;
+        const quorum = x.terms ? ` · needs ${x.terms.quorum} voting` : '';
+        const count = x.state === 'backing' ? `${x.backers} of ${need} backers · ${left(x)}` : x.state === 'voting' ? `${x.yes} yes · ${x.no} no${quorum} · ${left(x)}` : `${x.yes} yes · ${x.no} no`;
+        const can = (c) => !acted.has(`${x.id}:${c === 'back' ? 'back' : 'vote'}`);
+        const acts = !members ? '' : x.state === 'backing' && can('back') ? `<button class="act small" data-vote="back" data-p="${x.id}">Back</button>`
+          : x.state === 'voting' && can('yes') ? `<button class="act small" data-vote="yes" data-p="${x.id}">Yes</button><button class="act small ghost" data-vote="no" data-p="${x.id}">No</button>` : '';
+        return `<div class="prop"><div class="prop-head"><b>#${x.id}</b><span class="tag ${x.state === 'voting' ? 'now' : ''}">${esc(x.state)}</span></div>
+          <p class="prop-text">${t === null ? '<em>Text not found under its hash.</em>' : esc(t)}</p>
+          <p class="prop-meta">${esc(pay)} · ${esc(count)}</p>${acts ? `<div class="row">${acts}</div>` : ''}</div>`;
+      }));
+      if (gen !== generation) return;
+      el('props').innerHTML = rows.join('');
+      el('props').querySelectorAll('[data-vote]').forEach((b) => {
+        b.onclick = async () => {
+          const out = el('props-out');
+          const mine = el('props').querySelectorAll(`[data-p="${b.dataset.p}"]`);
+          mine.forEach((x) => { x.disabled = true; });
+          out.className = 'out';
+          out.textContent = 'Approve in Nap.';
+          try {
+            const r = await ask('zyn_daoVote', { collection: CAVE_Z, proposal: Number(b.dataset.p), choice: b.dataset.vote });
+            acted.add(`${b.dataset.p}:${b.dataset.vote === 'back' ? 'back' : 'vote'}`);
+            out.textContent = r.items ? `Counted: ${r.items} item${r.items === 1 ? '' : 's'}.` : 'Your items had all acted on this proposal already.';
+            out.classList.add('good');
+            later(loadDao);
+            drawProposals();
+          } catch (e) {
+            mine.forEach((x) => { x.disabled = false; });
+            out.textContent = failText(e, 'Nothing was voted.');
+            out.classList.toggle('bad', e?.code !== 4001);
+          }
+        };
+      });
+    } catch (e) {
+      el('props').innerHTML = `<p class="say">The proposals could not be shown: ${esc(e?.message || String(e))}</p>`;
     }
-    const props = dao.proposals || [];
-    el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
-    if (!props.length) { el('props').innerHTML = `<p class="say">No proposals yet.${members ? ' Yours can be the first.' : ''}</p>`; return; }
-    const rows = await Promise.all(props.map(async (x) => {
-      const t = await textOf(x.text);
-      const pay = x.pay ? `Pays ${zec(x.pay.amount)} ZEC.zy to ${esc(x.pay.to.slice(0, 10))}…` : 'Pays nothing';
-      const count = x.state === 'backing' ? `${x.backers} of ${dao.backers} backers · ${left(x.until)}` : x.state === 'voting' ? `${x.yes} yes · ${x.no} no · ${left(x.until)}` : `${x.yes} yes · ${x.no} no`;
-      const acts = !members ? '' : x.state === 'backing' ? `<button class="act small" data-vote="back" data-p="${x.id}">Back</button>`
-        : x.state === 'voting' ? `<button class="act small" data-vote="yes" data-p="${x.id}">Yes</button><button class="act small ghost" data-vote="no" data-p="${x.id}">No</button>` : '';
-      return `<div class="prop"><div class="prop-head"><b>#${x.id}</b><span class="tag ${x.state === 'voting' ? 'now' : ''}">${esc(x.state)}</span></div>
-        <p class="prop-text">${t === null ? '<em>Text not found under its hash.</em>' : esc(t)}</p>
-        <p class="prop-meta">${pay} · ${count}</p>${acts ? `<div class="row">${acts}</div>` : ''}</div>`;
-    }));
-    if (gen !== generation) return;
-    el('props').innerHTML = rows.join('');
-    el('props').querySelectorAll('[data-vote]').forEach((b) => {
-      b.onclick = async () => {
-        const out = el('props-out');
-        out.className = 'out';
-        out.textContent = 'Approve in Nap.';
-        try {
-          const r = await ask('zyn_daoVote', { collection: CAVE_Z, proposal: Number(b.dataset.p), choice: b.dataset.vote });
-          out.textContent = `Counted with ${r.items} item${r.items === 1 ? '' : 's'} once the epoch seals.`;
-          out.classList.add('good');
-          later(loadDao);
-        } catch (e) {
-          out.textContent = failText(e, 'Nothing was voted.');
-          out.classList.toggle('bad', e?.code !== 4001);
-        }
-      };
-    });
   }
 
-  // A new proposal: the text is stored by its hash first, then Nap proposes.
+  // A new proposal: Nap proposes, then the text is published under its hash —
+  // the store takes only texts the chain has a proposal for.
   const propDialog = el('prop-dialog');
   const propForm = el('prop-form');
   el('new-prop').onclick = () => { propForm.reset(); el('prop-out').textContent = ''; propDialog.showModal(); };
   el('prop-close').onclick = () => propDialog.close();
+  const publish = async (text) => {
+    for (let i = 0; i < 9; i += 1) {
+      const r = await fetch('/api/proposal-text', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ text, network: NETWORK }) });
+      const b = await r.json().catch(() => ({}));
+      if (b.ok) return;
+      if (r.status !== 409) throw new Error(b.error || `HTTP ${r.status}`);
+      await new Promise((res) => setTimeout(res, 10000));
+    }
+    throw new Error('the chain did not show the proposal in time');
+  };
   propForm.onsubmit = async (e) => {
     e.preventDefault();
     const out = el('prop-out');
@@ -891,23 +943,40 @@ async function daoPage() {
     const amount = propForm.amount.value.trim();
     const to = propForm.to.value.trim().toLowerCase();
     if (amount && !/^[0-9a-f]{64}$/.test(to)) { out.textContent = 'A payment needs the Zyn account it goes to (64 hex characters).'; out.classList.add('bad'); return; }
+    if (to && !amount) { out.textContent = 'A recipient needs an amount, or leave both empty.'; out.classList.add('bad'); return; }
     el('prop-send').disabled = true;
     try {
-      out.textContent = 'Publishing the text…';
-      const r = await fetch('/api/proposal-text', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ text }) });
-      const b = await r.json().catch(() => ({}));
-      if (!b.ok) throw new Error(b.error || `The text was not stored (HTTP ${r.status}).`);
       out.textContent = 'Approve the proposal in Nap.';
       await ask('zyn_daoPropose', { collection: CAVE_Z, text, pay: amount ? { asset: ZEC_ZY, amount, to } : undefined });
       // Done: the form gets out of the way, and the list says what comes next.
       propDialog.close();
-      el('props-out').className = 'out good';
-      el('props-out').textContent = 'Proposed. It shows here once the epoch seals.';
+      const po = el('props-out');
+      po.className = 'out';
+      po.textContent = 'Proposed. Publishing its text…';
+      try {
+        await publish(text);
+        po.textContent = 'Proposed, and its text is published.';
+        po.classList.add('good');
+      } catch (err) {
+        po.textContent = `Proposed, but its text is not published yet (${err.message}). Keep a copy of it.`;
+        po.classList.add('bad');
+      }
       later(loadDao);
+      loadDao();
     } catch (err) {
       out.textContent = failText(err, 'Nothing was proposed.');
       out.classList.toggle('bad', err?.code !== 4001);
     } finally { el('prop-send').disabled = false; }
+  };
+
+  // The rules, as the chain has them: the proposals bubble says them.
+  const rulesTip = () => {
+    const b = document.querySelector('#h-props')?.closest('section')?.querySelector('.tip');
+    if (!b || daoState !== 'set') return;
+    const q = `${dao.quorum_bps / 100}%`;
+    b.dataset.tip = dao.strict
+      ? `${dao.backers} item${dao.backers === 1 ? '' : 's'} must back a proposal within ${span(dao.voting_epochs * (dao.block_seconds || 75))}; its vote then runs ${span(dao.voting_epochs * (dao.block_seconds || 75))}, counted in Zcash blocks. It passes with more yes than no and at least ${q} of the items outstanding when its vote opens taking part. A proposal keeps the rules it opened under.`
+      : `${dao.backers} item${dao.backers === 1 ? '' : 's'} must back a proposal within ${span(dao.voting_epochs * (dao.epoch_seconds || 15))}; its vote then runs as long. It passes with more yes than no and at least ${q} of the items outstanding taking part.`;
   };
 
   async function loadDao() {
@@ -915,23 +984,27 @@ async function daoPage() {
       const d = await chain('zyn_dao', { collection: CAVE_Z });
       if (gen !== generation) return;
       dao = d?.set ? d : null;
-      daoSet = !!dao;
-    } catch { dao = null; daoSet = false; }
-    if (gen !== generation) return;
-    el('get-pass').hidden = !(members && daoSet);
-    el('new-prop').hidden = !(members && daoSet);
+      daoState = dao ? 'set' : 'unset';
+    } catch {
+      if (gen !== generation) return;
+      dao = null;
+      daoState = 'error';
+    }
+    memberActs();
+    rulesTip();
     const t = dao?.treasury?.find((x) => x.asset === ZEC_ZY);
-    el('f-treasury-box').hidden = !daoSet;
-    if (daoSet) el('f-treasury').textContent = `${zec(t?.amount || '0')} ZEC.zy`;
+    el('f-treasury-box').hidden = daoState !== 'set';
+    if (daoState === 'set') el('f-treasury').textContent = `${zec(isInt(t?.amount) ? t.amount : '0')} ZEC.zy`;
+    el('statement').innerHTML = daoState === 'set'
+      ? '<p class="say small">Only a passed proposal can pay out of the treasury; no key can move it. The operator orders transactions, so it could delay or refuse a vote, but it cannot speed one up or change a proposal\'s rules.</p>'
+      : daoState === 'error' ? '<p class="say small">The treasury could not be read from the chain.</p>' : '';
     drawProposals();
   }
   proposalsReady = true;
   await loadDao();
-  const rows = Array.isArray(data?.statement) ? data.statement : [];
-  el('statement').innerHTML = daoSet ? '<p class="say small">The DAO treasury is on the ledger: shares arrive by rule, and only a passed proposal pays out of it.</p>' : rows.length
-    ? `<table class="rows"><thead><tr><th>Date</th><th>In / out</th><th>ZEC.zy</th><th>For</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.dir)}</td><td>${esc(x.amount)}</td><td>${x.link ? `<a href="${esc(x.link)}" rel="noopener noreferrer" target="_blank">${esc(x.what)}</a>` : esc(x.what)}</td></tr>`).join('')}</tbody></table>`
-    : '<p class="say small">Treasury statement: no entries yet. The treasury receives its first share when the sale opens.</p>';
-  if (!daoSet && data?.treasury?.held_by) el('held-by').textContent = `Treasury account ${String(data.treasury.account || '').slice(0, 10)}…, held by ${data.treasury.held_by}.`;
+  // Time left and tallies move: look again every minute while the page is open.
+  const tick = setInterval(() => { if (gen !== generation) { clearInterval(tick); return; } loadDao(); }, 60000);
+
   if (data?.updated) el('updated').textContent = `updated ${data.updated}`;
   const steps = Array.isArray(data?.setup) ? data.setup : [];
   const label = { done: 'done', now: 'now', next: 'next', later: 'later' };
@@ -949,7 +1022,7 @@ async function daoPage() {
       el('f-out').textContent = `${c.outstanding} of ${Number(c.cap).toLocaleString('en-US')}`;
       el('f-each').textContent = BigInt(c.outstanding) > 0n ? `${zec(BigInt(c.floor) / BigInt(c.outstanding))} ZEC.zy` : '—';
     }
-    const phase = { open: 'tickets on sale', closed: 'waiting for the draw', drawn: 'claims open', openmint: 'open mint' }[sale?.phase] || (sale ? sale.phase : 'not open yet');
+    const phase = { open: 'tickets on sale', closed: 'waiting for the draw', drawn: 'claims open', openmint: 'open mint' }[sale?.phase] || (sale ? 'sale on' : 'not open yet');
     el('f-sale').textContent = sale && Number.isSafeInteger(sale.tickets) ? `${phase} · ${sale.tickets} tickets` : phase;
   } catch (e) {
     if (gen !== generation) return;

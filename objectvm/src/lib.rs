@@ -395,6 +395,22 @@ pub enum Op {
         voting_epochs: u64,
         quorum_bps: u32,
     },
+    /// Advance the Zcash clock (§173): a Zcash height and its block hash. Only
+    /// forward. Its first tick moves DAOs to strict rules. Operator only.
+    DaoClock {
+        program: ProgramId,
+        height: u32,
+        hash: Hash,
+    },
+    /// Strict terms for a collection's DAO (§173): windows in Zcash blocks,
+    /// fixed once it has a proposal. Operator only.
+    SetDaoTerms {
+        program: ProgramId,
+        collection: Address,
+        backers: u32,
+        window_blocks: u64,
+        quorum_bps: u32,
+    },
     /// Register a member pass, proved by one of the holder's live items: valid
     /// while that item stays live (§172).
     MemberPass {
@@ -699,6 +715,7 @@ pub enum Receipt {
     CurveQuoteSet { quote: Address, unit: i128, bond: Fixed },
     SaleGated { collection: Address, base: u32 },
     DaoSet { collection: Address },
+    DaoClock { height: u32 },
     PassSet { collection: Address },
     Proposed { collection: Address, id: u32 },
     Voted { collection: Address, id: u32, items: u32 },
@@ -2120,6 +2137,10 @@ impl MicrochainVm for ObjectVm {
             }
             Op::MintItem { program, collection, serial, owner, nonce, enc } => one(if *program != program::mint_item() {
                 Err("wrong program for a mint")
+            } else if self.market.daos.get(collection).is_some_and(|d| d.strict.is_some()) {
+                // A strict DAO's members come only through its sale (§173):
+                // an operator mint would be a vote the operator gave itself.
+                Err("a DAO collection's items come only through its sale")
             } else {
                 self.apply_mint_item(collection, *serial, owner, nonce, enc)
             }),
@@ -2159,6 +2180,16 @@ impl MicrochainVm for ObjectVm {
                 Err("wrong program for a DAO's terms")
             } else {
                 self.apply_set_dao(collection, *backers, *voting_epochs, *quorum_bps)
+            }),
+            Op::DaoClock { program, height, hash } => one(if *program != program::dao_configure() {
+                Err("wrong program for the Zcash clock")
+            } else {
+                self.apply_dao_clock(*height, hash)
+            }),
+            Op::SetDaoTerms { program, collection, backers, window_blocks, quorum_bps } => one(if *program != program::dao_configure() {
+                Err("wrong program for a DAO's terms")
+            } else {
+                self.apply_set_dao_terms(collection, *backers, *window_blocks, *quorum_bps)
             }),
             Op::MemberPass { holder, program, collection, item, pass } => one(if *program != program::dao() {
                 Err("wrong program for a member pass")
@@ -2844,6 +2875,12 @@ impl MicrochainVm for ObjectVm {
             }
             Op::SetDao { program, collection, backers, voting_epochs, quorum_bps } => {
                 e.u8(56).bytes(&program.0).bytes(collection).u32(*backers).u64(*voting_epochs).u32(*quorum_bps);
+            }
+            Op::DaoClock { program, height, hash } => {
+                e.u8(60).bytes(&program.0).u32(*height).bytes(hash);
+            }
+            Op::SetDaoTerms { program, collection, backers, window_blocks, quorum_bps } => {
+                e.u8(61).bytes(&program.0).bytes(collection).u32(*backers).u64(*window_blocks).u32(*quorum_bps);
             }
             Op::MemberPass { holder, program, collection, item, pass } => {
                 e.u8(57).bytes(holder).bytes(&program.0).bytes(collection).bytes(item).bytes(pass);
@@ -3561,6 +3598,14 @@ impl MicrochainVm for ObjectVm {
                 collection: d.hash().ok()?,
                 backers: d.u32().ok()?,
                 voting_epochs: d.u64().ok()?,
+                quorum_bps: d.u32().ok()?,
+            }),
+            60 => Some(Op::DaoClock { program: ProgramId(d.hash().ok()?), height: d.u32().ok()?, hash: d.hash().ok()? }),
+            61 => Some(Op::SetDaoTerms {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                backers: d.u32().ok()?,
+                window_blocks: d.u64().ok()?,
                 quorum_bps: d.u32().ok()?,
             }),
             57 => Some(Op::MemberPass { holder: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, item: d.hash().ok()?, pass: d.hash().ok()? }),

@@ -117,32 +117,32 @@
       <section class="ledger" aria-labelledby="h-member">
         <div class="ledger-index"><h2 id="h-member">Membership</h2><span>1 item · 1 vote</span></div>
         <div class="ledger-body">
-          <p class="say">One Cave item is one membership and one vote. The batch it comes from and the animal on it carry no rank or role.<button class="tip" type="button" aria-expanded="false" data-tip="Membership is private: you prove you hold an item without showing which item or which account. Selling or redeeming the item ends the membership, and it passes to the new holder.">i</button></p>
+          <p class="say">One Cave item is one membership and one vote: today the items of batch one, Collection Z. The animal on an item carries no rank or role.<button class="tip" type="button" aria-expanded="false" data-tip="Selling, moving or redeeming the item ends its membership, and it passes to whoever holds the item next. Later batches are to join the same DAO when they launch.">i</button></p>
           <div class="row">
             <button class="act" id="check" type="button">Check with Nap</button>
             <button class="act ghost" id="get-pass" type="button" hidden>Get a member pass</button>
           </div>
           <p class="out" id="member-out" role="status" aria-live="polite"></p>
           <div class="pass" id="pass-box" hidden>
-            <p class="say small">Your pass code. Keep it private: give it only to the gate bot in the members' chat. Selling or moving the item ends it.</p>
+            <p class="say small">Your pass code: the key to the members' chat, which is not open yet. Keep it private. Selling or moving the item ends it.</p>
             <code id="pass-code"></code>
             <button class="act small ghost" id="pass-copy" type="button">Copy</button>
           </div>
-          <p class="say small">Your Nap checks this in your browser. Cave's server is not told what you hold.</p>
+          <p class="say small">Your Nap checks this in your browser; Cave's server is not told what you hold. On the ledger, the public never sees which item acted; the operator and the replicas that check the ledger can.</p>
         </div>
       </section>
 
       <section class="ledger" aria-labelledby="h-roles">
         <div class="ledger-index"><h2 id="h-roles">Roles</h2><span>voluntary</span></div>
         <div class="ledger-body">
-          <p class="say">Take on any role, or several. A role is kept by work anyone can check, and the treasury pays for that work. It adds no votes.</p>
+          <p class="say">Take on any role, or several. A role is kept by work anyone can check, and is paid by proposals the members pass. It adds no votes.</p>
           <div class="roles">
             <article class="role">
               <h3>Digger</h3>
               <dl>
                 <div><dt>Does</dt><dd>Builds privacy tools and apps on Zyn and Zcash.</dd></div>
                 <div><dt>Kept by</dt><dd>A shipped project or grant deliverable.</dd></div>
-                <div><dt>Paid as</dt><dd>Grants.</dd></div>
+                <div><dt>Paid by proposals as</dt><dd>Grants.</dd></div>
               </dl>
               <button class="act small" type="button" data-role="digger">Take it on</button>
             </article>
@@ -151,7 +151,7 @@
               <dl>
                 <div><dt>Does</dt><dd>Runs verifying replicas or the public RPC; audits code.</dd></div>
                 <div><dt>Kept by</dt><dd>A replica that agrees with ZynScan, or a published review.</dd></div>
-                <div><dt>Paid as</dt><dd>Running fees and audit bounties.</dd></div>
+                <div><dt>Paid by proposals as</dt><dd>Running fees and audit bounties.</dd></div>
               </dl>
               <button class="act small" type="button" data-role="lookout">Take it on</button>
             </article>
@@ -160,7 +160,7 @@
               <dl>
                 <div><dt>Does</dt><dd>Brings people into privacy: events, guides, onboarding.</dd></div>
                 <div><dt>Kept by</dt><dd>An event with NFC attendance certificates, or a published guide.</dd></div>
-                <div><dt>Paid as</dt><dd>Event budgets.</dd></div>
+                <div><dt>Paid by proposals as</dt><dd>Event budgets.</dd></div>
               </dl>
               <button class="act small" type="button" data-role="lantern">Take it on</button>
             </article>
@@ -171,7 +171,7 @@
       <section class="ledger" aria-labelledby="h-props">
         <div class="ledger-index"><h2 id="h-props">Proposals</h2><span id="props-count">—</span></div>
         <div class="ledger-body">
-          <p class="say">Members propose; enough backers bring a proposal to a vote; one vote per item, privately.<button class="tip" type="button" aria-expanded="false" data-tip="Draft rules: 10 items back a proposal before it goes to a vote; a vote stays open 7 days and passes with more yes than no and at least 10% of minted items voting. Until private voting is built, the team runs votes by hand and publishes each tally and payment.">i</button></p>
+          <p class="say">Members propose; enough backers bring a proposal to a vote; one vote per item.<button class="tip" type="button" aria-expanded="false" data-tip="Reading the rules from the chain…">i</button></p>
           <div id="props"><p class="say">Loading…</p></div>
           <button class="act ghost" id="new-prop" type="button" hidden>New proposal</button>
           <p class="out" id="props-out" role="status" aria-live="polite"></p>
@@ -188,10 +188,9 @@
             <div><dt>Sale</dt><dd id="f-sale">—</dd></div>
             <div id="f-treasury-box" hidden><dt>DAO treasury</dt><dd id="f-treasury">—</dd></div>
           </dl>
-          <p class="say">Sales pay 90% into the floor reserve and 10% to the treasury; each resale fee pays the treasury 10%.<button class="tip" type="button" aria-expanded="false" data-tip="The floor reserve belongs to holders: any item can be redeemed for its share at any time, whatever the DAO decides. The treasury is spent only on Cave's purpose: grants, Lookout fees and bounties, events and running Cave. Every inflow and spend is on the ledger.">i</button></p>
+          <p class="say">Sales pay 90% into the floor reserve and 10% to the treasury, and the treasury takes 10% of every resale fee.<button class="tip" type="button" aria-expanded="false" data-tip="The floor reserve belongs to holders: any item can be redeemed for its share at any time, whatever the DAO decides. The treasury pays only what members' proposals pass; every inflow and payment is on the ledger.">i</button></p>
           <p class="out" id="treasury-out" role="status" aria-live="polite"></p>
           <div id="statement"></div>
-          <p class="say small" id="held-by"></p>
         </div>
       </section>
 

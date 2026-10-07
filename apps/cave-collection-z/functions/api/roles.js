@@ -41,7 +41,10 @@ export async function onRequestPost({ request, env }) {
   const seen = Number((await env.CAVE_WHITELIST.get(rl)) || 0);
   if (seen >= PER_HOUR) return json({ ok: false, error: 'too many from here — try again later' }, 429);
 
-  const key = `role:${role}:${contact.toLowerCase()}`;
+  // One entry per contact, role and note: someone who signs up first under
+  // another's handle cannot block that person's own entry (audit, 7 Oct 2026).
+  const noteHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(note)))].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const key = `role:${role}:${contact.toLowerCase()}:${noteHash}`;
   if (await env.CAVE_WHITELIST.get(key)) return json({ ok: true, already: true });
   try {
     await env.CAVE_WHITELIST.put(rl, String(seen + 1), { expirationTtl: 7200 });

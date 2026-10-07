@@ -163,6 +163,10 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // by nature (what it asks, and whom it would pay), and so are a vote's
         // proposal, side and weight. Which items or accounts act never is.
         Op::SetDao { collection, backers, voting_epochs, quorum_bps, .. } => ("DAO terms set", true, json!({ "collection": hex(collection), "backers": backers, "voting_epochs": voting_epochs, "quorum_bps": quorum_bps })),
+        // The Zcash clock (§173) is public so anyone can check each height's
+        // hash against Zcash: a forged one is the operator hurrying a vote.
+        Op::DaoClock { height, hash, .. } => ("Zcash clock", true, json!({ "zcash_height": height, "zcash_hash": hex(hash) })),
+        Op::SetDaoTerms { collection, backers, window_blocks, quorum_bps, .. } => ("DAO terms set", true, json!({ "collection": hex(collection), "backers": backers, "window_blocks": window_blocks, "quorum_bps": quorum_bps })),
         Op::MemberPass { collection, .. } => ("Member pass", false, json!({ "collection": hex(collection) })),
         Op::Propose { collection, text, pay, .. } => ("Proposal", false, json!({
             "collection": hex(collection), "text": hex(text),

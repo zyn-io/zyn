@@ -34,7 +34,11 @@ fn enc() -> zyn_vm::note_enc::EncryptedNote {
 
 impl Chain {
     fn new() -> Chain {
-        let mut c = Chain { vm: ObjectVm::genesis(212, Limits { max_io: 16 }), seq: 0, salt: 0 };
+        Chain::on(212)
+    }
+
+    fn on(chain: u32) -> Chain {
+        let mut c = Chain { vm: ObjectVm::genesis(chain, Limits { max_io: 16 }), seq: 0, salt: 0 };
         c.ok(Op::RegisterCollection { program: program::register_collection(), asset: CAVE, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 20 });
         c.ok(Op::RegisterCollection { program: program::register_collection(), asset: OTHER, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 20 });
         c
@@ -271,4 +275,179 @@ fn a_dao_needs_a_collection_and_sane_terms() {
     assert!(c.refused(op).starts_with("backers and voting time must be positive"));
     let op = Op::SetDao { program: program::dao(), collection: CAVE, backers: 2, voting_epochs: 10, quorum_bps: 1_000 };
     assert_eq!(c.refused(op), "wrong program for a DAO's terms");
+}
+
+// ---------------------------------------------------------------------------
+// Strict rules (§173): the audit's findings, each now refused.
+
+impl Chain {
+    fn clock(&mut self, height: u32) {
+        let op = Op::DaoClock { program: program::dao_configure(), height, hash: [height as u8 | 1; 32] };
+        assert!(ObjectVm::intent_authorities(&op).is_empty());
+        self.ok(op);
+    }
+
+    fn terms(&mut self, backers: u32, window_blocks: u64, quorum_bps: u32) -> Receipt {
+        self.apply(Op::SetDaoTerms { program: program::dao_configure(), collection: CAVE, backers, window_blocks, quorum_bps })
+    }
+
+    fn propose(&mut self, who: AccountId, item: Hash, text: u8, pay: Option<Payment>) -> Receipt {
+        self.apply(Op::Propose { proposer: who, program: program::dao(), collection: CAVE, item, text: [text; 32], pay })
+    }
+}
+
+#[test]
+fn the_clock_starts_strict_rules_and_only_moves_forward() {
+    let mut c = Chain::new();
+    c.dao(1, 5, 1_000);
+    assert_eq!(c.refused(Op::SetDaoTerms { program: program::dao_configure(), collection: CAVE, backers: 1, window_blocks: 8, quorum_bps: 500 }), "start the Zcash clock first");
+    c.clock(100);
+    let op = Op::DaoClock { program: program::dao_configure(), height: 100, hash: [7; 32] };
+    assert_eq!(c.refused(op), "the Zcash clock only moves forward");
+    let op = Op::SetDao { program: program::dao_configure(), collection: CAVE, backers: 1, voting_epochs: 5, quorum_bps: 0 };
+    assert_eq!(c.refused(op), "the Zcash clock has started: a DAO's terms are set with SetDaoTerms");
+    assert!(matches!(c.terms(1, 8, 500), Receipt::DaoSet { .. }));
+    assert!(c.vm.market.daos[&CAVE].strict.is_some());
+}
+
+#[test]
+fn the_operator_cannot_drain_a_strict_treasury() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    let b = c.item(CAVE, 2, BOB);
+    c.ok(Op::SetSale { program: program::sale_open(), collection: CAVE, ticket_price: TICKET, claim_price: TICKET, open_price: TICKET, treasury_bps: 1_000 });
+    c.dao(2, 5, 1_000);
+    c.clock(1_000);
+    c.terms(2, 10, 5_000);
+    c.buy(CAROL, 20);
+    let full = c.treasury();
+    assert!(full.0 > 0);
+
+    // The old path: mint itself an item, retune, propose, vote, seal. Each
+    // step is refused or no longer enough.
+    let nonce = c.fresh();
+    let op = Op::MintItem { program: program::mint_item(), collection: CAVE, serial: 9, owner: TREASURY, nonce, enc: enc() };
+    assert_eq!(c.refused(op), "a DAO collection's items come only through its sale");
+    let grab = Payment { asset: ZEC, amount: full, to: TREASURY };
+    assert!(matches!(c.propose(ALICE, a, 1, Some(grab)), Receipt::Proposed { id: 1, .. }));
+    // Terms are fixed once there is a proposal.
+    assert_eq!(c.refused(Op::SetDaoTerms { program: program::dao_configure(), collection: CAVE, backers: 1, window_blocks: 1, quorum_bps: 0 }), "a DAO's terms are fixed once it has a proposal");
+    let op = c.vote(BOB, 1, vec![b], BACK);
+    c.ok(op);
+    assert!(matches!(c.state(1), State::Voting { until: 1_010 }));
+    let op = c.vote(ALICE, 1, vec![a], YES);
+    c.ok(op);
+    // Sealing a thousand epochs does not move a window measured in Zcash blocks.
+    c.seal(1_000);
+    assert!(matches!(c.state(1), State::Voting { .. }));
+    assert_eq!(c.treasury(), full);
+    // Zcash moves on; with 1 yes of 2 outstanding at a 50% quorum it passes.
+    c.clock(1_010);
+    c.seal(1);
+    assert_eq!(c.state(1), State::Passed);
+}
+
+#[test]
+fn mainnet_terms_have_floors() {
+    let mut c = Chain::on(objectvm::dao::MAINNET);
+    c.clock(10);
+    for (b, w, q) in [(2, 8_064, 1_000), (10, 2_000, 1_000), (10, 8_064, 100), (10, 40_000, 1_000)] {
+        assert!(matches!(c.terms(b, w, q), Receipt::Refused(_)), "{b} {w} {q}");
+    }
+    assert!(matches!(c.terms(10, 8_064, 1_000), Receipt::DaoSet { .. }));
+}
+
+#[test]
+fn a_strict_proposal_keeps_its_terms_and_its_quorum_base() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    let mut carol = Vec::new();
+    for s in 2..=5 {
+        carol.push(c.item(CAVE, s, CAROL));
+    }
+    c.clock(1);
+    c.terms(1, 10, 5_000);
+    // Opened with 5 outstanding: quorum 3 (50%, rounded up).
+    c.propose(ALICE, a, 1, None);
+    if let Some(t) = c.vm.market.daos[&CAVE].proposals[&1].terms {
+        assert_eq!((t.base, t.backers, t.window, t.quorum_bps), (5, 1, 10, 5_000));
+    } else {
+        panic!("a strict proposal records its terms");
+    }
+    let op = c.vote(ALICE, 1, vec![a], YES);
+    c.ok(op);
+    // Redeeming two of Carol's items mid-vote does not lower the quorum.
+    let n0 = nullifier(&[CAROL[0]; 32], &carol[0]);
+    let n1 = nullifier(&[CAROL[0]; 32], &carol[1]);
+    c.ok(Op::Redeem { holder: CAROL, program: program::redeem_item(), asset: CAVE, inputs: vec![(carol[0], n0), (carol[1], n1)] });
+    c.clock(20);
+    c.seal(1);
+    assert_eq!(c.state(1), State::Failed, "1 vote of a quorum of 3 fixed when the vote opened");
+}
+
+#[test]
+fn one_open_proposal_per_item_and_at_most_sixteen() {
+    let mut c = Chain::new();
+    let mut items = Vec::new();
+    for s in 1..=18 {
+        items.push(c.item(CAVE, s, ALICE));
+    }
+    c.clock(1);
+    c.terms(1, 10, 500);
+    c.propose(ALICE, items[0], 1, None);
+    assert_eq!(c.propose(ALICE, items[0], 2, None), Receipt::Refused("that item already has an open proposal"));
+    for (i, it) in items.iter().enumerate().take(16).skip(1) {
+        assert!(matches!(c.propose(ALICE, *it, i as u8, None), Receipt::Proposed { .. }));
+    }
+    assert_eq!(c.propose(ALICE, items[16], 99, None), Receipt::Refused("the DAO has 16 open proposals; wait for one to close"));
+    // Once they close, the item may propose again.
+    c.clock(11);
+    c.seal(1);
+    assert!(matches!(c.propose(ALICE, items[0], 3, None), Receipt::Proposed { .. }));
+}
+
+#[test]
+fn closed_strict_proposals_are_pruned_to_the_last_64() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    c.clock(1);
+    c.terms(1, 1, 500);
+    let mut h = 1;
+    for i in 0..70u32 {
+        assert!(matches!(c.propose(ALICE, a, (i % 250) as u8, None), Receipt::Proposed { .. }));
+        h += 1;
+        c.clock(h);
+        c.seal(1);
+    }
+    let d = &c.vm.market.daos[&CAVE];
+    assert_eq!(d.proposals.len(), objectvm::dao::KEEP_CLOSED);
+    assert_eq!(*d.proposals.keys().next().unwrap(), 7, "the oldest six are gone");
+    assert_eq!(d.strict.unwrap().next_id, 71, "numbers are never reused");
+}
+
+#[test]
+fn a_dao_with_an_open_first_rules_proposal_waits_before_going_strict() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    c.dao(2, 5, 1_000);
+    c.propose(ALICE, a, 1, None);
+    c.clock(1);
+    assert_eq!(c.terms(1, 10, 500), Receipt::Refused("close the DAO's open proposals before moving it to strict rules"));
+    c.seal(6);
+    assert_eq!(c.state(1), State::Lapsed);
+    assert!(matches!(c.terms(1, 10, 500), Receipt::DaoSet { .. }));
+    assert!(matches!(c.propose(ALICE, a, 2, None), Receipt::Proposed { id: 2, .. }));
+}
+
+#[test]
+fn registering_the_same_pass_again_is_refused() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    c.dao(2, 10, 1_000);
+    let op = c.pass(ALICE, a, b"t");
+    c.ok(op);
+    let op = c.pass(ALICE, a, b"t");
+    assert_eq!(c.refused(op), "that item already has that pass");
+    let op = c.pass(ALICE, a, b"u");
+    c.ok(op);
 }
