@@ -1203,7 +1203,7 @@ fn handle(
                 })
             }).collect();
             let v = serde_json::json!({
-                "set": true, "epoch": st.epoch,
+                "set": true, "epoch": st.epoch, "epoch_seconds": n.policy().max_seconds_per_epoch,
                 "backers": d.backers, "voting_epochs": d.voting_epochs, "quorum_bps": d.quorum_bps,
                 "outstanding": st.market.collections.get(&collection).map(|t| t.outstanding),
                 "treasury": d.treasury.iter().map(|(a, v)| serde_json::json!({ "asset": hex(a), "amount": v.0.to_string() })).collect::<Vec<_>>(),
@@ -3211,11 +3211,16 @@ fn main() {
             // before rules v2, prices aged and auctions stepped per epoch),
             // so while anything is listed epochs keep sealing on the clock.
             let lending = !n.state().market.lend.listed.is_empty();
+            // And a DAO's open proposals (§172): their windows are counted in
+            // epochs, so while one is open epochs keep their length.
+            let dao_open = n.state().market.daos.values().any(|d| {
+                d.proposals.values().any(|p| matches!(p.state, objectvm::dao::State::Backing { .. } | objectvm::dao::State::Voting { .. }))
+            });
             if halted().is_some() {
                 continue;
             }
             let sealed = n.seal_if_due(now_secs()).is_some()
-                || ((sale_open || lending) && n.seal_on_clock(now_secs()).is_some());
+                || ((sale_open || lending || dao_open) && n.seal_on_clock(now_secs()).is_some());
             // The public lending figures move only at a seal.
             if sealed {
                 take_lend_snapshot(n.state());

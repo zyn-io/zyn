@@ -37,8 +37,9 @@ use crate::{ObjectVm, Receipt};
 
 /// Items one vote may count at once.
 pub const MAX_VOTE_ITEMS: usize = 32;
-/// A vote stays open at most this many epochs (about 90 days at a minute each).
-pub const MAX_VOTING_EPOCHS: u64 = 129_600;
+/// A window lasts at most this many epochs: 30 days at the 15-second epochs
+/// the node keeps while a proposal is open.
+pub const MAX_VOTING_EPOCHS: u64 = 172_800;
 
 pub const BACK: u8 = 0;
 pub const YES: u8 = 1;
@@ -292,7 +293,7 @@ impl ObjectVm {
             return Err("that is not a registered collection");
         }
         if backers == 0 || voting_epochs == 0 || voting_epochs > MAX_VOTING_EPOCHS || quorum_bps > 10_000 {
-            return Err("backers and voting time must be positive, voting at most 129,600 epochs, quorum at most 100%");
+            return Err("backers and voting time must be positive, voting at most 172,800 epochs, quorum at most 100%");
         }
         let d = self.market.daos.entry(*collection).or_default();
         d.backers = backers;

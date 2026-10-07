@@ -88,13 +88,12 @@ const mine = await until('the proposal to appear on the chain', async () => {
   return d.proposals.length > before ? d.proposals[0] : null;
 });
 ok(['backing', 'voting'].includes(mine.state), `proposal #${mine.id} is on the chain (${mine.state})`);
-await page.reload();
-await page.waitForFunction((t) => document.querySelector('#props')?.textContent.includes(t), text, { timeout: 60000 });
+// The page looks again on its own after a proposal (a reload would drop Nap).
+await page.waitForFunction((t) => document.querySelector('#props')?.textContent.includes(t), text, { timeout: 180000 });
 ok(true, 'the page shows the proposal\'s text, checked against its hash');
 
 // The vote: yes with the member's items, then the close.
 if (mine.state === 'backing') throw new Error('set the DAO to 1 backer for this test');
-await page.click('#check');
 await page.waitForSelector(`[data-vote="yes"][data-p="${mine.id}"]`, { timeout: 60000 });
 await page.click(`[data-vote="yes"][data-p="${mine.id}"]`);
 await approve(new RegExp(`Vote yes on proposal #${mine.id}`));

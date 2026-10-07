@@ -830,9 +830,9 @@ async function daoPage() {
     texts.set(h, t);
     return t;
   };
-  const MINUTE_EPOCHS = 1;
+  // The node keeps its epochs this long while a proposal is open.
   const left = (until) => {
-    const m = Math.max(0, (until - (dao?.epoch ?? 0)) * MINUTE_EPOCHS);
+    const m = Math.max(0, Math.round(((until - (dao?.epoch ?? 0)) * (dao?.epoch_seconds || 15)) / 60));
     return m >= 2880 ? `${Math.round(m / 1440)} days left` : m >= 120 ? `${Math.round(m / 60)} hours left` : `${m} min left`;
   };
   async function drawProposals() {
