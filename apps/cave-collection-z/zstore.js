@@ -731,7 +731,7 @@ async function daoPage() {
       const mine = await ask('zyn_nftItems');
       if (gen !== generation) return;
       const n = (mine?.items || []).filter((i) => i.collection === CAVE_Z && Number.isSafeInteger(i.serial)).length;
-      out.textContent = n ? `You are a member: ${n} item${n === 1 ? '' : 's'}, ${n} vote${n === 1 ? '' : 's'}.` : 'No Collection Z item in this wallet yet.';
+      out.textContent = n ? `You are a member: ${n} item${n === 1 ? '' : 's'}, ${n} vote${n === 1 ? '' : 's'}.` : 'No Cave item in this wallet yet.';
       out.classList.add(n ? 'good' : 'bad');
       members = n;
       el('get-pass').hidden = !(n && daoSet);

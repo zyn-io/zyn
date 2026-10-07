@@ -62,7 +62,7 @@ nap = await ctx.waitForEvent('page', { timeout: 15000 }).catch(() => ctx.pages()
 await unlockNap(nap, words);
 await nap.waitForSelector('#yes', { timeout: 30000 });
 await nap.click('#yes');
-await page.waitForFunction(() => /You are a member|No Collection Z/.test(document.querySelector('#member-out')?.textContent || ''), null, { timeout: 60000 });
+await page.waitForFunction(() => /You are a member|No Cave item/.test(document.querySelector('#member-out')?.textContent || ''), null, { timeout: 60000 });
 const member = await page.textContent('#member-out');
 ok(/You are a member/.test(member), `the page says: ${member}`);
 
