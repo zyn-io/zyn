@@ -959,7 +959,7 @@ export const METHODS = {
           key: b.key, symbol: b.symbol, zy: b.zy, chainName: b.chainName, decimals: b.decimals, network: b.network, asset: b.asset,
           live: b.live, waiting: b.waiting || null, issued: b.issued === null ? null : String(b.issued),
           vault: b.vault || null, rpc: b.rpc || null, cluster: b.cluster || null, chainId: b.chainId || null, explorer: b.explorer || null,
-          capWei: b.capWei || null, custody: b.custody || null, safe: b.safe || null, chain: b.chain || null,
+          capWei: b.capWei || null, custody: b.custody || null, safe: b.safe || null, multisig: b.multisig || null, chain: b.chain || null,
           token: b.token || null, assetId: b.assetId || null, faucet: !!b.faucet,
         })),
       };
@@ -1048,7 +1048,7 @@ export const METHODS = {
         title: `Withdraw ${b.symbol}`,
         danger: true,
         rows: [['You send', `${wadText(amount)} ${b.zy}`], ['Bridge fee', `${wadText(fee)} ${b.zy}`], ['To', to], ['On', b.chainName]],
-        note: `${b.chainName} will show this address receiving the amount from the vault${b.safe ? '; the Safe owners approve each payout, which can take hours' : ''}.`,
+        note: `${b.chainName} will show this address receiving the amount from the vault${b.safe ? '; the Safe owners approve each payout, which can take hours' : b.multisig ? "; the multisig's owners approve each payout, which can take hours" : ''}.`,
         run: async () => {
           const h = await holdings(ctx);
           await bridges.bridgeOut(ctx.config, ctx.identity, h.held, b, to, amount, st.bps);

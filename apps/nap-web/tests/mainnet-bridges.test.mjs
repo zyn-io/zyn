@@ -42,7 +42,17 @@ test('mainnet ETH is under the Safe, uncapped; its asset id is the chain\'s', ()
   assert.equal(eth.custody, '2-of-3 Safe');
   assert.match(eth.safe, /^0x[0-9a-fA-F]{40}$/);
   assert.equal(eth.checkVault, undefined, 'ETH is the native asset: nothing to wait for');
-  assert.deepEqual(bridgesOf(mainnet).map((b) => b.key), ['eth', 'bold']);
+  assert.deepEqual(bridgesOf(mainnet).map((b) => b.key), ['sol', 'eth', 'bold']);
+});
+
+test('mainnet SOL is the Squads multisig\'s vault, as SOL.zy on network solana (§171)', () => {
+  const sol = bridgesOf(mainnet).find((b) => b.key === 'sol');
+  assert.equal(sol.vault, '23bHgTpb8kcbBXcKP66MdjrRfM4UgAtjDDFkidWYLwnU');
+  assert.equal(sol.multisig, 'A334BUsBudh3RzkSpxgKu3wcCsyVYk4iP2iXMk9pFSvh');
+  assert.equal(sol.network, 'solana');
+  assert.equal(sol.chainName, 'Solana');
+  assert.equal(sol.asset, '0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df');
+  assert.equal(sol.rpc, 'https://solana-rpc.publicnode.com', 'one that answers browsers');
 });
 
 const identity = deriveIdentity('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art');
