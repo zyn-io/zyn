@@ -11,13 +11,15 @@
 //! ```
 //!
 //! **Squads mode (§171), the only mode on mainnet:** with `ZYN_SOL_SQUADS`
-//! set, the vault is that Squads v4 multisig's vault, and this holds no key
-//! that can move it. It proposes each payout batch — a vault transaction and
-//! its proposal, from a proposer key that is a member with Initiate only —
-//! after simulating the payouts as the vault would make them. Two owners
-//! approve and execute it in the Squads app; this settles the exits once the
-//! execution is final. A proposal the owners reject or cancel is not proposed
-//! again until its record is deleted.
+//! set, the vault is that Squads v4 multisig's vault, and no key this holds
+//! can move it alone. It proposes each payout batch — a vault transaction and
+//! its proposal, from its own member key — after simulating the payouts as
+//! the vault would make them. A key that may vote is accepted only while the
+//! threshold is at least 3, so two owners are always needed besides it; it
+//! approves its own proposal, and with Execute it executes once the owners
+//! have approved. Otherwise the owners execute in the Squads app. It settles
+//! the exits once the execution is final. A proposal the owners reject or
+//! cancel is not proposed again until its record is deleted.
 //!
 //! **In:** a transfer into the vault carrying `zyn:<commitment>` becomes a
 //! `DepositCommitted`, recorded once by the transaction's signature; the
@@ -619,6 +621,38 @@ impl Bridge {
         Err(format!("the payouts would fail if the multisig executed them — not proposing: {} {}", r["value"]["err"], logs.join(" | ")))
     }
 
+    /// The proposer's permissions, refused unless it may initiate and, if it
+    /// may vote, two owners are still needed besides it.
+    fn proposer_role(&self, ms: &squads::Multisig) -> Result<u8, String> {
+        let Custody::Squads { proposer, .. } = &self.custody else { return Err("not in Squads mode".into()) };
+        let me = base58_encode(&proposer.pubkey());
+        match ms.permissions(&proposer.pubkey()) {
+            None => Err(format!("the proposer {me} is not a member of the multisig yet")),
+            Some(p) if p & squads::INITIATE == 0 => Err(format!("the proposer {me} may not initiate in the multisig")),
+            Some(p) if p & squads::VOTE != 0 && ms.threshold < 3 => Err(format!("the proposer {me} may vote, so the threshold must be at least 3 (two owners besides it); it is {}", ms.threshold)),
+            Some(p) => Ok(p),
+        }
+    }
+
+    /// Execute an approved batch with the proposer's key. Left to the owners
+    /// if it does not fit one transaction.
+    fn execute(&self, index: u64, transaction: &str) -> Result<(), String> {
+        let Custody::Squads { multisig, proposer, .. } = &self.custody else { return Err("not in Squads mode".into()) };
+        let raw = self.account(transaction, "confirmed")?.ok_or("the approved batch's transaction account is gone")?;
+        let keys = squads::vault_transaction_keys(&raw).ok_or("the approved batch does not decode as this bridge's")?;
+        let bh = blockhash(&self.agent, &self.rpc_url)?;
+        let (sig, tx) = proposer.transaction(&[sol_pool::compute_limit(400_000), squads::vault_transaction_execute(multisig, index, &proposer.pubkey(), &keys)], &bh);
+        if tx.len() > zyn_bridge::solana::MAX_TRANSACTION_BYTES {
+            eprintln!("zyn-sol-bridge: batch {index} is too large for this bridge to execute; an owner executes it in Squads");
+            return Ok(());
+        }
+        match send_raw(&self.agent, &self.rpc_url, &tx) {
+            Ok(_) => println!("out: batch {index} approved — executed by the bridge ({sig}), waiting for finality"),
+            Err(e) => eprintln!("zyn-sol-bridge: executing batch {index}: {e}"),
+        }
+        Ok(())
+    }
+
     /// Squads mode: propose a payout batch to the multisig, or follow the one
     /// proposed until its owners execute (or reject) it.
     fn pay_squads(&self) -> Result<(), String> {
@@ -669,6 +703,18 @@ impl Bridge {
                 squads::Status::Rejected | squads::Status::Cancelled => {
                     eprintln!("zyn-sol-bridge: the owners {} batch {index}; its exits wait. Delete {} to propose them again.", if status == squads::Status::Rejected { "rejected" } else { "cancelled" }, self.proposal_path().display());
                 }
+                squads::Status::Approved => {
+                    // Once the owners' votes are in, the bridge executes if
+                    // it may — at most once a minute, so a slow landing is
+                    // not sent twice over.
+                    let ms = self.multisig()?;
+                    if self.proposer_role(&ms).map(|p| p & squads::EXECUTE != 0).unwrap_or(false) && now > p["executed_at"].as_u64().unwrap_or(0) + 60 {
+                        let mut p = p.clone();
+                        p["executed_at"] = json!(now);
+                        std::fs::write(self.proposal_path(), serde_json::to_vec_pretty(&p).unwrap()).map_err(|e| e.to_string())?;
+                        self.execute(index, &transaction)?;
+                    }
+                }
                 _ => {
                     if index <= self.multisig()?.stale_transaction_index {
                         eprintln!("zyn-sol-bridge: batch {index} went stale (the multisig's settings changed); its exits wait. Delete {} to propose them again.", self.proposal_path().display());
@@ -690,11 +736,7 @@ impl Bridge {
         }
         let ms = self.multisig()?;
         let me = proposer.pubkey();
-        match ms.permissions(&me) {
-            Some(p) if p == squads::INITIATE => {}
-            Some(_) => return Err(format!("the proposer {} may vote or execute in the multisig; give it Initiate only", base58_encode(&me))),
-            None => return Err(format!("the proposer {} is not a member of the multisig; add it with Initiate only", base58_encode(&me))),
-        }
+        let role = self.proposer_role(&ms)?;
         let index = ms.transaction_index + 1;
         payouts.truncate(SQUADS_BATCH);
         covers.truncate(payouts.len());
@@ -707,7 +749,13 @@ impl Bridge {
             let memo = format!("Zyn bridge: pay out {} withdrawal(s)", payouts.len());
             let create = squads::vault_transaction_create(multisig, index, &me, *vault_index, &message, &memo);
             let propose = squads::proposal_create(multisig, index, &me);
-            let (sig, tx) = proposer.transaction(&[create, propose], &bh);
+            let mut ixs_out = vec![create, propose];
+            // A voting proposer counts its own vote at once: the owners'
+            // two are what remain.
+            if role & squads::VOTE != 0 {
+                ixs_out.push(squads::proposal_approve(multisig, index, &me));
+            }
+            let (sig, tx) = proposer.transaction(&ixs_out, &bh);
             if tx.len() <= zyn_bridge::solana::MAX_TRANSACTION_BYTES {
                 break (ixs, sig, tx);
             }
@@ -1072,10 +1120,11 @@ fn main() {
                     }
                     let me = proposer.pubkey();
                     let bal = b.solana("getBalance", json!([base58_encode(&me), { "commitment": "confirmed" }]))?;
-                    let role = match ms.permissions(&me) {
-                        Some(p) if p == squads::INITIATE => "a member with Initiate only — ready",
-                        Some(_) => "a member that may also vote or execute — give it Initiate only",
-                        None => "NOT a member yet — add it in Squads with Initiate only",
+                    let role = match (b.proposer_role(&ms), ms.permissions(&me)) {
+                        (Err(e), _) => format!("NOT READY — {e}"),
+                        (Ok(p), _) if p & squads::VOTE != 0 && p & squads::EXECUTE != 0 => "ready — proposes, approves its own, executes once two owners approve".to_string(),
+                        (Ok(p), _) if p & squads::VOTE != 0 => "ready — proposes and approves its own; owners approve and execute".to_string(),
+                        (Ok(_), _) => "ready — proposes; owners approve and execute".to_string(),
                     };
                     println!("proposer {} ({} lamports for proposal rent): {role}", base58_encode(&me), bal["value"]);
                     println!("next     transaction {}", ms.transaction_index + 1);

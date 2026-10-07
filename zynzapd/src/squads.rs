@@ -187,6 +187,69 @@ pub fn proposal_create(multisig: &Pubkey, index: u64, member: &Pubkey) -> Ix {
     }
 }
 
+/// `proposal_approve`: the member's vote for a proposal.
+pub fn proposal_approve(multisig: &Pubkey, index: u64, member: &Pubkey) -> Ix {
+    let mut data = discriminator("proposal_approve").to_vec();
+    data.push(0); // no memo
+    Ix {
+        program: program(),
+        accounts: vec![
+            Meta { key: *multisig, signer: false, writable: false },
+            Meta { key: *member, signer: true, writable: true },
+            Meta { key: proposal_pda(multisig, index), signer: false, writable: true },
+        ],
+        data,
+    }
+}
+
+/// `vault_transaction_execute` for an approved batch: the stored message's
+/// accounts follow, in its order, none of them signing here — the vault
+/// signs inside the program.
+pub fn vault_transaction_execute(multisig: &Pubkey, index: u64, member: &Pubkey, keys: &[(Pubkey, bool)]) -> Ix {
+    let mut accounts = vec![
+        Meta { key: *multisig, signer: false, writable: false },
+        Meta { key: proposal_pda(multisig, index), signer: false, writable: true },
+        Meta { key: transaction_pda(multisig, index), signer: false, writable: false },
+        Meta { key: *member, signer: true, writable: false },
+    ];
+    accounts.extend(keys.iter().map(|&(key, writable)| Meta { key, signer: false, writable }));
+    Ix { program: program(), accounts, data: discriminator("vault_transaction_execute").to_vec() }
+}
+
+/// A stored vault transaction's accounts, in its order, each with whether it
+/// is written: what executing it must pass. None for one that uses address
+/// tables (this bridge never makes one) or does not decode.
+pub fn vault_transaction_keys(d: &[u8]) -> Option<Vec<(Pubkey, bool)>> {
+    use sha2::Digest as _;
+    if d.get(..8)? != &sha2::Sha256::digest(b"account:VaultTransaction")[..8] {
+        return None;
+    }
+    let u32_at = |o: usize| Some(u32::from_le_bytes(d.get(o..o + 4)?.try_into().ok()?) as usize);
+    // multisig, creator, index, bump, vault_index, vault_bump
+    let mut o = 8 + 32 + 32 + 8 + 3;
+    o += 4 + u32_at(o)?; // ephemeral signer bumps
+    let (signers, writable_signers, writable_others) = (*d.get(o)? as usize, *d.get(o + 1)? as usize, *d.get(o + 2)? as usize);
+    o += 3;
+    let n = u32_at(o)?;
+    o += 4;
+    let mut keys = Vec::with_capacity(n.min(256));
+    for i in 0..n {
+        let k: Pubkey = d.get(o..o + 32)?.try_into().ok()?;
+        o += 32;
+        let writable = if i < signers { i < writable_signers } else { i < signers + writable_others };
+        keys.push((k, writable));
+    }
+    // Instructions, then the address table lookups, which must be none.
+    let ixs = u32_at(o)?;
+    o += 4;
+    for _ in 0..ixs {
+        o += 1; // program index
+        o += 4 + u32_at(o)?; // account indexes
+        o += 4 + u32_at(o)?; // data
+    }
+    (u32_at(o)? == 0).then_some(keys)
+}
+
 /// What the bridge reads from the multisig account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Multisig {
@@ -339,6 +402,39 @@ mod tests {
         assert_eq!(*m.last().unwrap(), 0);
         assert!(payout_ixs(&vault, &[SolPayout::native(vault, 1)]).is_err());
         assert!(payout_ixs(&vault, &[SolPayout::native(a, 0)]).is_err());
+    }
+
+    #[test]
+    fn a_stored_batch_lists_its_accounts_for_execution() {
+        use sha2::Digest as _;
+        let vault = [9u8; 32];
+        let (a, b) = ([1u8; 32], [2u8; 32]);
+        let ixs = payout_ixs(&vault, &[SolPayout::native(a, 5), SolPayout::native(b, 7)]).unwrap();
+        let m = transaction_message(&vault, &ixs).unwrap();
+        // As the program stores it: header, then the message with u32 lengths.
+        let mut d = sha2::Sha256::digest(b"account:VaultTransaction")[..8].to_vec();
+        d.extend_from_slice(&[0u8; 32 + 32 + 8 + 3]);
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&m[..3]);
+        d.extend_from_slice(&(m[3] as u32).to_le_bytes());
+        d.extend_from_slice(&m[4..4 + 32 * m[3] as usize]);
+        d.extend_from_slice(&2u32.to_le_bytes());
+        for _ in 0..2 {
+            d.push(2);
+            d.extend_from_slice(&2u32.to_le_bytes());
+            d.extend_from_slice(&[0, 1]);
+            d.extend_from_slice(&12u32.to_le_bytes());
+            d.extend_from_slice(&[0u8; 12]);
+        }
+        d.extend_from_slice(&0u32.to_le_bytes());
+        assert_eq!(vault_transaction_keys(&d).unwrap(), vec![(vault, true), (a, true), (b, true), (SYSTEM_PROGRAM, false)]);
+        let ix = vault_transaction_execute(&[3u8; 32], 2, &[4u8; 32], &vault_transaction_keys(&d).unwrap());
+        assert_eq!(ix.accounts.len(), 8);
+        assert!(ix.accounts[4..].iter().all(|m| !m.signer));
+        // An address table would need accounts this bridge does not pass.
+        let last = d.len() - 4;
+        d[last] = 1;
+        assert!(vault_transaction_keys(&d).is_none());
     }
 
     #[test]
