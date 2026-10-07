@@ -89,6 +89,15 @@ async function quoteName(ctx, asset) {
   return (await namer(ctx, await ledger.call(ctx.config, 'zyn_market')))(asset);
 }
 
+/// This wallet's items of `collection`, as the DAO's member proofs: refused
+/// when it holds none, so a site learns only that this wallet is not a member.
+async function daoItems(ctx, collection) {
+  const h = await holdings(ctx);
+  const mine = h.held.map((note) => ({ note, item: h.items.get(note.asset) })).filter((x) => x.item?.collection === collection && BigInt(x.note.amount) === mk.ITEM_UNIT);
+  if (!mine.length) throw bad('This wallet holds no item of that collection');
+  return mine;
+}
+
 function heldItem(h, asset) {
   if (!isHex(asset)) throw bad('asset must be 64 hex characters');
   const note = h.held.find((x) => x.asset === asset);
@@ -1277,6 +1286,84 @@ export const METHODS = {
             holder: ctx.identity.account, collection: unhex(item.collection), inputs: [{ commitment: c, nullifier: nullifierOf(ctx.identity.nullifier, c) }],
           }));
           return { redeemed: note.asset };
+        },
+      };
+    },
+  },
+
+  // A collection's DAO (§172): a member pass for the members' chat, a
+  // proposal, a vote. Each is proved by this wallet's own items of the
+  // collection; the public sees tallies and pass hashes, the operator sees
+  // which items acted — said on every card.
+  zyn_daoPass: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const mine = await daoItems(ctx, collection);
+      const { note, item } = mine[0];
+      return {
+        title: 'Member pass',
+        rows: [['Collection', collection === CAVE_Z ? 'Cave Collection Z' : `${collection.slice(0, 10)}…`], ['Proved by', itemName(collection, item.serial)], ['The chat sees', 'a pass code, not your item or account']],
+        note: "Keep the pass code private: whoever has it can use your membership in the members' chat. Selling or moving the item ends the pass. The operator can see which item made it.",
+        run: async () => {
+          const token = crypto.getRandomValues(new Uint8Array(32));
+          const pass = mk.daoPass(token);
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.memberPassIntent({ holder: ctx.identity.account, collection: unhex(collection), item: unhex(note.commitment), pass }));
+          return { token: hex(token), pass: hex(pass) };
+        },
+      };
+    },
+  },
+
+  zyn_daoPropose: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const text = String(p?.text ?? '').trim();
+      if (!text || text.length > 4000) throw bad('A proposal is 1 to 4,000 characters');
+      let pay = null;
+      if (p?.pay) {
+        if (!isHex(p.pay.asset) || !isHex(p.pay.to)) throw bad('pay.asset and pay.to must be 64 hex characters');
+        let amount;
+        try { amount = parseAmount(p.pay.amount); } catch (e) { throw bad(e.message); }
+        if (amount <= 0n) throw bad('A payment must be worth something');
+        pay = { asset: unhex(p.pay.asset), amount, to: unhex(p.pay.to), shown: `${wadText(amount)} ${await quoteName(ctx, p.pay.asset)}` };
+      }
+      const mine = await daoItems(ctx, collection);
+      const hash = sha256(new TextEncoder().encode(text));
+      return {
+        title: 'Proposal',
+        rows: [['Says', text.length > 90 ? `${text.slice(0, 90)}…` : text], ['Treasury pays', pay ? `${pay.shown} to ${p.pay.to.slice(0, 10)}…` : 'nothing'], ['Backed by', 'one of your items']],
+        note: 'The proposal, its text hash and any payment are public. The operator can see which item backed it.',
+        run: async () => {
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.proposeIntent({
+            proposer: ctx.identity.account, collection: unhex(collection), item: unhex(mine[0].note.commitment), text: hash, pay: pay && { asset: pay.asset, amount: pay.amount, to: pay.to },
+          }));
+          return { text: hex(hash) };
+        },
+      };
+    },
+  },
+
+  zyn_daoVote: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const collection = saleCollection(p);
+      const proposal = Number(p?.proposal);
+      if (!Number.isSafeInteger(proposal) || proposal < 1 || proposal > 0xffffffff) throw bad('proposal must be a proposal number');
+      const choice = { back: mk.DAO_BACK, yes: mk.DAO_YES, no: mk.DAO_NO }[p?.choice];
+      if (choice === undefined) throw bad('choice must be back, yes or no');
+      const mine = (await daoItems(ctx, collection)).slice(0, 32);
+      const word = { back: 'Back', yes: 'Vote yes on', no: 'Vote no on' }[p.choice];
+      return {
+        title: `${word} proposal #${proposal}`,
+        rows: [['Items', `${mine.length} of yours, one vote each`], ['Already counted', 'items that voted before are skipped']],
+        note: 'The public sees the tally, not which items voted. The operator can see it.',
+        run: async () => {
+          await ledger.submitIntent(ctx.config, ctx.identity, mk.voteIntent({
+            voter: ctx.identity.account, collection: unhex(collection), proposal, items: mine.map((x) => unhex(x.note.commitment)), choice,
+          }));
+          return { items: mine.length };
         },
       };
     },

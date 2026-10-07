@@ -16,6 +16,8 @@ const RPC = NETWORK === 'testnet' ? 'https://zyn-rpc.cavebro.win/object' : 'http
 const LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const NAP = (LOCAL && initial.get('nap')) || NAP_WEB;
 const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e';
+/// ZEC.zy, the same asset on both networks: what the DAO treasury pays in.
+const ZEC_ZY = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 const WAD = 10n ** 18n;
 const PAGE = document.body.dataset.page;
 
@@ -94,13 +96,13 @@ const rarityTag = (d) => (d.rarity ? `<span class="tag rarity r-${esc(d.rarity.t
 
 /// One read of the chain: a clear error for an HTTP failure or a hang, never
 /// "Unexpected token '<'" or a spinner forever.
-async function chain(method) {
+async function chain(method, fields = {}) {
   let r;
   try {
     r = await fetch(RPC, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method, params: [] }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method, params: [], ...fields }),
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
       signal: AbortSignal.timeout(15000),
@@ -713,6 +715,12 @@ async function daoPage() {
 
   // Membership: Nap lists this wallet's items; only the count is used, here.
   let wanted = false;
+  let members = 0;
+  let daoSet = false;
+  let dao = null;
+  // Set once the proposal list can be drawn: a membership check that answers
+  // before the page has finished loading draws it then, not earlier.
+  let proposalsReady = false;
   const check = async () => {
     const out = el('member-out');
     if (!current) { wanted = true; pick(); return; }
@@ -725,6 +733,10 @@ async function daoPage() {
       const n = (mine?.items || []).filter((i) => i.collection === CAVE_Z && Number.isSafeInteger(i.serial)).length;
       out.textContent = n ? `You are a member: ${n} item${n === 1 ? '' : 's'}, ${n} vote${n === 1 ? '' : 's'}.` : 'No Collection Z item in this wallet yet.';
       out.classList.add(n ? 'good' : 'bad');
+      members = n;
+      el('get-pass').hidden = !(n && daoSet);
+      el('new-prop').hidden = !(n && daoSet);
+      if (proposalsReady) drawProposals();
     } catch (e) {
       if (gen !== generation) return;
       out.textContent = failText(e, 'Nap was not asked. Nothing was shared.');
@@ -732,6 +744,27 @@ async function daoPage() {
     }
   };
   el('check').onclick = check;
+
+  // A member pass (§172): Nap proves one item to the ledger and hands back a
+  // code for the members' chat; the ledger keeps only the code's hash.
+  el('get-pass').onclick = async () => {
+    const out = el('member-out');
+    el('get-pass').disabled = true;
+    out.className = 'out';
+    out.textContent = 'Approve the pass in Nap.';
+    try {
+      const r = await ask('zyn_daoPass', { collection: CAVE_Z });
+      if (gen !== generation) return;
+      el('pass-code').textContent = r.token;
+      el('pass-box').hidden = false;
+      out.textContent = 'Pass made. It is valid once the next epoch seals, and while you hold the item.';
+      out.classList.add('good');
+    } catch (e) {
+      out.textContent = failText(e, 'No pass was made.');
+      out.classList.toggle('bad', e?.code !== 4001);
+    } finally { el('get-pass').disabled = false; }
+  };
+  el('pass-copy').onclick = () => navigator.clipboard?.writeText(el('pass-code').textContent).then(() => { el('pass-copy').textContent = 'Copied'; }).catch(() => {});
   walletListeners.add(() => { if (wanted && current) check(); });
 
   // Roles: a note to the team until names carry roles.
@@ -780,16 +813,123 @@ async function daoPage() {
     data = r.ok ? await r.json() : null;
   } catch { data = null; }
   if (gen !== generation) return;
-  const props = Array.isArray(data?.proposals) ? data.proposals : [];
-  el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
-  el('props').innerHTML = props.length
-    ? `<table class="rows"><thead><tr><th>Proposal</th><th>State</th><th>Yes · No</th></tr></thead><tbody>${props.map((x) => `<tr><td>${x.link ? `<a href="${esc(x.link)}" rel="noopener noreferrer" target="_blank">${esc(x.title)}</a>` : esc(x.title)}</td><td><span class="tag">${esc(x.state)}</span></td><td>${Number.isSafeInteger(x.yes) ? `${x.yes} · ${x.no ?? 0}` : '—'}</td></tr>`).join('')}</tbody></table>`
-    : '<p class="say">No proposals yet. The first ones open with the sale.</p>';
+  // Proposals: from the ledger once the DAO is set (§172), each text read by
+  // its hash and checked against it; the published file before that.
+  const texts = new Map();
+  const textOf = async (h) => {
+    if (texts.has(h)) return texts.get(h);
+    let t = null;
+    try {
+      const r = await fetch(`/api/proposal-text?hash=${h}`, { credentials: 'omit' });
+      const b = r.ok ? await r.json() : null;
+      if (typeof b?.text === 'string') {
+        const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(b.text));
+        if ([...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('') === h) t = b.text;
+      }
+    } catch { t = null; }
+    texts.set(h, t);
+    return t;
+  };
+  const MINUTE_EPOCHS = 1;
+  const left = (until) => {
+    const m = Math.max(0, (until - (dao?.epoch ?? 0)) * MINUTE_EPOCHS);
+    return m >= 2880 ? `${Math.round(m / 1440)} days left` : m >= 120 ? `${Math.round(m / 60)} hours left` : `${m} min left`;
+  };
+  async function drawProposals() {
+    if (gen !== generation) return;
+    if (!daoSet) {
+      const props = Array.isArray(data?.proposals) ? data.proposals : [];
+      el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
+      el('props').innerHTML = props.length
+        ? props.map((x) => `<div class="prop"><div class="prop-head">${esc(x.title)} <span class="tag">${esc(x.state)}</span></div></div>`).join('')
+        : '<p class="say">No proposals yet. The first ones open with the sale.</p>';
+      return;
+    }
+    const props = dao.proposals || [];
+    el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
+    if (!props.length) { el('props').innerHTML = `<p class="say">No proposals yet.${members ? ' Yours can be the first.' : ''}</p>`; return; }
+    const rows = await Promise.all(props.map(async (x) => {
+      const t = await textOf(x.text);
+      const pay = x.pay ? `Pays ${zec(x.pay.amount)} ZEC.zy to ${esc(x.pay.to.slice(0, 10))}…` : 'Pays nothing';
+      const count = x.state === 'backing' ? `${x.backers} of ${dao.backers} backers · ${left(x.until)}` : x.state === 'voting' ? `${x.yes} yes · ${x.no} no · ${left(x.until)}` : `${x.yes} yes · ${x.no} no`;
+      const acts = !members ? '' : x.state === 'backing' ? `<button class="act small" data-vote="back" data-p="${x.id}">Back</button>`
+        : x.state === 'voting' ? `<button class="act small" data-vote="yes" data-p="${x.id}">Yes</button><button class="act small ghost" data-vote="no" data-p="${x.id}">No</button>` : '';
+      return `<div class="prop"><div class="prop-head"><b>#${x.id}</b><span class="tag ${x.state === 'voting' ? 'now' : ''}">${esc(x.state)}</span></div>
+        <p class="prop-text">${t === null ? '<em>Text not found under its hash.</em>' : esc(t)}</p>
+        <p class="prop-meta">${pay} · ${count}</p>${acts ? `<div class="row">${acts}</div>` : ''}</div>`;
+    }));
+    if (gen !== generation) return;
+    el('props').innerHTML = rows.join('');
+    el('props').querySelectorAll('[data-vote]').forEach((b) => {
+      b.onclick = async () => {
+        const out = el('props-out');
+        out.className = 'out';
+        out.textContent = 'Approve in Nap.';
+        try {
+          const r = await ask('zyn_daoVote', { collection: CAVE_Z, proposal: Number(b.dataset.p), choice: b.dataset.vote });
+          out.textContent = `Counted with ${r.items} item${r.items === 1 ? '' : 's'} once the epoch seals.`;
+          out.classList.add('good');
+          later(loadDao);
+        } catch (e) {
+          out.textContent = failText(e, 'Nothing was voted.');
+          out.classList.toggle('bad', e?.code !== 4001);
+        }
+      };
+    });
+  }
+
+  // A new proposal: the text is stored by its hash first, then Nap proposes.
+  const propDialog = el('prop-dialog');
+  const propForm = el('prop-form');
+  el('new-prop').onclick = () => { propForm.reset(); el('prop-out').textContent = ''; propDialog.showModal(); };
+  el('prop-close').onclick = () => propDialog.close();
+  propForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const out = el('prop-out');
+    out.className = 'out';
+    const text = propForm.text.value.trim();
+    const amount = propForm.amount.value.trim();
+    const to = propForm.to.value.trim().toLowerCase();
+    if (amount && !/^[0-9a-f]{64}$/.test(to)) { out.textContent = 'A payment needs the Zyn account it goes to (64 hex characters).'; out.classList.add('bad'); return; }
+    el('prop-send').disabled = true;
+    try {
+      out.textContent = 'Publishing the text…';
+      const r = await fetch('/api/proposal-text', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'omit', body: JSON.stringify({ text }) });
+      const b = await r.json().catch(() => ({}));
+      if (!b.ok) throw new Error(b.error || `The text was not stored (HTTP ${r.status}).`);
+      out.textContent = 'Approve the proposal in Nap.';
+      await ask('zyn_daoPropose', { collection: CAVE_Z, text, pay: amount ? { asset: ZEC_ZY, amount, to } : undefined });
+      out.textContent = 'Proposed. It shows here once the epoch seals.';
+      out.classList.add('good');
+      later(loadDao);
+    } catch (err) {
+      out.textContent = failText(err, 'Nothing was proposed.');
+      out.classList.toggle('bad', err?.code !== 4001);
+    } finally { el('prop-send').disabled = false; }
+  };
+
+  async function loadDao() {
+    try {
+      const d = await chain('zyn_dao', { collection: CAVE_Z });
+      if (gen !== generation) return;
+      dao = d?.set ? d : null;
+      daoSet = !!dao;
+    } catch { dao = null; daoSet = false; }
+    if (gen !== generation) return;
+    el('get-pass').hidden = !(members && daoSet);
+    el('new-prop').hidden = !(members && daoSet);
+    const t = dao?.treasury?.find((x) => x.asset === ZEC_ZY);
+    el('f-treasury-box').hidden = !daoSet;
+    if (daoSet) el('f-treasury').textContent = `${zec(t?.amount || '0')} ZEC.zy`;
+    drawProposals();
+  }
+  proposalsReady = true;
+  await loadDao();
   const rows = Array.isArray(data?.statement) ? data.statement : [];
-  el('statement').innerHTML = rows.length
+  el('statement').innerHTML = daoSet ? '<p class="say small">The DAO treasury is on the ledger: shares arrive by rule, and only a passed proposal pays out of it.</p>' : rows.length
     ? `<table class="rows"><thead><tr><th>Date</th><th>In / out</th><th>ZEC.zy</th><th>For</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.dir)}</td><td>${esc(x.amount)}</td><td>${x.link ? `<a href="${esc(x.link)}" rel="noopener noreferrer" target="_blank">${esc(x.what)}</a>` : esc(x.what)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="say small">Treasury statement: no entries yet. The treasury receives its first share when the sale opens.</p>';
-  if (data?.treasury?.held_by) el('held-by').textContent = `Treasury account ${String(data.treasury.account || '').slice(0, 10)}…, held by ${data.treasury.held_by}.`;
+  if (!daoSet && data?.treasury?.held_by) el('held-by').textContent = `Treasury account ${String(data.treasury.account || '').slice(0, 10)}…, held by ${data.treasury.held_by}.`;
   if (data?.updated) el('updated').textContent = `updated ${data.updated}`;
   const steps = Array.isArray(data?.setup) ? data.setup : [];
   const label = { done: 'done', now: 'now', next: 'next', later: 'later' };

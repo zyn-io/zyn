@@ -159,6 +159,19 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         Op::GateSale { collection, base, .. } => ("Sale gated to its list", true, json!({ "collection": hex(collection), "base": base })),
         // The list's keys are blinded; how many were added is public.
         Op::AllowBuyers { collection, keys, .. } => ("Accounts added to a sale's list", true, json!({ "collection": hex(collection), "added": keys.len() })),
+        // A collection's DAO (§172): its terms are public, a proposal is public
+        // by nature (what it asks, and whom it would pay), and so are a vote's
+        // proposal, side and weight. Which items or accounts act never is.
+        Op::SetDao { collection, backers, voting_epochs, quorum_bps, .. } => ("DAO terms set", true, json!({ "collection": hex(collection), "backers": backers, "voting_epochs": voting_epochs, "quorum_bps": quorum_bps })),
+        Op::MemberPass { collection, .. } => ("Member pass", false, json!({ "collection": hex(collection) })),
+        Op::Propose { collection, text, pay, .. } => ("Proposal", false, json!({
+            "collection": hex(collection), "text": hex(text),
+            "pay": pay.map(|p| json!({ "asset": hex(&p.asset), "amount": p.amount.0.to_string(), "to": hex(&p.to) })),
+        })),
+        Op::Vote { collection, proposal, items, choice, .. } => ("Vote", false, json!({
+            "collection": hex(collection), "proposal": proposal, "items": items.len(),
+            "choice": match *choice { objectvm::dao::BACK => "back", objectvm::dao::YES => "yes", _ => "no" },
+        })),
         Op::SetCurveQuote { quote, graduation_mc, bond, .. } => ("Launch asset set", true, json!({ "quote": hex(quote), "graduation_mc": graduation_mc.0.to_string(), "bond": bond.0.to_string() })),
         Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
             "Sale opened",

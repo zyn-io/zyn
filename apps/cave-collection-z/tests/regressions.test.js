@@ -84,3 +84,17 @@ test('a role sign-up keeps to its role, its limits and one entry per contact', a
   assert.deepEqual(await post({ ...good, role: 'digger', burrow: 'x' }), { ok: true });
   assert.equal(m.get('role:digger:@alice'), undefined);
 });
+
+test('a proposal text is kept only under its own hash', async () => {
+  const fn = await import('../functions/api/proposal-text.js');
+  const m = new Map();
+  const env = { CAVE_WHITELIST: { get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); } } };
+  const post = (text) => fn.onRequestPost({ env, request: new Request('https://cavebro.win/api/proposal-text', { method: 'POST', body: JSON.stringify({ text }) }) }).then((r) => r.json());
+  const r = await post('  Fund a mainnet replica for a year.  ');
+  const { createHash } = await import('node:crypto');
+  assert.equal(r.hash, createHash('sha256').update('Fund a mainnet replica for a year.').digest('hex'), 'trimmed, as Nap hashes it');
+  const got = await fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${r.hash}`) }).then((x) => x.json());
+  assert.equal(got.text, 'Fund a mainnet replica for a year.');
+  assert.equal((await post('x'.repeat(4001))).ok, false);
+  assert.equal((await fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${'0'.repeat(64)}`) })).status, 404);
+});

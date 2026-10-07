@@ -122,6 +122,34 @@ pub fn vectors() -> Vec<(&'static str, String)> {
             }),
         ),
         // Atomic routes (§167): a coin's curve, a pool, another coin's curve.
+        // A collection's DAO (§172): its program, a pass hash, a payment's
+        // claim source, and the three member intents.
+        ("program_dao", hex(&program::dao().0)),
+        ("dao_pass", hex(&objectvm::dao::pass_of(b"cave-pass-token"))),
+        ("dao_payment_source", hex(&objectvm::dao::payment_source(&TOKEN, 7))),
+        (
+            "member_pass",
+            enc(&Op::MemberPass { holder: OWNER, program: program::dao(), collection: TOKEN, item: [0xc1; 32], pass: objectvm::dao::pass_of(b"cave-pass-token") }),
+        ),
+        (
+            "propose",
+            enc(&Op::Propose {
+                proposer: OWNER,
+                program: program::dao(),
+                collection: TOKEN,
+                item: [0xc1; 32],
+                text: [0x7a; 32],
+                pay: Some(objectvm::dao::Payment { asset: ZEC, amount: Fixed::whole(3), to: [0xB0; 32] }),
+            }),
+        ),
+        (
+            "propose_no_pay",
+            enc(&Op::Propose { proposer: OWNER, program: program::dao(), collection: TOKEN, item: [0xc1; 32], text: [0x7a; 32], pay: None }),
+        ),
+        (
+            "vote",
+            enc(&Op::Vote { voter: OWNER, program: program::dao(), collection: TOKEN, proposal: 7, items: vec![[0xc1; 32], [0xc2; 32]], choice: objectvm::dao::YES }),
+        ),
         // A gated sale's list (§168): an account's blinded key, and prices.
         ("sale_allow_key", hex(&objectvm::sale::allow_key(&TOKEN, &OWNER))),
         ("sale_gated_total_10_2", objectvm::sale::gated_total(Fixed(10_000_000_000_000_000), 10, 10, 2).unwrap().to_string()),

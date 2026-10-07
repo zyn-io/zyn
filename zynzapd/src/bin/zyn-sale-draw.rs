@@ -7,6 +7,9 @@
 //!   zyn-sale-draw open        SetSale at the terms' prices (once)
 //!   zyn-sale-draw gate <n>    whitelist only, rising past n tickets each (§168)
 //!   zyn-sale-draw allow <f>   put the accounts in file f on the list
+//!   zyn-sale-draw dao <backers> <voting epochs> <quorum bps>
+//!                             give the collection its DAO (§172): its creator
+//!                             shares go to the DAO's treasury from then on
 //!   zyn-sale-draw close       CloseSale, once Zcash reaches the announced close
 //!   zyn-sale-draw draw        run the draw over every ticket and post its root
 //!   zyn-sale-draw open-mint   end claims; post the order the rest sell in
@@ -381,6 +384,18 @@ fn gate(c: &Ctx) -> Result<(), String> {
     c.submit("gate", &Op::GateSale { program: program::sale_open(), collection: c.collection(), base })
 }
 
+/// Give the collection its DAO (§172), or retune it. From the first time, the
+/// treasury's shares of the sale and of resale fees go to the DAO's keyless
+/// treasury instead of the creator's account.
+fn dao(c: &Ctx) -> Result<(), String> {
+    let usage = "usage: zyn-sale-draw dao <backers> <voting epochs> <quorum bps>";
+    let arg = |i: usize| std::env::args().nth(i).ok_or(usage);
+    let backers: u32 = arg(2)?.parse().map_err(|_| usage)?;
+    let voting_epochs: u64 = arg(3)?.parse().map_err(|_| usage)?;
+    let quorum_bps: u32 = arg(4)?.parse().map_err(|_| usage)?;
+    c.submit("dao", &Op::SetDao { program: program::dao_configure(), collection: c.collection(), backers, voting_epochs, quorum_bps })
+}
+
 /// Put accounts on the list: a file of Zyn account ids, one per line (the
 /// whitelist's linked accounts). Each goes on blinded; already-listed ones are
 /// left as they are.
@@ -409,7 +424,8 @@ fn main() {
         "open-mint" => open_mint(&c),
         "gate" => gate(&c),
         "allow" => allow(&c),
-        other => Err(format!("unknown command {other}: status | open | gate | allow | close | draw | open-mint")),
+        "dao" => dao(&c),
+        other => Err(format!("unknown command {other}: status | open | gate | allow | dao | close | draw | open-mint")),
     });
     if let Err(e) = result {
         eprintln!("zyn-sale-draw {cmd}: {e}");

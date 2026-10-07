@@ -337,7 +337,8 @@ impl ObjectVm {
         self.apply_funding(who, inputs, f);
         let t = *self.market.collections.get(collection).expect("checked above");
         self.market.collections.insert(*collection, CollectionTerms { floor: Fixed(t.floor.0 + amount.0 - treasury), ..t });
-        self.market.pay(&treasury_source(collection, payment), 0, t.creator, t.quote, Fixed(treasury));
+        // To the collection's DAO treasury once it has one (§172).
+        self.pay_creator_share(collection, &treasury_source(collection, payment), t.creator, t.quote, Fixed(treasury));
         Ok(())
     }
 

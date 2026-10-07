@@ -1182,6 +1182,47 @@ fn handle(
             });
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
         }
+        // A collection's DAO (§172): terms, treasury, how many passes are live,
+        // and every proposal with its tallies. Which items voted or hold a
+        // pass is not in it.
+        "zyn_dao" => {
+            let Some(collection) = field(body, "collection").and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                return err("zyn_dao needs a collection");
+            };
+            let n = node.lock().unwrap();
+            let st = n.state();
+            let Some(d) = st.market.daos.get(&collection) else {
+                return format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::json!({ "set": false }));
+            };
+            let proposals: Vec<serde_json::Value> = d.proposals.iter().rev().map(|(id, p)| {
+                let until = match p.state { objectvm::dao::State::Backing { until } | objectvm::dao::State::Voting { until } => Some(until), _ => None };
+                serde_json::json!({
+                    "id": id, "text": hex(&p.text), "state": p.state.word(), "until": until,
+                    "pay": p.pay.map(|x| serde_json::json!({ "asset": hex(&x.asset), "amount": x.amount.0.to_string(), "to": hex(&x.to) })),
+                    "backers": p.backers.len(), "yes": p.yes.len(), "no": p.no.len(),
+                })
+            }).collect();
+            let v = serde_json::json!({
+                "set": true, "epoch": st.epoch,
+                "backers": d.backers, "voting_epochs": d.voting_epochs, "quorum_bps": d.quorum_bps,
+                "outstanding": st.market.collections.get(&collection).map(|t| t.outstanding),
+                "treasury": d.treasury.iter().map(|(a, v)| serde_json::json!({ "asset": hex(a), "amount": v.0.to_string() })).collect::<Vec<_>>(),
+                "passes": d.passes.keys().filter(|c| st.live.contains_key(*c)).count(),
+                "proposals": proposals,
+            });
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
+        }
+        // Whether a pass hash is a live member pass: what the members' chat
+        // checks, given the token's hash and nothing else.
+        "zyn_memberPass" => {
+            let get = |k: &str| field(body, k).and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok());
+            let (Some(collection), Some(pass)) = (get("collection"), get("pass")) else {
+                return err("zyn_memberPass needs a collection and a pass");
+            };
+            let n = node.lock().unwrap();
+            let v = serde_json::json!({ "member": n.state().pass_valid(&collection, &pass) });
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
+        }
         "zyn_tickets" => {
             let n = node.lock().unwrap();
             let tickets = &n.state().market.tickets;
@@ -1739,7 +1780,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_lendMarkets, zyn_lendPositions, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_lendMarkets, zyn_lendPositions, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_dao, zyn_memberPass, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 

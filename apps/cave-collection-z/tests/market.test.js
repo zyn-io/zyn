@@ -76,12 +76,15 @@ test('the store reads only public things itself, and nothing with an account in 
   // the operator must put that account on the sale's list.
   // CaveDAO reads the team's published /dao.json, and a role sign-up sends
   // only the contact and note the member types — never an account or item.
-  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/roles'", "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
+  // Proposal texts are stored and read by their hash (§172): public words.
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/proposal-text'", "'/api/roles'", '`/api/proposal-text?hash=${h}`', "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
   assert.match(zstore, /fetch\('\/api\/whitelist\/bind', \{ method: 'POST'/, 'the account goes only in the holder\'s own link request');
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
-  // Every chain read goes through one helper that sends no params: nothing
-  // with an account in it.
-  assert.match(zstore, /body: JSON\.stringify\(\{ jsonrpc: '2\.0', id: crypto\.randomUUID\(\), method, params: \[\] \}\)/);
+  // Every chain read goes through one helper. Its only fields are public ones:
+  // today the DAO's collection id (§172) — nothing with an account in it.
+  assert.match(zstore, /body: JSON\.stringify\(\{ jsonrpc: '2\.0', id: crypto\.randomUUID\(\), method, params: \[\], \.\.\.fields \}\)/);
+  const withFields = [...zstore.matchAll(/chain\('[a-zA-Z_]+', ([^)]+)\)/g)].map((m) => m[1].trim());
+  assert.deepEqual([...new Set(withFields)], ['{ collection: CAVE_Z }']);
   assert.match(zstore, /chain\('zyn_offers'\)/);
   assert.match(zstore, /chain\('zyn_market'\)/, 'the sale is read from the public market');
   assert.doesNotMatch(zstore, /127\.0\.0\.1:\d|:8096|:8099/);

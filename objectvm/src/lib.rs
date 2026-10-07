@@ -53,6 +53,7 @@ pub use zyn_lend;
 pub mod curve;
 pub mod route;
 pub mod sale;
+pub mod dao;
 pub mod market;
 
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
@@ -385,6 +386,44 @@ pub enum Op {
         collection: Address,
         keys: Vec<Hash>,
     },
+    /// Give a collection a DAO, or retune it (§172): its creator shares go to
+    /// a keyless treasury from then on. Operator only.
+    SetDao {
+        program: ProgramId,
+        collection: Address,
+        backers: u32,
+        voting_epochs: u64,
+        quorum_bps: u32,
+    },
+    /// Register a member pass, proved by one of the holder's live items: valid
+    /// while that item stays live (§172).
+    MemberPass {
+        holder: AccountId,
+        program: ProgramId,
+        collection: Address,
+        item: Hash,
+        pass: Hash,
+    },
+    /// Propose to a collection's DAO, proved by one of the proposer's items,
+    /// which backs it first (§172).
+    Propose {
+        proposer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        item: Hash,
+        text: Hash,
+        pay: Option<dao::Payment>,
+    },
+    /// Back a proposal, or vote yes or no on it, with up to 32 of the voter's
+    /// items, each once (§172).
+    Vote {
+        voter: AccountId,
+        program: ProgramId,
+        collection: Address,
+        proposal: u32,
+        items: Vec<Hash>,
+        choice: u8,
+    },
     /// Name an asset coins launch in, sized to graduate at `graduation_mc`
     /// of it fully diluted, with `bond` of it to create one (§166). A zero
     /// `graduation_mc` stops new coins in it. Operator only.
@@ -659,6 +698,10 @@ pub enum Receipt {
     CurveTermsSet { fee_bps: u32, bond: Fixed },
     CurveQuoteSet { quote: Address, unit: i128, bond: Fixed },
     SaleGated { collection: Address, base: u32 },
+    DaoSet { collection: Address },
+    PassSet { collection: Address },
+    Proposed { collection: Address, id: u32 },
+    Voted { collection: Address, id: u32, items: u32 },
     BuyersAllowed { collection: Address, added: u32 },
     SaleOpened { collection: Address },
     TicketsBought { first: Hash, count: u32 },
@@ -1378,7 +1421,7 @@ impl ObjectVm {
             self.market
                 .collections
                 .insert(coll, market::CollectionTerms { floor: Fixed(t.floor.0 + to_floor.0), ..t });
-            self.market.pay(&market::sale_fee_source(item), 0, t.creator, t.quote, to_creator);
+            self.pay_creator_share(&coll, &market::sale_fee_source(item), t.creator, t.quote, to_creator);
         }
         if let Some(l) = listing {
             self.market.listings.remove(item);
@@ -2112,6 +2155,26 @@ impl MicrochainVm for ObjectVm {
                 self.market.curve_terms = Some(curve::CurveTerms { fee_bps: *fee_bps, bond: *bond });
                 vec![Receipt::CurveTermsSet { fee_bps: *fee_bps, bond: *bond }]
             }
+            Op::SetDao { program, collection, backers, voting_epochs, quorum_bps } => one(if *program != program::dao_configure() {
+                Err("wrong program for a DAO's terms")
+            } else {
+                self.apply_set_dao(collection, *backers, *voting_epochs, *quorum_bps)
+            }),
+            Op::MemberPass { holder, program, collection, item, pass } => one(if *program != program::dao() {
+                Err("wrong program for a member pass")
+            } else {
+                self.apply_member_pass(holder, collection, item, pass)
+            }),
+            Op::Propose { proposer, program, collection, item, text, pay } => one(if *program != program::dao() {
+                Err("wrong program for a proposal")
+            } else {
+                self.apply_propose(proposer, collection, item, text, pay)
+            }),
+            Op::Vote { voter, program, collection, proposal, items, choice } => one(if *program != program::dao() {
+                Err("wrong program for a vote")
+            } else {
+                self.apply_vote(voter, collection, *proposal, items, *choice)
+            }),
             Op::GateSale { program, collection, base } => one(if *program != program::sale_open() {
                 Err("wrong program for a sale's gate")
             } else {
@@ -2384,6 +2447,9 @@ impl MicrochainVm for ObjectVm {
             Op::CreateLaunch { creator, .. } => vec![*creator],
             Op::Commit { buyer, .. } => vec![*buyer],
             Op::Redeem { holder, .. } => vec![*holder],
+            Op::MemberPass { holder, .. } => vec![*holder],
+            Op::Propose { proposer, .. } => vec![*proposer],
+            Op::Vote { voter, .. } => vec![*voter],
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
             Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
@@ -2775,6 +2841,29 @@ impl MicrochainVm for ObjectVm {
             }
             Op::GateSale { program, collection, base } => {
                 e.u8(54).bytes(&program.0).bytes(collection).u32(*base);
+            }
+            Op::SetDao { program, collection, backers, voting_epochs, quorum_bps } => {
+                e.u8(56).bytes(&program.0).bytes(collection).u32(*backers).u64(*voting_epochs).u32(*quorum_bps);
+            }
+            Op::MemberPass { holder, program, collection, item, pass } => {
+                e.u8(57).bytes(holder).bytes(&program.0).bytes(collection).bytes(item).bytes(pass);
+            }
+            Op::Propose { proposer, program, collection, item, text, pay } => {
+                e.u8(58).bytes(proposer).bytes(&program.0).bytes(collection).bytes(item).bytes(text);
+                match pay {
+                    None => {
+                        e.u8(0);
+                    }
+                    Some(p) => {
+                        e.u8(1).bytes(&p.asset).fixed(p.amount).bytes(&p.to);
+                    }
+                }
+            }
+            Op::Vote { voter, program, collection, proposal, items, choice } => {
+                e.u8(59).bytes(voter).bytes(&program.0).bytes(collection).u32(*proposal).u8(*choice).u32(items.len() as u32);
+                for c in items {
+                    e.bytes(c);
+                }
             }
             Op::AllowBuyers { program, collection, keys } => {
                 e.u8(55).bytes(&program.0).bytes(collection).u32(keys.len() as u32);
@@ -3467,6 +3556,44 @@ impl MicrochainVm for ObjectVm {
             49 => Some(Op::LendRules { program: ProgramId(d.hash().ok()?), version: d.u32().ok()? }),
             50 => Some(Op::LendTime { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
             54 => Some(Op::GateSale { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, base: d.u32().ok()? }),
+            56 => Some(Op::SetDao {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                backers: d.u32().ok()?,
+                voting_epochs: d.u64().ok()?,
+                quorum_bps: d.u32().ok()?,
+            }),
+            57 => Some(Op::MemberPass { holder: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, item: d.hash().ok()?, pass: d.hash().ok()? }),
+            58 => Some(Op::Propose {
+                proposer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                item: d.hash().ok()?,
+                text: d.hash().ok()?,
+                pay: match d.u8().ok()? {
+                    0 => None,
+                    1 => Some(dao::Payment { asset: d.hash().ok()?, amount: d.fixed().ok()?, to: d.account().ok()? }),
+                    _ => return None,
+                },
+            }),
+            59 => Some(Op::Vote {
+                voter: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                proposal: d.u32().ok()?,
+                choice: d.u8().ok()?,
+                items: {
+                    let n = d.u32().ok()? as usize;
+                    if n > dao::MAX_VOTE_ITEMS {
+                        return None;
+                    }
+                    let mut v = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        v.push(d.hash().ok()?);
+                    }
+                    v
+                },
+            }),
             55 => Some(Op::AllowBuyers {
                 program: ProgramId(d.hash().ok()?),
                 collection: d.hash().ok()?,

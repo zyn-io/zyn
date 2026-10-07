@@ -86,7 +86,16 @@
       .role-form input, .role-form textarea { font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; text-transform: none; letter-spacing: 0; }
       .role-form textarea { min-height: 96px; resize: vertical; }
       .role-form .burrow { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
-      .role-form .row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      .pass { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(199, 240, 75, 0.35); background: rgba(0, 0, 0, 0.45); }
+      .pass code { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--acid); overflow-wrap: anywhere; }
+      .pass .act { justify-self: start; }
+      .prop { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid rgba(240, 238, 230, 0.07); }
+      .prop:last-child { border-bottom: 0; }
+      .prop-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-family: var(--sans); color: var(--ink); font-size: 15px; }
+      .prop-head b { font-family: var(--mono); font-size: 11px; color: var(--muted); font-weight: 400; }
+      .prop-text { font-family: var(--sans); font-size: 14px; line-height: 1.55; color: var(--read); white-space: pre-wrap; margin: 0; }
+      .prop-meta { font-family: var(--sans); font-size: 13px; color: var(--muted); margin: 0; }
     </style>
   </head>
   <body data-page="dao">
@@ -109,8 +118,16 @@
         <div class="ledger-index"><h2 id="h-member">Membership</h2><span>1 item · 1 vote</span></div>
         <div class="ledger-body">
           <p class="say">One Collection Z item is one membership and one vote. The animal on it carries no rank or role.<button class="tip" type="button" aria-expanded="false" data-tip="Membership is private: you prove you hold an item without showing which item or which account. Selling or redeeming the item ends the membership, and it passes to the new holder.">i</button></p>
-          <button class="act" id="check" type="button">Check with Nap</button>
+          <div class="row">
+            <button class="act" id="check" type="button">Check with Nap</button>
+            <button class="act ghost" id="get-pass" type="button" hidden>Get a member pass</button>
+          </div>
           <p class="out" id="member-out" role="status" aria-live="polite"></p>
+          <div class="pass" id="pass-box" hidden>
+            <p class="say small">Your pass code. Keep it private: give it only to the gate bot in the members' chat. Selling or moving the item ends it.</p>
+            <code id="pass-code"></code>
+            <button class="act small ghost" id="pass-copy" type="button">Copy</button>
+          </div>
           <p class="say small">Your Nap checks this in your browser. Cave's server is not told what you hold.</p>
         </div>
       </section>
@@ -156,6 +173,8 @@
         <div class="ledger-body">
           <p class="say">Members propose; enough backers bring a proposal to a vote; one vote per item, privately.<button class="tip" type="button" aria-expanded="false" data-tip="Draft rules: 10 items back a proposal before it goes to a vote; a vote stays open 7 days and passes with more yes than no and at least 10% of minted items voting. Until private voting is built, the team runs votes by hand and publishes each tally and payment.">i</button></p>
           <div id="props"><p class="say">Loading…</p></div>
+          <button class="act ghost" id="new-prop" type="button" hidden>New proposal</button>
+          <p class="out" id="props-out" role="status" aria-live="polite"></p>
         </div>
       </section>
 
@@ -167,6 +186,7 @@
             <div><dt>Items held</dt><dd id="f-out">—</dd></div>
             <div><dt>Floor per item</dt><dd id="f-each">—</dd></div>
             <div><dt>Sale</dt><dd id="f-sale">—</dd></div>
+            <div id="f-treasury-box" hidden><dt>DAO treasury</dt><dd id="f-treasury">—</dd></div>
           </dl>
           <p class="say">Sales pay 90% into the floor reserve and 10% to the treasury; each resale fee pays the treasury 10%.<button class="tip" type="button" aria-expanded="false" data-tip="The floor reserve belongs to holders: any item can be redeemed for its share at any time, whatever the DAO decides. The treasury is spent only on Cave's purpose: grants, Lookout fees and bounties, events and running Cave. Every inflow and spend is on the ledger.">i</button></p>
           <p class="out" id="treasury-out" role="status" aria-live="polite"></p>
@@ -183,6 +203,21 @@
         </div>
       </section>
     </main>
+
+    <dialog class="role-form" id="prop-dialog" aria-labelledby="prop-title">
+      <form id="prop-form">
+        <h2 id="prop-title">New proposal</h2>
+        <p class="say small">The text is published under its hash; the ledger keeps the hash. One of your items backs it first.</p>
+        <label>Proposal<textarea name="text" required maxlength="4000" placeholder="What, why, and what it costs"></textarea></label>
+        <label>Treasury pays, ZEC.zy (optional)<input name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" /></label>
+        <label>To Zyn account (if paying)<input name="to" autocomplete="off" spellcheck="false" placeholder="64 hex characters" /></label>
+        <p class="out" id="prop-out" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button class="act" type="submit" id="prop-send">Propose with Nap</button>
+          <button class="act ghost" type="button" id="prop-close">Close</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog class="role-form" id="role-dialog" aria-labelledby="role-title">
       <form id="role-form">
