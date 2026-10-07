@@ -98,3 +98,9 @@ test('a proposal text is kept only under its own hash', async () => {
   assert.equal((await post('x'.repeat(4001))).ok, false);
   assert.equal((await fn.onRequestGet({ env, request: new Request(`https://cavebro.win/api/proposal-text?hash=${'0'.repeat(64)}`) })).status, 404);
 });
+
+test('a proposal made closes its form, so the list behind it can be used', async () => {
+  const zstore = await read('zstore.js');
+  const sent = zstore.slice(zstore.indexOf("await ask('zyn_daoPropose'"));
+  assert.ok(sent.slice(0, 300).includes('propDialog.close();'), 'the dialog closes once Nap has proposed');
+});

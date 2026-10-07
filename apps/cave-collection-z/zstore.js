@@ -899,8 +899,10 @@ async function daoPage() {
       if (!b.ok) throw new Error(b.error || `The text was not stored (HTTP ${r.status}).`);
       out.textContent = 'Approve the proposal in Nap.';
       await ask('zyn_daoPropose', { collection: CAVE_Z, text, pay: amount ? { asset: ZEC_ZY, amount, to } : undefined });
-      out.textContent = 'Proposed. It shows here once the epoch seals.';
-      out.classList.add('good');
+      // Done: the form gets out of the way, and the list says what comes next.
+      propDialog.close();
+      el('props-out').className = 'out good';
+      el('props-out').textContent = 'Proposed. It shows here once the epoch seals.';
       later(loadDao);
     } catch (err) {
       out.textContent = failText(err, 'Nothing was proposed.');
