@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="CaveDAO: membership, roles, proposals and treasury of the Cave society." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/dao" />
+    <meta property="og:title" content="CaveDAO" />
+    <meta property="og:description" content="Membership, roles, proposals and treasury of the Cave society." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CaveDAO" />
+    <meta name="twitter:description" content="Membership, roles, proposals and treasury of the Cave society." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>CaveDAO</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>
+      .register { max-width: 940px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register::before { content: ""; position: absolute; inset: -20% 0 auto; height: 70%; background: radial-gradient(ellipse 44% 60% at 30% 0%, rgba(199, 240, 75, 0.05), transparent 68%); pointer-events: none; }
+      .register h1 > span { display: block; font-size: clamp(58px, 9vw, 116px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(36px, 5.2vw, 70px); color: var(--acid); }
+      .lede { margin: 26px 0 0; max-width: 56ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+
+      .ledger { margin: 40px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index h2 { margin: 0; font: inherit; color: var(--acid); }
+      .ledger-body { padding: clamp(22px, 3vw, 34px); display: grid; gap: 20px; }
+      .say { font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); margin: 0; }
+      .say strong { color: var(--ink); font-weight: 600; }
+      .small { font-size: 13px; color: var(--muted); }
+
+      .act { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 13px 22px; color: var(--black); background: var(--acid); border: 0; cursor: pointer; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); text-decoration: none; display: inline-block; }
+      .act:hover { filter: brightness(1.08); }
+      .act:disabled { opacity: 0.45; cursor: progress; }
+      .act.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); box-shadow: none; }
+      .act.small { padding: 7px 12px; font-size: 9px; }
+      .act:focus-visible { outline: 2px solid var(--zec); outline-offset: 3px; }
+      .out { font-family: var(--sans); font-size: 14px; line-height: 1.55; color: var(--read); margin: 0; }
+      .out.good { color: var(--acid); }
+      .out.bad { color: #e88; }
+      .out:empty { display: none; }
+
+      /* The "i" bubble: what needs explaining stays out of the headings. */
+      .tip { width: 18px; height: 18px; margin-left: 6px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 10px/1 var(--sans); cursor: pointer; vertical-align: middle; text-transform: none; letter-spacing: 0; }
+      .tip[aria-expanded="true"] { color: var(--acid); border-color: var(--acid); }
+      .bubble { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.55); font-family: var(--sans); font-size: 13.5px; line-height: 1.55; color: var(--read); max-width: 60ch; text-transform: none; letter-spacing: 0; }
+
+      .roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+      .role { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: 18px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); }
+      .role .act { justify-self: start; }
+      .role h3 { margin: 0; font-family: var(--mono); font-size: 18px; color: var(--ink); font-weight: 400; }
+      .role dl { margin: 0; display: grid; gap: 8px; }
+      .role dt { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+      .role dd { margin: 2px 0 0; font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--read); }
+
+      .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0; }
+      .figures div { padding: 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); }
+      .figures dt { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+      .figures dd { margin: 8px 0 0; font-family: var(--sans); font-size: 18px; color: var(--ink); overflow-wrap: anywhere; }
+
+      .rows { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 14px; color: var(--read); }
+      .rows th { text-align: left; font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); font-weight: 400; padding: 0 10px 10px 0; border-bottom: 1px solid var(--line); }
+      .rows td { padding: 10px 10px 10px 0; border-bottom: 1px solid rgba(240, 238, 230, 0.07); vertical-align: top; overflow-wrap: anywhere; }
+      .rows a { color: var(--acid); }
+      .tag { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; padding: 4px 8px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+      .tag.now { color: var(--acid); border-color: rgba(199, 240, 75, 0.5); }
+      .tag.done { color: var(--ink); }
+
+      .steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; counter-reset: s; }
+      .steps li { display: grid; grid-template-columns: 28px 1fr auto; gap: 12px; align-items: center; font-family: var(--sans); font-size: 14.5px; color: var(--read); counter-increment: s; }
+      .steps li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-size: 10px; color: var(--muted); }
+
+      dialog.role-form { max-width: 520px; width: calc(100% - 32px); }
+      .role-form form { display: grid; gap: 14px; }
+      .role-form label { display: grid; gap: 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+      .role-form input, .role-form textarea { font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; text-transform: none; letter-spacing: 0; }
+      .role-form textarea { min-height: 96px; resize: vertical; }
+      .role-form .burrow { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+      .role-form .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body data-page="dao">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/dao" aria-current="page">DAO</a>
+        <a href="/whitelist"><span class="l">Join the list</span><span class="s">Join</span></a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>Cave</span><span>DAO</span></h1>
+      <p class="lede">The Cave society: crypto privacy people who build, run and spread privacy, and decide together how Cave's money is used.</p>
+
+      <section class="ledger" aria-labelledby="h-member">
+        <div class="ledger-index"><h2 id="h-member">Membership</h2><span>1 item · 1 vote</span></div>
+        <div class="ledger-body">
+          <p class="say">One Collection Z item is one membership and one vote. The animal on it carries no rank or role.<button class="tip" type="button" aria-expanded="false" data-tip="Membership is private: you prove you hold an item without showing which item or which account. Selling or redeeming the item ends the membership, and it passes to the new holder.">i</button></p>
+          <button class="act" id="check" type="button">Check with Nap</button>
+          <p class="out" id="member-out" role="status" aria-live="polite"></p>
+          <p class="say small">Your Nap checks this in your browser. Cave's server is not told what you hold.</p>
+        </div>
+      </section>
+
+      <section class="ledger" aria-labelledby="h-roles">
+        <div class="ledger-index"><h2 id="h-roles">Roles</h2><span>voluntary</span></div>
+        <div class="ledger-body">
+          <p class="say">Take on any role, or several. A role is kept by work anyone can check, and the treasury pays for that work. It adds no votes.</p>
+          <div class="roles">
+            <article class="role">
+              <h3>Digger</h3>
+              <dl>
+                <div><dt>Does</dt><dd>Builds privacy tools and apps on Zyn and Zcash.</dd></div>
+                <div><dt>Kept by</dt><dd>A shipped project or grant deliverable.</dd></div>
+                <div><dt>Paid as</dt><dd>Grants.</dd></div>
+              </dl>
+              <button class="act small" type="button" data-role="digger">Take it on</button>
+            </article>
+            <article class="role">
+              <h3>Lookout</h3>
+              <dl>
+                <div><dt>Does</dt><dd>Runs verifying replicas or the public RPC; audits code.</dd></div>
+                <div><dt>Kept by</dt><dd>A replica that agrees with ZynScan, or a published review.</dd></div>
+                <div><dt>Paid as</dt><dd>Running fees and audit bounties.</dd></div>
+              </dl>
+              <button class="act small" type="button" data-role="lookout">Take it on</button>
+            </article>
+            <article class="role">
+              <h3>Lantern</h3>
+              <dl>
+                <div><dt>Does</dt><dd>Brings people into privacy: events, guides, onboarding.</dd></div>
+                <div><dt>Kept by</dt><dd>An event with NFC attendance certificates, or a published guide.</dd></div>
+                <div><dt>Paid as</dt><dd>Event budgets.</dd></div>
+              </dl>
+              <button class="act small" type="button" data-role="lantern">Take it on</button>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="ledger" aria-labelledby="h-props">
+        <div class="ledger-index"><h2 id="h-props">Proposals</h2><span id="props-count">—</span></div>
+        <div class="ledger-body">
+          <p class="say">Members propose; enough backers bring a proposal to a vote; one vote per item, privately.<button class="tip" type="button" aria-expanded="false" data-tip="Draft rules: 10 items back a proposal before it goes to a vote; a vote stays open 7 days and passes with more yes than no and at least 10% of minted items voting. Until private voting is built, the team runs votes by hand and publishes each tally and payment.">i</button></p>
+          <div id="props"><p class="say">Loading…</p></div>
+        </div>
+      </section>
+
+      <section class="ledger" aria-labelledby="h-treasury">
+        <div class="ledger-index"><h2 id="h-treasury">Treasury</h2><span id="treasury-net">mainnet</span></div>
+        <div class="ledger-body">
+          <dl class="figures" id="figures">
+            <div><dt>Floor reserve</dt><dd id="f-floor">—</dd></div>
+            <div><dt>Items held</dt><dd id="f-out">—</dd></div>
+            <div><dt>Floor per item</dt><dd id="f-each">—</dd></div>
+            <div><dt>Sale</dt><dd id="f-sale">—</dd></div>
+          </dl>
+          <p class="say">Sales pay 90% into the floor reserve and 10% to the treasury; each resale fee pays the treasury 10%.<button class="tip" type="button" aria-expanded="false" data-tip="The floor reserve belongs to holders: any item can be redeemed for its share at any time, whatever the DAO decides. The treasury is spent only on Cave's purpose: grants, Lookout fees and bounties, events and running Cave. Every inflow and spend is on the ledger.">i</button></p>
+          <p class="out" id="treasury-out" role="status" aria-live="polite"></p>
+          <div id="statement"></div>
+          <p class="say small" id="held-by"></p>
+        </div>
+      </section>
+
+      <section class="ledger" aria-labelledby="h-setup">
+        <div class="ledger-index"><h2 id="h-setup">Setup</h2><span id="updated"></span></div>
+        <div class="ledger-body">
+          <p class="say">Setup ends when treasury spends run only on passed votes.</p>
+          <ol class="steps" id="steps"></ol>
+        </div>
+      </section>
+    </main>
+
+    <dialog class="role-form" id="role-dialog" aria-labelledby="role-title">
+      <form id="role-form">
+        <h2 id="role-title">Take it on</h2>
+        <p class="say small">Only the Cave team sees this. When Cave names launch, your role shows on your name instead.</p>
+        <input type="hidden" name="role" />
+        <label class="burrow" aria-hidden="true">Leave empty<input name="burrow" tabindex="-1" autocomplete="off" /></label>
+        <label>X handle or other contact<input name="contact" required maxlength="80" autocomplete="off" spellcheck="false" placeholder="@handle" /></label>
+        <label>What you will do<textarea name="note" required maxlength="280" placeholder="A tool, a replica, an event…"></textarea></label>
+        <p class="out" id="role-out" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button class="act" type="submit" id="role-send">Send</button>
+          <button class="act ghost" type="button" id="role-close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/zstore.js?v=6"></script>
+  </body>
+</html>

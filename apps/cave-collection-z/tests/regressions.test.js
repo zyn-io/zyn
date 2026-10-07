@@ -67,3 +67,20 @@ test('the landing page no longer says sealed', () => {
 test('nothing widens a phone screen', () => {
   assert.match(styles, /html \{ scroll-behavior: smooth; overflow-x: clip; \}/);
 });
+
+test('a role sign-up keeps to its role, its limits and one entry per contact', async () => {
+  const { onRequestPost } = await import('../functions/api/roles.js');
+  const m = new Map();
+  const env = { CAVE_WHITELIST: { get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); } } };
+  const post = (body) => onRequestPost({ env, request: new Request('https://cavebro.win/api/roles', { method: 'POST', body: JSON.stringify(body), headers: { 'cf-connecting-ip': '1.2.3.4' } }) }).then((r) => r.json());
+  const good = { role: 'lookout', contact: '@alice', note: 'run a mainnet replica', dwell: 5000 };
+  assert.equal((await post({ ...good, role: 'admin' })).ok, false);
+  assert.equal((await post({ ...good, dwell: 10 })).ok, false);
+  assert.equal((await post({ ...good, note: 'x'.repeat(281) })).ok, false);
+  assert.deepEqual(await post(good), { ok: true });
+  assert.deepEqual(await post(good), { ok: true, already: true });
+  assert.equal(JSON.parse(m.get('role:lookout:@alice')).note, 'run a mainnet replica');
+  // The honeypot answers as accepted and stores nothing.
+  assert.deepEqual(await post({ ...good, role: 'digger', burrow: 'x' }), { ok: true });
+  assert.equal(m.get('role:digger:@alice'), undefined);
+});

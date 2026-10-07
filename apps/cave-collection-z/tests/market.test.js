@@ -74,7 +74,9 @@ test('the store reads only public things itself, and nothing with an account in 
   // One exception, and only when the holder acts (§74.13, §168): linking a
   // whitelist code sends this site the account the code is linked to, since
   // the operator must put that account on the sale's list.
-  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/whitelist/bind'", "'/collection-z.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
+  // CaveDAO reads the team's published /dao.json, and a role sign-up sends
+  // only the contact and note the member types — never an account or item.
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/roles'", "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());
   assert.match(zstore, /fetch\('\/api\/whitelist\/bind', \{ method: 'POST'/, 'the account goes only in the holder\'s own link request');
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   // Every chain read goes through one helper that sends no params: nothing

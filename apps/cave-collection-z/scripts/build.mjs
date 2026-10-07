@@ -47,7 +47,7 @@ await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 // The second half of the journey. Everything above gets a buyer as far as
 // owning an item; these are what they do next — see it, price it, sell it,
 // buy another, and leave. Same directory shape, so every one is a clean URL.
-for (const page of ['items', 'item', 'market', 'exit']) {
+for (const page of ['items', 'item', 'market', 'exit', 'dao']) {
   await mkdir(new URL(`${page}/`, output), { recursive: true });
   await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
 }
@@ -66,6 +66,8 @@ for (const f of ['burn.json', 'burn-testnet.json']) {
   await cp(new URL(f, root), new URL(f, output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 }
 await cp(new URL('../nap-connect/nap-connect.js', root), new URL('nap-connect.js', output));
+// CaveDAO's published data: setup steps, proposals and the treasury statement.
+await cp(new URL('dao.json', root), new URL('dao.json', output));
 
 // Collection Z's public index: for every serial, its name, the hash of its
 // image blob, its rarity and its traits — the frozen metadata, in one file the
@@ -129,7 +131,7 @@ await writeFile(
 // injected. Computed rather than written down, because a hash maintained by
 // hand is a hash that goes stale and takes the site down with it.
 const pages = ['index.html', 'whitelist.html', 'deposit.html', 'terms.html', 'mint.html',
-  'items.html', 'item.html', 'market.html', 'exit.html'];
+  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html'];
 const scriptHashes = new Set();
 for (const page of pages) {
   const html = await readFile(new URL(page, root), 'utf8');

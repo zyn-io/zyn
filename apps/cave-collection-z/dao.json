@@ -1,0 +1,19 @@
+{
+  "updated": "2026-10-07",
+  "treasury": {
+    "account": "b3e4c493bb79349270260f7d2e2882b4f1a736348935493331e18c95098cfe99",
+    "held_by": "the Zyn team's 2-of-3 custodian key, until votes become binding"
+  },
+  "setup": [
+    { "step": "Agree the charter", "state": "now" },
+    { "step": "Re-issue the sale terms with the whitelist gate, rising ticket price and the charter", "state": "next" },
+    { "step": "Open the sale", "state": "next" },
+    { "step": "Private membership proof and the members' chat", "state": "next" },
+    { "step": "Cave names and roles on names", "state": "later" },
+    { "step": "Votes as signals, carried out by the team", "state": "later" },
+    { "step": "Binding votes: the ledger pays only passed proposals", "state": "later" },
+    { "step": "Legal wrapper", "state": "later" }
+  ],
+  "proposals": [],
+  "statement": []
+}

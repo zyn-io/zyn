@@ -684,8 +684,140 @@ async function mintPage() {
 // connection to Nap — which for Nap in the browser is a window this page
 // opened — carries across. Any other link loads normally.
 
-const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage };
-const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint' };
+// ---------------------------------------------------------------------------
+// CaveDAO: membership is checked by the holder's own Nap, in this page; roles,
+// proposals, the treasury and setup are read from public data — the chain for
+// the floor and the sale, /dao.json for what the team publishes.
+
+/// The "i" bubbles: what needs explaining opens beside the words it explains.
+function wireTips() {
+  document.querySelectorAll('.tip[data-tip]').forEach((b) => {
+    b.onclick = () => {
+      const open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', String(!open));
+      const host = b.closest('p, div');
+      host.nextElementSibling?.classList.contains('bubble') && host.nextElementSibling.remove();
+      if (!open) {
+        const bubble = document.createElement('p');
+        bubble.className = 'bubble';
+        bubble.textContent = b.dataset.tip;
+        host.after(bubble);
+      }
+    };
+  });
+}
+
+async function daoPage() {
+  const gen = generation;
+  wireTips();
+
+  // Membership: Nap lists this wallet's items; only the count is used, here.
+  let wanted = false;
+  const check = async () => {
+    const out = el('member-out');
+    if (!current) { wanted = true; pick(); return; }
+    wanted = false;
+    out.className = 'out';
+    out.textContent = 'Asking Nap…';
+    try {
+      const mine = await ask('zyn_nftItems');
+      if (gen !== generation) return;
+      const n = (mine?.items || []).filter((i) => i.collection === CAVE_Z && Number.isSafeInteger(i.serial)).length;
+      out.textContent = n ? `You are a member: ${n} item${n === 1 ? '' : 's'}, ${n} vote${n === 1 ? '' : 's'}.` : 'No Collection Z item in this wallet yet.';
+      out.classList.add(n ? 'good' : 'bad');
+    } catch (e) {
+      if (gen !== generation) return;
+      out.textContent = failText(e, 'Nap was not asked. Nothing was shared.');
+      out.classList.toggle('bad', e?.code !== 4001);
+    }
+  };
+  el('check').onclick = check;
+  walletListeners.add(() => { if (wanted && current) check(); });
+
+  // Roles: a note to the team until names carry roles.
+  const dialog = el('role-dialog');
+  const form = el('role-form');
+  let opened = 0;
+  document.querySelectorAll('[data-role]').forEach((b) => {
+    b.onclick = () => {
+      form.reset();
+      form.role.value = b.dataset.role;
+      el('role-title').textContent = `Take on ${b.closest('.role').querySelector('h3').textContent}`;
+      el('role-out').textContent = '';
+      opened = Date.now();
+      dialog.showModal();
+    };
+  });
+  el('role-close').onclick = () => dialog.close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const out = el('role-out');
+    const send = el('role-send');
+    send.disabled = true;
+    out.className = 'out';
+    out.textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/roles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'omit',
+        body: JSON.stringify({ role: form.role.value, contact: form.contact.value, note: form.note.value, burrow: form.burrow.value, dwell: Date.now() - opened }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!body.ok) throw new Error(body.error || `Not sent (HTTP ${r.status}).`);
+      out.textContent = body.already ? 'Already noted for this role.' : 'Sent. The team will reach out.';
+      out.classList.add('good');
+    } catch (err) {
+      out.textContent = err.message.replace(/^./, (c) => c.toUpperCase());
+      out.classList.add('bad');
+    } finally { send.disabled = false; }
+  };
+
+  // What the team publishes.
+  let data = null;
+  try {
+    const r = await fetch('/dao.json', { credentials: 'omit', cache: 'no-cache' });
+    data = r.ok ? await r.json() : null;
+  } catch { data = null; }
+  if (gen !== generation) return;
+  const props = Array.isArray(data?.proposals) ? data.proposals : [];
+  el('props-count').textContent = props.length ? `${props.length}` : 'none yet';
+  el('props').innerHTML = props.length
+    ? `<table class="rows"><thead><tr><th>Proposal</th><th>State</th><th>Yes · No</th></tr></thead><tbody>${props.map((x) => `<tr><td>${x.link ? `<a href="${esc(x.link)}" rel="noopener noreferrer" target="_blank">${esc(x.title)}</a>` : esc(x.title)}</td><td><span class="tag">${esc(x.state)}</span></td><td>${Number.isSafeInteger(x.yes) ? `${x.yes} · ${x.no ?? 0}` : '—'}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="say">No proposals yet. The first ones open with the sale.</p>';
+  const rows = Array.isArray(data?.statement) ? data.statement : [];
+  el('statement').innerHTML = rows.length
+    ? `<table class="rows"><thead><tr><th>Date</th><th>In / out</th><th>ZEC.zy</th><th>For</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.dir)}</td><td>${esc(x.amount)}</td><td>${x.link ? `<a href="${esc(x.link)}" rel="noopener noreferrer" target="_blank">${esc(x.what)}</a>` : esc(x.what)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="say small">Treasury statement: no entries yet. The treasury receives its first share when the sale opens.</p>';
+  if (data?.treasury?.held_by) el('held-by').textContent = `Treasury account ${String(data.treasury.account || '').slice(0, 10)}…, held by ${data.treasury.held_by}.`;
+  if (data?.updated) el('updated').textContent = `updated ${data.updated}`;
+  const steps = Array.isArray(data?.setup) ? data.setup : [];
+  const label = { done: 'done', now: 'now', next: 'next', later: 'later' };
+  el('steps').innerHTML = steps.map((x) => `<li><span>${esc(x.step)}</span><span class="tag ${esc(x.state)}">${esc(label[x.state] || x.state)}</span></li>`).join('');
+
+  // The floor and the sale, from the chain itself.
+  el('treasury-net').textContent = NETWORK;
+  try {
+    const m = await chain('zyn_market');
+    if (gen !== generation) return;
+    const c = (m?.collections || []).find((x) => x.asset === CAVE_Z);
+    const sale = (m?.sales || []).find((x) => x.collection === CAVE_Z);
+    if (c && isInt(c.floor) && isInt(c.outstanding)) {
+      el('f-floor').textContent = `${zec(c.floor)} ZEC.zy`;
+      el('f-out').textContent = `${c.outstanding} of ${Number(c.cap).toLocaleString('en-US')}`;
+      el('f-each').textContent = BigInt(c.outstanding) > 0n ? `${zec(BigInt(c.floor) / BigInt(c.outstanding))} ZEC.zy` : '—';
+    }
+    const phase = { open: 'tickets on sale', closed: 'waiting for the draw', drawn: 'claims open', openmint: 'open mint' }[sale?.phase] || (sale ? sale.phase : 'not open yet');
+    el('f-sale').textContent = sale && Number.isSafeInteger(sale.tickets) ? `${phase} · ${sale.tickets} tickets` : phase;
+  } catch (e) {
+    if (gen !== generation) return;
+    el('treasury-out').textContent = e.message;
+    el('treasury-out').classList.add('bad');
+  }
+}
+
+const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage, dao: daoPage };
+const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint', '/dao/': 'dao' };
 let params = new URLSearchParams(location.search);
 
 function start(page) {
