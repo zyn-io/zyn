@@ -47,7 +47,8 @@ test('the page may reach Solana only where a burn config says, and only to read'
   assert.match(headers, /connect-src 'self' https:\/\/zyn-rpc\.cavebro\.win https:\/\/api\.devnet\.solana\.com/);
   const zstore = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
   const asked = [...zstore.matchAll(/solanaRead\(cfg, '(\w+)'/g)].map((m) => m[1]).sort();
-  assert.deepEqual(asked, ['getLatestBlockhash', 'getTokenAccountsByOwner'], 'the page reads; the wallet sends');
+  // A pool-priced token's rate reads the pool's two reserves (8 Oct 2026).
+  assert.deepEqual(asked, ['getLatestBlockhash', 'getTokenAccountBalance', 'getTokenAccountsByOwner'], 'the page reads; the wallet sends');
 });
 
 test('no burn is offered on mainnet until the token exists', async () => {
@@ -59,4 +60,17 @@ test('no burn is offered on mainnet until the token exists', async () => {
   }
   const t = JSON.parse(await readFile(new URL('../burn-testnet.json', import.meta.url), 'utf8'));
   assert.equal(t.cluster, 'devnet', 'the testnet store burns on Solana devnet');
+});
+
+test('a pool-priced burn costs one ticket price in ZEC at the pool, with headroom', async () => {
+  const src = await (await import('node:fs/promises')).readFile(new URL('../zstore.js', import.meta.url), 'utf8');
+  const body = (name) => src.slice(src.indexOf(name), src.indexOf('\n}\n', src.indexOf(name)) + 2);
+  const burnRate = new Function('solanaRead', `${body('async function burnRate')}; return burnRate;`)(async (cfg, method, [account]) => ({ value: { amount: account === 'T' ? '1000000000000' : '1000000000' } }));
+  // 1,000,000 tokens (6 places) against 10 ZEC (8 places): a 0.01 ZEC ticket is 1,000 tokens.
+  const rate = await burnRate({ pool: { token_vault: 'T', zec_vault: 'Z', zec_decimals: 8 } }, '10000000000000000');
+  assert.deepEqual(rate, { perTicket: 1000000000n, floating: true });
+  const BURN_HEADROOM = 5n;
+  const burnFor = new Function('BURN_HEADROOM', `return ${src.match(/const burnFor = ([^;]+);/)[1]};`)(BURN_HEADROOM);
+  assert.equal(burnFor(3, rate), 3150000000n, '5% over three tickets');
+  assert.equal(burnFor(3, { perTicket: 7n, floating: false }), 21n, 'a fixed rate has no headroom');
 });

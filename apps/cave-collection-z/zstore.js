@@ -418,10 +418,35 @@ let burnConfig = null;
 async function burnToken() {
   burnConfig ??= fetch(NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json', { credentials: 'omit' })
     .then((r) => (r.ok ? r.json() : null))
-    .then((c) => (c && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.mint) && /^\d+$/.test(c.per_ticket) && Number.isInteger(c.decimals) ? c : null))
+    .then((c) => (c && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.mint) && (/^\d+$/.test(c.per_ticket) || validPool(c.pool)) && Number.isInteger(c.decimals) ? c : null))
     .catch(() => null);
   return burnConfig;
 }
+
+/// A token priced by its pool against bridged ZEC on Solana (the user, 8 Oct
+/// 2026): a burn ticket costs one ticket price in ZEC at the pool's price.
+const SOLANA_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const validPool = (p) => !!p && SOLANA_ADDR.test(p.token_vault) && SOLANA_ADDR.test(p.zec_vault) && Number.isInteger(p.zec_decimals) && p.zec_decimals >= 0 && p.zec_decimals <= 18;
+/// Headroom on a pool-priced burn, in percent: the watcher prices burns at
+/// the median of the last hour, so the amount allows for the price moving.
+const BURN_HEADROOM = 5n;
+
+/// Base units one ticket costs now: fixed, or the ticket's price in ZEC at
+/// the pool's price (rounded up) — the same sum the watcher makes.
+async function burnRate(cfg, ticketWad) {
+  if (!cfg.pool) return { perTicket: BigInt(cfg.per_ticket), floating: false };
+  const [t, z] = await Promise.all([cfg.pool.token_vault, cfg.pool.zec_vault].map((a) => solanaRead(cfg, 'getTokenAccountBalance', [a, { commitment: 'confirmed' }])));
+  const token = BigInt(t?.value?.amount || '0');
+  const zecWad = BigInt(z?.value?.amount || '0') * 10n ** BigInt(18 - cfg.pool.zec_decimals);
+  if (token === 0n || zecWad === 0n) throw new Error("The token's pool is empty; burning is paused.");
+  const n = BigInt(ticketWad) * token;
+  return { perTicket: (n + zecWad - 1n) / zecWad, floating: true };
+}
+/// What to burn for `tickets`: whole tickets at a fixed rate; with headroom
+/// at a pool's price.
+const burnFor = (tickets, rate) => (rate.floating
+  ? (BigInt(tickets) * rate.perTicket * (100n + BURN_HEADROOM) + 99n) / 100n
+  : BigInt(tickets) * rate.perTicket);
 
 const SOLANA_PUBLIC = { mainnet: 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com' };
 async function solanaRead(cfg, method, params) {
@@ -442,7 +467,7 @@ const units = (raw, decimals) => {
 
 /// Burn for `tickets`: Nap's memo, the holder's Solana wallet, one signed
 /// transaction. Returns the Solana signature.
-async function burnForTickets(cfg, tickets, report) {
+async function burnForTickets(cfg, amount, report) {
   // A fresh code every burn: two burns never share one, so a second burn made
   // before the first is posted still earns its own tickets.
   const { memo } = await ask('zyn_burnMemo', { fresh: true });
@@ -455,7 +480,6 @@ async function burnForTickets(cfg, tickets, report) {
   const { accounts } = await wallet.features['standard:connect'].connect();
   const account = accounts?.[0];
   if (!account) throw new Error(`${wallet.name} shared no account.`);
-  const amount = sol.burnAmount(tickets, cfg.per_ticket);
   const held = await solanaRead(cfg, 'getTokenAccountsByOwner', [account.address, { mint: cfg.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
   const ta = (held?.value || []).find((a) => BigInt(a.account?.data?.parsed?.info?.tokenAmount?.amount || '0') >= amount);
   if (!ta) throw new Error(`That wallet holds less than ${units(amount, cfg.decimals)} ${cfg.symbol}.`);
@@ -476,6 +500,8 @@ async function mintPage() {
   const gen = generation;
   let sale = null;
   let cfg = null;
+  // Base units per ticket, fixed or read from the token's pool.
+  let rate = null;
   // A gated sale (§168): this wallet's place on the list and its next prices,
   // as Nap reads them from the chain. Null when the sale is not gated.
   let access = null;
@@ -489,11 +515,11 @@ async function mintPage() {
     el('buy').disabled = !n || (gated() && !access?.listed);
   };
   const setBurnTotal = () => {
-    if (!cfg || !el('burn-total')) return;
+    if (!cfg || !rate || !el('burn-total')) return;
     const max = burnMax();
     el('burn-in').max = String(Math.max(1, max));
     const n = whole('burn-in', max);
-    el('burn-total').textContent = n ? `${units(sol.burnAmount(n, cfg.per_ticket), cfg.decimals)} ${cfg.symbol}` : `a whole number from 1 to ${max}`;
+    el('burn-total').textContent = n ? `${units(burnFor(n, rate), cfg.decimals)} ${cfg.symbol}${rate.floating ? `, with ${BURN_HEADROOM}% headroom` : ''}` : `a whole number from 1 to ${max}`;
     el('burn-go').disabled = !n;
   };
   const setMintTotal = () => {
@@ -543,7 +569,14 @@ async function mintPage() {
       el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0 && (!gated() || access?.listed));
       if (cfg) {
         document.querySelectorAll('[data-burn-symbol]').forEach((x) => { x.textContent = cfg.symbol; });
-        el('burn-rate').textContent = `${units(cfg.per_ticket, cfg.decimals)} ${cfg.symbol}`;
+        try {
+          rate = await burnRate(cfg, sale.ticket_price);
+          el('burn-rate').textContent = `${rate.floating ? 'About ' : ''}${units(rate.perTicket, cfg.decimals)} ${cfg.symbol}`;
+          el('burn-floating').hidden = !rate.floating;
+        } catch (e) {
+          rate = null;
+          el('burn-rate').textContent = e.message;
+        }
         el('burn-left').textContent = String(Math.max(0, Number(sale.voucher_cap || 0) - Number(sale.voucher_tickets || 0)));
         setBurnTotal();
       }
@@ -657,7 +690,10 @@ async function mintPage() {
     if (!n) { out.textContent = max ? `Burn for 1 to ${max} tickets — that is how many burn tickets are left.` : 'The burn tickets are all taken.'; out.classList.add('bad'); setBurnTotal(); return; }
     el('burn-go').disabled = true;
     try {
-      const sig = await burnForTickets(cfg, n, (t) => { out.textContent = t; });
+      // The rate again too: a pool's price moves.
+      rate = await burnRate(cfg, sale.ticket_price);
+      setBurnTotal();
+      const sig = await burnForTickets(cfg, burnFor(n, rate), (t) => { out.textContent = t; });
       out.textContent = `Burned. Your ${n} ticket${n > 1 ? 's' : ''} appear below once Solana finalizes it and the burn is posted — usually within a minute or two. Solana: ${sig.slice(0, 12)}…`;
       for (const wait of [30000, 60000, 120000, 240000]) setTimeout(read, wait);
     } catch (e) {

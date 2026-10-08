@@ -15,7 +15,14 @@
 //! ```text
 //!   ZYN_BURN_RPC         Solana JSON-RPC (https://api.mainnet-beta.solana.com)
 //!   ZYN_BURN_MINT        the token's mint address                      (required)
-//!   ZYN_BURN_PER_TICKET  base units burned per ticket                  (required)
+//!   ZYN_BURN_POOL        the token's pool against bridged ZEC on Solana:
+//!                        <token vault>,<ZEC vault> (its two reserve accounts).
+//!                        Set, a ticket costs one ticket price in ZEC at the
+//!                        median of the last hour's pool readings
+//!   ZYN_BURN_ZEC_DECIMALS  bridged ZEC's decimal places                 (8)
+//!   ZYN_BURN_PRICES      file holding the last hour's readings
+//!                                         (/var/lib/zyn/burn-prices.json)
+//!   ZYN_BURN_PER_TICKET  base units burned per ticket, when no pool is set
 //!   ZYN_BURN_NODE        the object ledger's JSON-RPC  (http://127.0.0.1:8599)
 //!   ZYN_SUBMIT_TOKEN     the operator door's token (read from the node's env)
 //!   ZYN_BURN_COLLECTION  the sale's collection                (Collection Z)
@@ -40,10 +47,20 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// How a ticket is priced: a fixed number of base units, or the token's
+/// price in bridged ZEC from its pool.
+enum Rate {
+    Fixed(u64),
+    Pool { token_vault: String, zec_vault: String, zec_decimals: u32, prices: std::path::PathBuf },
+}
+
+/// The window the median rate is taken over.
+const PRICE_WINDOW_SECS: u64 = 3_600;
+
 struct Watch {
     rpc: String,
     mint: String,
-    per_ticket: u64,
+    rate: Rate,
     node: String,
     collection: [u8; 32],
     cursor: std::path::PathBuf,
@@ -55,10 +72,22 @@ fn watch() -> Result<Watch, String> {
     if mint.is_empty() {
         return Err("set ZYN_BURN_MINT to the token's mint address".into());
     }
-    let per_ticket: u64 = env("ZYN_BURN_PER_TICKET", "").parse().map_err(|_| "set ZYN_BURN_PER_TICKET to the base units one ticket costs".to_string())?;
-    if per_ticket == 0 {
-        return Err("ZYN_BURN_PER_TICKET must be above zero".into());
-    }
+    let pool = env("ZYN_BURN_POOL", "");
+    let rate = if pool.is_empty() {
+        let per_ticket: u64 = env("ZYN_BURN_PER_TICKET", "").parse().map_err(|_| "set ZYN_BURN_POOL to the token's pool, or ZYN_BURN_PER_TICKET to the base units one ticket costs".to_string())?;
+        if per_ticket == 0 {
+            return Err("ZYN_BURN_PER_TICKET must be above zero".into());
+        }
+        Rate::Fixed(per_ticket)
+    } else {
+        let (token_vault, zec_vault) = pool.split_once(',').ok_or("ZYN_BURN_POOL is <token vault>,<ZEC vault>")?;
+        Rate::Pool {
+            token_vault: token_vault.trim().to_string(),
+            zec_vault: zec_vault.trim().to_string(),
+            zec_decimals: env("ZYN_BURN_ZEC_DECIMALS", "8").parse().map_err(|_| "ZYN_BURN_ZEC_DECIMALS must be a number".to_string())?,
+            prices: env("ZYN_BURN_PRICES", "/var/lib/zyn/burn-prices.json").into(),
+        }
+    };
     let collection = match std::env::var("ZYN_BURN_COLLECTION").ok().filter(|v| !v.is_empty()) {
         None => zynzapd::cave_z::collection_id(),
         Some(h) => {
@@ -69,7 +98,7 @@ fn watch() -> Result<Watch, String> {
     Ok(Watch {
         rpc: env("ZYN_BURN_RPC", "https://api.mainnet-beta.solana.com"),
         mint,
-        per_ticket,
+        rate,
         node: env("ZYN_BURN_NODE", "http://127.0.0.1:8599"),
         collection,
         cursor: env("ZYN_BURN_CURSOR", "/var/lib/zyn/burn-cursor").into(),
@@ -98,6 +127,40 @@ impl Watch {
     fn sale(&self) -> Result<Option<Value>, String> {
         let m = zynzapd::object_client::call(&self.node, "zyn_market", json!({}))?;
         Ok(m.get("sales").and_then(Value::as_array).and_then(|a| a.iter().find(|s| s["collection"].as_str() == Some(&hex(&self.collection))).cloned()))
+    }
+
+    /// A pool reserve, in base units.
+    fn reserve(&self, account: &str) -> Result<u128, String> {
+        let v = self.solana("getTokenAccountBalance", json!([account, { "commitment": "finalized" }]))?;
+        v["value"]["amount"].as_str().and_then(|a| a.parse().ok()).ok_or_else(|| format!("{account} is not a token account"))
+    }
+
+    /// The pool's price for one ticket now, recorded with the readings of
+    /// the last hour; returns the spot and the median the burns are priced at
+    /// (None until there are enough readings).
+    fn read_rate(&self, sale: &Value) -> Result<(u64, Option<u64>), String> {
+        let Rate::Pool { token_vault, zec_vault, zec_decimals, prices } = &self.rate else { return Err("not priced by a pool".into()) };
+        let ticket: u128 = sale["ticket_price"].as_str().and_then(|t| t.parse().ok()).ok_or("the sale has no ticket price")?;
+        let spot = zynzapd::burn_watch::per_ticket_at(ticket, self.reserve(token_vault)?, self.reserve(zec_vault)?, *zec_decimals).ok_or("the pool is empty or prices a ticket under one base unit")?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let mut readings: Vec<(u64, u64)> = std::fs::read(prices).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        readings.retain(|(t, _)| now.saturating_sub(*t) <= PRICE_WINDOW_SECS);
+        readings.push((now, spot));
+        std::fs::write(prices, serde_json::to_vec(&readings).unwrap()).map_err(|e| format!("{}: {e}", prices.display()))?;
+        let rates: Vec<u64> = readings.iter().map(|(_, r)| *r).collect();
+        Ok((spot, zynzapd::burn_watch::median_rate(&rates)))
+    }
+
+    /// Base units one ticket costs for the burns this pass posts.
+    fn per_ticket(&self, sale: &Value) -> Result<u64, String> {
+        match &self.rate {
+            Rate::Fixed(n) => Ok(*n),
+            Rate::Pool { .. } => {
+                let (_, median) = self.read_rate(sale)?;
+                // Too few readings yet: the burns wait, unposted, for the next pass.
+                median.ok_or_else(|| format!("pricing burns needs {} readings of the pool; still gathering", zynzapd::burn_watch::MIN_READINGS))
+            }
+        }
     }
 
     fn submit(&self, op: &Op) -> Result<String, String> {
@@ -148,6 +211,9 @@ impl Watch {
         let Some(sale) = self.sale()? else {
             return Err("there is no sale for this collection yet".into());
         };
+        // The rate first: without one, nothing is read and the cursor stays,
+        // so the burns wait for a priced pass.
+        let per_ticket = self.per_ticket(&sale)?;
         // Read the head first: anything after it is next round's.
         let head = self.newest()?;
         let open = sale["phase"].as_str() == Some("open");
@@ -156,7 +222,7 @@ impl Watch {
                 continue;
             };
             let Some(b) = decode_burn(&tx, &self.mint) else { continue };
-            let count = tickets_for(b.amount, self.per_ticket);
+            let count = tickets_for(b.amount, per_ticket);
             if count == 0 {
                 println!("{sig}: burned {} — less than one ticket", b.amount);
                 continue;
@@ -197,7 +263,17 @@ fn main() {
         "status" => {
             let sale = w.sale()?;
             println!("mint        {}", w.mint);
-            println!("per ticket  {} base units", w.per_ticket);
+            match &w.rate {
+                Rate::Fixed(n) => println!("per ticket  {n} base units (fixed)"),
+                Rate::Pool { token_vault, zec_vault, .. } => {
+                    println!("pool        token {token_vault} · ZEC {zec_vault}");
+                    match sale.as_ref().map(|s| w.read_rate(s)) {
+                        Some(Ok((spot, median))) => println!("per ticket  {spot} base units now; burns priced at {}", median.map_or("— (gathering readings)".into(), |m| format!("{m} (hour's median)"))),
+                        Some(Err(e)) => println!("per ticket  unknown: {e}"),
+                        None => println!("per ticket  — (no sale)"),
+                    }
+                }
+            }
             println!("collection  {}", hex(&w.collection));
             match sale {
                 None => println!("no sale yet"),

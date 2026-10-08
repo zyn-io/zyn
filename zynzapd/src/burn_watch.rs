@@ -121,6 +121,42 @@ pub fn decode_burn(tx: &Value, mint: &str) -> Option<Burn> {
     Some(Burn { amount, commitment: commitment? })
 }
 
+// ---------------------------------------------------------------------------
+// The rate (the user, 8 Oct 2026): a burn ticket costs one ticket price in ZEC,
+// in the token at its price against bridged ZEC on Solana. The price is read
+// from the token's pool — its two reserves — and a burn is priced at the
+// median of the last hour's readings, so a moment's pump of the pool buys no
+// extra tickets.
+
+/// Token base units one ticket costs when the pool holds `token_reserve` base
+/// units of the token and `zec_reserve` base units of bridged ZEC (with
+/// `zec_decimals` places): the ticket's price (`ticket_wad`, ZEC in WAD) at
+/// the pool's price, rounded up. None for an empty pool or a price so high a
+/// ticket costs less than one base unit.
+pub fn per_ticket_at(ticket_wad: u128, token_reserve: u128, zec_reserve: u128, zec_decimals: u32) -> Option<u64> {
+    if token_reserve == 0 || zec_reserve == 0 || zec_decimals > 18 {
+        return None;
+    }
+    let zec_wad = zec_reserve.checked_mul(10u128.checked_pow(18 - zec_decimals)?)?;
+    let v = ticket_wad.checked_mul(token_reserve)?.div_ceil(zec_wad);
+    u64::try_from(v).ok().filter(|v| *v > 0)
+}
+
+/// Readings a rate needs before any burn is priced: five minutes' worth at
+/// the watcher's 30-second poll.
+pub const MIN_READINGS: usize = 10;
+
+/// The rate a burn is priced at: the median of the readings (the upper one of
+/// an even count, so the rate never favours the burner).
+pub fn median_rate(readings: &[u64]) -> Option<u64> {
+    if readings.len() < MIN_READINGS {
+        return None;
+    }
+    let mut v = readings.to_vec();
+    v.sort_unstable();
+    Some(v[v.len() / 2])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +202,27 @@ mod tests {
         assert_eq!(tickets_for(5, 0), 0);
         assert_eq!(memo_commitment("zyn:zz"), None);
         assert_ne!(burn_id("a"), burn_id("b"));
+    }
+
+    #[test]
+    fn a_ticket_costs_its_zec_price_at_the_pool() {
+        // 0.01 ZEC a ticket; the pool holds 1,000,000 tokens (6 places) and
+        // 10 ZEC (8 places): a token is 0.00001 ZEC, a ticket 1,000 tokens.
+        let ticket = 10_000_000_000_000_000u128;
+        assert_eq!(per_ticket_at(ticket, 1_000_000 * 1_000_000, 10 * 100_000_000, 8), Some(1_000 * 1_000_000));
+        // The price doubles: half the tokens. Rounded up, never down.
+        assert_eq!(per_ticket_at(ticket, 1_000_000 * 1_000_000, 20 * 100_000_000, 8), Some(500 * 1_000_000));
+        assert_eq!(per_ticket_at(ticket, 3, 7 * 100_000_000, 8), Some(1));
+        assert_eq!(per_ticket_at(ticket, 0, 1, 8), None);
+        assert_eq!(per_ticket_at(ticket, 1, 0, 8), None);
+    }
+
+    #[test]
+    fn a_burn_is_priced_at_the_hours_median() {
+        assert_eq!(median_rate(&[5; 9]), None, "too few readings: no burn is priced");
+        let mut r = vec![1_000; 9];
+        r.push(1); // a pumped moment: one ticket for one base unit
+        assert_eq!(median_rate(&r), Some(1_000), "one spike does not move the median");
+        assert_eq!(median_rate(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), Some(6), "the upper middle of an even count");
     }
 }
