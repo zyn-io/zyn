@@ -1,0 +1,36 @@
+/* Cave brand tokens (brandkit/cave/tokens.json) and the film's shared look. */
+@font-face { font-family: "Tiny5"; src: url("assets/fonts/Tiny5-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Silkscreen"; src: url("assets/fonts/Silkscreen-Regular.ttf") format("truetype"); }
+@font-face { font-family: "Silkscreen"; font-weight: 700; src: url("assets/fonts/Silkscreen-Bold.ttf") format("truetype"); }
+@font-face { font-family: "DM Sans"; src: url("assets/fonts/DM-Sans.ttf") format("truetype"); font-weight: 100 1000; }
+
+:root {
+  --black: #070807;
+  --stone: #111813;
+  --ivory: #f0eee6;
+  --muted: #a8ada3;
+  --amber: #f4b728;
+  --line: #3b413a;
+  --acid: #c7f04b;
+  --cyan: #8be2dd;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--black); }
+img { image-rendering: pixelated; display: block; }
+
+.clip { position: absolute; inset: 0; overflow: hidden; }
+.display { font-family: "Tiny5", monospace; color: var(--ivory); line-height: 0.9; letter-spacing: 0; }
+.label { font-family: "Silkscreen", monospace; text-transform: uppercase; letter-spacing: 0.18em; color: var(--muted); }
+.read { font-family: "DM Sans", sans-serif; color: var(--ivory); }
+.amber { color: var(--amber); }
+
+/* Film grain: a fixed noise tile, shifted per frame by the timeline. */
+.grain {
+  position: absolute; inset: -40px; pointer-events: none; opacity: 0.06; mix-blend-mode: screen;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='7'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+}
+
+/* Scanline-free pixel vignette: darkness is the cave, not a filter. */
+.vignette { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 70% 70% at 50% 55%, transparent 40%, rgba(7,8,7,0.85) 100%); }

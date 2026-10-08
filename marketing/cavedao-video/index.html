@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="cues.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      .h { font-family: "DM Sans", sans-serif; font-weight: 800; letter-spacing: -0.035em; line-height: 1.02; color: var(--ivory);
+           text-shadow: 0 6px 30px rgba(7, 8, 7, 0.75); position: absolute; }
+      .sub { font-family: "DM Sans", sans-serif; font-weight: 600; letter-spacing: -0.01em; color: var(--ivory); position: absolute; text-shadow: 0 4px 24px rgba(7,8,7,0.8); }
+      .world { position: absolute; left: 0; top: 0; height: 1080px; }
+      /* The cavern plate sits back: dimmed and softened so the creatures' pixels lead. */
+      .plate { position: absolute; top: 0; width: 1920px; height: 1080px; background: url("assets/art/cave-background.png") center/cover; filter: brightness(0.5) blur(1.5px); }
+      .who { position: absolute; width: 384px; height: 384px; }
+      .who img { position: absolute; left: 0; top: 0; width: 384px; height: 384px; image-rendering: pixelated; }
+      .floor { position: absolute; left: 0; width: 1920px; top: 950px; height: 130px; background: linear-gradient(180deg, rgba(7,8,7,0), rgba(7,8,7,0.92) 60%); }
+      .gate { position: absolute; }
+      .gate i { position: absolute; background: var(--amber); }
+      .ember { position: absolute; width: 8px; height: 8px; background: var(--amber); box-shadow: 0 0 12px rgba(244, 183, 40, 0.8); }
+      .layer { position: absolute; inset: 0; }
+
+      /* 1 · the gate */
+      #s1 { z-index: 3; }
+      #s1 .cam { position: absolute; inset: 0; transform-origin: 960px 560px; }
+      #s1 .mask { position: absolute; left: -2000px; top: -2000px; width: 5920px; height: 5080px; }
+      #s1 .floorglow { position: absolute; left: 560px; top: 640px; width: 800px; height: 200px;
+        background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(139,226,221,0.22), transparent 70%); }
+      #s1 .door { position: absolute; left: 876px; top: 418px; width: 168px; height: 252px; opacity: 0;
+        background: radial-gradient(ellipse 70% 80% at 50% 100%, rgba(255,227,160,0.75), rgba(244,183,40,0.35) 55%, rgba(244,183,40,0.05) 100%); }
+      #s1 .spill { position: absolute; left: 0; right: 0; top: 670px; height: 410px; opacity: 0;
+        background: linear-gradient(180deg, rgba(244,183,40,0.30), rgba(244,183,40,0) 80%);
+        clip-path: polygon(54.4% 0, 45.6% 0, 26% 100%, 74% 100%); }
+      #s1 .sil { position: absolute; top: 606px; width: 64px; height: 64px; opacity: 0; image-rendering: pixelated; }
+
+      /* 2 · the cavern */
+      #s2 .cone { position: absolute; left: 0; top: -260px; width: 760px; height: 1400px; mix-blend-mode: screen; opacity: 0;
+        clip-path: polygon(46% 0, 54% 0, 100% 100%, 0 100%);
+        background: linear-gradient(180deg, rgba(255,214,130,0.0), rgba(255,214,130,0.26) 60%, rgba(255,214,130,0.06)); }
+
+      /* 3 · one item */
+      #s3 .wall { position: absolute; left: -192px; top: -36px; width: 2304px; display: grid; grid-template-columns: repeat(6, 384px); }
+      #s3 .wall img { width: 384px; height: 384px; image-rendering: pixelated; filter: brightness(0.17) saturate(0.6); }
+      #s3 .torch { position: absolute; left: 1150px; top: 252px; width: 576px; height: 576px;
+        -webkit-mask: radial-gradient(circle at 50% 50%, #000 50%, transparent 70.5%); mask: radial-gradient(circle at 50% 50%, #000 50%, transparent 70.5%); }
+      #s3 .torch img { width: 576px; height: 576px; image-rendering: pixelated; }
+
+      /* 4 · the vote */
+      #s4 .bg { position: absolute; inset: 0; background: var(--black); }
+      #s4 .card { position: absolute; left: 380px; top: 270px; width: 1160px; padding: 48px 60px 176px; background: rgba(17, 24, 19, 0.96);
+        border: 2px solid var(--line); box-shadow: 14px 14px 0 rgba(0,0,0,0.55); font-family: "DM Sans", sans-serif; color: var(--ivory); }
+      #s4 .row { display: flex; justify-content: space-between; align-items: baseline; }
+      #s4 .k { font-size: 44px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+      #s4 .t { font-size: 80px; font-weight: 800; letter-spacing: -0.03em; margin: 18px 0 8px; }
+      #s4 .p { font-size: 46px; color: var(--muted); }
+      #s4 .bar { margin-top: 34px; display: grid; grid-template-columns: 120px 1fr 120px; gap: 24px; align-items: center; font-size: 46px; font-weight: 700; }
+      #s4 .track { height: 34px; background: #1b221d; border: 2px solid var(--line); position: relative; }
+      #s4 .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+      #s4 .n { text-align: right; font-variant-numeric: tabular-nums; }
+      #s4 .quorum { position: absolute; left: 60px; bottom: 56px; font-size: 44px; color: rgba(240,238,230,0.72); opacity: 0; font-weight: 600; }
+      #s4 .stamp { position: absolute; right: 70px; bottom: 40px; padding: 10px 26px; border: 6px solid var(--amber); color: var(--amber);
+        font-family: "DM Sans", sans-serif; font-weight: 800; font-size: 64px; letter-spacing: 0.02em; transform: rotate(-5deg); opacity: 0; }
+
+      /* 5–6 · hero, then the camera moves on into the dark (one continuous plate) */
+      #s56 .lock { position: absolute; left: 0; width: 1920px; top: 180px; display: flex; justify-content: center; align-items: center; gap: 44px; }
+      #s56 .lock .gate { position: relative; width: 176px; height: 176px; }
+      #s56 .lock .h { position: relative; font-size: 196px; }
+      #s56 .alcove { position: absolute; top: 470px; width: 320px; height: 320px; }
+      #s56 .alcove svg { width: 100%; height: 100%; }
+      #s56 .alcove .light { position: absolute; left: 31%; right: 31%; top: 38%; bottom: 6%; opacity: 0.0;
+        background: radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,226,221,0.75), rgba(139,226,221,0.05) 85%); }
+      #s56 .q { position: absolute; text-align: center; font-family: "DM Sans", sans-serif; font-weight: 800;
+        font-size: 120px; color: var(--amber); opacity: 0; text-shadow: 0 0 40px rgba(244,183,40,0.6); }
+
+      /* 7 · end card */
+      #s7 .gate { left: 852px; top: 150px; width: 216px; height: 216px; }
+      #s7 .halo { position: absolute; left: 660px; top: 40px; width: 600px; height: 460px;
+        background: radial-gradient(ellipse 50% 50% at 50% 55%, rgba(244,183,40,0.22), transparent 70%); }
+      #s7 .mini { position: absolute; top: 790px; width: 192px; height: 192px; }
+      #s7 .mini img { width: 192px; height: 192px; image-rendering: pixelated; }
+
+      #bloom { position: absolute; inset: 0; background: radial-gradient(ellipse 45% 45% at 50% 50%, #ffd77a, rgba(244,183,40,0.4) 45%, transparent 75%); opacity: 0; pointer-events: none; z-index: 8; }
+      #flash { position: absolute; inset: 0; background: var(--amber); opacity: 0; pointer-events: none; z-index: 8; }
+      .grain-wrap { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 9; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="20" data-width="1920" data-height="1080">
+
+      <!-- 1 · the gate builds; its doorway opens onto the cavern -->
+      <section id="s1" class="clip" data-start="0" data-duration="2.1" data-track-index="1">
+        <div class="cam">
+          <svg class="mask" viewBox="-2000 -2000 5920 5080" id="mask1"></svg>
+          <div class="floorglow"></div>
+          <div class="door"></div>
+          <div class="spill"></div>
+          <img class="sil" src="assets/art/mole-sil-192.png" style="left:880px" alt="" />
+          <img class="sil" src="assets/art/owl-sil-192.png" style="left:928px" alt="" />
+          <img class="sil" src="assets/art/moth-sil-192.png" style="left:976px" alt="" />
+          <div class="gate" id="gate1" style="left:736px;top:250px"></div>
+        </div>
+      </section>
+
+      <!-- 2 · the cavern: the torch finds Mole, Owl, Moth -->
+      <section id="s2" class="clip" data-start="1.4" data-duration="4.85" data-track-index="0">
+        <div class="world" id="world2" style="width:1920px">
+          <div class="plate" style="left:0"></div>
+          <div class="who" id="w-mole" style="left:283px;top:640px"><img class="sh" src="assets/art/mole-sil-192.png" alt="" /><img class="lit" src="assets/art/mole-192.png" alt="" /></div>
+          <div class="who" id="w-owl" style="left:768px;top:640px"><img class="sh" src="assets/art/owl-sil-192.png" alt="" /><img class="lit" src="assets/art/owl-192.png" alt="" /></div>
+          <div class="who" id="w-moth" style="left:1253px;top:640px"><img class="sh" src="assets/art/moth-sil-192.png" alt="" /><img class="lit" src="assets/art/moth-192.png" alt="" /></div>
+          <div class="floor"></div>
+          <div class="cone" id="cone"></div>
+        </div>
+        <div class="vignette"></div>
+        <p class="h" style="left:130px;top:120px;font-size:112px">
+          <span id="t-mole">Mole.</span> <span id="t-owl">Owl.</span> <span id="t-moth">Moth.</span>
+        </p>
+        <p class="sub" id="t-batch" style="left:134px;top:262px;font-size:76px;color:var(--amber);font-weight:700">Batch one: 4,444 items.</p>
+      </section>
+
+      <!-- 3 · one item, one vote -->
+      <section id="s3" class="clip" data-start="6" data-duration="3" data-track-index="0">
+        <div class="wall" id="wall"></div>
+        <div class="torch" id="torch"><img src="assets/art/item-23.png" alt="" /></div>
+        <div class="vignette"></div>
+        <p class="h" id="t-item" style="left:130px;top:560px;font-size:150px">One item.</p>
+        <p class="h" id="t-vote" style="left:130px;top:720px;font-size:150px;color:var(--amber)">One vote.</p>
+      </section>
+
+      <!-- 4 · only a passed vote moves the treasury -->
+      <section id="s4" class="clip" data-start="9" data-duration="3" data-track-index="0">
+        <div class="bg"></div><div class="plate" style="left:0" id="plate4"></div><div class="vignette"></div>
+        <div class="layer" id="embers4"></div>
+        <p class="h" id="t-treasury" style="left:0;right:0;top:110px;text-align:center;font-size:92px">Only a passed vote moves the treasury.</p>
+        <div class="card" id="card">
+          <div class="row"><span class="k">Proposal #1 · on-chain</span><span class="k">7-day vote</span></div>
+          <div class="t">Open the members' chat</div>
+          <div class="p">Pays 0.5 ZEC.zy from the treasury</div>
+          <div class="bar"><span>Yes</span><div class="track"><div class="fill" id="f-yes" style="background:var(--amber)"></div></div><span class="n" id="n-yes">0</span></div>
+          <div class="bar" style="margin-top:18px"><span>No</span><div class="track"><div class="fill" id="f-no" style="background:var(--muted)"></div></div><span class="n" id="n-no">0</span></div>
+          <div class="quorum" id="quorum">Quorum met</div>
+          <div class="stamp" id="stamp">PASSED</div>
+        </div>
+      </section>
+
+      <!-- 5–6 · ZCaveDAO, then deeper in: more are coming -->
+      <section id="s56" class="clip" data-start="12" data-duration="5" data-track-index="0">
+        <div class="world" id="world56" style="width:3840px">
+          <div class="plate" style="left:0"></div>
+          <div class="plate" style="left:1920px;transform:scaleX(-1)"></div>
+          <div class="who" style="left:283px;top:640px"><img src="assets/art/mole-192.png" alt="" /></div>
+          <div class="who" style="left:768px;top:640px"><img src="assets/art/owl-192.png" alt="" /></div>
+          <div class="who" style="left:1253px;top:640px"><img src="assets/art/moth-192.png" alt="" /></div>
+          <div class="floor" style="width:3840px"></div>
+          <div class="alcove" style="left:2290px" id="al1"></div>
+          <div class="alcove" style="left:2720px" id="al2"><div class="light"></div></div>
+          <div class="alcove" style="left:3150px" id="al3"></div>
+        </div>
+        <div class="layer" id="embers56"></div>
+        <div class="vignette"></div>
+        <div class="world" id="text56" style="width:3840px">
+          <div class="lock" id="lock5"><div class="gate" id="gate5"></div><p class="h" id="t-title">ZCaveDAO</p></div>
+          <p class="sub" id="t-sub" style="left:0;width:1920px;top:470px;text-align:center;font-size:64px">A society for crypto privacy geeks.</p>
+          <p class="q" id="q" style="left:2720px;width:320px;top:620px">?</p>
+          <p class="h" style="left:1920px;width:1920px;top:120px;text-align:center;font-size:112px">Batch one. <span style="color:var(--amber)" id="t-more">More are coming.</span></p>
+        </div>
+      </section>
+
+      <!-- 7 · end card -->
+      <section id="s7" class="clip" data-start="17" data-duration="3" data-track-index="0">
+        <div class="halo" id="halo"></div>
+        <div class="gate" id="gate7"></div>
+        <div class="layer" id="embers7"></div>
+        <p class="h" style="left:0;right:0;top:410px;text-align:center;font-size:176px">ZCaveDAO</p>
+        <p class="sub" style="left:0;right:0;top:630px;text-align:center;font-size:64px;font-weight:700;color:var(--amber)">cavebro.win/dao</p>
+        <div class="mini" id="e-mole" style="left:648px"><img src="assets/art/mole-192.png" alt="" /></div>
+        <div class="mini" id="e-owl" style="left:864px"><img src="assets/art/owl-192.png" alt="" /></div>
+        <div class="mini" id="e-moth" style="left:1080px"><img src="assets/art/moth-192.png" alt="" /></div>
+      </section>
+
+      <div id="bloom" class="clip" data-start="0" data-duration="20" data-track-index="5"></div>
+      <div id="flash" class="clip" data-start="0" data-duration="20" data-track-index="5"></div>
+      <div class="clip grain-wrap" data-start="0" data-duration="20" data-track-index="6"><div class="grain" id="grain"></div></div>
+
+      <audio id="music" data-start="0" data-duration="20" data-track-index="7" data-volume="1" src="assets/mix.mp3"></audio>
+    </div>
+
+    <script>
+      const C = window.CUES, B = 60 / C.bpm, F = 1 / 30;
+      const ease = "expo.out";
+
+      function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+      const rand = mulberry32(4444);
+
+      // The Cave gate on its own 4-unit grid (brandkit/cave/assets/cave-mark-amber.svg).
+      const GATE = [[4,60],[4,28],[8,28],[8,20],[12,20],[12,16],[16,16],[16,12],[24,12],[24,8],[40,8],[40,12],[48,12],[48,16],[52,16],[52,20],[56,20],[56,28],[60,28],[60,60],[44,60],[44,32],[40,32],[40,24],[36,24],[36,20],[28,20],[28,24],[24,24],[24,32],[20,32],[20,60]];
+      const DOOR = [[20,60],[20,32],[24,32],[24,24],[28,24],[28,20],[36,20],[36,24],[40,24],[40,32],[44,32],[44,60]];
+      function inside(x, y) {
+        let c = false;
+        for (let i = 0, j = GATE.length - 1; i < GATE.length; j = i++) {
+          const [xi, yi] = GATE[i], [xj, yj] = GATE[j];
+          if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+        }
+        return c;
+      }
+      const CELLS = [];
+      for (let r = 0; r < 16; r++) for (let q = 0; q < 16; q++) if (inside(q * 4 + 2, r * 4 + 2)) CELLS.push([q, r]);
+      CELLS.sort((m, n) => n[1] - m[1] || Math.abs(m[0] - 7.5) - Math.abs(n[0] - 7.5));
+      function gate(id, size) {
+        const el = document.getElementById(id), cell = size / 16;
+        el.style.width = el.style.height = size + "px";
+        return CELLS.map(([q, r]) => {
+          const i = document.createElement("i");
+          // one pixel of overlap so neighbouring blocks never show a seam
+          Object.assign(i.style, { left: q * cell + "px", top: r * cell + "px", width: cell + 1 + "px", height: cell + 1 + "px" });
+          el.appendChild(i);
+          return i;
+        });
+      }
+      const g1 = gate("gate1", 448), g5 = gate("gate5", 176), g7 = gate("gate7", 216);
+
+      // Everything but the gate's doorway is the dark: a black plane with the doorway cut out.
+      {
+        const s = 448 / 64, ox = 736, oy = 250;
+        const door = DOOR.map(([x, y]) => `${ox + x * s},${oy + y * s}`).join(" L ");
+        document.getElementById("mask1").innerHTML =
+          `<path fill="#070807" fill-rule="evenodd" d="M -2000 -2000 H 3920 V 3080 H -2000 Z M ${door} Z"/>`;
+      }
+
+      const wall = document.getElementById("wall");
+      for (let k = 0; k < 18; k++) {
+        const img = document.createElement("img");
+        img.src = `assets/art/item-${String((k * 7) % 35).padStart(2, "0")}.png`;
+        wall.appendChild(img);
+      }
+
+      // Empty alcoves: the gate in unlit stone, on the same 4-unit grid.
+      for (const id of ["al1", "al2", "al3"]) {
+        const host = document.getElementById(id), g = document.createElement("div");
+        g.className = "gate"; g.id = id + "-g"; g.style.left = g.style.top = "0px";
+        host.prepend(g);
+        gate(g.id, 320).forEach((b) => (b.style.background = "#2b2e2a"));
+      }
+
+      const tl = gsap.timeline({ paused: true });
+
+      function embers(id, n, t0, dur, drift) {
+        const host = document.getElementById(id), out = [];
+        for (let k = 0; k < n; k++) {
+          const e = document.createElement("i");
+          e.className = "ember";
+          const s = 4 + Math.round(rand() * 6);
+          const L = Math.round(100 + rand() * 1720);
+          Object.assign(e.style, { width: s + "px", height: s + "px", left: L + "px", top: "0px" });
+          host.appendChild(e);
+          out.push({ e, L, y0: 1100 + rand() * 300, rise: 500 + rand() * 600, sway: 10 + rand() * 30, ph: rand() * 6.28, f: 1 + rand() * 2 });
+        }
+        const p = { t: 0 };
+        tl.to(p, { t: dur, duration: dur, ease: "none", onUpdate: () => {
+          const dx = drift ? drift() : 0;
+          for (const o of out) {
+            const y = o.y0 - ((p.t * o.rise) % 1400);
+            // with a drift, wrap the ember's on-screen x so the field never runs out
+            const sx = Math.sin(p.t * o.f + o.ph) * o.sway, at = (((o.L + sx + dx) % 1920) + 1920) % 1920;
+            o.e.style.transform = `translate(${drift ? at - o.L : sx}px, ${y}px)`;
+            o.e.style.opacity = Math.max(0, Math.min(1, (1100 - y) / 300)) * (0.5 + 0.5 * Math.sin(p.t * 3 + o.ph));
+          }
+        } }, t0);
+      }
+      // A hard flash on the beat: one frame at 85 %, gone four frames later.
+      function bloom(at) {
+        tl.set("#bloom", { opacity: 0.4 }, at).to("#bloom", { opacity: 0, duration: 6 * F, ease: "power1.out" }, at + F);
+      }
+      function flash(at) {
+        tl.set("#flash", { opacity: 0.85 }, at).to("#flash", { opacity: 0, duration: 4 * F, ease: "power1.out" }, at + F);
+      }
+
+      // ── 1 · the gate is 40 % built at frame 0, 70 % by 0.5 s
+      g1.forEach((b, k) => {
+        const at = -0.6 + (k / g1.length) * 1.5;
+        if (at > 0) tl.from(b, { y: -220, opacity: 0, duration: 0.3, ease: "power3.out" }, at);
+      });
+      tl.fromTo("#s1 .floorglow", { opacity: 0.6 }, { opacity: 1, duration: 0.6, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);
+      tl.to("#s1 .door", { opacity: 1, duration: 0.18, ease: "steps(3)" }, C.hits.light - 0.1)
+        .to("#s1 .spill", { opacity: 1, duration: 0.3, ease }, C.hits.light - 0.05)
+        .to("#s1 .sil", { opacity: 1, duration: 0.12, ease: "steps(2)" }, C.hits.light - 0.05)
+        .to("#s1 .sil", { opacity: 0, duration: 0.1, ease: "power1.in" }, 1.84)
+        .to("#s1 .door, #s1 .spill", { opacity: 0, duration: 0.15, ease: "power1.in" }, 1.8);
+      tl.fromTo("#s1 .cam", { scale: 1 }, { scale: 1.08, duration: 1.55, ease: "none" }, 0);
+      // into the doorway: 1.08× → 15× on a log curve; the doorway fills the frame by 1.95
+      const zoom = { s: 1.08 }, cam = document.querySelector("#s1 .cam");
+      tl.to(zoom, { keyframes: [{ s: 1.5, duration: 0.15, ease: "power1.in" }, { s: 3.5, duration: 0.13, ease: "power2.in" }, { s: 15, duration: 0.12, ease: "power3.in" }],
+        onUpdate: () => { cam.style.transform = `scale(${zoom.s})`; } }, 1.55);
+      tl.fromTo(cam, { filter: "blur(0px)" }, { filter: "blur(5px)", duration: 2 * F, ease: "none" }, 1.95 - 2 * F);
+      flash(C.beats.cavern);
+
+      // ── 2 · the cavern; the cone of light causes each reveal
+      tl.fromTo("#world2", { scale: 1.12 }, { scale: 1.02, duration: 4.85, ease: "power2.out" }, 1.4);
+      const cx = (t) => 475 + (t - C.hits.mole) * 485;            // cone centre over time
+      tl.fromTo("#cone", { x: cx(2.1) - 380 }, { x: cx(4.95) - 380, duration: 2.85, ease: "none" }, 2.1);
+      tl.to("#cone", { opacity: 1, duration: 0.3, ease }, 2.0).to("#cone", { opacity: 0, duration: 0.4, ease: "power1.in" }, 4.9);
+      tl.set("#s2 .lit", { clipPath: "inset(0 100% 0 0)" }, 0);
+      for (const [who, word, at] of [["#w-mole", "#t-mole", C.hits.mole], ["#w-owl", "#t-owl", C.hits.owl], ["#w-moth", "#t-moth", C.hits.moth]]) {
+        tl.set(word, { opacity: 0 }, 0);
+        tl.to(`${who} .lit`, { clipPath: "inset(0 0% 0 0)", duration: 6 * F, ease: "none" }, at - 3 * F);
+        tl.fromTo(who, { y: 14 }, { y: 0, duration: 0.45, ease }, at - 3 * F);
+        tl.to(word, { opacity: 1, duration: 0.3, ease }, at);
+        tl.fromTo(`${who} img`, { y: 0 }, { y: -4, duration: B, ease: "steps(1)", yoyo: true, repeat: Math.floor((6.2 - at) / B) }, at + B);
+      }
+      tl.fromTo("#t-batch", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.4, ease }, C.hits.batch);
+      bloom(C.beats.wall);
+
+      // ── 3 · one item, one vote
+      tl.fromTo("#wall", { x: 0 }, { x: -70, duration: 3, ease: "none" }, C.beats.wall);
+      tl.fromTo("#torch", { scale: 0.55, opacity: 0, x: -500 }, { scale: 1, opacity: 1, x: 0, duration: 0.55, ease }, C.beats.wall + 0.05);
+      tl.to("#torch", { scale: 1.02, duration: B / 2, ease: "sine.inOut", yoyo: true, repeat: 9 }, C.beats.wall + 0.6);
+      tl.fromTo("#t-item", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease }, C.hits.item);
+      tl.fromTo("#t-vote", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.4, ease }, C.hits.vote);
+
+      // ── 4 · the vote passes; the treasury pays only then
+      tl.fromTo("#card", { y: 60, opacity: 0, scale: 0.98 }, { y: 0, opacity: 1, scale: 0.98, duration: 0.45, ease }, C.beats.vote);
+      tl.to("#card", { scale: 1.03, duration: 2.55, ease: "none" }, C.beats.vote + 0.45);
+      tl.fromTo("#t-treasury", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.4, ease }, C.beats.vote + 0.1);
+      tl.fromTo("#plate4", { scale: 1.0, opacity: 0.35 }, { scale: 1.07, opacity: 0.5, duration: 3, ease: "sine.inOut" }, C.beats.vote);
+      const tally = { yes: 0, no: 0 };
+      tl.to(tally, { yes: 64, no: 12, duration: 1.3, ease: "steps(12)", onUpdate: () => {
+        document.getElementById("n-yes").textContent = Math.round(tally.yes);
+        document.getElementById("n-no").textContent = Math.round(tally.no);
+        document.getElementById("f-yes").style.width = (tally.yes / 76) * 100 + "%";
+        document.getElementById("f-no").style.width = (tally.no / 76) * 100 + "%";
+      } }, C.beats.vote + 0.4);
+      tl.to("#quorum", { opacity: 1, duration: 0.25, ease }, C.hits.passed - 0.5);
+      tl.set("#stamp", { opacity: 1, scale: 1.6 }, C.hits.passed - 4 * F)
+        .to("#stamp", { keyframes: [{ scale: 0.94, duration: 4 * F, ease: "power4.in" }, { scale: 1.0, duration: 2 * F, ease: "power1.out" }] }, C.hits.passed - 4 * F);
+      tl.to("#card", { keyframes: [{ x: -9, duration: F }, { x: 7, duration: F }, { x: 0, duration: F }] }, C.hits.passed);
+      embers("embers4", 16, C.beats.vote, 3);
+      bloom(C.beats.hero);
+
+      // ── 5 · hero: ZCaveDAO
+      tl.fromTo("#world56, #text56", { scale: 1.05 }, { scale: 1.0, duration: 0.6, ease, transformOrigin: "960px 540px" }, C.beats.hero);
+      g5.forEach((b, k) => tl.from(b, { y: -60, opacity: 0, duration: 0.2, ease: "power3.out" }, C.hits.title - 0.05 + (k / g5.length) * 0.45));
+      tl.fromTo("#t-title", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.35, ease }, C.hits.title);
+      tl.fromTo("#t-sub", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.45, ease }, C.hits.sub);
+      // the camera moves on along the same cave; embers drift 20 % faster (parallax)
+      const pan = { x: 0 };
+      tl.to(pan, { x: -1920, duration: 0.8, ease: "power2.inOut", onUpdate: () => {
+        document.getElementById("world56").style.left = pan.x + "px";
+        document.getElementById("text56").style.left = pan.x + "px";
+      } }, C.beats.more - 0.25);
+      embers("embers56", 34, C.beats.hero, 5, () => pan.x * 1.2);
+
+      // ── 6 · more are coming
+      tl.set("#t-more", { opacity: 0 }, 0);
+      tl.to("#t-more", { opacity: 1, duration: 0.3, ease }, C.hits.more - 0.25);
+      tl.to("#al2 .light", { keyframes: [{ opacity: 0.8, duration: 0.05 }, { opacity: 0.1, duration: 0.08 }, { opacity: 0.9, duration: 0.05 }, { opacity: 0.25, duration: 0.1 }, { opacity: 0.85, duration: 0.3 }] }, C.hits.more);
+      tl.to("#al2 .light", { opacity: 0.5, duration: B / 2, ease: "sine.inOut", yoyo: true, repeat: 2 }, C.hits.more + 0.65);
+      tl.to("#q", { keyframes: [{ opacity: 1, duration: 0.05 }, { opacity: 0, duration: 0.08 }, { opacity: 1, duration: 0.2 }] }, C.hits.more + 0.1);
+      tl.to("#q", { scale: 1.08, duration: B / 2, ease: "sine.inOut", yoyo: true, repeat: 2 }, C.hits.more + 0.45);
+      tl.fromTo("#al1, #al2, #al3", { scale: 1.0 }, { scale: 1.06, duration: 1.5, ease: "none" }, C.beats.more + 0.5);
+      tl.to("#al1, #al3", { opacity: 0.6, duration: 1, ease: "sine.inOut" }, C.hits.more);
+
+      // ── 7 · end card, held with living motion
+      g7.forEach((b, k) => tl.from(b, { y: -40, opacity: 0, duration: 0.2, ease: "power3.out" }, C.beats.end + (k / g7.length) * 0.35));
+      tl.from("#s7 .h, #s7 .sub", { opacity: 0, y: 24, duration: 0.45, stagger: 0.15, ease }, C.beats.end + 0.2);
+      tl.from("#e-mole, #e-owl, #e-moth", { opacity: 0, y: 30, duration: 0.4, stagger: 0.12, ease }, C.beats.end + 0.5);
+      tl.fromTo("#halo", { opacity: 0.6 }, { opacity: 1, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 2 }, C.beats.end);
+      for (const [id, k] of [["#e-mole", 0], ["#e-owl", 1], ["#e-moth", 2]]) {
+        tl.fromTo(`${id} img`, { y: 0 }, { y: -4, duration: B, ease: "steps(1)", yoyo: true, repeat: 4 }, C.beats.end + 1 + k * 0.25);
+      }
+      embers("embers7", 24, C.beats.end, 3);
+
+      // Film grain, re-seeded twelve times a second.
+      const grain = document.getElementById("grain"), gp = { t: 0 };
+      tl.to(gp, { t: 20, duration: 20, ease: "none", onUpdate: () => {
+        const f = Math.floor(gp.t * 12), r = mulberry32(f + 1);
+        grain.style.transform = `translate(${Math.round(r() * 40 - 20)}px, ${Math.round(r() * 40 - 20)}px)`;
+      } }, 0);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
