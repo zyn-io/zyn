@@ -74,7 +74,7 @@ test('the store reads only public things itself, and nothing with an account in 
   // One exception, and only when the holder acts (§74.13, §168): linking a
   // whitelist code sends this site the account the code is linked to, since
   // the operator must put that account on the sale's list.
-  // CaveDAO reads the team's published /dao.json, and a role sign-up sends
+  // ZCaveDAO reads the team's published /dao.json, and a role sign-up sends
   // only the contact and note the member types — never an account or item.
   // Proposal texts are stored and read by their hash (§172): public words.
   assert.deepEqual([...new Set(fetches)].sort(), ["'/api/proposal-text'", "'/api/roles'", '`/api/proposal-text?hash=${h}&network=${NETWORK}`', "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet'].sort());

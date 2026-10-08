@@ -1,4 +1,4 @@
-// Receive one "take it on" for a CaveDAO role (Digger, Lookout, Lantern).
+// Receive one "take it on" for a ZCaveDAO role (Digger, Lookout, Lantern).
 //
 // Until Cave names carry roles, a role starts as a note to the team: which
 // role, a contact, and what the member will do. Nothing else — no wallet, no

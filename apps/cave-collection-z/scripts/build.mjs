@@ -68,7 +68,7 @@ for (const f of ['burn.json', 'burn-testnet.json']) {
   await cp(new URL(f, root), new URL(f, output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 }
 await cp(new URL('../nap-connect/nap-connect.js', root), new URL('nap-connect.js', output));
-// CaveDAO's published data: setup steps, proposals and the treasury statement.
+// ZCaveDAO's published data: setup steps, proposals and the treasury statement.
 await cp(new URL('dao.json', root), new URL('dao.json', output));
 
 // Collection Z's public index: for every serial, its name, the hash of its

@@ -1,4 +1,4 @@
-// CaveDAO proposal texts, by their hash (§172, §173).
+// ZCaveDAO proposal texts, by their hash (§172, §173).
 //
 // The ledger holds a proposal's SHA-256 text hash; this keeps the words so
 // members can read them. Only texts the chain has a proposal for are kept or

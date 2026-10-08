@@ -306,8 +306,8 @@
             <div><span>Open mint</span><b>1,330,000 zatoshi</b></div>
             <div><span>Confirmations</span><b>6, for ZEC brought into Nap</b></div>
             <div><span>Claim window</span><b>16,128 blocks after the close</b></div>
-            <div><span>Split</span><b>Of every payment, 90% to the collection's pool, 10% to the CaveDAO treasury</b></div>
-            <div><span>Treasury</span><b>CaveDAO's: no key can spend it; it pays only on a passed proposal</b></div>
+            <div><span>Split</span><b>Of every payment, 90% to the collection's pool, 10% to the ZCaveDAO treasury</b></div>
+            <div><span>Treasury</span><b>ZCaveDAO's: no key can spend it; it pays only on a passed proposal</b></div>
             <div><span>DAO rules</span><b>10 items back a proposal · votes run 8,064 Zcash blocks (7 days) · passes with more yes than no and at least 10% of items voting · fixed at the first proposal</b></div>
             <div><span>Burn tickets</span><b>One ticket per 0.01 ZEC of the token, at the median of the last hour's pool price against bridged ZEC on Solana · at most 20 per burn · at most 20 in the whole sale</b></div>
             <div><span>Policy digest</span><b class="hash">a572a74778052829a768adb56f84404353ee5ad188b274b36b5fa58c68500b13</b></div>
@@ -343,12 +343,12 @@
         <ul class="facts zyn-facts" style="margin-top:14px;max-width:66ch">
           <li><b>Whitelist</b><span>An approved code, linked once to your Zyn account on <a href="/mint">/mint</a>, puts that account on the list. The ledger sells tickets only to listed accounts.</span></li>
           <li><b>Ticket</b><span>Bought in Nap with <strong>ZEC.zy</strong>. It exists the moment Nap signs it. The rising price is the ledger's, counted per account.</span></li>
-          <li><b>Split</b><span>90% of what is paid to the collection's pool, 10% to the CaveDAO treasury, on the ledger as each ticket is bought. The treasury also takes 10% of every resale fee.</span></li>
+          <li><b>Split</b><span>90% of what is paid to the collection's pool, 10% to the ZCaveDAO treasury, on the ledger as each ticket is bought. The treasury also takes 10% of every resale fee.</span></li>
           <li><b>Draw</b><span>Run once over every ticket bought before the announced close, from the announced drand round and the Zcash reveal block. Its result is posted on Zyn as a Merkle root; anyone holding the public inputs can run it again and get the same root.</span></li>
           <li><b>Claim</b><span>A winner claims with a proof against that root, at the claim price per item, within 16,128 blocks after the close. Only the wallet that bought a ticket can claim it; nobody can be refused one the draw gave.</span></li>
           <li><b>Open mint</b><span>After the window, what the draw handed nobody and what winners left sell at the open-mint price, in an order fixed by the draw.</span></li>
           <li><b>Burn tickets</b><span>Burning the Cave token on Solana also gives tickets in the same draw at the same odds. They pay nothing into the pool; a winning one pays the claim price per item, and only a listed wallet can claim it, within the claim window. Burns after the close, past the cap, or under one ticket get nothing and are not refunded.</span></li>
-          <li><b>CaveDAO</b><span>Holders of the collection's items are its members. The treasury pays only on a proposal that passed under the rules above.</span></li>
+          <li><b>ZCaveDAO</b><span>Holders of the collection's items are its members. The treasury pays only on a proposal that passed under the rules above.</span></li>
         </ul>
         <p class="smallprint" style="margin-top:14px;max-width:66ch">
           <strong>What the operator decides.</strong> Zyn cannot read Solana, so the operator's burn watcher decides which burns count and at what pool price; the count is checkable against Solana's burns. The operator orders transactions, so it can delay or refuse a ticket, a claim or a vote. It sets the burn cap on the ledger, where anyone can read it; a cap above 20 would break these terms. It cannot change a price or the split once the sale starts, change a proposal's rules, or give itself items. The operator and replicas see which item voted.

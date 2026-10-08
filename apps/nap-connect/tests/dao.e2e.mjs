@@ -1,4 +1,4 @@
-// CaveDAO end to end on testnet, through the real /dao page and a real Nap in
+// ZCaveDAO end to end on testnet, through the real /dao page and a real Nap in
 // the browser (DECISIONS §172): membership checked by Nap, a member pass the
 // chain then recognises, a proposal backed by the member's item, a yes vote,
 // and the vote closing as passed — each step read back from the chain itself.
@@ -50,7 +50,7 @@ async function approve(expect) {
 }
 
 await page.goto(`${SITE}/dao/?network=testnet`);
-ok(/CaveDAO/.test(await page.title()), 'the DAO page loads');
+ok(/ZCaveDAO/.test(await page.title()), 'the DAO page loads');
 await page.waitForFunction(() => !document.querySelector('#f-treasury-box')?.hidden, null, { timeout: 30000 });
 ok(/ZEC\.zy/.test(await page.textContent('#f-treasury')), `the DAO treasury reads from the chain: ${await page.textContent('#f-treasury')}`);
 

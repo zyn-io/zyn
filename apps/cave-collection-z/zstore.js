@@ -723,7 +723,7 @@ async function mintPage() {
 // opened — carries across. Any other link loads normally.
 
 // ---------------------------------------------------------------------------
-// CaveDAO: membership is checked by the holder's own Nap, in this page; roles,
+// ZCaveDAO: membership is checked by the holder's own Nap, in this page; roles,
 // proposals, the treasury and setup are read from public data — the chain for
 // the floor and the sale, /dao.json for what the team publishes.
 

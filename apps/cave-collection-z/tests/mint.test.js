@@ -71,7 +71,7 @@ test('the built site serves the checkout at /mint', async () => {
 
 test('it names where the money goes', () => {
   assert.match(page, /90% funds the pool/i);
-  assert.match(page, /10% goes to the CaveDAO treasury/i);
+  assert.match(page, /10% goes to the ZCaveDAO treasury/i);
 });
 
 test('the published terms page carries bytes that reproduce the digest', async () => {

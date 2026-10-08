@@ -1,4 +1,4 @@
-// CaveDAO's Nap requests (§172, §173): what a vote is on comes from the
+// ZCaveDAO's Nap requests (§172, §173): what a vote is on comes from the
 // chain, not the page; a proposal in the wrong state is refused before any
 // card is shown.
 import { test } from 'node:test';
