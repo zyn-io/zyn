@@ -916,7 +916,7 @@ async function daoPage() {
       if (!props.length) { el('props').innerHTML = `<p class="say">No proposals yet.${members ? ' Yours can be the first.' : ''}</p>`; return; }
       const rows = await Promise.all(props.map(async (x) => {
         const t = await textOf(x.text);
-        const pay = x.pay ? `Pays ${zec(x.pay.amount)} ${x.pay.asset === ZEC_ZY ? 'ZEC.zy' : `of ${short(x.pay.asset)}`} to ${short(x.pay.to)}` : 'Pays nothing';
+        const pay = x.pay ? `Pays ${zec(x.pay.amount)} ${x.pay.asset === ZEC_ZY ? 'ZEC' : `of ${short(x.pay.asset)}`} to ${short(x.pay.to)}` : 'Pays nothing';
         const need = x.terms ? x.terms.backers : dao.backers;
         const quorum = x.terms ? ` · needs ${x.terms.quorum} voting` : '';
         const count = x.state === 'backing' ? `${x.backers} of ${need} backers · ${left(x)}` : x.state === 'voting' ? `${x.yes} yes · ${x.no} no${quorum} · ${left(x)}` : `${x.yes} yes · ${x.no} no`;
@@ -978,7 +978,7 @@ async function daoPage() {
     const text = propForm.text.value.trim();
     const amount = propForm.amount.value.trim();
     const to = propForm.to.value.trim().toLowerCase();
-    if (amount && !/^[0-9a-f]{64}$/.test(to)) { out.textContent = 'A payment needs the Zyn account it goes to (64 hex characters).'; out.classList.add('bad'); return; }
+    if (amount && !/^[0-9a-f]{64}$/.test(to)) { out.textContent = 'A payment needs the Nap account it goes to (64 hex characters).'; out.classList.add('bad'); return; }
     if (to && !amount) { out.textContent = 'A recipient needs an amount, or leave both empty.'; out.classList.add('bad'); return; }
     el('prop-send').disabled = true;
     try {
@@ -1030,7 +1030,7 @@ async function daoPage() {
     rulesTip();
     const t = dao?.treasury?.find((x) => x.asset === ZEC_ZY);
     el('f-treasury-box').hidden = daoState !== 'set';
-    if (daoState === 'set') el('f-treasury').textContent = `${zec(isInt(t?.amount) ? t.amount : '0')} ZEC.zy`;
+    if (daoState === 'set') el('f-treasury').textContent = `${zec(isInt(t?.amount) ? t.amount : '0')} ZEC`;
     el('statement').innerHTML = daoState === 'set'
       ? '<p class="say small">Only a passed proposal can pay out of the treasury; no key can move it. The operator orders transactions, so it could delay or refuse a vote, but it cannot speed one up or change a proposal\'s rules.</p>'
       : daoState === 'error' ? '<p class="say small">The treasury could not be read from the chain.</p>' : '';
@@ -1054,9 +1054,9 @@ async function daoPage() {
     const c = (m?.collections || []).find((x) => x.asset === CAVE_Z);
     const sale = (m?.sales || []).find((x) => x.collection === CAVE_Z);
     if (c && isInt(c.floor) && isInt(c.outstanding)) {
-      el('f-floor').textContent = `${zec(c.floor)} ZEC.zy`;
+      el('f-floor').textContent = `${zec(c.floor)} ZEC`;
       el('f-out').textContent = `${c.outstanding} of ${Number(c.cap).toLocaleString('en-US')}`;
-      el('f-each').textContent = BigInt(c.outstanding) > 0n ? `${zec(BigInt(c.floor) / BigInt(c.outstanding))} ZEC.zy` : '—';
+      el('f-each').textContent = BigInt(c.outstanding) > 0n ? `${zec(BigInt(c.floor) / BigInt(c.outstanding))} ZEC` : '—';
     }
     const phase = { open: 'tickets on sale', closed: 'waiting for the draw', drawn: 'claims open', openmint: 'open mint' }[sale?.phase] || (sale ? 'sale on' : 'not open yet');
     el('f-sale').textContent = sale && Number.isSafeInteger(sale.tickets) ? `${phase} · ${sale.tickets} tickets` : phase;
