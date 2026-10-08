@@ -283,4 +283,5 @@ test('a DAO\'s pass, payment source and member intents are the ledger\'s (§172)
   assert.equal(hex(m.proposeIntent({ proposer: OWNER, collection: TOKEN, item, text: new Uint8Array(32).fill(0x7a), pay })), v.propose);
   assert.equal(hex(m.proposeIntent({ proposer: OWNER, collection: TOKEN, item, text: new Uint8Array(32).fill(0x7a), pay: null })), v.propose_no_pay);
   assert.equal(hex(m.voteIntent({ voter: OWNER, collection: TOKEN, proposal: 7, items: [item, new Uint8Array(32).fill(0xc2)], choice: m.DAO_YES })), v.vote);
+  assert.equal(hex(m.proposeZynIntent({ proposer: OWNER, collection: TOKEN, item, text: new Uint8Array(32).fill(0x7a) })), v.propose_zyn);
 });

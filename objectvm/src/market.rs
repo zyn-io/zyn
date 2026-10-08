@@ -638,7 +638,10 @@ impl Market {
         // sized for one; it carries MARKET10's lending state too.
         // MARKET15 (§173) once the Zcash clock has started: strict DAOs and
         // proposals carry their own terms. It carries MARKET14's tail too.
-        let v15 = self.dao_clock.is_some();
+        // MARKET16 (§176) once a DAO has a Zyn track: its proposals carry the
+        // team's vote. It carries MARKET15's tail too.
+        let v16 = self.daos.values().any(|d| d.zyn.is_some());
+        let v15 = v16 || self.dao_clock.is_some();
         let v14 = v15 || !self.daos.is_empty();
         let v13 = v14 || !self.sale_gates.is_empty();
         let v12 = v13 || !self.routes.is_empty();
@@ -647,7 +650,7 @@ impl Market {
         // MARKET12 (§167) only while a route waits: it carries MARKET11 too.
         // MARKET13 (§168) once a sale is gated: it carries MARKET12's tail too.
         // MARKET14 (§172) once a collection has a DAO: it carries MARKET13's too.
-        e.bytes(if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        e.bytes(if v16 { b"MARKET16" } else if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -731,7 +734,7 @@ impl Market {
             crate::sale::encode_gates(e, &self.sale_gates);
         }
         if v14 {
-            crate::dao::encode(e, &self.daos, v15);
+            crate::dao::encode(e, &self.daos, v15, v16);
         }
         if v15 {
             let (h, hash) = self.dao_clock.expect("v15 means started");
@@ -752,13 +755,14 @@ impl Market {
         // v9 predates lending rules v2 (§160) and reads as rules 0.
         // v10 predates quote assets (§166) and reads as none named.
         let tag = d.take_bytes(8).ok()?;
-        let v15 = tag == b"MARKET15";
+        let v16 = tag == b"MARKET16";
+        let v15 = v16 || tag == b"MARKET15";
         let v14 = v15 || tag == b"MARKET14";
         let v13 = v14 || tag == b"MARKET13";
         let v12 = v13 || tag == b"MARKET12";
         let v11 = v12 || tag == b"MARKET11";
         let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
-            b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET16" | b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -907,7 +911,7 @@ impl Market {
             m.sale_gates = crate::sale::decode_gates(d)?;
         }
         if v14 {
-            m.daos = crate::dao::decode(d, v15)?;
+            m.daos = crate::dao::decode(d, v15, v16)?;
         }
         if v15 {
             m.dao_clock = Some((d.u32().ok()?, d.hash().ok()?));

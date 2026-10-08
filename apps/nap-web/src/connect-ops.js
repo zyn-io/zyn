@@ -91,6 +91,8 @@ async function quoteName(ctx, asset) {
 
 const shortHex = (h) => `${String(h).slice(0, 8)}…${String(h).slice(-6)}`;
 const collectionLabel = (c) => (c === CAVE_Z ? 'Cave, batch one (Collection Z)' : `${c.slice(0, 10)}…`);
+/// What the team's vote weighs on a DAO's Zyn track (§176), from the chain.
+const teamRule = (z) => (z?.rule === 'weighted' ? `the team's account casts ${Number(z.share_bps) / 100}% of the tally` : "the team's account can veto, not pass");
 
 /// This wallet's items of `collection`, as the DAO's member proofs: refused
 /// when it holds none, so a site learns only that this wallet is not a member.
@@ -1324,6 +1326,7 @@ export const METHODS = {
       const collection = saleCollection(p);
       const text = String(p?.text ?? '').trim();
       if (!text || text.length > 4000) throw bad('A proposal is 1 to 4,000 characters');
+      if (p?.track === 'zyn' && p?.pay) throw bad('A Zyn proposal pays nothing from the treasury');
       let pay = null;
       if (p?.pay) {
         if (!isHex(p.pay.asset) || !isHex(p.pay.to)) throw bad('pay.asset and pay.to must be 64 hex characters');
@@ -1334,17 +1337,30 @@ export const METHODS = {
       }
       const dao = await ledger.call(ctx.config, 'zyn_dao', { collection });
       if (!dao?.set) throw bad('That collection has no DAO');
+      // The Zyn track (§176): members vote on Zyn's issues; it pays nothing,
+      // and the team's own account casts a vote the track's rule weighs.
+      const zyn = p?.track === 'zyn';
+      if (p?.track !== undefined && p.track !== 'zyn' && p.track !== 'collection') throw bad("track must be 'collection' or 'zyn'");
+      if (zyn && !dao.zyn) throw bad('This DAO does not vote on Zyn issues yet');
       const mine = await daoItems(ctx, collection);
       const hash = sha256(new TextEncoder().encode(text));
+      const item = unhex(mine[0].note.commitment);
       return {
-        title: 'Proposal',
-        rows: [['Says', text], ['Treasury pays', pay ? pay.shown : 'nothing'], ['Needs', `${dao.backers} backing item${dao.backers === 1 ? '' : 's'}, then a vote`], ['Backed by', 'one of your items']],
+        title: zyn ? 'Zyn proposal' : 'Proposal',
+        rows: [
+          ['Says', text],
+          zyn ? ['Team vote', teamRule(dao.zyn)] : ['Treasury pays', pay ? pay.shown : 'nothing'],
+          ['Needs', `${dao.backers} backing item${dao.backers === 1 ? '' : 's'}, then a vote`],
+          ['Backed by', 'one of your items'],
+        ],
         note: 'The proposal, its text and any payment are public. The operator and replicas can see which item backed it.',
         run: async () => {
-          await ledger.submitIntent(ctx.config, ctx.identity, mk.proposeIntent({
-            proposer: ctx.identity.account, collection: unhex(collection), item: unhex(mine[0].note.commitment), text: hash, pay: pay && { asset: pay.asset, amount: pay.amount, to: pay.to },
-          }));
-          return { text: hex(hash) };
+          await ledger.submitIntent(ctx.config, ctx.identity, zyn
+            ? mk.proposeZynIntent({ proposer: ctx.identity.account, collection: unhex(collection), item, text: hash })
+            : mk.proposeIntent({ proposer: ctx.identity.account, collection: unhex(collection), item, text: hash, pay: pay && { asset: pay.asset, amount: pay.amount, to: pay.to } }));
+          // Which track it went on, so a site can tell an older Nap (which
+          // ignores `track`) from this one.
+          return { text: hex(hash), track: zyn ? 'zyn' : 'collection' };
         },
       };
     },
@@ -1367,9 +1383,14 @@ export const METHODS = {
       const mine = await daoItems(ctx, collection);
       const pays = prop.pay ? `${wadText(BigInt(prop.pay.amount))} ${await quoteName(ctx, prop.pay.asset)} to ${shortHex(prop.pay.to)}` : 'nothing';
       const word = { back: 'Back', yes: 'Vote yes on', no: 'Vote no on' }[p.choice];
+      const zyn = prop.track === 'zyn';
       return {
-        title: `${word} proposal #${id}`,
-        rows: [['Text', `hash ${prop.text.slice(0, 16)}…`], ['Treasury pays', pays], ['Items', `${mine.length} of yours, one vote each; any that voted before are skipped`]],
+        title: `${word} ${zyn ? 'Zyn ' : ''}proposal #${id}`,
+        rows: [
+          ['Text', `hash ${prop.text.slice(0, 16)}…`],
+          zyn ? ['Team vote', `${teamRule(dao.zyn)}; so far ${prop.team === 'none' || !prop.team ? 'not cast' : prop.team}`] : ['Treasury pays', pays],
+          ['Items', `${mine.length} of yours, one vote each; any that voted before are skipped`],
+        ],
         note: 'The public sees the tally, not which items voted. The operator and replicas can see it.',
         run: async () => {
           // 32 items a vote: every chunk is sent, and one whose items all

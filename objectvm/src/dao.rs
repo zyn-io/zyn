@@ -43,6 +43,15 @@
 //! What stays true at this tier: the operator orders and can refuse what it is
 //! sent, so it can delay or censor a vote; it can no longer speed one up or
 //! change its rules.
+//!
+//! **The Zyn track (§176).** Members also vote on Zyn's own issues — which
+//! coins are bridged, fees, the ZYN release, what is built next. A Zyn
+//! proposal runs on the DAO's strict terms and pays nothing from the
+//! treasury; the team's account casts one vote of its own, and the track's
+//! rule decides what it weighs: a **veto** (members decide, the team can only
+//! block) or a **weighted** share of every tally. The rule is fixed once the
+//! track has a proposal; the team's account can be replaced, publicly. A Zyn result is recorded here; the Zyn settings it
+//! decides are wired to it one at a time.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -73,6 +82,11 @@ pub const MAX_WINDOW_BLOCKS: u64 = 34_560;
 pub const MAX_OPEN: usize = 16;
 /// Closed proposals a strict DAO keeps; older ones are pruned.
 pub const KEEP_CLOSED: usize = 64;
+
+/// The Zyn track's rules: the team can only block, or its vote carries a
+/// share of every tally.
+pub const RULE_VETO: u8 = 0;
+pub const RULE_WEIGHTED: u8 = 1;
 
 pub const BACK: u8 = 0;
 pub const YES: u8 = 1;
@@ -161,6 +175,9 @@ pub struct Proposal {
     pub no: BTreeSet<Address>,
     /// Strict proposals only; `until` is then a Zcash height.
     pub terms: Option<Terms>,
+    /// A Zyn-track proposal (§176): the team's vote so far — 0 none, then
+    /// `YES` or `NO`. `None` for the collection's own proposals.
+    pub zyn: Option<u8>,
 }
 
 impl Proposal {
@@ -175,6 +192,19 @@ pub struct Strict {
     /// The next proposal's number (old ones may be pruned).
     pub next_id: u32,
     /// Set by the first strict proposal: the terms are fixed from then on.
+    pub frozen: bool,
+}
+
+/// Members' votes on Zyn's issues (§176).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ZynTrack {
+    /// The account that casts the team's vote.
+    pub team: AccountId,
+    /// `RULE_VETO` or `RULE_WEIGHTED`.
+    pub rule: u8,
+    /// Under `RULE_WEIGHTED`, the team's share of every tally, in bps.
+    pub share_bps: u32,
+    /// Set by the track's first proposal: the rule is fixed from then on.
     pub frozen: bool,
 }
 
@@ -195,6 +225,8 @@ pub struct Dao {
     pub proposals: BTreeMap<u32, Proposal>,
     /// Strict rules, once `SetDaoTerms` has run.
     pub strict: Option<Strict>,
+    /// The Zyn track, once `SetZynTrack` has run.
+    pub zyn: Option<ZynTrack>,
 }
 
 /// The pass hash a token makes: what the chat is shown, never the token.
@@ -229,6 +261,10 @@ fn proposal_leaf(n: u32, p: &Proposal) -> Hash {
     if let Some(x) = &p.terms {
         e.bytes(b"objectvm.dao-proposal-terms.v1").u32(x.backers).u64(x.window).u32(x.quorum_bps).u32(x.base).bytes(&x.item);
     }
+    // And a Zyn proposal's team vote; every other proposal hashes as it did.
+    if let Some(t) = p.zyn {
+        e.bytes(b"objectvm.dao-zyn-proposal.v1").u8(t);
+    }
     e.leaf()
 }
 
@@ -255,6 +291,9 @@ fn dao_leaf(collection: &Address, d: &Dao) -> Hash {
         .bytes(&merkle_root(&proposals));
     if let Some(x) = &d.strict {
         e.bytes(b"objectvm.dao-strict.v1").u32(x.next_id).u8(x.frozen as u8);
+    }
+    if let Some(z) = &d.zyn {
+        e.bytes(b"objectvm.dao-zyn.v1").bytes(&z.team).u8(z.rule).u32(z.share_bps).u8(z.frozen as u8);
     }
     e.leaf()
 }
@@ -285,7 +324,7 @@ fn get_set(d: &mut Decoder) -> Option<BTreeSet<Address>> {
     Some(s)
 }
 
-pub(crate) fn encode(e: &mut Encoder, daos: &BTreeMap<Address, Dao>, v15: bool) {
+pub(crate) fn encode(e: &mut Encoder, daos: &BTreeMap<Address, Dao>, v15: bool, v16: bool) {
     e.u32(daos.len() as u32);
     for (c, d) in daos {
         e.bytes(c).u32(d.backers).u64(d.voting_epochs).u32(d.quorum_bps);
@@ -323,6 +362,16 @@ pub(crate) fn encode(e: &mut Encoder, daos: &BTreeMap<Address, Dao>, v15: bool) 
                     }
                 }
             }
+            if v16 {
+                match p.zyn {
+                    None => {
+                        e.u8(0);
+                    }
+                    Some(t) => {
+                        e.u8(1).u8(t);
+                    }
+                }
+            }
         }
         if v15 {
             match &d.strict {
@@ -334,10 +383,20 @@ pub(crate) fn encode(e: &mut Encoder, daos: &BTreeMap<Address, Dao>, v15: bool) 
                 }
             }
         }
+        if v16 {
+            match &d.zyn {
+                None => {
+                    e.u8(0);
+                }
+                Some(z) => {
+                    e.u8(1).bytes(&z.team).u8(z.rule).u32(z.share_bps).u8(z.frozen as u8);
+                }
+            }
+        }
     }
 }
 
-pub(crate) fn decode(d: &mut Decoder, v15: bool) -> Option<BTreeMap<Address, Dao>> {
+pub(crate) fn decode(d: &mut Decoder, v15: bool, v16: bool) -> Option<BTreeMap<Address, Dao>> {
     let mut daos = BTreeMap::new();
     for _ in 0..d.u32().ok()? {
         let c = d.hash().ok()?;
@@ -365,10 +424,14 @@ pub(crate) fn decode(d: &mut Decoder, v15: bool) -> Option<BTreeMap<Address, Dao
             } else {
                 None
             };
-            dao.proposals.insert(n, Proposal { text, pay, state, backers, yes, no, terms });
+            let zyn = if v16 && d.u8().ok()? == 1 { Some(d.u8().ok()?) } else { None };
+            dao.proposals.insert(n, Proposal { text, pay, state, backers, yes, no, terms, zyn });
         }
         if v15 && d.u8().ok()? == 1 {
             dao.strict = Some(Strict { next_id: d.u32().ok()?, frozen: d.u8().ok()? != 0 });
+        }
+        if v16 && d.u8().ok()? == 1 {
+            dao.zyn = Some(ZynTrack { team: d.account().ok()?, rule: d.u8().ok()?, share_bps: d.u32().ok()?, frozen: d.u8().ok()? != 0 });
         }
         daos.insert(c, dao);
     }
@@ -497,8 +560,9 @@ impl ObjectVm {
         self.market.daos.get(collection).is_some_and(|d| d.passes.iter().any(|(c, p)| p == pass && self.live.contains_key(c)))
     }
 
-    /// Propose: the proposer's item backs it first.
-    pub(crate) fn apply_propose(&mut self, proposer: &AccountId, collection: &Address, item: &Hash, text: &Hash, pay: &Option<Payment>) -> Result<Receipt, &'static str> {
+    /// Propose: the proposer's item backs it first. A Zyn-track proposal
+    /// (`zyn`) runs on the DAO's strict terms and pays nothing.
+    pub(crate) fn apply_propose(&mut self, proposer: &AccountId, collection: &Address, item: &Hash, text: &Hash, pay: &Option<Payment>, zyn: bool) -> Result<Receipt, &'static str> {
         let asset = self.member_item(proposer, collection, item)?;
         if let Some(p) = pay {
             if p.amount.0 <= 0 {
@@ -511,12 +575,23 @@ impl ObjectVm {
         let d = self.market.daos.get_mut(collection).ok_or("that collection has no DAO")?;
         let mut backers = BTreeSet::new();
         backers.insert(asset);
+        if zyn {
+            if pay.is_some() {
+                return Err("a Zyn proposal pays nothing from the treasury");
+            }
+            if d.strict.is_none() {
+                return Err("the Zyn track needs a DAO under strict rules");
+            }
+            if d.zyn.is_none() {
+                return Err("this DAO has no Zyn track");
+            }
+        }
         let n = match d.strict.as_mut() {
             // First rules: exactly as they ran.
             None => {
                 let n = d.proposals.keys().next_back().map_or(1, |n| n + 1);
                 let state = if d.backers <= 1 { State::Voting { until: epoch + d.voting_epochs } } else { State::Backing { until: epoch + d.voting_epochs } };
-                d.proposals.insert(n, Proposal { text: *text, pay: *pay, state, backers, yes: BTreeSet::new(), no: BTreeSet::new(), terms: None });
+                d.proposals.insert(n, Proposal { text: *text, pay: *pay, state, backers, yes: BTreeSet::new(), no: BTreeSet::new(), terms: None, zyn: None });
                 n
             }
             Some(strict) => {
@@ -535,7 +610,11 @@ impl ObjectVm {
                 let terms = Terms { backers: d.backers, window: d.voting_epochs, quorum_bps: d.quorum_bps, base: if voting { outstanding } else { 0 }, item: asset };
                 let until = now + d.voting_epochs;
                 let state = if voting { State::Voting { until } } else { State::Backing { until } };
-                d.proposals.insert(n, Proposal { text: *text, pay: *pay, state, backers, yes: BTreeSet::new(), no: BTreeSet::new(), terms: Some(terms) });
+                d.proposals.insert(n, Proposal { text: *text, pay: *pay, state, backers, yes: BTreeSet::new(), no: BTreeSet::new(), terms: Some(terms), zyn: zyn.then_some(0) });
+                // The track's rule is fixed by its first proposal, once taken.
+                if let (true, Some(z)) = (zyn, d.zyn.as_mut()) {
+                    z.frozen = true;
+                }
                 n
             }
         };
@@ -604,6 +683,59 @@ impl ObjectVm {
         Ok(Receipt::Voted { collection: *collection, id: proposal, items: counted as u32 })
     }
 
+    /// Start, or retune until its first proposal, a DAO's Zyn track (§176).
+    /// Operator only.
+    pub(crate) fn apply_set_zyn_track(&mut self, collection: &Address, team: &AccountId, rule: u8, share_bps: u32) -> Result<Receipt, &'static str> {
+        if *team == [0u8; 32] {
+            return Err("the zero account cannot be the team");
+        }
+        let share_bps = match rule {
+            RULE_VETO if share_bps == 0 => 0,
+            RULE_VETO => return Err("a veto has no share; pass 0"),
+            RULE_WEIGHTED if (1..=10_000).contains(&share_bps) => share_bps,
+            RULE_WEIGHTED => return Err("a weighted share is 1 to 10,000 bps"),
+            _ => return Err("veto (0) or weighted (1)"),
+        };
+        let d = self.market.daos.get_mut(collection).ok_or("that collection has no DAO")?;
+        if d.strict.is_none() {
+            return Err("the Zyn track needs a DAO under strict rules");
+        }
+        // Once the track has a proposal its rule is fixed; its team account
+        // can still be replaced (a key rotated or lost), publicly, as an
+        // operator act — the rule and share it carries cannot.
+        let frozen = match d.zyn {
+            Some(z) if z.frozen && (z.rule != rule || z.share_bps != share_bps) => {
+                return Err("the Zyn track's rule is fixed once it has a proposal; only its team account can change");
+            }
+            Some(z) => z.frozen,
+            None => false,
+        };
+        d.zyn = Some(ZynTrack { team: *team, rule, share_bps, frozen });
+        Ok(Receipt::ZynTrackSet { collection: *collection })
+    }
+
+    /// The team's vote on a Zyn proposal, once, while it is open for votes.
+    pub(crate) fn apply_team_vote(&mut self, team: &AccountId, collection: &Address, proposal: u32, choice: u8) -> Result<Receipt, &'static str> {
+        if choice != YES && choice != NO {
+            return Err("yes or no");
+        }
+        let now = self.clock_height().ok_or("the Zcash clock has not started")?;
+        let d = self.market.daos.get_mut(collection).ok_or("that collection has no DAO")?;
+        let z = d.zyn.ok_or("this DAO has no Zyn track")?;
+        if *team != z.team {
+            return Err("only the team's account casts the team's vote");
+        }
+        let p = d.proposals.get_mut(&proposal).ok_or("no such proposal")?;
+        match (p.zyn, p.state) {
+            (None, _) => return Err("the team votes only on Zyn proposals"),
+            (Some(t), _) if t != 0 => return Err("the team has already voted on this proposal"),
+            (Some(_), State::Voting { until }) if now < until => p.zyn = Some(choice),
+            _ => return Err("this proposal is not open for votes"),
+        }
+        *self.accounts.entry(*team).or_insert(0) += 1;
+        Ok(Receipt::TeamVoted { collection: *collection, id: proposal, choice })
+    }
+
     /// At the seal: lapse proposals that found too few backers in time, and
     /// close votes whose time is up — paying a passed proposal's payment from
     /// the treasury if it can.
@@ -620,6 +752,7 @@ impl ObjectVm {
             let claims = &self.market.claims;
             let d = self.market.daos.get_mut(&c).expect("listed above");
             let dao_quorum = (outstanding * d.quorum_bps as u128).div_ceil(10_000);
+            let track = d.zyn;
             for (n, p) in d.proposals.iter_mut() {
                 let (due, quorum) = match &p.terms {
                     None => (closing, dao_quorum),
@@ -633,7 +766,22 @@ impl ObjectVm {
                     State::Backing { until } if until <= due => p.state = State::Lapsed,
                     State::Voting { until } if until <= due => {
                         let turnout = (p.yes.len() + p.no.len()) as u128;
-                        if p.yes.len() > p.no.len() && turnout >= quorum.max(1) {
+                        let (yes, no) = (p.yes.len() as u128, p.no.len() as u128);
+                        let carried = match (p.zyn, track) {
+                            (None, _) => yes > no,
+                            // Weighted: the team's vote is `share` of the tally and the
+                            // members' votes the rest, split as they voted (scaled by
+                            // the turnout to stay in whole numbers).
+                            (Some(team), Some(z)) if z.rule == RULE_WEIGHTED => {
+                                let s = z.share_bps as u128;
+                                let t_yes = if team == YES { s * turnout } else { 0 };
+                                let t_no = if team == NO { s * turnout } else { 0 };
+                                t_yes + (10_000 - s) * yes > t_no + (10_000 - s) * no
+                            }
+                            // Veto: the members decide, and the team can only block.
+                            (Some(team), _) => yes > no && team != NO,
+                        };
+                        if carried && turnout >= quorum.max(1) {
                             match p.pay {
                                 None => p.state = State::Passed,
                                 Some(x) => {

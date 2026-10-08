@@ -176,6 +176,17 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
             "collection": hex(collection), "proposal": proposal, "items": items.len(),
             "choice": match *choice { objectvm::dao::BACK => "back", objectvm::dao::YES => "yes", _ => "no" },
         })),
+        // The Zyn track (§176): its rule and the team's vote are public — the
+        // team answers for its vote; members' votes stay as above.
+        Op::SetZynTrack { collection, team, rule, share_bps, .. } => ("Zyn track set", true, json!({
+            "collection": hex(collection), "team": hex(team),
+            "rule": if *rule == objectvm::dao::RULE_WEIGHTED { "weighted" } else { "veto" }, "share_bps": share_bps,
+        })),
+        Op::ProposeZyn { collection, text, .. } => ("Zyn proposal", false, json!({ "collection": hex(collection), "text": hex(text) })),
+        Op::TeamVote { collection, team, proposal, choice, .. } => ("Team vote", true, json!({
+            "collection": hex(collection), "team": hex(team), "proposal": proposal,
+            "choice": if *choice == objectvm::dao::YES { "yes" } else { "no" },
+        })),
         Op::SetCurveQuote { quote, graduation_mc, bond, .. } => ("Launch asset set", true, json!({ "quote": hex(quote), "graduation_mc": graduation_mc.0.to_string(), "bond": bond.0.to_string() })),
         Op::SetSale { collection, ticket_price, claim_price, open_price, treasury_bps, .. } => (
             "Sale opened",

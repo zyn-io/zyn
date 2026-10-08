@@ -451,3 +451,200 @@ fn registering_the_same_pass_again_is_refused() {
     let op = c.pass(ALICE, a, b"u");
     c.ok(op);
 }
+
+// ---------------------------------------------------------------------------
+// The Zyn track (§176): members vote on Zyn's issues; the team's own account
+// casts one vote, a veto or a weighted share.
+// ---------------------------------------------------------------------------
+
+const TEAM: AccountId = [0x7A; 32];
+
+impl Chain {
+    fn track(&mut self, rule: u8, share_bps: u32) -> Receipt {
+        let op = Op::SetZynTrack { program: program::dao_configure(), collection: CAVE, team: TEAM, rule, share_bps };
+        assert!(ObjectVm::intent_authorities(&op).is_empty(), "only the operator starts the track");
+        self.apply(op)
+    }
+
+    fn propose_zyn(&mut self, who: AccountId, item: Hash, text: u8) -> Receipt {
+        let op = Op::ProposeZyn { proposer: who, program: program::dao(), collection: CAVE, item, text: [text; 32] };
+        assert_eq!(ObjectVm::intent_authorities(&op), vec![who]);
+        self.apply(op)
+    }
+
+    fn team_vote(&mut self, team: AccountId, proposal: u32, choice: u8) -> Receipt {
+        let op = Op::TeamVote { team, program: program::dao(), collection: CAVE, proposal, choice };
+        assert_eq!(ObjectVm::intent_authorities(&op), vec![team], "the team's account signs its vote");
+        self.apply(op)
+    }
+
+    /// Four members' items and a strict DAO with a Zyn track under `rule`;
+    /// one Zyn proposal open for votes (1 backer, 10 blocks, 25% quorum).
+    fn zyn_vote(rule: u8, share_bps: u32) -> (Chain, Vec<Hash>) {
+        let mut c = Chain::new();
+        let items: Vec<Hash> = [ALICE, BOB, CAROL, BOB].iter().enumerate().map(|(i, w)| c.item(CAVE, i as u32 + 1, *w)).collect();
+        c.clock(100);
+        c.terms(1, 10, 2_500);
+        assert!(matches!(c.track(rule, share_bps), Receipt::ZynTrackSet { .. }));
+        assert!(matches!(c.propose_zyn(ALICE, items[0], 9), Receipt::Proposed { id: 1, .. }));
+        assert!(matches!(c.state(1), State::Voting { .. }));
+        (c, items)
+    }
+
+    fn close(&mut self) -> State {
+        self.clock(200);
+        self.seal(1);
+        self.state(1)
+    }
+}
+
+#[test]
+fn the_zyn_track_needs_strict_rules_and_is_fixed_by_its_first_proposal() {
+    use objectvm::dao::{RULE_VETO, RULE_WEIGHTED};
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    let b = c.item(CAVE, 2, BOB);
+    c.dao(1, 5, 1_000);
+    assert_eq!(c.track(RULE_VETO, 0).to_string_refused(), "the Zyn track needs a DAO under strict rules");
+    c.clock(100);
+    c.terms(1, 10, 1_000);
+    assert_eq!(c.propose_zyn(ALICE, a, 1).to_string_refused(), "this DAO has no Zyn track");
+    for (rule, share) in [(RULE_VETO, 5_000), (RULE_WEIGHTED, 0), (RULE_WEIGHTED, 10_001), (7, 0)] {
+        assert!(matches!(c.track(rule, share), Receipt::Refused(_)), "{rule} {share}");
+    }
+    // Retunable until its first proposal...
+    assert!(matches!(c.track(RULE_WEIGHTED, 5_000), Receipt::ZynTrackSet { .. }));
+    assert!(matches!(c.track(RULE_VETO, 0), Receipt::ZynTrackSet { .. }));
+    // ...and a refused proposal fixes nothing.
+    assert!(matches!(c.propose(ALICE, a, 1, None), Receipt::Proposed { id: 1, .. }));
+    assert_eq!(c.propose_zyn(ALICE, a, 2).to_string_refused(), "that item already has an open proposal");
+    assert!(!c.vm.market.daos[&CAVE].zyn.unwrap().frozen);
+    assert!(matches!(c.track(RULE_VETO, 0), Receipt::ZynTrackSet { .. }));
+    assert!(matches!(c.propose_zyn(BOB, b, 3), Receipt::Proposed { id: 2, .. }));
+    assert!(c.vm.market.daos[&CAVE].zyn.unwrap().frozen);
+    assert_eq!(c.track(RULE_WEIGHTED, 5_000).to_string_refused(), "the Zyn track's rule is fixed once it has a proposal; only its team account can change");
+    // The team's account can still be replaced (a key rotated), the rule kept.
+    let op = Op::SetZynTrack { program: program::dao_configure(), collection: CAVE, team: CAROL, rule: RULE_VETO, share_bps: 0 };
+    assert!(matches!(c.ok(op), Receipt::ZynTrackSet { .. }));
+    let z = c.vm.market.daos[&CAVE].zyn.unwrap();
+    assert_eq!((z.team, z.rule, z.frozen), (CAROL, RULE_VETO, true));
+    // A Zyn proposal pays nothing; a collection's proposal has no team vote.
+    let z = &c.vm.market.daos[&CAVE].proposals[&2];
+    assert_eq!((z.pay, z.zyn), (None, Some(0)));
+    assert_eq!(c.vm.market.daos[&CAVE].proposals[&1].zyn, None);
+}
+
+#[test]
+fn under_a_veto_the_members_decide_and_the_team_can_only_block() {
+    use objectvm::dao::RULE_VETO;
+    // Members carry it, the team blocks: it fails.
+    let (mut c, it) = Chain::zyn_vote(RULE_VETO, 0);
+    let op = c.vote(BOB, 1, vec![it[1], it[3]], YES);
+    c.ok(op);
+    assert!(matches!(c.team_vote(TEAM, 1, NO), Receipt::TeamVoted { choice: NO, .. }));
+    assert_eq!(c.close(), State::Failed);
+
+    // Members carry it and the team stays out: it passes.
+    let (mut c, it) = Chain::zyn_vote(RULE_VETO, 0);
+    let op = c.vote(BOB, 1, vec![it[1]], YES);
+    c.ok(op);
+    assert_eq!(c.close(), State::Passed);
+
+    // The team says yes, but most members say no: it fails.
+    let (mut c, it) = Chain::zyn_vote(RULE_VETO, 0);
+    let op = c.vote(ALICE, 1, vec![it[0]], YES);
+    c.ok(op);
+    let op = c.vote(BOB, 1, vec![it[1], it[3]], NO);
+    c.ok(op);
+    c.team_vote(TEAM, 1, YES);
+    assert_eq!(c.close(), State::Failed);
+
+    // The team's yes does not stand in for the members' quorum (25% of 4 = 1).
+    let (mut c, _) = Chain::zyn_vote(RULE_VETO, 0);
+    c.team_vote(TEAM, 1, YES);
+    assert_eq!(c.close(), State::Failed);
+}
+
+#[test]
+fn a_weighted_team_vote_is_its_share_of_the_tally() {
+    use objectvm::dao::RULE_WEIGHTED;
+    // At 50%, the team's yes and one member's beat three members' no.
+    let (mut c, it) = Chain::zyn_vote(RULE_WEIGHTED, 5_000);
+    let op = c.vote(ALICE, 1, vec![it[0]], YES);
+    c.ok(op);
+    let op = c.vote(BOB, 1, vec![it[1], it[3]], NO);
+    c.ok(op);
+    let op = c.vote(CAROL, 1, vec![it[2]], NO);
+    c.ok(op);
+    c.team_vote(TEAM, 1, YES);
+    assert_eq!(c.close(), State::Passed);
+
+    // At 50%, every member's yes ties the team's no: it fails.
+    let (mut c, it) = Chain::zyn_vote(RULE_WEIGHTED, 5_000);
+    for (w, i) in [(ALICE, 0), (BOB, 1), (CAROL, 2), (BOB, 3)] {
+        let op = c.vote(w, 1, vec![it[i]], YES);
+        c.ok(op);
+    }
+    c.team_vote(TEAM, 1, NO);
+    assert_eq!(c.close(), State::Failed);
+
+    // At 40%, the same members outvote the team.
+    let (mut c, it) = Chain::zyn_vote(RULE_WEIGHTED, 4_000);
+    for (w, i) in [(ALICE, 0), (BOB, 1), (CAROL, 2), (BOB, 3)] {
+        let op = c.vote(w, 1, vec![it[i]], YES);
+        c.ok(op);
+    }
+    c.team_vote(TEAM, 1, NO);
+    assert_eq!(c.close(), State::Passed);
+}
+
+#[test]
+fn only_the_team_votes_as_the_team_once_on_zyn_proposals_while_open() {
+    use objectvm::dao::RULE_VETO;
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    let b = c.item(CAVE, 2, BOB);
+    c.clock(100);
+    c.terms(2, 10, 2_500);
+    c.track(RULE_VETO, 0);
+    c.propose(ALICE, a, 1, None);
+    c.propose_zyn(BOB, b, 2);
+    assert_eq!(c.team_vote(TEAM, 1, NO).to_string_refused(), "the team votes only on Zyn proposals");
+    assert_eq!(c.team_vote(TEAM, 2, NO).to_string_refused(), "this proposal is not open for votes");
+    let op = c.vote(ALICE, 2, vec![a], BACK);
+    c.ok(op);
+    assert_eq!(c.team_vote(ALICE, 2, NO).to_string_refused(), "only the team's account casts the team's vote");
+    assert_eq!(c.team_vote(TEAM, 2, BACK).to_string_refused(), "yes or no");
+    c.team_vote(TEAM, 2, NO);
+    assert_eq!(c.team_vote(TEAM, 2, YES).to_string_refused(), "the team has already voted on this proposal");
+    c.clock(300);
+    c.seal(1);
+    assert_eq!(c.team_vote(TEAM, 2, NO).to_string_refused(), "the team has already voted on this proposal");
+}
+
+#[test]
+fn a_chain_without_a_zyn_track_saves_as_it_did() {
+    let mut c = Chain::new();
+    let a = c.item(CAVE, 1, ALICE);
+    c.clock(100);
+    c.terms(1, 10, 1_000);
+    c.propose(ALICE, a, 1, None);
+    let saved = c.vm.encode();
+    assert!(saved.windows(8).any(|w| w == b"MARKET15"), "no track, no new format");
+    assert!(!saved.windows(8).any(|w| w == b"MARKET16"));
+    c.track(objectvm::dao::RULE_VETO, 0);
+    assert!(c.vm.encode().windows(8).any(|w| w == b"MARKET16"));
+}
+
+trait RefusedText {
+    fn to_string_refused(&self) -> String;
+}
+
+impl RefusedText for Receipt {
+    fn to_string_refused(&self) -> String {
+        match self {
+            Receipt::Refused(why) => why.to_string(),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+}

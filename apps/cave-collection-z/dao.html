@@ -83,8 +83,9 @@
       dialog.role-form { max-width: 520px; width: calc(100% - 32px); }
       .role-form form { display: grid; gap: 14px; }
       .role-form label { display: grid; gap: 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
-      .role-form input, .role-form textarea { font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; text-transform: none; letter-spacing: 0; }
+      .role-form input, .role-form textarea, .role-form select { font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; text-transform: none; letter-spacing: 0; }
       .role-form textarea { min-height: 96px; resize: vertical; }
+      .role-form [hidden] { display: none; }
       .role-form .burrow { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
       .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
       .pass { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(199, 240, 75, 0.35); background: rgba(0, 0, 0, 0.45); }
@@ -207,9 +208,11 @@
       <form id="prop-form">
         <h2 id="prop-title">New proposal</h2>
         <p class="say small">The text is published under its hash; the ledger keeps the hash. One of your items backs it first.</p>
+        <label id="prop-track-box" hidden>About<select name="track"><option value="collection">Cave</option><option value="zyn">Zyn</option></select></label>
         <label>Proposal<textarea name="text" required maxlength="4000" placeholder="What, why, and what it costs"></textarea></label>
-        <label>Treasury pays, ZEC (optional)<input name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" /></label>
-        <label>To Nap account (if paying)<input name="to" autocomplete="off" spellcheck="false" placeholder="64 hex characters" /></label>
+        <p class="say small" id="prop-zyn-note" hidden></p>
+        <label class="pay-field">Treasury pays, ZEC (optional)<input name="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" /></label>
+        <label class="pay-field">To Nap account (if paying)<input name="to" autocomplete="off" spellcheck="false" placeholder="64 hex characters" /></label>
         <p class="out" id="prop-out" role="status" aria-live="polite"></p>
         <div class="row">
           <button class="act" type="submit" id="prop-send">Propose with Nap</button>

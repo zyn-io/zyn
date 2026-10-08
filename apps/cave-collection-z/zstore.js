@@ -887,7 +887,10 @@ async function daoPage() {
   const STATES = ['backing', 'voting', 'passed', 'unfunded', 'failed', 'lapsed'];
   const validProp = (x) => whole(x?.id) && isHex(x.text) && STATES.includes(x.state) && whole(x.backers) && whole(x.yes) && whole(x.no)
     && (x.until == null || whole(x.until)) && (x.pay == null || (isInt(x.pay.amount) && isHex(x.pay.asset) && isHex(x.pay.to)))
-    && (x.terms == null || (whole(x.terms.backers) && whole(x.terms.quorum)));
+    && (x.terms == null || (whole(x.terms.backers) && whole(x.terms.quorum)))
+    && (x.track == null || x.track === 'collection' || x.track === 'zyn') && (x.team == null || ['none', 'yes', 'no'].includes(x.team));
+  // The Zyn track (§176): what the team's own vote weighs, from the chain.
+  const teamRule = () => (dao?.zyn?.rule === 'weighted' ? `the team's vote is ${Number(dao.zyn.share_bps) / 100}% of the tally` : 'the team can veto, not pass');
   const short = (h) => `${h.slice(0, 8)}…${h.slice(-6)}`;
   const span = (secs) => {
     const m = Math.max(0, Math.floor(secs / 60));
@@ -916,14 +919,16 @@ async function daoPage() {
       if (!props.length) { el('props').innerHTML = `<p class="say">No proposals yet.${members ? ' Yours can be the first.' : ''}</p>`; return; }
       const rows = await Promise.all(props.map(async (x) => {
         const t = await textOf(x.text);
-        const pay = x.pay ? `Pays ${zec(x.pay.amount)} ${x.pay.asset === ZEC_ZY ? 'ZEC' : `of ${short(x.pay.asset)}`} to ${short(x.pay.to)}` : 'Pays nothing';
+        const zyn = x.track === 'zyn';
+        const pay = zyn ? `Zyn · ${teamRule()} · team ${x.team === 'yes' || x.team === 'no' ? `voted ${x.team}` : 'has not voted'}`
+          : x.pay ? `Pays ${zec(x.pay.amount)} ${x.pay.asset === ZEC_ZY ? 'ZEC' : `of ${short(x.pay.asset)}`} to ${short(x.pay.to)}` : 'Pays nothing';
         const need = x.terms ? x.terms.backers : dao.backers;
         const quorum = x.terms ? ` · needs ${x.terms.quorum} voting` : '';
         const count = x.state === 'backing' ? `${x.backers} of ${need} backers · ${left(x)}` : x.state === 'voting' ? `${x.yes} yes · ${x.no} no${quorum} · ${left(x)}` : `${x.yes} yes · ${x.no} no`;
         const can = (c) => !acted.has(`${x.id}:${c === 'back' ? 'back' : 'vote'}`);
         const acts = !members ? '' : x.state === 'backing' && can('back') ? `<button class="act small" data-vote="back" data-p="${x.id}">Back</button>`
           : x.state === 'voting' && can('yes') ? `<button class="act small" data-vote="yes" data-p="${x.id}">Yes</button><button class="act small ghost" data-vote="no" data-p="${x.id}">No</button>` : '';
-        return `<div class="prop"><div class="prop-head"><b>#${x.id}</b><span class="tag ${x.state === 'voting' ? 'now' : ''}">${esc(x.state)}</span></div>
+        return `<div class="prop"><div class="prop-head"><b>#${x.id}</b>${zyn ? '<span class="tag">Zyn</span>' : ''}<span class="tag ${x.state === 'voting' ? 'now' : ''}">${esc(x.state)}</span></div>
           <p class="prop-text">${t === null ? '<em>Text not found under its hash.</em>' : esc(t)}</p>
           <p class="prop-meta">${esc(pay)} · ${esc(count)}</p>${acts ? `<div class="row">${acts}</div>` : ''}</div>`;
       }));
@@ -959,7 +964,21 @@ async function daoPage() {
   // the store takes only texts the chain has a proposal for.
   const propDialog = el('prop-dialog');
   const propForm = el('prop-form');
-  el('new-prop').onclick = () => { propForm.reset(); el('prop-out').textContent = ''; propDialog.showModal(); };
+  // The Zyn track shows only once the chain has one; a Zyn proposal pays nothing.
+  const trackShown = () => {
+    const zyn = propForm.track.value === 'zyn';
+    propForm.querySelectorAll('.pay-field').forEach((f) => { f.hidden = zyn; });
+    el('prop-zyn-note').hidden = !zyn;
+    el('prop-zyn-note').textContent = zyn ? `About Zyn: it pays nothing, and ${teamRule()}. The team's vote is public.` : '';
+  };
+  propForm.track.onchange = trackShown;
+  el('new-prop').onclick = () => {
+    propForm.reset();
+    el('prop-out').textContent = '';
+    el('prop-track-box').hidden = !dao?.zyn;
+    trackShown();
+    propDialog.showModal();
+  };
   el('prop-close').onclick = () => propDialog.close();
   const publish = async (text) => {
     for (let i = 0; i < 9; i += 1) {
@@ -976,14 +995,17 @@ async function daoPage() {
     const out = el('prop-out');
     out.className = 'out';
     const text = propForm.text.value.trim();
-    const amount = propForm.amount.value.trim();
-    const to = propForm.to.value.trim().toLowerCase();
+    const track = dao?.zyn && propForm.track.value === 'zyn' ? 'zyn' : 'collection';
+    const amount = track === 'zyn' ? '' : propForm.amount.value.trim();
+    const to = track === 'zyn' ? '' : propForm.to.value.trim().toLowerCase();
     if (amount && !/^[0-9a-f]{64}$/.test(to)) { out.textContent = 'A payment needs the Nap account it goes to (64 hex characters).'; out.classList.add('bad'); return; }
     if (to && !amount) { out.textContent = 'A recipient needs an amount, or leave both empty.'; out.classList.add('bad'); return; }
     el('prop-send').disabled = true;
     try {
       out.textContent = 'Approve the proposal in Nap.';
-      await ask('zyn_daoPropose', { collection: CAVE_Z, text, pay: amount ? { asset: ZEC_ZY, amount, to } : undefined });
+      const made = await ask('zyn_daoPropose', { collection: CAVE_Z, text, track, pay: amount ? { asset: ZEC_ZY, amount, to } : undefined });
+      // An older Nap ignores the track and proposes to the collection: say so.
+      const stale = track === 'zyn' && made?.track !== 'zyn';
       // Done: the form gets out of the way, and the list says what comes next.
       propDialog.close();
       const po = el('props-out');
@@ -991,8 +1013,8 @@ async function daoPage() {
       po.textContent = 'Proposed. Publishing its text…';
       try {
         await publish(text);
-        po.textContent = 'Proposed, and its text is published.';
-        po.classList.add('good');
+        po.textContent = stale ? 'Your Nap is out of date: it proposed this to Cave, not Zyn. Update Nap and propose again.' : 'Proposed, and its text is published.';
+        po.classList.add(stale ? 'bad' : 'good');
       } catch (err) {
         po.textContent = `Proposed, but its text is not published yet (${err.message}). Keep a copy of it.`;
         po.classList.add('bad');

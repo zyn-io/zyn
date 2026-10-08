@@ -60,7 +60,7 @@ export const MARKET_PROGRAM = Object.freeze(Object.fromEntries([
   ['dao', 'dao'],
 ].map(([k, name]) => [k, hex(named(name))])));
 
-const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47, lendInsure: 51, route: 53, memberPass: 57, propose: 58, vote: 59 };
+const TAG = { createPool: 10, addLiquidity: 11, removeLiquidity: 12, swap: 13, claim: 14, createLaunch: 15, commit: 16, createCurve: 23, curveTrade: 24, buyTickets: 27, claimItems: 30, mintOpen: 32, claimVoucherItems: 35, claimDeposit: 38, lendSupply: 41, lendWithdraw: 42, lendOpen: 43, lendRepay: 44, lendAddCollateral: 45, lendRemoveCollateral: 46, lendBid: 47, lendInsure: 51, route: 53, memberPass: 57, propose: 58, vote: 59, proposeZyn: 63 };
 
 const id = (domain, ...parts) => leaf(te.encode(domain), ...parts);
 
@@ -94,6 +94,8 @@ export const proposeIntent = (o) => concatBytes(
   new Uint8Array([TAG.propose]), o.proposer, prog('dao'), o.collection, o.item, o.text,
   o.pay ? concatBytes(new Uint8Array([1]), o.pay.asset, i128Bytes(o.pay.amount), o.pay.to) : new Uint8Array([0]),
 );
+/// A proposal on the Zyn track (§176): members vote on Zyn's issues; it pays nothing.
+export const proposeZynIntent = (o) => concatBytes(new Uint8Array([TAG.proposeZyn]), o.proposer, prog('dao'), o.collection, o.item, o.text);
 export const voteIntent = (o) => concatBytes(
   new Uint8Array([TAG.vote]), o.voter, prog('dao'), o.collection, u32be(o.proposal), new Uint8Array([o.choice]),
   u32be(o.items.length), ...o.items,

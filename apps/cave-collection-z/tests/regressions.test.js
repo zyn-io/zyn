@@ -116,5 +116,5 @@ test('a proposal text is kept only once the chain has a proposal with its hash',
 test('a proposal made closes its form, so the list behind it can be used', async () => {
   const zstore = await read('zstore.js');
   const sent = zstore.slice(zstore.indexOf("await ask('zyn_daoPropose'"));
-  assert.ok(sent.slice(0, 300).includes('propDialog.close();'), 'the dialog closes once Nap has proposed');
+  assert.ok(sent.slice(0, 600).includes('propDialog.close();'), 'the dialog closes once Nap has proposed');
 });

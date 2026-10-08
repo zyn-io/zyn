@@ -1206,6 +1206,9 @@ fn handle(
                     "id": id, "text": hex(&p.text), "state": p.state.word(), "until": until, "strict": p.terms.is_some(), "terms": terms,
                     "pay": p.pay.map(|x| serde_json::json!({ "asset": hex(&x.asset), "amount": x.amount.0.to_string(), "to": hex(&x.to) })),
                     "backers": p.backers.len(), "yes": p.yes.len(), "no": p.no.len(),
+                    // The Zyn track (§176): which track, and the team's vote so far.
+                    "track": if p.zyn.is_some() { "zyn" } else { "collection" },
+                    "team": p.zyn.map(|t| match t { objectvm::dao::YES => "yes", objectvm::dao::NO => "no", _ => "none" }),
                 })
             }).collect();
             let v = serde_json::json!({
@@ -1217,6 +1220,10 @@ fn handle(
                 "treasury": d.treasury.iter().map(|(a, v)| serde_json::json!({ "asset": hex(a), "amount": v.0.to_string() })).collect::<Vec<_>>(),
                 "passes": d.passes.keys().filter(|c| st.live.contains_key(*c)).count(),
                 "proposals": proposals,
+                "zyn": d.zyn.map(|z| serde_json::json!({
+                    "team": hex(&z.team), "rule": if z.rule == objectvm::dao::RULE_WEIGHTED { "weighted" } else { "veto" },
+                    "share_bps": z.share_bps, "frozen": z.frozen,
+                })),
             });
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
         }

@@ -146,6 +146,11 @@ pub fn vectors() -> Vec<(&'static str, String)> {
             "propose_no_pay",
             enc(&Op::Propose { proposer: OWNER, program: program::dao(), collection: TOKEN, item: [0xc1; 32], text: [0x7a; 32], pay: None }),
         ),
+        // The Zyn track (§176): a member's Zyn proposal.
+        (
+            "propose_zyn",
+            enc(&Op::ProposeZyn { proposer: OWNER, program: program::dao(), collection: TOKEN, item: [0xc1; 32], text: [0x7a; 32] }),
+        ),
         (
             "vote",
             enc(&Op::Vote { voter: OWNER, program: program::dao(), collection: TOKEN, proposal: 7, items: vec![[0xc1; 32], [0xc2; 32]], choice: objectvm::dao::YES }),

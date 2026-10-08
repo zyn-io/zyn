@@ -47,3 +47,19 @@ test('every DAO card says the operator and replicas can see which item acted', (
   assert.equal((block.match(/operator and replicas can see/g) || []).length, 3);
   assert.match(block, /i \+= 32/, 'votes go in chunks of 32, so every item counts');
 });
+
+test('a Zyn proposal needs the DAO\'s Zyn track and pays nothing (§176)', async () => {
+  dao = { set: true, backers: 10, proposals: [] };
+  const propose = (o) => METHODS.zyn_daoPropose.prepare(ctx, { collection: CAVE_Z, text: 'bridge BTC next', ...o });
+  await assert.rejects(propose({ track: 'zyn' }), /does not vote on Zyn issues yet/);
+  await assert.rejects(propose({ track: 'cave' }), /track must be/);
+  dao = { ...dao, zyn: { team: 'ab'.repeat(32), rule: 'veto', share_bps: 0, frozen: false } };
+  await assert.rejects(propose({ track: 'zyn', pay: { asset: 'ab'.repeat(32), to: 'cd'.repeat(32), amount: '1' } }), /pays nothing/);
+});
+
+test('a vote on a Zyn proposal says what the team\'s vote weighs and whether it is cast', () => {
+  const src = readFileSync(new URL('../src/connect-ops.js', import.meta.url), 'utf8');
+  assert.match(src, /can veto, not pass/);
+  assert.match(src, /% of the tally/);
+  assert.match(src, /\['Team vote', `\$\{teamRule\(dao\.zyn\)\}; so far/);
+});

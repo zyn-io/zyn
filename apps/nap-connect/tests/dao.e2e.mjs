@@ -52,7 +52,7 @@ async function approve(expect) {
 await page.goto(`${SITE}/dao/?network=testnet`);
 ok(/ZCaveDAO/.test(await page.title()), 'the DAO page loads');
 await page.waitForFunction(() => !document.querySelector('#f-treasury-box')?.hidden, null, { timeout: 30000 });
-ok(/ZEC\.zy/.test(await page.textContent('#f-treasury')), `the DAO treasury reads from the chain: ${await page.textContent('#f-treasury')}`);
+ok(/^[0-9.]+ ZEC$/.test((await page.textContent('#f-treasury')).trim()), `the DAO treasury reads from the chain: ${await page.textContent('#f-treasury')}`);
 
 // Membership: Nap answers in the page.
 await page.click('#check');

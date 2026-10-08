@@ -212,6 +212,32 @@ fn hexs(b: &[u8]) -> String {
 /// Sign `intent` with `key` and hand it to the holders' door. A refusal
 /// inside the receipts is an error: the frame was taken, the intent was not.
 pub fn submit(host: &str, chain: u32, key: &SigningKey, intent: Op) -> Result<String, String> {
+    submit_signed_by(host, chain, intent, |payload| {
+        Ok((key.verifying_key().to_bytes(), key.sign(payload).to_bytes()))
+    })
+}
+
+/// The same door, signed by an account whose key is shared among custodians
+/// (a FROST group over Ed25519, §80): each signs its part and the group's
+/// signature is an ordinary Ed25519 one, so the chain sees a normal frame.
+pub fn submit_threshold(
+    host: &str,
+    chain: u32,
+    custodians: &[String],
+    public: &zyn_custody::treasury::PublicKeyPackage<zyn_custody::treasury::ZynAccount>,
+    threshold: usize,
+    request_id: u64,
+    intent: Op,
+) -> Result<String, String> {
+    submit_signed_by(host, chain, intent, |payload| {
+        zyn_custody::treasury::sign_across(custodians, public, threshold, payload, request_id)
+            .map_err(|e| format!("threshold signing across custodians failed: {e:?}"))
+    })
+}
+
+/// Sign `intent` with whatever `sign` holds — it receives the signing
+/// payload and returns the verifying key and signature — and submit it.
+fn submit_signed_by(host: &str, chain: u32, intent: Op, sign: impl FnOnce(&[u8]) -> Result<([u8; 32], [u8; 64]), String>) -> Result<String, String> {
     let status = call(host, "zyn_status", serde_json::json!({}))?;
     if status.get("chain").and_then(|c| c.as_u64()) != Some(chain as u64) {
         return Err(format!("the ledger at {host} is not chain {chain}"));
@@ -222,11 +248,8 @@ pub fn submit(host: &str, chain: u32, key: &SigningKey, intent: Op) -> Result<St
         vm_id: zyn_vm::zvm::vm_id::<ObjectVm>(),
         valid_until_epoch: epoch + 100,
     };
-    let signature = key.sign(&zyn_vm::auth::signing_payload::<ObjectVm>(&auth, &intent));
-    let cred = zyn_vm::verify::Credential::Ed25519 {
-        key: key.verifying_key().to_bytes(),
-        signature: signature.to_bytes(),
-    };
+    let (key, signature) = sign(&zyn_vm::auth::signing_payload::<ObjectVm>(&auth, &intent))?;
+    let cred = zyn_vm::verify::Credential::Ed25519 { key, signature };
     let genesis = <ObjectVm as MicrochainVm>::genesis(chain, objectvm::Limits { max_io: 16 });
     let authorized = zyn_vm::verify::authorize_intent::<ObjectVm>(&[cred], &auth, intent, &genesis)
         .map_err(|e| format!("cannot sign that: {e:?}"))?;

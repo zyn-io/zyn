@@ -440,6 +440,33 @@ pub enum Op {
         items: Vec<Hash>,
         choice: u8,
     },
+    /// Start a DAO's Zyn track (§176): `team` casts the team's vote; `rule`
+    /// is veto (0, share 0) or weighted (1, the team's share in bps). Fixed
+    /// once the track has a proposal. Operator only.
+    SetZynTrack {
+        program: ProgramId,
+        collection: Address,
+        team: AccountId,
+        rule: u8,
+        share_bps: u32,
+    },
+    /// Propose on the Zyn track, proved by one of the proposer's items, which
+    /// backs it first. Pays nothing (§176).
+    ProposeZyn {
+        proposer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        item: Hash,
+        text: Hash,
+    },
+    /// The team's vote on a Zyn proposal, signed by the team's account (§176).
+    TeamVote {
+        team: AccountId,
+        program: ProgramId,
+        collection: Address,
+        proposal: u32,
+        choice: u8,
+    },
     /// Name an asset coins launch in, sized to graduate at `graduation_mc`
     /// of it fully diluted, with `bond` of it to create one (§166). A zero
     /// `graduation_mc` stops new coins in it. Operator only.
@@ -719,6 +746,8 @@ pub enum Receipt {
     PassSet { collection: Address },
     Proposed { collection: Address, id: u32 },
     Voted { collection: Address, id: u32, items: u32 },
+    ZynTrackSet { collection: Address },
+    TeamVoted { collection: Address, id: u32, choice: u8 },
     BuyersAllowed { collection: Address, added: u32 },
     SaleOpened { collection: Address },
     TicketsBought { first: Hash, count: u32 },
@@ -2199,7 +2228,22 @@ impl MicrochainVm for ObjectVm {
             Op::Propose { proposer, program, collection, item, text, pay } => one(if *program != program::dao() {
                 Err("wrong program for a proposal")
             } else {
-                self.apply_propose(proposer, collection, item, text, pay)
+                self.apply_propose(proposer, collection, item, text, pay, false)
+            }),
+            Op::SetZynTrack { program, collection, team, rule, share_bps } => one(if *program != program::dao_configure() {
+                Err("wrong program for the Zyn track")
+            } else {
+                self.apply_set_zyn_track(collection, team, *rule, *share_bps)
+            }),
+            Op::ProposeZyn { proposer, program, collection, item, text } => one(if *program != program::dao() {
+                Err("wrong program for a proposal")
+            } else {
+                self.apply_propose(proposer, collection, item, text, &None, true)
+            }),
+            Op::TeamVote { team, program, collection, proposal, choice } => one(if *program != program::dao() {
+                Err("wrong program for a vote")
+            } else {
+                self.apply_team_vote(team, collection, *proposal, *choice)
             }),
             Op::Vote { voter, program, collection, proposal, items, choice } => one(if *program != program::dao() {
                 Err("wrong program for a vote")
@@ -2481,6 +2525,8 @@ impl MicrochainVm for ObjectVm {
             Op::MemberPass { holder, .. } => vec![*holder],
             Op::Propose { proposer, .. } => vec![*proposer],
             Op::Vote { voter, .. } => vec![*voter],
+            Op::ProposeZyn { proposer, .. } => vec![*proposer],
+            Op::TeamVote { team, .. } => vec![*team],
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
             Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
@@ -2901,6 +2947,15 @@ impl MicrochainVm for ObjectVm {
                 for c in items {
                     e.bytes(c);
                 }
+            }
+            Op::SetZynTrack { program, collection, team, rule, share_bps } => {
+                e.u8(62).bytes(&program.0).bytes(collection).bytes(team).u8(*rule).u32(*share_bps);
+            }
+            Op::ProposeZyn { proposer, program, collection, item, text } => {
+                e.u8(63).bytes(proposer).bytes(&program.0).bytes(collection).bytes(item).bytes(text);
+            }
+            Op::TeamVote { team, program, collection, proposal, choice } => {
+                e.u8(64).bytes(team).bytes(&program.0).bytes(collection).u32(*proposal).u8(*choice);
             }
             Op::AllowBuyers { program, collection, keys } => {
                 e.u8(55).bytes(&program.0).bytes(collection).u32(keys.len() as u32);
@@ -3608,6 +3663,9 @@ impl MicrochainVm for ObjectVm {
                 window_blocks: d.u64().ok()?,
                 quorum_bps: d.u32().ok()?,
             }),
+            62 => Some(Op::SetZynTrack { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, team: d.account().ok()?, rule: d.u8().ok()?, share_bps: d.u32().ok()? }),
+            63 => Some(Op::ProposeZyn { proposer: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, item: d.hash().ok()?, text: d.hash().ok()? }),
+            64 => Some(Op::TeamVote { team: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, proposal: d.u32().ok()?, choice: d.u8().ok()? }),
             57 => Some(Op::MemberPass { holder: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, item: d.hash().ok()?, pass: d.hash().ok()? }),
             58 => Some(Op::Propose {
                 proposer: d.account().ok()?,
