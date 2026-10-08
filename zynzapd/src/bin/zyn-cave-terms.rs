@@ -9,12 +9,14 @@
 //! It prints. It does not broadcast, sign, or write to the chain: publishing is
 //! a deliberate act and this is the thing you read before taking it.
 //!
-//!   zyn-cave-terms                 print the policy and terms, with digests
+//!   zyn-cave-terms                 print the policy and terms (v2), with digests
+//!   zyn-cave-terms bytes           v2's canonical bytes, as hex
+//!   zyn-cave-terms bytes-v1        v1's (superseded, §175)
 //!   zyn-cave-terms announce <H>    the close announcement for close height H
 
 
 use cave_randomness::CloseAnnouncement;
-use zynzapd::cave_z::{policy, terms};
+use zynzapd::cave_z::{policy, terms, terms_v2};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
@@ -63,9 +65,11 @@ fn main() {
     // The canonical bytes themselves, for publication. A digest nobody can
     // recompute is a number, not a commitment — so the bytes have to be
     // publishable, not only their hash.
-    if std::env::args().nth(1).as_deref() == Some("bytes") {
-        println!("{}", hex(&t.canonical_bytes()));
-        return;
+    let v2 = terms_v2(&p);
+    match std::env::args().nth(1).as_deref() {
+        Some("bytes") => return println!("{}", hex(&v2.canonical_bytes())),
+        Some("bytes-v1") => return println!("{}", hex(&t.canonical_bytes())),
+        _ => {}
     }
 
     println!("Cave Collection Z — sale policy and terms");
@@ -77,24 +81,31 @@ fn main() {
     println!("identity              concealed shuffle");
     println!("close                 announced, >= 1152 blocks' notice");
     println!("reveal                close + 100 blocks, announced round + 2400");
-    println!("treasury              {}", hex(&t.treasury));
+    println!("treasury              10% to the collection's DAO treasury (no key spends it)");
     println!(
         "prices (zatoshi)      entry {}  claim {}  open mint {}",
         t.entry_price_zatoshi, t.claim_price_zatoshi, t.open_mint_price_zatoshi
     );
+    println!(
+        "whitelist             listed accounts only; ticket n > {} costs {} more per ticket past it",
+        v2.gate_base, v2.gate_step_zatoshi
+    );
     println!("confirmations         {}", t.min_confirmations);
     println!("claim window          {} blocks", t.claim_window_blocks);
     let (pool, treasury) = t.split(t.entry_price_zatoshi);
+    println!("split of one entry    {} to the pool, {} to the DAO treasury", pool, treasury);
     println!(
-        "split of one entry    {} to the pool, {} to the treasury",
-        pool, treasury
+        "DAO                   {} backers, {}-block windows, {} bps quorum",
+        v2.dao_backers, v2.dao_window_blocks, v2.dao_quorum_bps
+    );
+    println!(
+        "burn tickets          {} zatoshi of the token each, median of {} s (>= {} readings); <= {} per burn, {} in all",
+        v2.burn_ticket_zatoshi, v2.burn_median_seconds, v2.burn_min_readings, v2.burn_per_burn, v2.burn_cap
     );
     println!();
     println!("POLICY DIGEST  {}", hex(&t.policy_digest));
-    println!("TERMS DIGEST   {}", hex(&t.digest()));
-    println!();
-    println!("Publish both before the first deposit. A ticket references the");
-    println!("terms digest, so anything changed after this is a different sale.");
+    println!("TERMS DIGEST   {}  (cave-sale-terms/v2)", hex(&v2.digest()));
+    println!("SUPERSEDES     {}  (v1)", hex(&v2.supersedes));
 }
 
 #[cfg(test)]

@@ -37,7 +37,9 @@ await cp(new URL('terms.html', root), new URL('terms/index.html', output));
 
 // The canonical bytes on their own, so a verifier can curl them rather than
 // scrape them out of a web page.
-await cp(new URL('terms.hex', root), new URL('cave-sale-terms-v1.hex', output));
+await cp(new URL('terms.hex', root), new URL('cave-sale-terms-v2.hex', output));
+// The terms v2 replaced (§175), kept so its digest can still be checked.
+await cp(new URL('terms-v1.hex', root), new URL('cave-sale-terms-v1.hex', output));
 
 // The checkout. Same shape again: `/mint` is where an invitation becomes a
 // paid entry, and it is the only page on the site that asks for money.

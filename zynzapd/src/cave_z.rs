@@ -116,6 +116,130 @@ pub fn terms(p: &AllocationPolicy) -> SaleTerms {
 }
 
 
+/// The re-issued terms (§175): v1's sale, plus what was decided after it —
+/// the whitelist gate and rising price (§168), the treasury share going to
+/// the collection's keyless DAO treasury under its strict rules (§172, §173),
+/// and the burn rule and its caps (§145, §174). The draw's policy, and so its
+/// digest, is unchanged; v1's terms digest is named as the one superseded.
+///
+/// Its own version and domain rather than a v1 field change: a v1 reader must
+/// not parse these bytes as v1 terms with a different treasury.
+pub const TERMS_V2_VERSION: &str = "cave-sale-terms/v2";
+const TERMS_V2_DOMAIN: &[u8] = b"cave.sale.terms.v2";
+
+/// v1's published terms digest, which v2 replaces before any ticket was sold.
+const SUPERSEDES: &str = "f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e";
+
+/// Where the treasury share goes. 1: the collection's own DAO treasury,
+/// which no key can spend; only a passed proposal pays out of it (§172.6).
+pub const TREASURY_DAO: u8 = 1;
+
+/// §168.2: a listed account's first 10 tickets cost the ticket price; each one
+/// after costs one more ticket price than the last (11th 0.02, 12th 0.03, …).
+pub const GATE_BASE: u32 = 10;
+/// §173.11: the DAO's mainnet terms, fixed at its first proposal.
+pub const DAO_BACKERS: u32 = 10;
+pub const DAO_WINDOW_BLOCKS: u32 = 8_064;
+pub const DAO_QUORUM_BPS: u32 = 1_000;
+/// §174: a burn ticket costs one ticket price in ZEC, at the median of the
+/// last hour's pool readings (at least 10).
+pub const BURN_MEDIAN_SECONDS: u32 = 3_600;
+pub const BURN_MIN_READINGS: u32 = 10;
+/// §145.6: at most 20 tickets from one burn; and the user, 8 Oct 2026: "Cap
+/// at 20" — at most 20 burn tickets in the whole sale (`SetVoucherCap`).
+pub const BURN_PER_BURN: u32 = 20;
+pub const BURN_CAP: u32 = 20;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermsV2 {
+    pub v1: SaleTerms,
+    pub supersedes: [u8; 32],
+    pub treasury_kind: u8,
+    pub gate_base: u32,
+    /// Added per ticket past the base: the n-th ticket past it costs
+    /// entry + n × step.
+    pub gate_step_zatoshi: u64,
+    pub dao_backers: u32,
+    pub dao_window_blocks: u32,
+    pub dao_quorum_bps: u32,
+    pub burn_ticket_zatoshi: u64,
+    pub burn_median_seconds: u32,
+    pub burn_min_readings: u32,
+    pub burn_per_burn: u32,
+    pub burn_cap: u32,
+}
+
+impl TermsV2 {
+    /// v1's fields in v1's order, except the treasury account, which v2
+    /// replaces with `treasury_kind`; then what v2 adds. Integers big-endian,
+    /// the version length-prefixed, as in v1.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let t = &self.v1;
+        let mut out = Vec::new();
+        out.extend_from_slice(&(TERMS_V2_VERSION.len() as u32).to_be_bytes());
+        out.extend_from_slice(TERMS_V2_VERSION.as_bytes());
+        out.extend_from_slice(&self.supersedes);
+        out.extend_from_slice(&t.policy_digest);
+        out.extend_from_slice(&t.collection_id);
+        out.extend_from_slice(&t.manifest_root);
+        out.push(self.treasury_kind);
+        out.push(t.network);
+        out.extend_from_slice(&t.entry_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.claim_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.open_mint_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.min_confirmations.to_be_bytes());
+        out.extend_from_slice(&t.claim_window_blocks.to_be_bytes());
+        out.extend_from_slice(&(t.treasury_bps as u32).to_be_bytes());
+        out.extend_from_slice(&self.gate_base.to_be_bytes());
+        out.extend_from_slice(&self.gate_step_zatoshi.to_be_bytes());
+        out.extend_from_slice(&self.dao_backers.to_be_bytes());
+        out.extend_from_slice(&self.dao_window_blocks.to_be_bytes());
+        out.extend_from_slice(&self.dao_quorum_bps.to_be_bytes());
+        out.extend_from_slice(&self.burn_ticket_zatoshi.to_be_bytes());
+        out.extend_from_slice(&self.burn_median_seconds.to_be_bytes());
+        out.extend_from_slice(&self.burn_min_readings.to_be_bytes());
+        out.extend_from_slice(&self.burn_per_burn.to_be_bytes());
+        out.extend_from_slice(&self.burn_cap.to_be_bytes());
+        out
+    }
+
+    /// SHA-256 over the length-prefixed domain and payload, as v1.
+    pub fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let payload = self.canonical_bytes();
+        let mut h = Sha256::new();
+        h.update((TERMS_V2_DOMAIN.len() as u32).to_be_bytes());
+        h.update(TERMS_V2_DOMAIN);
+        h.update((payload.len() as u32).to_be_bytes());
+        h.update(&payload);
+        h.finalize().into()
+    }
+
+    /// The price of a listed account's `n`-th ticket (1-based).
+    pub fn ticket_price(&self, n: u32) -> u64 {
+        let past = n.saturating_sub(self.gate_base) as u64;
+        self.v1.entry_price_zatoshi + past * self.gate_step_zatoshi
+    }
+}
+
+pub fn terms_v2(p: &AllocationPolicy) -> TermsV2 {
+    TermsV2 {
+        v1: terms(p),
+        supersedes: unhex32(SUPERSEDES),
+        treasury_kind: TREASURY_DAO,
+        gate_base: GATE_BASE,
+        gate_step_zatoshi: ENTRY,
+        dao_backers: DAO_BACKERS,
+        dao_window_blocks: DAO_WINDOW_BLOCKS,
+        dao_quorum_bps: DAO_QUORUM_BPS,
+        burn_ticket_zatoshi: ENTRY,
+        burn_median_seconds: BURN_MEDIAN_SECONDS,
+        burn_min_readings: BURN_MIN_READINGS,
+        burn_per_burn: BURN_PER_BURN,
+        burn_cap: BURN_CAP,
+    }
+}
+
 /// The manifest as the allocator needs it, from the builder's `content.json`.
 ///
 /// The item id is derived here rather than read, because it is a function of
@@ -157,6 +281,25 @@ mod tests {
             hex(&terms(&p).digest()),
             "f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e"
         );
+        let v2 = terms_v2(&p);
+        assert_eq!(hex(&v2.supersedes), hex(&terms(&p).digest()), "v2 names the v1 it replaces");
+        assert_eq!(
+            hex(&v2.digest()),
+            "9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c",
+            "the re-issued terms (§175)"
+        );
+    }
+
+    /// §168.2's prices, from the terms rather than from the ledger's code.
+    #[test]
+    fn the_v2_prices_rise_past_ten() {
+        let v2 = terms_v2(&policy());
+        assert_eq!(v2.ticket_price(1), 1_000_000);
+        assert_eq!(v2.ticket_price(10), 1_000_000);
+        assert_eq!(v2.ticket_price(11), 2_000_000);
+        assert_eq!(v2.ticket_price(12), 3_000_000);
+        assert_eq!((v2.burn_per_burn, v2.burn_cap), (20, 20));
+        assert_eq!((v2.dao_backers, v2.dao_window_blocks, v2.dao_quorum_bps), (10, 8_064, 1_000));
     }
 
     /// The manifest the allocator reads must produce the root the terms

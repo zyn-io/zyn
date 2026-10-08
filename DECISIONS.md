@@ -6910,4 +6910,18 @@ The user: "Burn rate is just the same as zec ticket price. The coin will be quot
 |---|---|---|
 | 174.1 | **The rate is the ticket price (0.01 ZEC) in the token at its pool price against bridged ZEC on Solana**: `per_ticket = ticket price × token reserve ÷ ZEC reserve`, rounded up (`burn_watch::per_ticket_at`). `zyn-burn-watch` reads the pool's two reserve accounts (`ZYN_BURN_POOL=<token vault>,<ZEC vault>`, `ZYN_BURN_ZEC_DECIMALS`) every pass and prices burns at the **median of the last hour's readings** (at least 10), so a moment's pump of the pool buys no extra tickets; until there are enough readings, burns wait unposted. A fixed rate still works when no pool is set | ✅ |
 | 174.2 | **The mint page** reads the same pool, shows "about N tokens" a ticket, and asks for 5% headroom over whole tickets, saying so and that anything past whole tickets is not returned. The per-burn limit stays 20 tickets (ledger) | ✅ |
-| 174.3 | **Open**: the token's mint, bridged ZEC's mint and the pool's two vaults (known once the token trades), go into `burn.json` and the watcher's env; the sale's total burn-ticket cap (`zyn-burn-watch cap`); whether to stamp the re-issued terms' digest on Zcash | ⏳ |
+| 174.3 | **Open**: the token's mint, bridged ZEC's mint and the pool's two vaults (known once the token trades), go into `burn.json` and the watcher's env. The cap and the stamp: §175 | ⏳ |
+
+## §175 — Batch one's terms re-issued: cave-sale-terms/v2 (8 Oct 2026)
+
+The user: "Cap at 20. Stamp can wait." Closes §168.6. The published v1 terms (`f2c32420…a59e`) sent the 10% to the team account `b3e4…` and stated none of the whitelist, the rising price, CaveDAO or the burn rule; nothing was sold under them.
+
+| # | Decision | |
+|---|---|---|
+| 175.1 | **Terms digest `9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c`**, 236 canonical bytes under domain `cave.sale.terms.v2` (`zynzapd::cave_z::TermsV2`, `zyn-cave-terms` / `zyn-cave-terms bytes`). Its own version and domain, so a v1 reader cannot take the bytes for v1 terms. It names the v1 digest it replaces. The draw's policy is unchanged (`a572a747…0b13`) | ✅ |
+| 175.2 | **What v2 commits to, beyond v1's prices, window and confirmations:** whitelisted accounts only; each account's first 10 tickets at 0.01, then 0.01 more per ticket (the ledger's `gated_price`, checked in a test); the 10% to the collection's keyless DAO treasury; DAO terms 10 backers, 8,064-block windows, 10% quorum; burn tickets at one ticket price in ZEC at the pool's 1-hour median (≥10 readings), at most 20 per burn and **20 in the whole sale** | ✅ |
+| 175.3 | **The false claim is gone**: tickets do not reference the terms digest, so the page no longer says they do. It says what the operator decides (which burns count and at what price, ordering, refusal), that it sets the burn cap on the ledger where anyone can read it and that a cap above 20 would break these terms, and that it cannot change prices or the split once the sale starts, a proposal's rules, or give itself items | ✅ |
+| 175.4 | **Site**: `/terms` shows v2 and its bytes; `/cave-sale-terms-v2.hex`; v1's bytes stay at `/cave-sale-terms-v1.hex` and a test checks they still hash to `f2c32420…`. The mint page names the CaveDAO treasury. Site tests 47/47; `cave.e2e.mjs` passes against the local build | ✅ |
+| 175.5 | **No Zcash stamp yet** (the user: "Stamp can wait"); the page still says the timing rests on our word | ⏳ |
+| 175.6 | **At sale time**: `zyn-burn-watch cap 20` on mainnet (the ledger's `SetVoucherCap`; it can be raised, never lowered below what is posted) | ⏳ |
+

@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-07",
+  "updated": "2026-10-08",
   "setup": [
     {
       "step": "Agree the charter",
@@ -11,7 +11,7 @@
     },
     {
       "step": "Re-issue batch one's sale terms with the whitelist gate, rising ticket price and the DAO",
-      "state": "next"
+      "state": "done"
     },
     {
       "step": "Open batch one's sale",
