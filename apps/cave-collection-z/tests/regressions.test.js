@@ -49,7 +49,10 @@ test('"nothing was paid" is said only when Nap said no', () => {
 test('the whitelist runs one dig at a time and never says "reload"', () => {
   assert.match(whitelist, /if \(dig && digHandle === handle\) return dig;/);
   assert.doesNotMatch(whitelist, /Reload and try again/);
-  assert.doesNotMatch(whitelist, /Places are given, not bought/, 'the list gates nothing (§144.1)');
+  assert.doesNotMatch(whitelist, /Places are given, not bought/);
+  // Since §168 the list gates the sale: the page must not say it gates nothing.
+  assert.doesNotMatch(whitelist, /gates nothing|anyone can buy/);
+  assert.match(whitelist, /Only accounts on this list can buy tickets/);
   assert.match(whitelist, /inset: -20% 0 auto;/, 'the glow stays inside a phone screen');
 });
 
