@@ -1026,6 +1026,89 @@ pub fn clear(pool: &Pool, orders: &[Order]) -> Clearing {
         reserve_a: pool.reserve_a,
         reserve_b: pool.reserve_b,
     };
+    let mut nets: Vec<Fixed> = Vec::with_capacity(orders.len());
+    for o in orders {
+        let Some(net) = net_of_fee(o.amount_in, pool.fee_bps) else {
+            return refund_all();
+        };
+        nets.push(net);
+    }
+    // Every active order's output at the price they make together, or None
+    // if any misses its minimum or the arithmetic overflows.
+    let outs_at = |active: &[bool]| -> Option<Vec<Option<Fixed>>> {
+        let mut in_a: i128 = 0; // net of fee
+        let mut in_b: i128 = 0;
+        for (i, o) in orders.iter().enumerate() {
+            if active[i] {
+                let side = if o.sell_a { &mut in_a } else { &mut in_b };
+                *side = side.checked_add(nets[i].0)?;
+            }
+        }
+        let num = in_b.checked_mul(2)?.checked_add(pool.reserve_b.0)?;
+        let den = in_a.checked_mul(2)?.checked_add(pool.reserve_a.0)?;
+        let mut outs: Vec<Option<Fixed>> = vec![None; orders.len()];
+        for (i, o) in orders.iter().enumerate() {
+            if !active[i] {
+                continue;
+            }
+            // A seller of A receives B at p = num/den; a seller of B receives
+            // A at 1/p. Floored either way.
+            let v = if o.sell_a { zyn_vm::fixed::mul_div(nets[i].0, num, den)? } else { zyn_vm::fixed::mul_div(nets[i].0, den, num)? };
+            if v <= 0 || v < o.min_out.0 {
+                return None;
+            }
+            outs[i] = Some(Fixed(v));
+        }
+        Some(outs)
+    };
+    let keys = orders.iter().map(|o| (asking_vs(o.min_out, o.amount_in, pool, o.sell_a), o.id)).collect();
+    let active = admit_batch(orders.len(), keys, |a| outs_at(a).is_some());
+    let Some(outs) = outs_at(&active) else {
+        return refund_all();
+    };
+    let mut ra = pool.reserve_a.0;
+    let mut rb = pool.reserve_b.0;
+    let mut filled = Vec::new();
+    let mut refunded = Vec::new();
+    for (i, o) in orders.iter().enumerate() {
+        match outs[i] {
+            Some(out) => {
+                let (sold, bought) = if o.sell_a { (&mut ra, &mut rb) } else { (&mut rb, &mut ra) };
+                match (sold.checked_add(o.amount_in.0), bought.checked_sub(out.0)) {
+                    (Some(s), Some(b)) => {
+                        *sold = s;
+                        *bought = b;
+                    }
+                    _ => return refund_all(),
+                }
+                filled.push((i, out));
+            }
+            None => refunded.push(i),
+        }
+    }
+    // Proven positive in exact arithmetic and floors only raise it; this
+    // is the belt to that brace.
+    if ra <= 0 || rb <= 0 {
+        return refund_all();
+    }
+    Clearing {
+        filled,
+        refunded,
+        reserve_a: Fixed(ra),
+        reserve_b: Fixed(rb),
+    }
+}
+
+/// The batch as it cleared before `ObjectVm::fair_batches`: every order
+/// that missed its minimum dropped together, per pass. Kept so the history
+/// sealed under it replays exactly.
+pub fn clear_legacy(pool: &Pool, orders: &[Order]) -> Clearing {
+    let refund_all = || Clearing {
+        filled: Vec::new(),
+        refunded: (0..orders.len()).collect(),
+        reserve_a: pool.reserve_a,
+        reserve_b: pool.reserve_b,
+    };
     let mut active: Vec<bool> = alloc_active(orders.len());
     loop {
         let mut in_a: i128 = 0; // net of fee
@@ -1118,6 +1201,99 @@ pub fn clear(pool: &Pool, orders: &[Order]) -> Clearing {
 
 fn alloc_active(n: usize) -> Vec<bool> {
     vec![true; n]
+}
+
+/// What an order asks for each unit it puts in (WAD): the lower, the more
+/// willing. `None` when it cannot be said; such an order comes last.
+pub(crate) fn asking(min_out: Fixed, amount_in: Fixed) -> Option<i128> {
+    if amount_in.0 <= 0 || min_out.0 < 0 {
+        return None;
+    }
+    zyn_vm::fixed::mul_div(min_out.0, zyn_vm::fixed::WAD, amount_in.0)
+}
+
+/// The same, against a pool's own price, so both sides of a batch compare:
+/// 1.0 asks exactly the pool's price, 0.95 accepts 5% less.
+pub(crate) fn asking_vs(min_out: Fixed, amount_in: Fixed, pool: &Pool, sell_a: bool) -> Option<i128> {
+    let a = asking(min_out, amount_in)?;
+    let (have, get) = if sell_a { (pool.reserve_a.0, pool.reserve_b.0) } else { (pool.reserve_b.0, pool.reserve_a.0) };
+    if get <= 0 {
+        return None;
+    }
+    zyn_vm::fixed::mul_div(a, have, get)
+}
+
+/// Passes over the orders a batch turned away, for those that fit once
+/// orders the other way are in.
+const ADMIT_PASSES: usize = 3;
+
+/// Which orders a batch keeps. If every order meets its minimum together,
+/// all of them, as always. Otherwise they are admitted one at a time, most
+/// willing first (the least asked; ties by id), and one is kept only if,
+/// with it, every order kept still meets its minimum (`fits`). An order
+/// that can never be met is turned away on its own: it cannot take honest
+/// orders out of the batch with it (audit, 9 Oct 2026 — dropping every
+/// unmet order together let a decoy with an impossible floor push others
+/// past theirs, leave with them, and hand its own real order the cheaper
+/// price, for nothing). A further pass retries what was turned away, for an
+/// order that fits only once one the other way is in.
+pub(crate) fn admit_batch(n: usize, keys: Vec<(Option<i128>, Hash)>, mut fits: impl FnMut(&[bool]) -> bool) -> Vec<bool> {
+    let all = vec![true; n];
+    if n == 0 || fits(&all) {
+        return all;
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&x, &y| {
+        let by = match (keys[x].0, keys[y].0) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by.then(keys[x].1.cmp(&keys[y].1))
+    });
+    let mut active = vec![false; n];
+    for _ in 0..ADMIT_PASSES {
+        let mut added = false;
+        for &i in &order {
+            if active[i] {
+                continue;
+            }
+            active[i] = true;
+            if fits(&active) {
+                added = true;
+            } else {
+                active[i] = false;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    active
+}
+
+/// When a batch is full: the least willing order in it, if a new order
+/// asking `new` is more willing (lower), to make room — it goes back to its
+/// owner whole. Otherwise none, and the new order is refused. Orders that
+/// can fill (a route's legs ask nothing) are never the ones displaced, so a
+/// batch filled with floors that can never be met no longer shuts a venue
+/// for the epoch (audit, 9 Oct 2026).
+pub(crate) fn displace(asked: impl Iterator<Item = (usize, Option<i128>, Hash)>, new: Option<i128>) -> Option<usize> {
+    let new = new?;
+    let worst = asked.max_by(|x, y| {
+        let by = match (x.1, y.1) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by.then(x.2.cmp(&y.2))
+    })?;
+    match worst.1 {
+        Some(w) if w <= new => None,
+        _ => Some(worst.0),
+    }
 }
 
 /// Consume `inputs` owned by `who` and create `change`, leaving exactly
@@ -1411,12 +1587,22 @@ impl ObjectVm {
         }
         let oid = order_id(trader, nonce);
         self.fresh_source(&oid)?;
-        if self.market.orders.iter().filter(|o| &o.pool == pool).count() >= MAX_ORDERS_PER_POOL {
-            return Err("this pool's batch is full; try next epoch");
-        }
         let sold = if sell_a { p.a } else { p.b };
+        let mut out_of_batch = None;
+        if self.market.orders.iter().filter(|o| &o.pool == pool).count() >= MAX_ORDERS_PER_POOL {
+            if !self.fair_batches() {
+                return Err("this pool's batch is full; try next epoch");
+            }
+            let asked = self.market.orders.iter().enumerate().filter(|(_, o)| &o.pool == pool).map(|(i, o)| (i, asking_vs(o.min_out, o.amount_in, &p, o.sell_a), o.id));
+            out_of_batch = Some(displace(asked, asking_vs(min_out, amount_in, &p, sell_a)).ok_or("this pool's batch is full; try next epoch")?);
+        }
         let f = self.plan_funding(trader, inputs, change, &[(sold, amount_in)])?;
         self.apply_funding(trader, inputs, f);
+        if let Some(i) = out_of_batch {
+            let o = self.market.orders.remove(i);
+            let back = if o.sell_a { p.a } else { p.b };
+            self.market.pay(&o.id, 1, o.owner, back, o.amount_in);
+        }
         self.market.orders.push(Order {
             id: oid,
             owner: *trader,
@@ -1728,7 +1914,7 @@ impl ObjectVm {
     /// One pool's batch, at one price.
     pub(crate) fn settle_pool(&mut self, pid: Hash, batch: &[Order]) {
         let p = self.market.pools[&pid];
-        let c = clear(&p, batch);
+        let c = if self.fair_batches() { clear(&p, batch) } else { clear_legacy(&p, batch) };
         for (i, out) in &c.filled {
             let o = &batch[*i];
             let got = if o.sell_a { p.b } else { p.a };

@@ -56,7 +56,7 @@ use zyn_vm::read::Decoder;
 use zyn_vm::spec::AccountId;
 use zyn_vm::Fixed;
 
-use crate::market::{fee_of, geometric_mean, lp_asset, pool_id, resale_split, token_of, Pool, BPS, MINIMUM_LIQUIDITY};
+use crate::market::{admit_batch, asking, displace, fee_of, geometric_mean, lp_asset, pool_id, resale_split, token_of, Pool, BPS, MINIMUM_LIQUIDITY};
 use crate::{ObjectVm, Output, Receipt};
 
 /// Lots in a token's supply.
@@ -224,6 +224,24 @@ pub struct CurveOrder {
 }
 
 impl Curve {
+    /// What an order asks against this curve's price, so buys and sells in
+    /// one batch compare (as `market::asking_vs` for a pool): 1.0 is the
+    /// next lot's price, lower is more willing.
+    pub(crate) fn asking_vs(&self, buy: bool, min_out: Fixed, amount_in: Fixed) -> Option<i128> {
+        let a = asking(min_out, amount_in)?;
+        let unit = if self.unit > 0 { self.unit } else { ZAT };
+        // Quote per token at the next lot, as a WAD.
+        let price = zyn_vm::fixed::mul_div(cost_at(self.sold, 1, unit), zyn_vm::fixed::WAD, LOT.0)?;
+        if price <= 0 {
+            return None;
+        }
+        if buy {
+            zyn_vm::fixed::mul_div(a, price, zyn_vm::fixed::WAD)
+        } else {
+            zyn_vm::fixed::mul_div(a, zyn_vm::fixed::WAD, price)
+        }
+    }
+
     /// The price of the next lot, per token, in the ledger's units.
     pub fn price_per_token(&self) -> Fixed {
         Fixed(cost_at(self.sold, 1, self.unit) / LOT_TOKENS)
@@ -432,8 +450,105 @@ pub(crate) struct SellFill {
     pub lots: u32,
 }
 
-/// Sells, all at one price: the average over the lots they return.
+/// Sells, all at one price: the average over the lots they return. Which
+/// orders take part is `market::admit_batch`'s: all of them when every
+/// minimum is met, else one at a time, most willing first (audit, 9 Oct 2026).
 pub(crate) fn clear_sells(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> SellFill {
+    // Each active order's (gross, fee) at the price they make together, or
+    // None if any misses its minimum.
+    let pass = |active: &[bool]| -> Option<(Vec<(usize, i128, i128)>, u32)> {
+        let lots: u64 = orders.iter().zip(active).filter(|(_, a)| **a).map(|(o, _)| (o.amount_in.0 / LOT.0) as u64).sum();
+        // More lots than were ever sold cannot be anybody's to sell. It
+        // cannot happen — tokens exist only for lots sold — but if it did,
+        // paying it would take from the reserve what it owes everyone else.
+        if lots > sold as u64 {
+            return None;
+        }
+        let lots = lots as u32;
+        let total = if lots == 0 { 0 } else { cost_at(sold - lots, lots, unit) };
+        let mut filled = Vec::new();
+        for (i, o) in orders.iter().enumerate() {
+            if !active[i] {
+                continue;
+            }
+            let mine = (o.amount_in.0 / LOT.0) as i128;
+            // Rounded down: the dust stays in the reserve.
+            let gross = if lots == 0 { 0 } else { total * mine / lots as i128 };
+            let fee = fee_of(Fixed(gross), fee_bps).map(|f| f.0).unwrap_or(0);
+            if gross - fee < o.min_out.0 {
+                return None;
+            }
+            filled.push((i, gross, fee));
+        }
+        Some((filled, lots))
+    };
+    let keys = orders.iter().map(|o| (asking(o.min_out, o.amount_in), o.id)).collect();
+    let active = admit_batch(orders.len(), keys, |a| pass(a).is_some());
+    let (filled, lots) = pass(&active).unwrap_or((Vec::new(), 0));
+    let refunded = (0..orders.len()).filter(|i| !active[*i] || !filled.iter().any(|f| f.0 == *i)).collect();
+    SellFill { filled, refunded, lots }
+}
+
+/// How one batch of buys settles: `(order index, lots, paid, fee)` for each
+/// order filled, and the indices refunded whole.
+pub(crate) struct BuyFill {
+    pub filled: Vec<(usize, u32, i128, i128)>,
+    pub refunded: Vec<usize>,
+    pub lots: u32,
+}
+
+/// `a / b` rounded up, for `a ≥ 0` and `b > 0`.
+fn ceil_div(a: i128, b: i128) -> i128 {
+    (a + b - 1) / b
+}
+
+/// The quote a buy has left for lots once the fee on top is set aside.
+fn budget(amount_in: i128, fee_bps: u32) -> i128 {
+    amount_in * BPS / (BPS + fee_bps as i128)
+}
+
+/// Buys, all at one price: the average over the lots they take, shared in
+/// proportion to what each put in, never past graduation. Which orders take
+/// part is `market::admit_batch`'s, as for sells.
+pub(crate) fn clear_buys(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> BuyFill {
+    let cap = GRADUATE_AT.saturating_sub(sold);
+    // Each active order's (lots, paid, fee) at the price they make together,
+    // or None if any misses its minimum.
+    let pass = |active: &[bool]| -> Option<Vec<(usize, u32, i128, i128)>> {
+        let total_budget: i128 = orders.iter().zip(active).filter(|(_, a)| **a).map(|(o, _)| budget(o.amount_in.0, fee_bps)).sum();
+        let lots = if total_budget <= 0 { 0 } else { lots_for_at(sold, total_budget, cap, unit) };
+        let total = cost_at(sold, lots, unit);
+        let mut filled = Vec::new();
+        for (i, o) in orders.iter().enumerate() {
+            if !active[i] {
+                continue;
+            }
+            let b = budget(o.amount_in.0, fee_bps);
+            let mut mine = if lots == 0 { 0 } else { (b * lots as i128 / total_budget) as u32 };
+            // Rounded up: the curve is never short for a lot it sold.
+            let paid_for = |n: u32| if lots == 0 { 0 } else { ceil_div(total * n as i128, lots as i128) };
+            let fee_for = |p: i128| fee_of(Fixed(p), fee_bps).map(|f| f.0).unwrap_or(0);
+            while mine > 0 && paid_for(mine) + fee_for(paid_for(mine)) > o.amount_in.0 {
+                mine -= 1;
+            }
+            if (mine as i128) * LOT.0 < o.min_out.0 {
+                return None;
+            }
+            let paid = paid_for(mine);
+            filled.push((i, mine, paid, fee_for(paid)));
+        }
+        Some(filled)
+    };
+    let keys = orders.iter().map(|o| (asking(o.min_out, o.amount_in), o.id)).collect();
+    let active = admit_batch(orders.len(), keys, |a| pass(a).is_some());
+    let filled = pass(&active).unwrap_or_default();
+    let taken = filled.iter().map(|f| f.1).sum();
+    let refunded = (0..orders.len()).filter(|i| !active[*i] || !filled.iter().any(|f| f.0 == *i)).collect();
+    BuyFill { filled, refunded, lots: taken }
+}
+
+/// Sells as they cleared before `ObjectVm::fair_batches` (history replays).
+pub(crate) fn clear_sells_legacy(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> SellFill {
     let mut active: Vec<bool> = vec![true; orders.len()];
     loop {
         let lots: u64 = orders
@@ -479,27 +594,8 @@ pub(crate) fn clear_sells(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOr
     }
 }
 
-/// How one batch of buys settles: `(order index, lots, paid, fee)` for each
-/// order filled, and the indices refunded whole.
-pub(crate) struct BuyFill {
-    pub filled: Vec<(usize, u32, i128, i128)>,
-    pub refunded: Vec<usize>,
-    pub lots: u32,
-}
-
-/// `a / b` rounded up, for `a ≥ 0` and `b > 0`.
-fn ceil_div(a: i128, b: i128) -> i128 {
-    (a + b - 1) / b
-}
-
-/// The quote a buy has left for lots once the fee on top is set aside.
-fn budget(amount_in: i128, fee_bps: u32) -> i128 {
-    amount_in * BPS / (BPS + fee_bps as i128)
-}
-
-/// Buys, all at one price: the average over the lots they take, shared in
-/// proportion to what each put in, never past graduation.
-pub(crate) fn clear_buys(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> BuyFill {
+/// Buys as they cleared before `ObjectVm::fair_batches` (history replays).
+pub(crate) fn clear_buys_legacy(sold: u32, fee_bps: u32, unit: i128, orders: &[CurveOrder]) -> BuyFill {
     let cap = GRADUATE_AT.saturating_sub(sold);
     let mut active: Vec<bool> = vec![true; orders.len()];
     loop {
@@ -631,12 +727,22 @@ impl ObjectVm {
         }
         let oid = curve_order_id(trader, nonce);
         self.fresh_source(&oid)?;
+        let mut out_of_batch = None;
         if self.market.curve_orders.iter().filter(|o| &o.token == token).count() >= MAX_ORDERS_PER_CURVE {
-            return Err("this curve's batch is full; try next epoch");
+            if !self.fair_batches() {
+                return Err("this curve's batch is full; try next epoch");
+            }
+            let asked = self.market.curve_orders.iter().enumerate().filter(|(_, o)| &o.token == token).map(|(i, o)| (i, c.asking_vs(o.buy, o.min_out, o.amount_in), o.id));
+            out_of_batch = Some(displace(asked, c.asking_vs(buy, min_out, amount_in)).ok_or("this curve's batch is full; try next epoch")?);
         }
         let asset = if buy { c.quote } else { c.token };
         let f = self.plan_funding(trader, inputs, change, &[(asset, amount_in)])?;
         self.apply_funding(trader, inputs, f);
+        if let Some(i) = out_of_batch {
+            let o = self.market.curve_orders.remove(i);
+            let back = if o.buy { c.quote } else { c.token };
+            self.market.pay(&o.id, 1, o.owner, back, o.amount_in);
+        }
         self.market.curve_orders.push(CurveOrder {
             id: oid,
             owner: *trader,
@@ -683,7 +789,7 @@ impl ObjectVm {
             let sells: Vec<CurveOrder> = batch.iter().filter(|o| !o.buy).copied().collect();
             let buys: Vec<CurveOrder> = batch.iter().filter(|o| o.buy).copied().collect();
 
-            let s = clear_sells(c.sold, c.fee_bps, c.unit, &sells);
+            let s = if self.fair_batches() { clear_sells(c.sold, c.fee_bps, c.unit, &sells) } else { clear_sells_legacy(c.sold, c.fee_bps, c.unit, &sells) };
             let mut paid_out: i128 = 0;
             for (i, gross, fee) in &s.filled {
                 let o = &sells[*i];
@@ -705,7 +811,7 @@ impl ObjectVm {
             }
 
             let sold = self.market.curves[&token].sold;
-            let b = clear_buys(sold, c.fee_bps, c.unit, &buys);
+            let b = if self.fair_batches() { clear_buys(sold, c.fee_bps, c.unit, &buys) } else { clear_buys_legacy(sold, c.fee_bps, c.unit, &buys) };
             let mut paid_in: i128 = 0;
             for (i, lots, paid, fee) in &b.filled {
                 let o = &buys[*i];

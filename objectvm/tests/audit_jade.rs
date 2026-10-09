@@ -36,7 +36,9 @@ fn enc() -> zyn_vm::note_enc::EncryptedNote {
 
 impl Chain {
     fn new() -> Chain {
-        let mut c = Chain { vm: ObjectVm::genesis(212, Limits { max_io: 16 }), seq: 0, salt: 0, strict: true };
+        // Mainnet's id: batches there settle by the fair-batch rules from genesis
+        // (`objectvm::fair_batches_from`); testnet's history keeps the old ones.
+        let mut c = Chain { vm: ObjectVm::genesis(26460, Limits { max_io: 16 }), seq: 0, salt: 0, strict: true };
         c.ok(Op::SetCurveTerms { program: program::configure_curves(), fee_bps: 100, bond: Fixed::ZERO });
         c.ok(Op::SetCurveQuote { program: program::configure_curves(), quote: ZEC, graduation_mc: Fixed(curve::GRADUATION_MC_UNITS * curve::ZAT), bond: Fixed::ZERO });
         c.ok(Op::SetCurveQuote { program: program::configure_curves(), quote: ETH, graduation_mc: Fixed::whole(23), bond: Fixed::ZERO });
@@ -392,4 +394,151 @@ fn random_trading_keeps_reserve_covering() {
         assert!(cur.reserve.0 >= curve::cost_at(0, cur.sold, cur.unit), "reserve short at sold {}", cur.sold);
     }
     println!("final sold {}", c.vm.market.curves[&t].sold);
+}
+
+// ---- The second audit (9 Oct 2026): decoys and dust. --------------------
+
+fn curve_buy(c: &mut Chain, who: AccountId, t: [u8; 32], amt: Fixed, min: Fixed) -> Hash {
+    let (inputs, change) = c.fund(who, ZEC, amt);
+    let n = c.fresh();
+    c.ok(Op::CurveTrade { trader: who, program: program::curve_trade(), token: t, buy: true, amount_in: amt, min_out: min, inputs, change, nonce: n });
+    curve_order_id(&who, &n)
+}
+
+#[test]
+fn a_decoy_with_an_impossible_floor_is_turned_away_alone() {
+    let mut base = Chain::new();
+    base.mint(ALICE, ZEC, 40);
+    base.mint(CAROL, ZEC, 10);
+    let t = base.create(BOB, ZEC);
+    // What Carol's 1 ZEC buys beside Alice's 1 ZEC, with no decoy.
+    let mut honest = base.clone();
+    let cid = curve_buy(&mut honest, CAROL, t, Fixed::whole(1), Fixed::ZERO);
+    let aid = curve_buy(&mut honest, ALICE, t, Fixed::whole(1), Fixed::ZERO);
+    honest.seal();
+    let carol_lots = honest.vm.market.claims[&claim_id(&cid, 0)].amount.0 / LOT.0;
+    let alice_lots = honest.vm.market.claims[&claim_id(&aid, 0)].amount.0 / LOT.0;
+    let min = Fixed(carol_lots * 95 / 100 * LOT.0);
+    // Alice adds 15 ZEC that can never fill, to push Carol past her 5%.
+    let mut c = base.clone();
+    let cid = curve_buy(&mut c, CAROL, t, Fixed::whole(1), min);
+    let aid = curve_buy(&mut c, ALICE, t, Fixed::whole(1), Fixed::ZERO);
+    let did = curve_buy(&mut c, ALICE, t, Fixed::whole(15), Fixed(1_000_000_000 * LOT.0));
+    c.seal();
+    let got = |c: &Chain, id: &Hash, k: u8| c.vm.market.claims.get(&claim_id(id, k)).map(|x| x.amount.0);
+    assert_eq!(got(&c, &cid, 0), Some(carol_lots * LOT.0), "Carol fills as if the decoy were not there");
+    assert_eq!(got(&c, &aid, 0), Some(alice_lots * LOT.0), "Alice's real order gets no cheaper price");
+    assert_eq!(got(&c, &did, 1), Some(Fixed::whole(15).0), "only the decoy goes back");
+}
+
+#[test]
+fn a_decoy_cannot_push_a_pool_swap_out_either() {
+    let mut c = Chain::new();
+    c.mint(DAVE, ZEC, 1000);
+    c.mint(DAVE, ETH, 1000);
+    c.mint(ALICE, ZEC, 500);
+    c.mint(CAROL, ZEC, 10);
+    let pid = c.pool(DAVE, ZEC, ETH, 100, 100);
+    let sell_a = c.vm.market.pools[&pid].a == ZEC;
+    let swap = |c: &mut Chain, who: AccountId, amt: i64, min: Fixed| {
+        let (inputs, change) = c.fund(who, ZEC, Fixed::whole(amt));
+        let n = c.fresh();
+        c.ok(Op::Swap { trader: who, program: program::amm_swap(), pool: pid, sell_a, amount_in: Fixed::whole(amt), min_out: min, inputs, change, nonce: n });
+        market::order_id(&who, &n)
+    };
+    let mut solo = c.clone();
+    let id = swap(&mut solo, CAROL, 1, Fixed::ZERO);
+    solo.seal();
+    let out = solo.vm.market.claims[&claim_id(&id, 0)].amount;
+    let cid = swap(&mut c, CAROL, 1, Fixed(out.0 * 95 / 100));
+    let did = swap(&mut c, ALICE, 400, Fixed(i128::MAX / 4));
+    c.seal();
+    assert_eq!(c.vm.market.claims.get(&claim_id(&cid, 0)).map(|x| x.amount), Some(out));
+    assert_eq!(c.vm.market.claims.get(&claim_id(&did, 1)).map(|x| x.amount), Some(Fixed::whole(400)));
+}
+
+#[test]
+fn a_full_batch_of_unfillable_floors_makes_room_for_a_real_order() {
+    let mut c = Chain::new();
+    c.mint(ALICE, ZEC, 10);
+    c.mint(CAROL, ZEC, 10);
+    let t = c.create(BOB, ZEC);
+    c.buy(ALICE, t, Fixed::whole(1));
+    let mut dust = Vec::new();
+    for _ in 0..curve::MAX_ORDERS_PER_CURVE {
+        let (inputs, change) = c.fund(ALICE, t, LOT);
+        let n = c.fresh();
+        c.ok(Op::CurveTrade { trader: ALICE, program: program::curve_trade(), token: t, buy: false, amount_in: LOT, min_out: Fixed(i128::MAX / 4), inputs, change, nonce: n });
+        dust.push(curve_order_id(&ALICE, &n));
+    }
+    // A buy that can fill displaces the least willing order, which goes back whole.
+    let cid = curve_buy(&mut c, CAROL, t, Fixed::whole(1), Fixed::ZERO);
+    let back: Vec<_> = dust.iter().filter(|id| c.vm.market.claims.contains_key(&claim_id(id, 1))).collect();
+    assert_eq!(back.len(), 1);
+    assert_eq!(c.vm.market.claims[&claim_id(back[0], 1)].amount, LOT);
+    // Another unfillable floor cannot displace one of its kind.
+    let (inputs, change) = c.fund(ALICE, t, LOT);
+    let n = c.fresh();
+    let why = c.refused(Op::CurveTrade { trader: ALICE, program: program::curve_trade(), token: t, buy: false, amount_in: LOT, min_out: Fixed(i128::MAX / 4), inputs, change, nonce: n });
+    assert!(why.contains("full"), "{why}");
+    c.seal();
+    assert!(c.vm.market.claims.contains_key(&claim_id(&cid, 0)), "Carol's buy filled");
+}
+
+#[test]
+fn dust_cannot_fill_the_route_slots() {
+    let mut c = Chain::new();
+    c.mint(DAVE, ZEC, 1000);
+    c.mint(DAVE, ETH, 1000);
+    c.mint(ALICE, ZEC, 10);
+    let pid = c.pool(DAVE, ZEC, ETH, 100, 100);
+    let hop = Hop::Pool { pool: pid, sell_a: c.vm.market.pools[&pid].a == ZEC };
+    let why = c.route(ALICE, vec![hop], ZEC, Fixed(1), Fixed::ZERO).unwrap_err();
+    assert!(why.contains("too small"), "{why}");
+    // A route at a buy's minimum in its coin goes in.
+    c.route(ALICE, vec![hop], ZEC, Fixed(curve::MIN_BUY_UNITS * curve::ZAT), Fixed::ZERO).unwrap();
+}
+
+#[test]
+fn a_decoy_route_is_turned_away_alone() {
+    let mut c = Chain::new();
+    c.mint(DAVE, ZEC, 1000);
+    c.mint(DAVE, ETH, 1000);
+    c.mint(ALICE, ZEC, 500);
+    c.mint(CAROL, ZEC, 10);
+    let pid = c.pool(DAVE, ZEC, ETH, 100, 100);
+    let hop = Hop::Pool { pool: pid, sell_a: c.vm.market.pools[&pid].a == ZEC };
+    let mut solo = c.clone();
+    let id = solo.route(CAROL, vec![hop], ZEC, Fixed::whole(1), Fixed::ZERO).unwrap();
+    solo.seal();
+    let out = solo.vm.market.claims[&claim_id(&id, 0)].amount;
+    let cid = c.route(CAROL, vec![hop], ZEC, Fixed::whole(1), Fixed(out.0 * 95 / 100)).unwrap();
+    let did = c.route(ALICE, vec![hop], ZEC, Fixed::whole(400), Fixed(i128::MAX / 4)).unwrap();
+    c.seal();
+    assert_eq!(c.vm.market.claims.get(&claim_id(&cid, 0)).map(|x| x.amount), Some(out), "Carol's route delivers as if alone");
+    assert_eq!(c.vm.market.claims.get(&claim_id(&did, 1)).map(|x| x.amount), Some(Fixed::whole(400)), "the decoy goes back whole");
+}
+
+#[test]
+fn testnet_history_keeps_the_rules_it_was_sealed_under() {
+    assert_eq!(objectvm::fair_batches_from(212), objectvm::TESTNET_FAIR_BATCHES_FROM);
+    assert_eq!(objectvm::fair_batches_from(26460), 0);
+    // On testnet before the switch, a decoy still drops floors together, as
+    // the sealed history did.
+    let mut base = Chain::new();
+    base.vm.chain_id = 212;
+    base.mint(ALICE, ZEC, 40);
+    base.mint(CAROL, ZEC, 10);
+    let t = base.create(BOB, ZEC);
+    let mut honest = base.clone();
+    let cid = curve_buy(&mut honest, CAROL, t, Fixed::whole(1), Fixed::ZERO);
+    curve_buy(&mut honest, ALICE, t, Fixed::whole(1), Fixed::ZERO);
+    honest.seal();
+    let carol_lots = honest.vm.market.claims[&claim_id(&cid, 0)].amount.0 / LOT.0;
+    let mut c = base.clone();
+    let cid = curve_buy(&mut c, CAROL, t, Fixed::whole(1), Fixed(carol_lots * 95 / 100 * LOT.0));
+    curve_buy(&mut c, ALICE, t, Fixed::whole(1), Fixed::ZERO);
+    curve_buy(&mut c, ALICE, t, Fixed::whole(15), Fixed(1_000_000_000 * LOT.0));
+    c.seal();
+    assert!(c.vm.market.claims.get(&claim_id(&cid, 0)).is_none(), "the old rule, before the switch");
 }

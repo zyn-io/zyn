@@ -1015,6 +1015,29 @@ pub struct ObjectVm {
     pub market: market::Market,
 }
 
+/// The epoch from which a chain's batches admit orders one at a time (most
+/// willing first, each kept only if every order kept still meets its
+/// minimum), a full batch makes room for a more willing order, and a route
+/// has a minimum size (audit, 9 Oct 2026). Before it, batches settle as they
+/// were sealed: testnet 212 has batches whose floors dropped together, and
+/// its history must replay to the same roots. Every other chain, mainnet
+/// 26460 included, has it from genesis: no batch there ever dropped a floor.
+pub const TESTNET_FAIR_BATCHES_FROM: u64 = 34_000;
+
+pub fn fair_batches_from(chain_id: u32) -> u64 {
+    match chain_id {
+        212 => TESTNET_FAIR_BATCHES_FROM,
+        _ => 0,
+    }
+}
+
+impl ObjectVm {
+    /// Whether this epoch's batches settle by `fair_batches_from`'s rules.
+    pub(crate) fn fair_batches(&self) -> bool {
+        self.epoch >= fair_batches_from(self.chain_id)
+    }
+}
+
 impl ObjectVm {
     fn header_leaf(&self) -> Hash {
         let mut e = Encoder::new();

@@ -281,6 +281,21 @@ impl ObjectVm {
         match hops[0] {
             Hop::CurveSell { .. } if amount_in.0 % LOT.0 != 0 => return Err("a sale to a curve is a whole number of lots (12,500 tokens each)"),
             Hop::CurveBuy { token } if amount_in < self.market.curves[&token].min_buy() => return Err("a buy is at least 0.001"),
+            Hop::Pool { pool, sell_a } if self.fair_batches() => {
+                // A route is at least what a buy is in its coin, or a
+                // millionth of what the pool holds of it: the epoch's route
+                // slots are not free to fill with dust that comes straight
+                // back (audit, 9 Oct 2026).
+                let p = &self.market.pools[&pool];
+                let held = if sell_a { p.reserve_a.0 } else { p.reserve_b.0 };
+                let least = match self.market.curve_quotes.get(&start) {
+                    Some(q) => crate::curve::MIN_BUY_UNITS * q.unit,
+                    None => held / 1_000_000,
+                };
+                if amount_in.0 < least.max(1) {
+                    return Err("too small to route; try a larger amount");
+                }
+            }
             _ => {}
         }
         if self.market.routes.len() >= MAX_ROUTES {
@@ -325,9 +340,55 @@ impl ObjectVm {
         }
     }
 
-    /// The seal with routes waiting: drop every route that would miss its
-    /// minimum (refunded whole), then clear the rest for real.
+    /// The seal with routes waiting. If every route meets its minimum
+    /// together, all of them clear. Otherwise routes are admitted one at a
+    /// time by id, each kept only if every route kept with it still meets
+    /// its minimum on a copy of the ledger; the rest are refunded whole.
+    /// One route that can never be met is turned away on its own, rather
+    /// than every short route together — which let a decoy push others past
+    /// their floors and leave with them (audit, 9 Oct 2026).
     pub(crate) fn settle_routed(&mut self) {
+        if !self.fair_batches() {
+            return self.settle_routed_legacy();
+        }
+        let routes = std::mem::take(&mut self.market.routes);
+        // Whether `kept` all meet their minimums, cleared on a copy with every
+        // other route's first leg out of its batch.
+        let fits = |vm: &ObjectVm, kept: &[bool]| -> bool {
+            let mut sim = vm.clone();
+            for (r, k) in routes.iter().zip(kept) {
+                if !k {
+                    let leg = leg_id(&r.id, 0);
+                    sim.market.orders.retain(|o| o.id != leg);
+                    sim.market.curve_orders.retain(|o| o.id != leg);
+                }
+            }
+            let these: Vec<Route> = routes.iter().zip(kept).filter(|(_, k)| **k).map(|(r, _)| r.clone()).collect();
+            let got = sim.clear_venues(&these);
+            these.iter().all(|r| got.get(&r.id).is_some_and(|g| *g >= r.min_out))
+        };
+        let keys = routes.iter().map(|r| (None, r.id)).collect();
+        let me: &ObjectVm = self;
+        let kept = crate::market::admit_batch(routes.len(), keys, |k| fits(me, k));
+        for (r, k) in routes.iter().zip(&kept) {
+            if *k {
+                continue;
+            }
+            // Out of its first venue's batch, and back to its owner whole.
+            let leg = leg_id(&r.id, 0);
+            self.market.orders.retain(|o| o.id != leg);
+            self.market.curve_orders.retain(|o| o.id != leg);
+            let start = self.hop_assets_settled(&r.hops[0]).0;
+            self.market.pay(&r.id, 1, r.owner, start, r.amount_in);
+        }
+        let kept: Vec<Route> = routes.into_iter().zip(kept).filter(|(_, k)| *k).map(|(r, _)| r).collect();
+        self.clear_venues(&kept);
+    }
+
+    /// Routes as they settled before `ObjectVm::fair_batches` (history
+    /// replays): drop every route that would miss its
+    /// minimum (refunded whole), then clear the rest for real.
+    fn settle_routed_legacy(&mut self) {
         let mut routes = std::mem::take(&mut self.market.routes);
         loop {
             let mut sim = self.clone();
