@@ -146,6 +146,12 @@ try {
   // lives on until Lock or 15 idle minutes): the next request reopens the
   // window and is answered without a password. Lock ends that.
   await win.close();
+  // A public question never brings Nap up (audit, 9 Oct 2026): with the
+  // window closed it is refused, and no window opens.
+  const popped = ctx.waitForEvent('page', { timeout: 4000 }).then(() => true, () => false);
+  await page.click('#markets');
+  const refused = await answer();
+  ok(!(await popped) && refused.code === 4900, `a public question with Nap closed opens no window: ${JSON.stringify(refused)}`);
   const [again] = await Promise.all([ctx.waitForEvent('page', { timeout: 30000 }), page.click('#collect')]);
   ok(again.url() === `chrome-extension://${id}/connect.html`, 'after closing it, the next request reopens Nap');
   await unlockNap(again, WORDS, { password: PASSWORD }).catch(() => {});

@@ -124,8 +124,26 @@ await approve('borrow', (t) => t.includes('Borrow SOL.zy against ETH.zy') && /He
 await page.waitForFunction(() => /Position opened|refused|declined|error/i.test(document.querySelector('#toast').textContent), null, { timeout: 90000 }).catch(() => {});
 ok(/Position opened/.test(await toast()), `borrow: ${await toast()}`);
 
+// Notes and positions go to a site only with the holder's leave (audit, 9 Oct
+// 2026): the first time the portfolio asks, Nap shows a SHARE card for each
+// (positions; notes too where the private channel runs), once for this site.
+async function allowShares() {
+  const seen = [];
+  for (let i = 0; i < 2; i++) {
+    const card = await popup.waitForSelector('main:has(.kicker:text-is("SHARE")) #yes', { timeout: 20000 }).catch(() => null);
+    if (!card) break;
+    const shown = (await popup.textContent('main')).replace(/\s+/g, ' ');
+    seen.push(shown);
+    ok(/asks to see your (private-channel notes|lending positions)/.test(shown) && /Disconnecting the site takes it back/.test(shown), `share: Nap shows ${shown.slice(0, 120)}…`);
+    await popup.screenshot({ path: `${S}/lend-share-${i}.png` });
+    await popup.click('#yes');
+  }
+  ok(seen.some((t) => /your lending positions/.test(t)), 'the positions are shared only after the holder allows it');
+}
+
 // After the seal: collect, and the position is there — found by Nap alone.
 await page.goto(`${APP}/#/positions`);
+await allowShares();
 let found = false;
 for (let i = 0; i < 12 && !found; i++) {
   await page.waitForTimeout(10000);

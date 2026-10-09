@@ -280,6 +280,23 @@ async function ownPosition(ctx, id) {
   return p;
 }
 
+/// A site's private-channel notes: what a site's bridge page acts on, and no
+/// more (audit, 9 Oct 2026). The relayer's transaction signature is never
+/// handed out, and neither is a spent note's commitment: on its chain the
+/// one ties the spend to its exit address, the other the deposit to its
+/// wallet, and neither is anything a site can still act on. An unspent
+/// note keeps its commitment, which Move into Zyn and Send name it by.
+export function siteNotes(notes) {
+  return notes.map((n) => ({
+    ch: n.ch, size: String(n.size), kind: n.kind, state: n.state,
+    ...(['to zyn', 'sent', 'spent'].includes(n.state) ? {} : { commitment: n.commitment }),
+  }));
+}
+
+/// `kind`: 'public' answers anyone; 'read' and 'auto' a connected site,
+/// without a card; 'write' after the holder approves its card. A read that
+/// names a `scope` (connect-grants.js) also waits for the holder to allow
+/// that scope to the site, once.
 export const METHODS = {
   nap_connect: { kind: 'connect' },
   nap_session: { kind: 'session' },
@@ -611,7 +628,8 @@ export const METHODS = {
   // --- Zyn Lend ---------------------------------------------------------------
 
   zyn_lendMarkets: { kind: 'public', run: async (ctx) => ledger.call(ctx.config, 'zyn_lendMarkets') },
-  zyn_lendPositions: { kind: 'read', run: async (ctx) => ({ positions: await ledger.loadPositions(ctx.config, ctx.identity) }) },
+  /// This wallet's positions, once the holder allows it (scope `positions`).
+  zyn_lendPositions: { kind: 'read', scope: 'positions', run: async (ctx) => ({ positions: await ledger.loadPositions(ctx.config, ctx.identity) }) },
 
   zyn_lendSupply: {
     kind: 'write',
@@ -984,6 +1002,8 @@ export const METHODS = {
   /// calldata, an ERC-20 (BOLD) the code and, given an amount, its approve
   /// and deposit calls, BTC an address (watched from now), ZEC this account's
   /// deposit address. The code names nobody; the other chain sees the sender.
+  /// Each call gives a fresh code, of this bridge only (ledger.js bridgeMemo,
+  /// audit 9 Oct 2026): ask once per deposit, right before it is made.
   zyn_bridgeDeposit: {
     kind: 'read',
     async run(ctx, p) {
@@ -1002,7 +1022,7 @@ export const METHODS = {
         const live = (await bridges.bridgeState(ctx.config)).bridges.find((x) => x.key === key);
         if (!live?.live) throw bad(live?.waiting === 'vault' ? `The vault does not take ${b.symbol} yet` : `${b.symbol} deposits are not open on this network yet`);
       }
-      const code = await bridges.depositCode(ctx.config, ctx.identity);
+      const code = await bridges.depositCode(ctx.config, ctx.identity, key);
       if (key === 'sol') return { key, memo: `zyn:${code}`, vault: b.vault, rpc: b.rpc, cluster: b.cluster };
       if (b.token) {
         // An ERC-20 (BOLD): two transactions from the holder's wallet —
@@ -1106,9 +1126,12 @@ export const METHODS = {
     },
   },
 
+  /// This wallet's private-channel notes, once the holder allows it (scope
+  /// `notes`), as siteNotes trims them.
   zyn_poolNotes: {
     kind: 'read',
-    async run(ctx) { return { notes: await pool.notes(ctx.config, ctx.identity) }; },
+    scope: 'notes',
+    async run(ctx) { return { notes: siteNotes(await pool.notes(ctx.config, ctx.identity)) }; },
   },
 
   /// A fresh note to deposit into the `size` pool from any wallet on its chain.
