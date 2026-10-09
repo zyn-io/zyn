@@ -14,6 +14,7 @@
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 import { createChart } from './vendor/lightweight-charts.js';
 import { installTips, tip } from './tip.js';
+import * as fund from './fund.js';
 
 const XZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 
@@ -44,6 +45,7 @@ const QUOTE_ASSETS = {
     [XZEC]: 'ZEC',
     '9f5a2c088a0071ba7afcb2c74b9c7cc23f0f94c297d97aef68e50392c04acc6c': 'ETH',
     'ddf2b7ecc2634e39a891a19020205ae26a87e9f753e492e03b84e7dc627f250f': 'BOLD',
+    '0f61f4340cd6a910ec8d7e73ef239569b83f16099e620786e71e7e7395c9f6df': 'SOL',
   },
   testnet: {
     [XZEC]: 'ZEC',
@@ -176,6 +178,8 @@ let curves = [];
 let pools = [];
 let stats = new Map();
 let terms = { set: false, fee_bps: 0, bond: '0' };
+/// The bridge's fee on a deposit (§178 brings coins in through it).
+let bridgeBps = 0;
 /// What new coins launch in: [{ asset, symbol, unit, bond }]. A node from
 /// before §166 names none, and coins launch in ZEC.zy at ZEC's size.
 let quotes = [];
@@ -277,6 +281,7 @@ async function loadMarket() {
   try {
     const [m, s] = await Promise.all([rpc('zyn_market'), rpc('zyn_curveStats').catch(() => [])]);
     terms = m.curve_terms || terms;
+    if (Number.isSafeInteger(m.fees?.bridge_bps)) bridgeBps = m.fees.bridge_bps;
     const named = (m.curve_quotes || []).filter((q) => isHex(q.asset) && QUOTE_ASSETS[q.asset] && isInt(q.unit) && isInt(q.bond));
     quotes = named.length
       ? named.map((q) => ({ asset: q.asset, symbol: symOf(q.asset), unit: BigInt(q.unit), bond: BigInt(q.bond) }))
@@ -1210,6 +1215,7 @@ function quote() {
   // its own line, which a refresh never wipes.
   const hint = $('#trade-hint');
   hint.textContent = '';
+  showFund('trade', null, 0n);
   const submit = $('.trade-submit');
   $$('#trade-presets [data-preset]').forEach((b) => b.classList.toggle('picked', b.dataset.preset === tradeInput.value.trim()));
   if (!c) return null;
@@ -1222,8 +1228,8 @@ function quote() {
     const via = viaOf(c);
     if (via !== c.quote) return quoteRoute(c, value, via, slip);
     const q$ = `${qsym(c)}.zy`;
-    const bal = balanceOf(c.quote);
-    if (tradeSide === 'buy' && bal != null && value > bal) throw new Error(`You have ${full(bal)} ${q$}`);
+    const short = tradeSide === 'buy' ? shortOf(c.quote, value) : 0n;
+    showFund('trade', c.quote, short);
     if (c.graduated) {
       const p = poolOf(c);
       if (!p) throw new Error('Its pool is not visible yet');
@@ -1238,7 +1244,7 @@ function quote() {
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
       min.textContent = `${full((q * (BPS - slip)) / BPS)}`;
       if (wallet && !placing) submit.disabled = false;
-      return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip) };
+      return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip), short, pay: c.quote };
     }
     if (tradeSide === 'buy') {
       const least = 100_000n * unitOf(c);
@@ -1252,7 +1258,7 @@ function quote() {
       fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
       min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
       if (wallet && !placing) submit.disabled = false;
-      return { kind: 'buy', amount: value, minTokens };
+      return { kind: 'buy', amount: value, minTokens, short, pay: c.quote };
     }
     if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
     if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
@@ -1267,6 +1273,8 @@ function quote() {
   } catch (e) {
     hint.textContent = e.message;
     return null;
+  } finally {
+    tradeLabel();
   }
 }
 
@@ -1275,10 +1283,9 @@ function quoteRoute(c, value, via, slip) {
   const out = $('#trade-output'), fee = $('#trade-fee'), min = $('#trade-min');
   const buy = tradeSide === 'buy';
   const v$ = `${symOf(via)}.zy`;
-  if (buy) {
-    const bal = balanceOf(via);
-    if (bal != null && value > bal) throw new Error(`You have ${full(bal)} ${v$}`);
-  } else {
+  const short = buy ? shortOf(via, value) : 0n;
+  showFund('trade', via, short);
+  if (!buy) {
     if (!c.graduated && value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
     if (mine && value > heldOf(c.token)) throw new Error(`You hold ${wad(heldOf(c.token), 0)}`);
   }
@@ -1304,7 +1311,7 @@ function quoteRoute(c, value, via, slip) {
   $('#trade-route-row').hidden = false;
   min.textContent = buy ? `${wad(floor, 0)} ${c.symbol}` : `${full(floor)} ${v$}`;
   if (wallet && !placing) $('.trade-submit').disabled = false;
-  return { kind: 'route', hops: r.hops, amount: value, minOut: floor, via };
+  return { kind: 'route', hops: r.hops, amount: value, minOut: floor, via, short, pay: via };
 }
 
 $('#trade-via').addEventListener('click', (event) => {
@@ -1389,6 +1396,7 @@ async function placeOrder() {
   if (button.disabled) return;
   placing = true;
   button.disabled = true;
+  if (q.short > 0n) return fundThenOrder(c, q);
   setOrder(c.token, "Approve it in Nap's window.", 'idle');
   const side = tradeSide, symbol = c.symbol;
   // What it pays with or receives: the quote, or another coin by a route.
@@ -1414,6 +1422,37 @@ async function placeOrder() {
   }
 }
 $('.trade-submit').addEventListener('click', placeOrder);
+
+/// A buy the account cannot cover yet: bring what it lacks in, then place
+/// it again on this coin with a fresh quote, if the page is still on it.
+async function fundThenOrder(c, q) {
+  const say = (t, address, link) => { setOrder(c.token, t, 'idle'); if (address || link) sayFundLink('trade', address, link); };
+  try {
+    await bringIn(q.pay, q.short, q.amount, say);
+  } catch (e) {
+    setOrder(c.token, e.code === 4001 || /reject|denied|declin/i.test(e.message || '') ? 'Not sent. Nothing left your wallets.' : e.message, 'error');
+    placing = false;
+    $('.trade-submit').disabled = false;
+    quote();
+    return;
+  }
+  sayFundLink('trade');
+  placing = false;
+  $('.trade-submit').disabled = false;
+  if (currentCoin?.token !== c.token) return;
+  const again = quote();
+  if (!again || again.short > 0n) return;
+  placeOrder();
+}
+
+/// Under the status: a deposit's link, or a Zcash address to copy.
+function sayFundLink(where, address, link) {
+  const el = $(`#${where}-fund-link`);
+  if (!el) return;
+  el.innerHTML = address ? `<span class="mono fund-addr">${esc(address)}</span> <button type="button" class="j-link" data-copy>Copy</button>`
+    : link ? `<a class="j-link" href="${esc(link)}" target="_blank" rel="noopener">View the deposit ↗</a>` : '';
+  el.querySelector('[data-copy]')?.addEventListener('click', () => navigator.clipboard?.writeText(address).catch(() => {}));
+}
 
 // Keys: / search, B buy, S sell, Enter place, Esc clear.
 document.addEventListener('keydown', (event) => {
@@ -1445,6 +1484,137 @@ document.addEventListener('keydown', (event) => {
     placeOrder();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Bringing a coin in (§178): a buy or a bond the account cannot cover yet is
+// brought from the holder's other wallet through the bridge first, then the
+// order or the coin goes ahead, approved in Nap as always.
+
+/// ZEC's source: Nap's own Zcash balance, or any Zcash wallet.
+let zecFrom = 'nap';
+/// A deposit on its way: { asset, target } while this page waits for it.
+let funding = null;
+const sourceOf = (asset) => fund.SOURCES[symOf(asset)] || null;
+
+/// What `need` of `asset` lacks in this account, when a bridge can bring it:
+/// 0n when it holds enough (or no wallet is connected to say).
+function shortOf(asset, need) {
+  const bal = balanceOf(asset);
+  if (bal == null || need <= bal) return 0n;
+  if (!sourceOf(asset)) throw new Error(`You have ${full(bal)} ${symOf(asset)}.zy`);
+  return need - bal;
+}
+
+/// What a shortfall is brought as: chain units that arrive as at least what
+/// it lacks, after the bridge's fee.
+function bringOf(asset, short) {
+  const src = sourceOf(asset);
+  const units = fund.grossUnits(short, bridgeBps, src.decimals);
+  return { src, units, text: `${fund.unitsText(units, src.decimals)} ${symOf(asset)}` };
+}
+
+/// The box under an order or a launch that says what will be brought in,
+/// from where, and what the other chain will show.
+function showFund(where, asset, short) {
+  const box = $(`#${where}-fund`);
+  if (!box) return;
+  if (!asset || !short) {
+    if (!box.hidden) { box.hidden = true; box.jadeHtml = ''; }
+    return;
+  }
+  const sym = symOf(asset);
+  const { src, text } = bringOf(asset, short);
+  const zec = src.key === 'zec';
+  const from = zec ? (zecFrom === 'nap' ? "Nap's Zcash balance" : 'any Zcash wallet') : `your ${src.wallet}`;
+  const shows = zec ? (zecFrom === 'nap' ? 'It is a shielded payment: Zcash shows nothing about it.' : 'A shielded payment shows nothing about it on Zcash; a transparent one shows your address paying the deposit address.')
+    : `${src.chain} shows your wallet paying the Zyn vault.`;
+  const fee = bridgeBps ? ` (with the ${bridgeBps / 100}% bridge fee)` : '';
+  const html = `<p>You hold ${esc(full(balanceOf(asset) ?? 0n))} ${esc(sym)}.zy. Jade first brings <b>${esc(text)}</b>${esc(fee)} from ${esc(from)} through the bridge, then goes ahead.${tip(`Nap makes a one-time deposit code for your account${zec ? ' (here, its deposit address)' : ''}; ${zec && zecFrom === 'nap' ? 'Nap pays it' : 'your wallet sends it to the bridge'}. It arrives as ${sym}.zy after ${src.wait}, and Jade collects it. Then it asks Nap to approve what you asked for. If you close the page, it still arrives in your account.`)}</p>`
+    + (zec ? `<div class="seg seg-sm fund-from" role="group" aria-label="Pay ZEC from"><button type="button" data-zec="nap" class="${zecFrom === 'nap' ? 'active' : ''}">Nap</button><button type="button" data-zec="other" class="${zecFrom === 'other' ? 'active' : ''}">Another wallet</button></div>` : '')
+    + `<p class="fund-shows">${esc(shows)}</p>`;
+  if (box.jadeHtml !== html) {
+    box.innerHTML = html;
+    box.jadeHtml = html;
+    box.querySelectorAll('[data-zec]').forEach((b) => b.addEventListener('click', () => {
+      zecFrom = b.dataset.zec;
+      if (where === 'trade') quote(); else renderPreview();
+    }));
+  }
+  box.hidden = false;
+}
+
+/// The order button, saying when it brings a coin in first.
+function tradeLabel() {
+  const c = currentCoin;
+  const submit = $('.trade-submit');
+  if (!c || !wallet) return;
+  const buying = tradeSide === 'buy';
+  let label = buying ? `Buy ${c.symbol}` : `Sell ${c.symbol}`;
+  if (buying && !$('#trade-fund').hidden) {
+    try {
+      const value = parseDecimal(tradeInput.value);
+      const via = viaOf(c);
+      label = `Bring ${bringOf(via, shortOf(via, value)).text}, then buy`;
+    } catch { /* the plain label */ }
+  }
+  if (funding) label = 'Waiting for the bridge…';
+  submit.textContent = label;
+}
+
+/// Bring `short` of `asset` in, then wait until the account holds `target`
+/// of it. Called from a click, and asks Nap before anything is awaited.
+async function bringIn(asset, short, target, say) {
+  const { src, units, text } = bringOf(asset, short);
+  const sym = symOf(asset);
+  const sent = fund.send({ ask, network: NETWORK, symbol: sym, units, bps: bridgeBps, from: zecFrom, say: (t) => say(t) });
+  funding = { asset, target };
+  tradeLabel();
+  try {
+    const r = await sent;
+    if (r.address) {
+      say(`Send exactly ${text} to ${r.address} from any Zcash wallet. Jade waits for it here.`, r.address);
+    } else {
+      fund.remember(NETWORK, wallet.session.account, { asset, target: String(target), text, link: r.link, at: Date.now() });
+      say(`Sent ${text}. It arrives as ${sym}.zy after ${src.wait}.`, null, r.link);
+    }
+    await fund.arrive({
+      collect: () => ask('zyn_collect', {}),
+      enough: async () => { await loadMine(); return (balanceOf(asset) ?? 0n) >= target; },
+      canAsk: () => !!wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen()),
+      say: (t) => say(t),
+    });
+    fund.forget(NETWORK, wallet.session.account);
+    say(`${text} arrived as ${sym}.zy.`);
+  } finally {
+    funding = null;
+    tradeLabel();
+  }
+}
+
+/// A deposit sent before the page was reloaded: wait for it again, and say
+/// when it arrives.
+async function resumeFunding() {
+  if (!wallet || funding) return;
+  const p = fund.recall(NETWORK, wallet.session.account);
+  if (!p || !isHex(p.asset)) return;
+  const bar = $('#fund-bar');
+  const say = (t, link) => { bar.innerHTML = `${esc(t)}${link ? ` <a class="j-link" href="${esc(link)}" target="_blank" rel="noopener">View ↗</a>` : ''}`; bar.hidden = false; };
+  if (Date.now() - p.at > 6 * 3600_000) { fund.forget(NETWORK, wallet.session.account); return; }
+  funding = { asset: p.asset, target: BigInt(p.target) };
+  say(`Bringing ${p.text} onto Zyn: waiting for the bridge.`, p.link);
+  try {
+    await fund.arrive({
+      collect: () => ask('zyn_collect', {}),
+      enough: async () => { await loadMine(); return (balanceOf(p.asset) ?? 0n) >= BigInt(p.target); },
+      canAsk: () => !!wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen()),
+      say: (t) => say(t, p.link),
+    });
+    fund.forget(NETWORK, wallet.session.account);
+    say(`${p.text} arrived as ${symOf(p.asset)}.zy.`);
+    render();
+    setTimeout(() => { bar.hidden = true; }, 12_000);
+  } catch (e) { say(e.message, p.link); } finally { funding = null; }
+}
 
 // ---------------------------------------------------------------------------
 // The wallet.
@@ -1481,6 +1651,7 @@ async function pickWallet() {
         dialog.close();
         await loadMine();
         render();
+        resumeFunding();
       } catch (e) { status.textContent = e.code === 4001 ? 'Not connected. Nothing was shared.' : e.message; }
     };
   });
@@ -1645,6 +1816,12 @@ function renderPreview() {
   $('#preview-mcap').textContent = `${zecText(start)} ${qt.symbol}`;
   launchButton.disabled = !ok || creating;
   const bond = qt.bond;
+  let bondShort = 0n;
+  try { bondShort = shortOf(qt.asset, bond); } catch { /* Nap says what it lacks */ }
+  if (!creating) {
+    showFund('create', qt.asset, bondShort);
+    launchButton.textContent = bondShort ? `Bring ${bringOf(qt.asset, bondShort).text}, then create` : 'Create coin';
+  }
   $('#create-terms').textContent = terms.set
     ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ${qt.symbol}.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
@@ -1710,6 +1887,15 @@ form.addEventListener('submit', async (event) => {
   const status = $('#create-status');
   let token = null;
   try {
+    const qt = quotes.find((q) => q.asset === createQuote);
+    let bondShort = 0n;
+    try { bondShort = qt ? shortOf(qt.asset, qt.bond) : 0n; } catch { /* Nap says what it lacks */ }
+    if (bondShort > 0n) {
+      launchButton.textContent = 'Waiting for the bridge…';
+      await bringIn(qt.asset, bondShort, qt.bond, (t, address, link) => { status.textContent = t; if (address || link) sayFundLink('create', address, link); });
+      sayFundLink('create');
+      showFund('create', null, 0n);
+    }
     const description = descInput.value.trim();
     const sym = symOf(createQuote);
     // A Nap from before §166 would make it in ZEC.zy whatever is asked: its
@@ -1739,7 +1925,7 @@ form.addEventListener('submit', async (event) => {
     form.reset(); imageData = '';
     setTimeout(async () => { await loadMarket(); navigate(`/coin/${token}`); }, 4000);
   } catch (e) {
-    status.textContent = e.code === 4001 ? 'Not created. Nothing left your wallet.' : e.message;
+    status.textContent = e.code === 4001 || /reject|denied|declin/i.test(e.message || '') ? 'Not created. Nothing left your wallets.' : e.message;
   } finally {
     creating = false;
     // The button stays off once a coin is made from this form; it was reset.

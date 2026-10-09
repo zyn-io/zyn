@@ -83,8 +83,11 @@ test('the fixes from the 27 Sep review stay in', () => {
   // The last order's status has its own line that a refresh never wipes.
   assert.match(jade, /hint\.textContent = e\.message;/);
   assert.doesNotMatch(jade, /\$\('#trade-status'\)\.textContent = '';\n  if \(!c\) return null;/);
-  // A buy over the wallet's balance of the coin's quote is refused on the page.
-  assert.match(jade, /bal != null && value > bal\) throw new Error/);
+  // A buy over the wallet's balance is refused on the page, unless a bridge
+  // brings what it lacks first (§178).
+  assert.match(jade, /if \(bal == null \|\| need <= bal\) return 0n;\n  if \(!sourceOf\(asset\)\) throw new Error\(`You have/);
+  assert.match(jade, /const short = tradeSide === 'buy' \? shortOf\(c\.quote, value\) : 0n;/);
+  assert.match(jade, /const short = buy \? shortOf\(via, value\) : 0n;/);
   // Creating is one at a time, and the coin is reported even if its picture fails.
   assert.match(jade, /if \(creating\) return;/);
   assert.match(jade, /The coin exists from here on, whatever happens to the picture\./);

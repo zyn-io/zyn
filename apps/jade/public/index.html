@@ -11,7 +11,7 @@
     <title>Jade</title>
     <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/jade.css?v=20261005-term1" />
+    <link rel="stylesheet" href="/jade.css?v=20261009-fund" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -104,8 +104,10 @@
             <div><dt>Pool shares</dt><dd>locked</dd></div>
           </dl>
           <p class="risk">You get none of the supply unless you buy. Your bond comes back only if the coin graduates. Nobody can pull a graduated coin's liquidity.</p>
+          <div class="fund" id="create-fund" hidden></div>
           <button id="create-go" class="primary" type="submit" disabled>Create coin</button>
           <p id="create-status" class="status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
+          <p class="fund-link" id="create-fund-link"></p>
         </form>
         <aside class="create-preview" aria-label="Preview">
           <p class="label">Preview · on the board</p>
@@ -203,10 +205,12 @@
               <div id="trade-route-row" hidden><dt>Route</dt><dd id="trade-route">—</dd></div>
               <div><dt>At least</dt><dd id="trade-min">—</dd></div>
             </dl>
+            <div class="fund" id="trade-fund" hidden></div>
             <button class="primary trade-submit" type="button">Connect wallet</button>
             <p id="trade-hint" class="hint" role="status" aria-live="polite"></p>
             <ol class="steps" id="trade-steps" aria-hidden="true" data-step="idle"><li data-s="placed">Placed</li><li data-s="sealing">Sealing</li><li data-s="done">Settled</li></ol>
             <p id="trade-status" class="status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
+            <p class="fund-link" id="trade-fund-link"></p>
             <p class="risk">Coins can go to zero. Prices move with every batch. Zyn runs on one operator today: withdrawals to Zcash need two of three team-held custodian keys, and there is no forced exit yet.</p>
             <p class="keys" aria-hidden="true"><kbd>B</kbd> buy <kbd>S</kbd> sell <kbd>↵</kbd> place <kbd>Esc</kbd> clear</p>
           </section>
@@ -277,6 +281,7 @@
       <h2 id="jade-wallet-title">Connect wallet</h2>
       <div class="jade-wallet-body"></div>
     </dialog>
+    <p class="fund-bar" id="fund-bar" role="status" aria-live="polite" hidden></p>
     <footer class="foot">
       <p>Jade runs on Zyn, an application layer for Zcash.</p>
       <nav aria-label="Zyn apps">
@@ -286,6 +291,6 @@
         <a href="https://scan.zyn-network.com/">ZynScan</a>
       </nav>
     </footer>
-    <script type="module" src="/jade.js?v=20261005-term1"></script>
+    <script type="module" src="/jade.js?v=20261009-fund"></script>
   </body>
 </html>

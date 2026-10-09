@@ -2651,6 +2651,7 @@ Without terms mainnet curves charge nothing and need no bond.
 - **Local:** `wrangler pages dev public --port 4391` in `apps/jade`, then open `/?network=testnet` (a local node needs a CORS proxy and `&rpc=http://127.0.0.1:<proxy>`).
 - **History** is `chain-<id>.history` in the node's data dir (JSON lines, append-only). Losing it loses only charts; it restarts from the next epoch.
 - **Live e2e:** `JADE=https://jade.zyn-network.com NAP=https://nap.zyn-network.com TOKEN=<testnet curve token> PHRASE_FILE=<funded testnet phrase> node apps/nap-connect/tests/jade.e2e.mjs` — connect, buy with a floor, auto-collect, sell a lot, auto-collect.
+- **Bringing a coin in (§178):** `JADE=http://localhost:4391 PHRASE_FILE=~/.zyn/test-wallets/devb.phrase node apps/nap-connect/tests/jade-fund.e2e.mjs` — a buy of SOLTEST larger than the account's SOL.zy; a stand-in Solana wallet signs with the Solana CLI's devnet key (`~/.config/solana/id.json`, or `SOL_KEY`) and sends `EXTRA` (0.02) SOL plus the bridge fee to the devnet vault for real; the bridge credits it, Jade collects, Nap approves the buy. About 30 s on testnet.
 
 ## 5f-duodevicies. End-to-end suites on the public testnet (25 Sep 2026)
 
