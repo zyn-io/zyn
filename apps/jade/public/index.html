@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#06110e" />
-    <meta name="description" content="Jade is Zyn's launchpad: coins on one bonding curve, traded in one-price batches per epoch, graduating into a locked pool." />
+    <meta name="description" content="Jade is Zyn's launchpad: coins on one bonding curve, traded in one-price batches per epoch, graduating into a pool whose shares are locked." />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Jade — Zyn's launchpad" />
     <meta property="og:description" content="Coins on one bonding curve, one price per epoch, a locked pool at graduation." />
     <title>Jade</title>
     <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/jade.css?v=20261009-treasury" />
+    <link rel="stylesheet" href="/jade.css?v=20261009-audit" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -103,7 +103,7 @@
             <div><dt>Cap at graduation</dt><dd id="fact-cap">~47 ZEC</dd></div>
             <div><dt>Pool shares</dt><dd>locked</dd></div>
           </dl>
-          <p class="risk">You get none of the supply unless you buy. Your bond comes back only if the coin graduates. Nobody can pull a graduated coin's liquidity.</p>
+          <p class="risk">You get none of the supply unless you buy. Your bond comes back only if the coin graduates. A graduated coin's pool shares are locked by the ledger's rules; Zyn runs on one operator today.</p>
           <div class="fund" id="create-fund" hidden></div>
           <button id="create-go" class="primary" type="submit" disabled>Create coin</button>
           <p id="create-status" class="status" aria-live="polite">Nothing is created until you approve it in Nap.</p>
@@ -211,7 +211,7 @@
             <ol class="steps" id="trade-steps" aria-hidden="true" data-step="idle"><li data-s="placed">Placed</li><li data-s="sealing">Sealing</li><li data-s="done">Settled</li></ol>
             <p id="trade-status" class="status" aria-live="polite">One price per epoch for every buyer, another for every seller.</p>
             <p class="fund-link" id="trade-fund-link"></p>
-            <p class="risk">Coins can go to zero. Prices move with every batch. Zyn runs on one operator today: withdrawals to Zcash need two of three team-held custodian keys, and there is no forced exit yet.</p>
+            <p class="risk">Coins can go to zero. Prices move with every batch. Zyn runs on one operator today. Bridged coins sit in team-held vaults (ZEC: two of three custodian keys; SOL, ETH and BOLD: the team's multisigs), and there is no forced exit yet.</p>
             <p class="keys" aria-hidden="true"><kbd>B</kbd> buy <kbd>S</kbd> sell <kbd>↵</kbd> place <kbd>Esc</kbd> clear</p>
           </section>
 
@@ -291,6 +291,6 @@
         <a href="https://scan.zyn-network.com/">ZynScan</a>
       </nav>
     </footer>
-    <script type="module" src="/jade.js?v=20261009-treasury"></script>
+    <script type="module" src="/jade.js?v=20261009-audit"></script>
   </body>
 </html>

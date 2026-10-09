@@ -286,7 +286,7 @@ async function loadMarket() {
     quotes = named.length
       ? named.map((q) => ({ asset: q.asset, symbol: symOf(q.asset), unit: BigInt(q.unit), bond: BigInt(q.bond) }))
       : [{ asset: XZEC, symbol: 'ZEC', unit: ZAT, bond: BigInt(terms.bond || '0') }];
-    pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b));
+    pools = (m.pools || []).filter((p) => isHex(p.id) && isInt(p.reserve_a) && isInt(p.reserve_b)).map((p) => ({ ...p, pending: Number.isSafeInteger(p.pending) && p.pending > 0 ? p.pending : 0 }));
     curves = (m.curves || []).filter(validCurve).map((c) => ({ ...c, pending: Number.isSafeInteger(c.pending) && c.pending > 0 ? c.pending : 0, ...decodeMeta(c.meta) }));
     // Numbers that reach the page's markup are numbers, whatever the node sends.
     const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : 0);
@@ -1243,7 +1243,7 @@ function quote() {
       out.textContent = `${full(q)} ${tradeSide === 'buy' ? c.symbol : q$}`;
       fee.textContent = `${p.fee_bps / 100}% kept by the pool`;
       min.textContent = `${full((q * (BPS - slip)) / BPS)}`;
-      if (wallet && !placing) submit.disabled = false;
+      if (wallet && !placing && !funding) submit.disabled = false;
       return { kind: 'swap', pool: p.id, sellA, amount: value, slippageBps: Number(slip), short, pay: c.quote };
     }
     if (tradeSide === 'buy') {
@@ -1257,7 +1257,7 @@ function quote() {
       out.textContent = `${wad(q.tokens, 0)} ${c.symbol}`;
       fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
       min.textContent = `${wad(minTokens, 0)} ${c.symbol}`;
-      if (wallet && !placing) submit.disabled = false;
+      if (wallet && !placing && !funding) submit.disabled = false;
       return { kind: 'buy', amount: value, minTokens, short, pay: c.quote };
     }
     if (value % LOT !== 0n) throw new Error(`Sell whole lots of ${CURVE.lotTokens.toLocaleString('en-US')}`);
@@ -1268,7 +1268,7 @@ function quote() {
     out.textContent = `${full(q.net)} ${q$}`;
     fee.textContent = c.fee_bps ? `${full(q.fee)} ${q$}` : 'none';
     min.textContent = `${full(minZec)} ${q$}`;
-    if (wallet && !placing) submit.disabled = false;
+    if (wallet && !placing && !funding) submit.disabled = false;
     return { kind: 'sell', tokens: value, minZec };
   } catch (e) {
     hint.textContent = e.message;
@@ -1310,7 +1310,7 @@ function quoteRoute(c, value, via, slip) {
   if (impact >= 5) $('#trade-hint').textContent = `This route fills ${impact.toFixed(1)}% below the pools' prices: they are thin for this amount.`;
   $('#trade-route-row').hidden = false;
   min.textContent = buy ? `${wad(floor, 0)} ${c.symbol}` : `${full(floor)} ${v$}`;
-  if (wallet && !placing) $('.trade-submit').disabled = false;
+  if (wallet && !placing && !funding) $('.trade-submit').disabled = false;
   return { kind: 'route', hops: r.hops, amount: value, minOut: floor, via, short, pay: via };
 }
 
@@ -1390,6 +1390,8 @@ async function placeOrder() {
   const c = currentCoin;
   if (!c || placing) return;
   if (!wallet) return pickWallet();
+  // One deposit at a time: a second would bring the same coin twice.
+  if (funding) return;
   const q = quote();
   if (!q) return;
   const button = $('.trade-submit');
@@ -1426,6 +1428,7 @@ $('.trade-submit').addEventListener('click', placeOrder);
 /// A buy the account cannot cover yet: bring what it lacks in, then place
 /// it again on this coin with a fresh quote, if the page is still on it.
 async function fundThenOrder(c, q) {
+  const side = tradeSide;
   const say = (t, address, link) => { setOrder(c.token, t, 'idle'); if (address || link) sayFundLink('trade', address, link); };
   try {
     await bringIn(q.pay, q.short, q.amount, say);
@@ -1439,9 +1442,13 @@ async function fundThenOrder(c, q) {
   sayFundLink('trade');
   placing = false;
   $('.trade-submit').disabled = false;
-  if (currentCoin?.token !== c.token) return;
+  // Only the order that was funded, and only if the form still asks for it.
+  if (currentCoin?.token !== c.token || pathRoute().view !== 'coin' || tradeSide !== side) return;
   const again = quote();
-  if (!again || again.short > 0n) return;
+  if (!again || again.short > 0n || again.kind !== q.kind || again.amount !== q.amount || again.pay !== q.pay) {
+    setOrder(c.token, 'It arrived. Place the order when you are ready.', 'idle');
+    return;
+  }
   placeOrder();
 }
 
@@ -1528,10 +1535,13 @@ function showFund(where, asset, short) {
   const from = zec ? (zecFrom === 'nap' ? "Nap's Zcash balance" : 'any Zcash wallet') : `your ${src.wallet}`;
   const shows = zec ? (zecFrom === 'nap' ? 'It is a shielded payment: Zcash shows nothing about it.' : 'A shielded payment shows nothing about it on Zcash; a transparent one shows your address paying the deposit address.')
     : `${src.chain} shows your wallet paying the Zyn vault.`;
+  // Who holds what is sent: said where it is sent from, before it is.
+  const custody = NETWORK === 'testnet' ? 'On testnet the vaults are the team\'s test vaults.'
+    : { zec: 'Zyn\'s ZEC vault pays out only with two of three team-held custodian keys.', sol: 'The vault is a Squads multisig the team controls (3 of 4).', eth: 'The vault is held by a Safe the team controls (2 of 3).', bold: 'The vault is held by a Safe the team controls (2 of 3).' }[src.key];
   const fee = bridgeBps ? ` (with the ${bridgeBps / 100}% bridge fee)` : '';
   const html = `<p>You hold ${esc(full(balanceOf(asset) ?? 0n))} ${esc(sym)}.zy. Jade first brings <b>${esc(text)}</b>${esc(fee)} from ${esc(from)} through the bridge, then goes ahead.${tip(`Nap makes a one-time deposit code for your account${zec ? ' (here, its deposit address)' : ''}; ${zec && zecFrom === 'nap' ? 'Nap pays it' : 'your wallet sends it to the bridge'}. It arrives as ${sym}.zy after ${src.wait}, and Jade collects it. Then it asks Nap to approve what you asked for. If you close the page, it still arrives in your account.`)}</p>`
     + (zec ? `<div class="seg seg-sm fund-from" role="group" aria-label="Pay ZEC from"><button type="button" data-zec="nap" class="${zecFrom === 'nap' ? 'active' : ''}">Nap</button><button type="button" data-zec="other" class="${zecFrom === 'other' ? 'active' : ''}">Another wallet</button></div>` : '')
-    + `<p class="fund-shows">${esc(shows)}</p>`;
+    + `<p class="fund-shows">${esc(shows)} ${esc(custody)}</p>`;
   if (box.jadeHtml !== html) {
     box.innerHTML = html;
     box.jadeHtml = html;
@@ -1557,7 +1567,7 @@ function tradeLabel() {
       label = `Bring ${bringOf(via, shortOf(via, value)).text}, then buy`;
     } catch { /* the plain label */ }
   }
-  if (funding) label = 'Waiting for the bridge…';
+  if (funding) { label = 'Waiting for the bridge…'; submit.disabled = true; }
   submit.textContent = label;
 }
 
@@ -1567,23 +1577,29 @@ async function bringIn(asset, short, target, say) {
   const { src, units, text } = bringOf(asset, short);
   const sym = symOf(asset);
   const sent = fund.send({ ask, network: NETWORK, symbol: sym, units, bps: bridgeBps, from: zecFrom, say: (t) => say(t) });
+  const account = wallet.session.account;
   funding = { asset, target };
   tradeLabel();
   try {
     const r = await sent;
+    // What the account holds now, before the bridge can have credited it:
+    // the deposit is done once it adds `short` to this, even if the page's
+    // own balance was stale when it worked out what to bring.
+    await loadMine();
+    const base = balanceOf(asset) ?? 0n;
     if (r.address) {
       say(`Send exactly ${text} to ${r.address} from any Zcash wallet. Jade waits for it here.`, r.address);
     } else {
-      fund.remember(NETWORK, wallet.session.account, { asset, target: String(target), text, link: r.link, at: Date.now() });
+      fund.remember(NETWORK, account, { asset, target: String(target), base: String(base + short), text, link: r.link, at: Date.now() });
       say(`Sent ${text}. It arrives as ${sym}.zy after ${src.wait}.`, null, r.link);
     }
     await fund.arrive({
       collect: () => ask('zyn_collect', {}),
-      enough: async () => { await loadMine(); return (balanceOf(asset) ?? 0n) >= target; },
-      canAsk: () => !!wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen()),
+      enough: async () => { await loadMine(); const b = balanceOf(asset) ?? 0n; return b >= target || b >= base + short; },
+      canAsk: () => !!wallet && wallet.session.account === account && (!wallet.provider.isNapWeb || wallet.provider.isOpen()),
       say: (t) => say(t),
     });
-    fund.forget(NETWORK, wallet.session.account);
+    fund.forget(NETWORK, account);
     say(`${text} arrived as ${sym}.zy.`);
   } finally {
     funding = null;
@@ -1605,7 +1621,7 @@ async function resumeFunding() {
   try {
     await fund.arrive({
       collect: () => ask('zyn_collect', {}),
-      enough: async () => { await loadMine(); return (balanceOf(p.asset) ?? 0n) >= BigInt(p.target); },
+      enough: async () => { await loadMine(); const b = balanceOf(p.asset) ?? 0n; return b >= BigInt(p.target) || (/^\d+$/.test(p.base || '') && b >= BigInt(p.base)); },
       canAsk: () => !!wallet && (!wallet.provider.isNapWeb || wallet.provider.isOpen()),
       say: (t) => say(t, p.link),
     });
@@ -1666,8 +1682,10 @@ function ask(method, p) {
   return wallet.provider.request({ method, params: { ...(p || {}), network: NETWORK } });
 }
 
+let mineAt = 0;
 async function loadMine() {
   if (!wallet || (wallet.provider.isNapWeb && !wallet.provider.isOpen())) return;
+  mineAt = Date.now();
   try {
     const r = await ask('zyn_curveHoldings', {});
     mine = {
@@ -1681,6 +1699,8 @@ async function loadMine() {
 }
 
 $('#wallet-button').addEventListener('click', pickWallet);
+// Back from another tab or Nap: what the account holds may have moved.
+addEventListener('focus', () => { if (wallet && !funding && Date.now() - mineAt > 30_000) loadMine().then(render); });
 
 function renderWallet() {
   const b = $('#wallet-button');
@@ -1814,7 +1834,7 @@ function renderPreview() {
   $('#preview-usd').textContent = per ? `${zecCell(start)} ${qt.symbol}` : qt.symbol;
   setHtml('preview-price', `${priceText(num(cost(0, 1, qt.unit) / CURVE.lotTokens))} ${esc(qt.symbol)}`);
   $('#preview-mcap').textContent = `${zecText(start)} ${qt.symbol}`;
-  launchButton.disabled = !ok || creating;
+  launchButton.disabled = !ok || creating || !!funding;
   const bond = qt.bond;
   let bondShort = 0n;
   try { bondShort = shortOf(qt.asset, bond); } catch { /* Nap says what it lacks */ }
@@ -1879,15 +1899,20 @@ async function retryAttachments() {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (creating) return;
+  if (creating || funding) return;
   const symbol = symbolInput.value.trim().toUpperCase();
   if (!validSymbol(symbol) || !validName(nameInput.value)) return renderPreview();
+  // What was asked for, read once: a bridge wait can be long.
+  const name = nameInput.value.trim();
+  const description = descInput.value.trim();
+  const image = imageData;
+  const quoteAsset = createQuote;
   creating = true;
   launchButton.disabled = true;
   const status = $('#create-status');
   let token = null;
   try {
-    const qt = quotes.find((q) => q.asset === createQuote);
+    const qt = quotes.find((q) => q.asset === quoteAsset);
     let bondShort = 0n;
     try { bondShort = qt ? shortOf(qt.asset, qt.bond) : 0n; } catch { /* Nap says what it lacks */ }
     if (bondShort > 0n) {
@@ -1896,18 +1921,17 @@ form.addEventListener('submit', async (event) => {
       sayFundLink('create');
       showFund('create', null, 0n);
     }
-    const description = descInput.value.trim();
-    const sym = symOf(createQuote);
+    const sym = symOf(quoteAsset);
     // A Nap from before §166 would make it in ZEC.zy whatever is asked: its
     // card says what it is priced in, and an older card does not.
-    status.textContent = createQuote === XZEC ? 'Approve it in Nap.' : `Approve it in Nap. Its card says "Priced in ${sym}.zy"; if it does not, your Nap is older: reject it and update Nap.`;
-    const r = await ask('zyn_curveCreate', { symbol, name: nameInput.value.trim(), description, image: imageData, ...(createQuote === XZEC ? {} : { quote: createQuote }) });
+    status.textContent = quoteAsset === XZEC ? 'Approve it in Nap.' : `Approve it in Nap. Its card says "Priced in ${sym}.zy"; if it does not, your Nap is older: reject it and update Nap.`;
+    const r = await ask('zyn_curveCreate', { symbol, name, description, image, ...(quoteAsset === XZEC ? {} : { quote: quoteAsset }) });
     if (!isHex(r?.token)) throw new Error('Nap did not say which coin it made');
     token = r.token;
     // The coin exists from here on, whatever happens to the picture.
     let note = `Created ${symbol} (${short(token)}). It can be traded right away.`;
-    if (r.content?.proof && (description || imageData)) {
-      const pending = { content: { description, image: imageData }, proof: r.content.proof };
+    if (r.content?.proof && (description || image)) {
+      const pending = { content: { description, image }, proof: r.content.proof };
       try { sessionStorage.setItem(`jade.attach.${NETWORK}.${token}`, JSON.stringify(pending)); } catch { /* this call only */ }
       let err;
       try { err = await attach(token, pending); } catch { err = 'the upload did not go through'; }
