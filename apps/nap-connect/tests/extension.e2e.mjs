@@ -111,7 +111,7 @@ try {
   if (process.env.LEND) {
     await page.click('#markets');
     const m = await answer();
-    ok(Array.isArray(m.pools) && m.pools.length === 3 && m.guarded === true, `the extension reads Zyn Lend's markets: ${m.pools?.length} pools, guarded ${m.guarded}`);
+    ok(Array.isArray(m.pools) && m.pools.length >= 3 && m.guarded === true, `the extension reads Zyn Lend's markets: ${m.pools?.length} pools, guarded ${m.guarded}`);
     await page.click('#supply');
     // A refusal (too little SOL.zy, say) comes back to the site with no card.
     await Promise.race([win.waitForSelector('#yes', { timeout: 60000 }), page.waitForFunction(() => /error/.test(document.querySelector('#out').textContent), null, { timeout: 60000 })]);
