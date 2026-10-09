@@ -1823,7 +1823,7 @@ function renderPreview() {
     launchButton.textContent = bondShort ? `Bring ${bringOf(qt.asset, bondShort).text}, then create` : 'Create coin';
   }
   $('#create-terms').textContent = terms.set
-    ? `${terms.fee_bps / 100}% on every curve trade — half to the ZYN pot, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ${qt.symbol}.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
+    ? `${terms.fee_bps / 100}% on every curve trade — half to the team treasury, 40% to this coin's pool, 10% to you when it graduates. ${bond ? `Bond ${wad(bond)} ${qt.symbol}.zy — returned only if the coin graduates; otherwise it stays in the curve.` : 'No bond.'}`
     : 'No fee and no bond are set on this network yet.';
   if (creating) return;
   const status = $('#create-status');
