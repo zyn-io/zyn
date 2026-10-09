@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="ZCaveDAO's rules: membership, roles, proposals, votes and the treasury, as the ledger enforces them." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/dao-rules" />
+    <meta property="og:title" content="ZCaveDAO — the rules" />
+    <meta property="og:description" content="Membership, roles, proposals, votes and the treasury of ZCaveDAO." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ZCaveDAO — the rules" />
+    <meta name="twitter:description" content="Membership, roles, proposals, votes and the treasury of ZCaveDAO." />
+    <title>ZCaveDAO rules — Cave Collection Z</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>
+      .register { max-width: 800px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register h1 > span { display: block; font-size: clamp(54px, 8.5vw, 108px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(34px, 5vw, 66px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 58ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede a, .rule a, .smallprint a { color: var(--acid); }
+      .ledger { margin: 46px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(18px, 3vw, 30px); }
+      .term-table { border-top: 1px solid var(--line); }
+      .term-table div { display: grid; grid-template-columns: 200px 1fr; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+      .term-table span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+      .term-table b { font-family: var(--sans); font-size: 15px; font-weight: 400; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+      @media (max-width: 680px) { .term-table div { grid-template-columns: 1fr; gap: 5px; } }
+      .stage { margin: 54px 0 0; }
+      .stage h2 { margin: 0; display: flex; align-items: baseline; gap: 14px; font-family: var(--sans); font-size: clamp(22px, 2.4vw, 28px); font-weight: 600; color: var(--ink); }
+      .stage h2 b { font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0.14em; color: var(--zec); }
+      .rules { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 12px; }
+      .rule { position: relative; padding-left: 22px; font-family: var(--sans); font-size: 15.5px; line-height: 1.62; color: var(--read); }
+      .rule::before { content: "—"; position: absolute; left: 0; color: var(--muted); }
+      .rule strong { color: var(--ink); font-weight: 600; }
+      .roles { margin: 18px 0 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+      .roles div { display: grid; grid-template-columns: 110px 1fr; gap: 16px; padding: 14px 16px; background: rgba(7, 8, 7, 0.96); font-family: var(--sans); font-size: 14.5px; line-height: 1.55; color: var(--read); }
+      .roles b { font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--zec); }
+      .roles i { font-style: normal; color: var(--muted); }
+      @media (max-width: 560px) { .roles div { grid-template-columns: 1fr; gap: 4px; } }
+      .smallprint { margin: 44px 0 0; font-family: var(--sans); font-size: 13.5px; line-height: 1.65; color: var(--read-dim); max-width: 64ch; }
+      .smallprint strong { color: var(--read); font-weight: 600; }
+      .back { display: inline-flex; align-items: center; min-height: 44px; margin: 32px 0 0; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+      .back:hover { color: var(--acid); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/dao"><span class="l">ZCaveDAO</span><span class="s">DAO</span></a>
+        <a href="/rules"><span class="l">Sale rules</span><span class="s">Rules</span></a>
+        <a href="/dao-rules" aria-current="page"><span class="l">DAO rules</span><span class="s">DAO rules</span></a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>ZCaveDAO</span><span>The rules</span></h1>
+
+      <p class="lede">
+        ZCaveDAO is the Cave society: people who build, run and spread privacy, and decide together
+        how Cave's money is used. Its rules run on the ledger; this page says what they are.
+        Vote and propose on <a href="/dao">the DAO page</a>.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index"><span>At a glance</span><span>ZCaveDAO · <b>strict rules</b></span></div>
+        <div class="ledger-body">
+          <div class="term-table">
+            <div><span>Membership</span><b>1 Collection Z item = 1 membership = 1 vote</b></div>
+            <div><span>To reach a vote</span><b>10 items back a proposal within 8,064 Zcash blocks (about 7 days)</b></div>
+            <div><span>Vote</span><b>8,064 Zcash blocks (about 7 days)</b></div>
+            <div><span>Passes with</span><b>More yes than no, and at least 10% of items voting</b></div>
+            <div><span>Treasury in</span><b>10% of every Collection Z sale payment and 10% of every resale fee</b></div>
+            <div><span>Treasury out</span><b>Only what a passed proposal pays; no key can move it</b></div>
+            <div><span>Rules fixed</span><b>At the first proposal; each proposal keeps the rules it opened under</b></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="stage" aria-labelledby="m">
+        <h2 id="m"><b>01</b>Membership</h2>
+        <ul class="rules">
+          <li class="rule">Holding a Collection Z item in Nap is a membership. <strong>Each item is one vote</strong>; holding five is five votes.</li>
+          <li class="rule">The animal on an item carries no rank and no role.</li>
+          <li class="rule">Selling, moving or redeeming an item ends its membership, which passes to whoever holds the item next.</li>
+          <li class="rule">A <strong>member pass</strong> is a private code made from one of your items: the key to the members' chat (not open yet). It ends when that item moves. Keep it private; whoever has it can use your membership.</li>
+          <li class="rule">Later Cave batches are to join the same DAO when they launch.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="r">
+        <h2 id="r"><b>02</b>Roles</h2>
+        <ul class="rules">
+          <li class="rule">Roles are <strong>voluntary</strong>: take on any, or several. A role adds no votes. It is kept by work anyone can check and paid only by proposals the members pass.</li>
+        </ul>
+        <div class="roles">
+          <div><b>Digger</b><span>Builds privacy tools and apps on Zcash. <i>Kept by</i> a shipped project or grant deliverable. <i>Paid by</i> grants.</span></div>
+          <div><b>Lookout</b><span>Runs verifying replicas or the public RPC; audits code. <i>Kept by</i> a replica that agrees with the public explorer, or a published review. <i>Paid by</i> running fees and audit bounties.</span></div>
+          <div><b>Lantern</b><span>Brings people into privacy: events, guides, onboarding. <i>Kept by</i> an event with attendance certificates, or a published guide. <i>Paid by</i> event budgets.</span></div>
+        </div>
+      </section>
+
+      <section class="stage" aria-labelledby="p">
+        <h2 id="p"><b>03</b>Proposals</h2>
+        <ul class="rules">
+          <li class="rule">Any member can propose, in Nap. The full text (up to 4,000 characters) is published; the ledger keeps its hash.</li>
+          <li class="rule">A proposal may ask the treasury to <strong>pay an amount of ZEC to a Nap account</strong>, or nothing.</li>
+          <li class="rule">One of your items backs it first. An item can have <strong>one open proposal</strong> at a time, and the DAO at most 16 open at once.</li>
+          <li class="rule">It needs <strong>10 backing items</strong> within 8,064 Zcash blocks (about 7 days) to reach a vote; otherwise it lapses.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="v">
+        <h2 id="v"><b>04</b>Votes</h2>
+        <ul class="rules">
+          <li class="rule">A vote runs <strong>8,064 Zcash blocks (about 7 days)</strong>. Windows are counted in Zcash blocks, which nobody can hurry.</li>
+          <li class="rule">Each item votes <strong>once per proposal</strong>, yes or no; up to 32 items in one go. An item that changes hands mid-vote cannot vote twice.</li>
+          <li class="rule">A proposal <strong>passes</strong> with more yes than no and at least 10% of the items outstanding when its vote opened taking part. Otherwise it fails.</li>
+          <li class="rule">A passed proposal's payment is made by the ledger at the close of its vote.</li>
+          <li class="rule">The public sees each proposal, its text, its payment and the tallies — <strong>not which items voted</strong>. The operator and the replicas that check the ledger can see which item acted.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="t">
+        <h2 id="t"><b>05</b>Treasury and floor</h2>
+        <ul class="rules">
+          <li class="rule">The treasury takes <strong>10% of every Collection Z sale payment</strong> (tickets, claims, open mint) and 10% of every resale fee.</li>
+          <li class="rule">It is <strong>keyless</strong>: no key can move it, the team's included. It pays only what a passed proposal pays. Every inflow and payment is on the ledger.</li>
+          <li class="rule">The <strong>floor</strong> is separate and belongs to holders: any item can be redeemed for its share at any time, whatever the DAO decides. See <a href="/rules">the sale rules</a>.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="o">
+        <h2 id="o"><b>06</b>What the operator can and cannot do</h2>
+        <ul class="rules">
+          <li class="rule">The operator orders transactions, so it <strong>can delay or refuse</strong> a proposal or a vote.</li>
+          <li class="rule">It <strong>cannot</strong> speed a vote up, change a proposal's rules once it has opened, change the DAO's rules after its first proposal, move the treasury, or mint items outside the sale.</li>
+          <li class="rule">On mainnet the rules can never go below 3 backers, a 5% quorum or two days.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="n">
+        <h2 id="n"><b>07</b>Still to come</h2>
+        <ul class="rules">
+          <li class="rule">The charter, agreed by members; the members' chat, opened with member passes; Cave names with roles on them; votes hidden from the operator too (zero-knowledge proofs); a legal wrapper.</li>
+        </ul>
+      </section>
+
+      <p class="smallprint">
+        <strong>Where the rules live.</strong> The numbers above are in Collection Z's published
+        <a href="/terms">sale terms</a> and enforced by the ledger; the ledger's live settings are read on
+        <a href="/dao">the DAO page</a>. Where this page and the ledger differ, the ledger decides.
+        Membership is not an investment and carries no promise of payment.
+      </p>
+
+      <a class="back" href="/">← back to the cave</a>
+    </main>
+  </body>
+</html>

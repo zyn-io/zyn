@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="How Collection Z is sold and traded, from the whitelist to the market: tickets, the draw, claims, the open mint, resales and the floor." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/rules" />
+    <meta property="og:title" content="Cave Collection Z — sale rules" />
+    <meta property="og:description" content="From the whitelist to the market: every rule of the Collection Z sale on one page." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cave Collection Z — sale rules" />
+    <meta name="twitter:description" content="From the whitelist to the market: every rule of the Collection Z sale on one page." />
+    <title>Sale rules — Cave Collection Z</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>
+      /* A rulebook: one column, each stage of the sale in order, the numbers
+         in a table a reader can scan before the prose. */
+      .register { max-width: 800px; margin: 0 auto; padding: clamp(46px, 7vw, 92px) clamp(24px, 4vw, 68px) 110px; position: relative; z-index: 2; }
+      .register h1 > span { display: block; font-size: clamp(54px, 8.5vw, 108px); line-height: 0.9; }
+      .register h1 > span:nth-child(2) { font-size: clamp(34px, 5vw, 66px); color: var(--zec); }
+      .lede { margin: 26px 0 0; max-width: 58ch; font-family: var(--sans); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.6; color: var(--read); }
+      .lede a, .rule a, .smallprint a { color: var(--acid); }
+      .ledger { margin: 46px 0 0; border: 1px solid var(--line); box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.5); background: linear-gradient(160deg, rgba(14, 17, 13, 0.9), rgba(7, 8, 7, 0.95)); }
+      .ledger-index { display: flex; justify-content: space-between; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; font-size: 8px; letter-spacing: 0.19em; }
+      .ledger-index b { color: var(--zec); font-weight: 400; }
+      .ledger-body { padding: clamp(18px, 3vw, 30px); }
+      .term-table { border-top: 1px solid var(--line); }
+      .term-table div { display: grid; grid-template-columns: 200px 1fr; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+      .term-table span { font-family: var(--mono); font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+      .term-table b { font-family: var(--sans); font-size: 15px; font-weight: 400; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+      @media (max-width: 680px) { .term-table div { grid-template-columns: 1fr; gap: 5px; } }
+      .stage { margin: 54px 0 0; }
+      .stage h2 { margin: 0; display: flex; align-items: baseline; gap: 14px; font-family: var(--sans); font-size: clamp(22px, 2.4vw, 28px); font-weight: 600; color: var(--ink); }
+      .stage h2 b { font-family: var(--mono); font-size: 11px; font-weight: 400; letter-spacing: 0.14em; color: var(--zec); }
+      .rules { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 12px; }
+      .rule { position: relative; padding-left: 22px; font-family: var(--sans); font-size: 15.5px; line-height: 1.62; color: var(--read); }
+      .rule::before { content: "—"; position: absolute; left: 0; color: var(--muted); }
+      .rule strong { color: var(--ink); font-weight: 600; }
+      .warn { margin: 18px 0 0; padding: 14px 16px; border: 1px solid rgba(244, 183, 40, 0.45); background: rgba(244, 183, 40, 0.06); font-family: var(--sans); font-size: 14.5px; line-height: 1.6; color: var(--read); }
+      .warn strong { color: var(--zec); font-weight: 600; }
+      .smallprint { margin: 44px 0 0; font-family: var(--sans); font-size: 13.5px; line-height: 1.65; color: var(--read-dim); max-width: 64ch; }
+      .smallprint strong { color: var(--read); font-weight: 600; }
+      .back { display: inline-flex; align-items: center; min-height: 44px; margin: 32px 0 0; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+      .back:hover { color: var(--acid); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/items"><span class="l">My shelf</span><span class="s">Shelf</span></a>
+        <a href="/market"><span class="l">The market</span><span class="s">Market</span></a>
+        <a href="/mint"><span class="l">Take a place</span><span class="s">Mint</span></a>
+        <a href="/deposit"><span class="l">Bring ZEC in</span><span class="s">Deposit</span></a>
+        <a href="/rules" aria-current="page">Rules</a>
+      </nav>
+    </header>
+    <main class="register">
+      <h1><span>Sale rules</span><span>Collection Z</span></h1>
+
+      <p class="lede">
+        How Cave's first batch, 4,444 items, is sold and traded: from the whitelist to the market.
+        The numbers are the ones in the published <a href="/terms">sale terms</a> (digest
+        <span class="hash">9267d58e…3d3c</span>) and in the ledger's own rules.
+      </p>
+
+      <div class="ledger">
+        <div class="ledger-index"><span>At a glance</span><span>Collection Z · <b>4,444</b></span></div>
+        <div class="ledger-body">
+          <div class="term-table">
+            <div><span>Who can buy</span><b>Whitelisted Nap accounts only</b></div>
+            <div><span>Ticket</span><b>0.01 ZEC each for an account's first 10; each one after costs 0.01 more than the last (11th 0.02, 12th 0.03, …)</b></div>
+            <div><span>Per ticket</span><b>1 item (80%), 2 items (19%) or 3 items (1%)</b></div>
+            <div><span>Claim</span><b>0.005 ZEC per item, within 16,128 Zcash blocks (about 14 days) of the close</b></div>
+            <div><span>Open mint</span><b>0.0133 ZEC per item, for what the draw handed nobody or winners left</b></div>
+            <div><span>Sale payments</span><b>90% to the collection's floor, 10% to the ZCaveDAO treasury</b></div>
+            <div><span>Resale fee</span><b>1% from the buyer and 1% from the seller</b></div>
+            <div><span>Fee split</span><b>40% to the floor, 10% to the ZCaveDAO treasury, 50% to the team treasury</b></div>
+            <div><span>Redeem</span><b>Any item, for its share of the floor; the item is burned</b></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="stage" aria-labelledby="s1">
+        <h2 id="s1"><b>01</b>Whitelist</h2>
+        <ul class="rules">
+          <li class="rule">Apply on <a href="/whitelist">the list page</a> with your X handle and a link to your repost or comment of the pinned post. Asking twice changes nothing.</li>
+          <li class="rule">An approved handle gets a <strong>code</strong>. Link it once to your Nap account on <a href="/mint">/mint</a>; from then on that account is on the list.</li>
+          <li class="rule">The ledger sells tickets <strong>only to listed accounts</strong>. Everyone on the list is drawn at the same odds.</li>
+          <li class="rule">The list keeps your X handle, your link and your note — no email, no wallet or Zcash address. Your Nap account is linked only when you use the code.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s2">
+        <h2 id="s2"><b>02</b>ZEC in and out</h2>
+        <ul class="rules">
+          <li class="rule">Tickets, claims and resales are paid with <strong>ZEC held in Nap</strong>. <a href="/deposit">Bring ZEC in</a> from any Zcash wallet; it counts after 6 confirmations.</li>
+          <li class="rule">Take ZEC back out from Nap to any Zcash address. Two of three custodians sign each payout, and the Zcash network fee comes out of the amount.</li>
+          <li class="rule">A <strong>0.5% bridge fee</strong> applies each way: on ZEC brought in and on ZEC taken out.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s3">
+        <h2 id="s3"><b>03</b>Tickets</h2>
+        <ul class="rules">
+          <li class="rule">Bought in Nap, <strong>1 to 20 at a time</strong>. A ticket exists the moment Nap signs it.</li>
+          <li class="rule">Each account's first 10 tickets cost <strong>0.01 ZEC</strong>; each one after costs 0.01 more than the last. The ledger counts this per account.</li>
+          <li class="rule">A ticket buys <strong>a place in the draw</strong>, not a chosen item. Nobody — the team included — sees which items a ticket gets before the draw.</li>
+          <li class="rule">Of every ticket payment, <strong>90% goes to the collection's floor</strong> and 10% to the ZCaveDAO treasury, on the ledger, as it is bought.</li>
+          <li class="rule">Tickets are sold in <strong>one window</strong>. The close is a Zcash block height announced at least 1,152 blocks (about a day) ahead; after it the ledger refuses tickets.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s4">
+        <h2 id="s4"><b>04</b>Burn tickets</h2>
+        <ul class="rules">
+          <li class="rule">Burning the Cave token on Solana also gives tickets in the <strong>same draw at the same odds</strong>: one ticket per 0.01 ZEC of the token, at the median of the last hour's pool price against bridged ZEC on Solana.</li>
+          <li class="rule">At most <strong>20 per burn and 20 in the whole sale</strong>. A burn ticket pays nothing into the floor; if it wins, its items are claimed at the claim price like any other.</li>
+          <li class="rule">The burn carries a code from your Nap, so its tickets are yours without your Solana wallet naming your account.</li>
+          <li class="rule">A burn cannot be undone. Burns after the close, past the cap or under one ticket <strong>earn nothing and are not refunded</strong>; the mint page lets you burn only for what is left.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s5">
+        <h2 id="s5"><b>05</b>The draw</h2>
+        <ul class="rules">
+          <li class="rule">Runs <strong>once</strong>, over every ticket bought before the close, from a Zcash block 100 blocks after the close and a drand round announced with the close (+2,400 rounds). Neither exists when the close is named.</li>
+          <li class="rule">Each ticket gets <strong>1 item (80%), 2 (19%) or 3 (1%)</strong>, and which items, by a shuffle of the frozen 4,444-item manifest (root <span class="hash">0c56593e…8426</span>).</li>
+          <li class="rule">The result is posted on the ledger as a Merkle root. Anyone with the public inputs can run the draw again and get the same root.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s6">
+        <h2 id="s6"><b>06</b>Claims</h2>
+        <ul class="rules">
+          <li class="rule">A winning ticket claims its items at <strong>0.005 ZEC each</strong>, within <strong>16,128 blocks (about 14 days)</strong> of the close. 90% of each claim goes to the floor, 10% to the ZCaveDAO treasury.</li>
+          <li class="rule">Only the wallet that bought a ticket can claim it, with a proof against the posted root. Nobody can claim for you, and nobody can refuse you an item the draw gave.</li>
+          <li class="rule">Each item is minted straight into your Nap.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s7">
+        <h2 id="s7"><b>07</b>Open mint</h2>
+        <ul class="rules">
+          <li class="rule">After the claim window, what the draw handed nobody and what winners left sell at <strong>0.0133 ZEC each</strong>, in an order fixed by the draw — the next ones in line, whichever they are.</li>
+          <li class="rule">Open-mint payments split like every sale payment: 90% to the floor, 10% to the ZCaveDAO treasury.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s8">
+        <h2 id="s8"><b>08</b>The market</h2>
+        <ul class="rules">
+          <li class="rule">List an item in Nap at a price in ZEC. A listing says what is for sale and what it costs; it <strong>never names the seller</strong>. Cancel any time; the item stays yours.</li>
+          <li class="rule">The fee is <strong>1% from each side</strong>: the buyer pays the price plus 1%, the seller receives the price less 1%.</li>
+          <li class="rule">The fee is split on the ledger: <strong>40% to the collection's floor</strong>, 10% to the ZCaveDAO treasury and 50% to the team treasury.</li>
+          <li class="rule">The item arrives in the buyer's Nap; the seller's proceeds wait as a claim only their wallet can find. Neither side learns who the other is.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s9">
+        <h2 id="s9"><b>09</b>The floor</h2>
+        <ul class="rules">
+          <li class="rule">The floor holds 90% of every sale payment and 40% of every resale fee. It is <strong>keyless</strong>: no key can move it, and it pays only redemptions.</li>
+          <li class="rule">Any holder can <strong>redeem an item for its share</strong>: the floor divided by the items outstanding. The item is burned, which cannot be undone.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s10">
+        <h2 id="s10"><b>10</b>Membership</h2>
+        <ul class="rules">
+          <li class="rule">Each item is one membership and one vote in <strong>ZCaveDAO</strong>, which decides what its treasury pays. Selling, moving or redeeming the item ends its membership. See <a href="/dao-rules">the DAO rules</a>.</li>
+        </ul>
+      </section>
+
+      <section class="stage" aria-labelledby="s11">
+        <h2 id="s11"><b>11</b>What the operator can and cannot do</h2>
+        <ul class="rules">
+          <li class="rule">The operator orders transactions, so it <strong>can delay or refuse</strong> a ticket, a claim, a listing or a vote. It announces the close.</li>
+          <li class="rule">It decides which Solana burns count and at what pool price; the count can be checked against Solana's burns.</li>
+          <li class="rule">It <strong>cannot</strong> change a price or the split once the sale starts, mint items outside the sale, give itself items, or move the floor or the DAO treasury.</li>
+          <li class="rule">The operator and the replicas that check the ledger can see which account holds which item; the public cannot.</li>
+        </ul>
+        <p class="warn"><strong>Risk.</strong> Items and their floor can lose value. ZEC in Nap sits in a vault held by two of three team-held custodian keys, and there is no forced exit yet. Nothing here is investment advice.</p>
+      </section>
+
+      <p class="smallprint">
+        <strong>Where the rules live.</strong> The sale's numbers are fixed by the terms digest on
+        <a href="/terms">/terms</a>, with the bytes to recompute it; a change to them is a new digest
+        published beside the old one. The market fee and its split are the ledger's. This page explains
+        them; where it and the terms differ, the terms and the ledger decide.
+      </p>
+
+      <a class="back" href="/">← back to the cave</a>
+    </main>
+  </body>
+</html>

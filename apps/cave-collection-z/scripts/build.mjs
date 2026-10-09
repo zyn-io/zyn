@@ -49,7 +49,7 @@ await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 // The second half of the journey. Everything above gets a buyer as far as
 // owning an item; these are what they do next — see it, price it, sell it,
 // buy another, and leave. Same directory shape, so every one is a clean URL.
-for (const page of ['items', 'item', 'market', 'exit', 'dao']) {
+for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules']) {
   await mkdir(new URL(`${page}/`, output), { recursive: true });
   await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
 }
@@ -133,7 +133,7 @@ await writeFile(
 // injected. Computed rather than written down, because a hash maintained by
 // hand is a hash that goes stale and takes the site down with it.
 const pages = ['index.html', 'whitelist.html', 'deposit.html', 'terms.html', 'mint.html',
-  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html'];
+  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html', 'rules.html', 'dao-rules.html'];
 const scriptHashes = new Set();
 for (const page of pages) {
   const html = await readFile(new URL(page, root), 'utf8');
