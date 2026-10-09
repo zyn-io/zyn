@@ -33,9 +33,11 @@ pub fn quantize(v: i128, step: i128) -> i128 {
 /// Cash and borrowed round to the same step, two significant figures of what
 /// is supplied, and supplied is cash plus borrowed less the reserve on that
 /// step, so the three always add up. Utilization is taken from the exact
-/// figures and rounded *up* to the next percent — a loan never shows as 0%
-/// — and the rates come from that rounded utilization, so they say no more
-/// than it does. The share count is replaced by the share price, which shows
+/// figures and rounded to the nearest percent — a loan still never shows as
+/// 0%: anything lent shows at least 1% — and the rates come from that
+/// rounded utilization, so they say no more than it does. It was rounded
+/// *up*, and just above the kink that showed the next percent's rate: 8.1%
+/// to borrow where the pool charged 4.9% (audit, 9 Oct 2026). The share count is replaced by the share price, which shows
 /// interest and nothing about amounts. No count of positions is published.
 /// Insurance is the protocol's own money, so it keeps two figures of its own
 /// size rather than the pool's.
@@ -64,7 +66,7 @@ pub fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
             let step = sig_step(value, 2);
             let (bq, cq, rq) = (quantize(debt, step), quantize(p.cash, step), quantize(p.reserves, step));
             let sq = (cq + bq - rq).max(0);
-            let util = round_up(p.utilization().unwrap_or(0), WAD / 100).min(WAD);
+            let util = public_utilization(p.utilization().unwrap_or(0));
             let borrow_rate = curve.rate(util).unwrap_or(0);
             let gross = wmul(borrow_rate, util).unwrap_or(0);
             let supply_rate = gross - bps(gross, curve.reserve_bps).unwrap_or(0);
@@ -153,7 +155,7 @@ pub fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
                 "backstop_at": if v2 { Some(lot.opened_at + lend::BACKSTOP_AFTER_SECS) } else { None },
                 "min_bid": if v2 { s.lot_min_bid(lot).map(|m| m.to_string()) } else { None },
                 "bids_full": full,
-                "outbid_above": if full { bids.iter().min().map(|m| m.to_string()) } else { None },
+                "outbid_above": if full { bids.iter().min().map(|m| outbid_shown(*m).to_string()) } else { None },
             })
         })
         .collect();
@@ -197,6 +199,29 @@ pub fn lend_markets_json(s: &ObjectVm) -> serde_json::Value {
         "pools": pools,
         "lots": lots,
     })
+}
+
+/// A pool's utilization as published: the nearest whole percent, and at
+/// least 1% once anything is lent (WAD in, WAD out).
+pub fn public_utilization(exact: i128) -> i128 {
+    use objectvm::zyn_lend::WAD;
+    let u = quantize(exact.clamp(0, WAD), WAD / 100);
+    if exact > 0 {
+        u.max(WAD / 100)
+    } else {
+        u
+    }
+}
+
+/// A full lot's smallest bid as published: what is just above it, rounded up
+/// to two significant figures. The exact smallest bid is someone's bid to the
+/// unit; this shows its size only, and a bid of exactly the figure shown
+/// still pushes it out (the chain takes a bid that pays more than the
+/// smallest). Nap and the Lend app ask for more than this figure, which is
+/// more than the smallest too (audit, 9 Oct 2026).
+pub fn outbid_shown(smallest: i128) -> i128 {
+    let v = smallest.max(0) + 1;
+    round_up(v, sig_step(v, 2))
 }
 
 /// Units of `b` per unit of `a` in Zyn's pool for the pair, WAD.
@@ -380,5 +405,75 @@ mod tests {
         // The smallest bid: 1% of 0.05 SOL beats $1 of SOL.
         assert_eq!(num(lot, "min_bid"), WAD / 2_000);
         assert_eq!(lot["bids_full"], false);
+        assert!(lot["outbid_above"].is_null());
+    }
+
+    /// Utilization rounds to the nearest percent, not up, and the rates are
+    /// the curve's at that figure: just above the kink a pool shows the
+    /// kink's rate, not the next percent's (audit, 9 Oct 2026).
+    #[test]
+    fn utilization_rounds_to_the_nearest_percent_and_the_rates_follow_it() {
+        assert_eq!(public_utilization(0), 0);
+        assert_eq!(public_utilization(WAD / 1_000), WAD / 100, "0.1% lent shows as 1%, never 0%");
+        assert_eq!(public_utilization(WAD * 803 / 1_000), WAD * 80 / 100);
+        assert_eq!(public_utilization(WAD * 806 / 1_000), WAD * 81 / 100);
+        assert_eq!(public_utilization(WAD), WAD);
+        let mut s = chain();
+        let kink = s.market.lend.curve().kink;
+        let mut pool = Pool::new(0);
+        pool.supply(100 * WAD).unwrap();
+        // 0.3 points above the kink.
+        pool.borrow(kink * 100 + 3 * WAD / 10).unwrap();
+        s.market.lend.listed.get_mut(&SOL).unwrap().pool = pool;
+        let v = lend_markets_json(&s);
+        let p = &v["pools"][0];
+        assert_eq!(num(p, "utilization"), kink);
+        let curve = s.market.lend.curve();
+        assert_eq!(num(p, "borrow_rate"), curve.rate(kink).unwrap());
+        assert!(num(p, "borrow_rate") < curve.rate(kink + WAD / 100).unwrap());
+    }
+
+    /// A full lot publishes its smallest bid rounded up to two figures, just
+    /// over it, so the figure gives no bid away to the unit and a bid of
+    /// exactly that figure outbids it (audit, 9 Oct 2026).
+    #[test]
+    fn a_full_lot_shows_its_smallest_bid_rounded_up() {
+        assert_eq!(outbid_shown(123_456_789_000_000_000), 130_000_000_000_000_000);
+        assert_eq!(outbid_shown(WAD / 2), 510_000_000_000_000_000, "exactly 0.5 shows 0.51: more than the bid");
+        assert_eq!(outbid_shown(99), 100);
+        assert_eq!(outbid_shown(5), 6);
+        let mut s = chain();
+        let l = &mut s.market.lend;
+        l.guarded = true;
+        l.rules = RULES_V2;
+        let pos = [7; 32];
+        l.lots.insert(
+            pos,
+            Lot {
+                owner: [9; 32],
+                collateral_asset: ETH,
+                collateral: Fixed(WAD),
+                borrow_asset: SOL,
+                debt_shares: Fixed(WAD / 20),
+                rate: Fixed(18 * WAD),
+                opened: 5,
+                proceeds: Fixed::ZERO,
+                opened_at: 0,
+                tab: Fixed(WAD / 20),
+                written_off: Fixed::ZERO,
+                insured: Fixed::ZERO,
+                backstop: None,
+            },
+        );
+        for i in 0..objectvm::lend::MAX_BIDS_PER_LOT {
+            let pay = 123_456_789_000_000_000 + i as i128;
+            l.bids.push(objectvm::lend::Bid { id: [i as u8; 32], owner: [3; 32], lot: pos, pay: Fixed(pay) });
+        }
+        let v = lend_markets_json(&s);
+        let lot = &v["lots"][0];
+        assert_eq!(lot["bids_full"], true);
+        let shown = num(lot, "outbid_above");
+        assert_eq!(shown, 130_000_000_000_000_000);
+        assert!(shown > 123_456_789_000_000_000, "a bid of the figure shown outbids the smallest");
     }
 }
