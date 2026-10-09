@@ -1561,6 +1561,7 @@ impl ObjectVm {
         if new.reserve_a.0 <= 0 || new.reserve_b.0 <= 0 {
             return Err("a pool cannot be emptied");
         }
+        self.check_depth_after(&p.a, &p.b, new.reserve_a.0, new.reserve_b.0)?;
         self.burn(lp_asset(pool), shares)?;
         self.apply_funding(provider, inputs, f);
         self.market.pools.insert(*pool, new);

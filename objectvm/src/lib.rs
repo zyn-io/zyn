@@ -1036,6 +1036,15 @@ impl ObjectVm {
     pub(crate) fn fair_batches(&self) -> bool {
         self.epoch >= fair_batches_from(self.chain_id)
     }
+
+    /// Lending's rules from the same audit (9 Oct 2026; DECISIONS §179.6),
+    /// switched on at the same epoch: borrowing only under guarded rules v2,
+    /// a bounded operator clock, no
+    /// tightening of the line under open loans, liquidity that loans' depth
+    /// depends on stays, and a top-up near the line always goes in.
+    pub(crate) fn lend_179(&self) -> bool {
+        self.fair_batches()
+    }
 }
 
 impl ObjectVm {

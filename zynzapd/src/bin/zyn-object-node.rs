@@ -781,6 +781,18 @@ fn load_lend_snapshot(path: &std::path::Path) -> Option<(u64, serde_json::Value)
 /// under rules v2 (`LendTime`); price posts move it too.
 const LEND_TICK_SECS: u64 = 10;
 
+/// The lending clock's next post: now, but never more than the ledger's
+/// step past where it stands (§179.6) — a node back from a long gap catches
+/// up an hour at a time, every tick, instead of being refused.
+fn lend_clock_next(time: u64) -> u64 {
+    let now = now_secs();
+    if time == 0 {
+        now
+    } else {
+        now.min(time.saturating_add(objectvm::lend::MAX_CLOCK_STEP_SECS))
+    }
+}
+
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -1756,6 +1768,20 @@ fn handle(
             // account in one epoch.
             if let Some(why) = admit(epoch_now, &ObjectVm::intent_authorities(authorized.intent())) {
                 return err(why);
+            }
+            // Inclusion, not consensus (§179.6): prices age by the lending
+            // clock, so a clock that stopped (its thread down, the host
+            // stuck) would keep old prices fresh. Borrowing and taking
+            // collateral out wait until it moves again.
+            if matches!(authorized.intent(), Op::LendOpen { .. } | Op::LendRemoveCollateral { .. }) {
+                let stood = {
+                    let n = node.lock().unwrap();
+                    let l = &n.state().market.lend;
+                    l.v2() && now_secs() > l.time.saturating_add(objectvm::lend::MAX_PRICE_AGE_SECS)
+                };
+                if stood {
+                    return err("lending waits: the lending clock has not moved for five minutes; try again shortly");
+                }
             }
             if let Some(r) = REPLAY.get() {
                 let mut r = r.lock().unwrap();
@@ -3098,11 +3124,16 @@ fn main() {
                 let Some((sym, rest)) = kv.split_once('=') else { continue };
                 let sym = sym.trim().to_uppercase();
                 let parts: Vec<&str> = rest.split(':').collect();
+                // A limit that does not land would leave lending unguarded:
+                // the node does not start on one it cannot read (§179.6).
                 let (true, [c, b, m]) = (assets.iter().any(|(s, _)| s == &sym), parts.as_slice()) else {
-                    eprintln!("zyn-object-node: ZYN_LEND_LIMITS entry {kv:?} not understood");
-                    continue;
+                    eprintln!("zyn-object-node: ZYN_LEND_LIMITS entry {kv:?} not understood (SYM=<collateral cap>:<borrow cap>:<min loan $>, SYM in ZYN_LEND_ASSETS); not starting");
+                    std::process::exit(2);
                 };
-                let (Some(c), Some(b), Some(m)) = (whole(c), whole(b), whole(m)) else { continue };
+                let (Some(c), Some(b), Some(m)) = (whole(c), whole(b), whole(m)) else {
+                    eprintln!("zyn-object-node: ZYN_LEND_LIMITS entry {kv:?} has a number that is not one; not starting");
+                    std::process::exit(2);
+                };
                 limits.insert(sym, objectvm::lend::Limits { collateral_cap: c, borrow_cap: b, min_borrow_usd: m });
             }
         }
@@ -3127,7 +3158,8 @@ fn main() {
         // Under v2 the clock moves first, before any holder's intent: after
         // a restart, prices from before it are as old as they really are.
         if node.lock().map(|n| n.state().market.lend.v2()).unwrap_or(false) {
-            let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at: now_secs() };
+            let at = node.lock().map(|n| lend_clock_next(n.state().market.lend.time)).unwrap_or_else(|_| now_secs());
+            let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at };
             for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
                 if let objectvm::Receipt::Refused(why) = r {
                     eprintln!("zyn-object-node: lending clock refused: {why}");
@@ -3197,8 +3229,14 @@ fn main() {
                 if prices.is_empty() {
                     continue;
                 }
-                // Never behind the clock the timer may have just posted.
-                let at = node.lock().map(|n| now_secs().max(n.state().market.lend.time)).unwrap_or_else(|_| now_secs());
+                // Never behind the clock the timer may have just posted, and
+                // never while it is still catching up after a gap: these are
+                // today's prices, not an hour-old step's (§179.6).
+                let time = node.lock().map(|n| n.state().market.lend.time).unwrap_or(0);
+                if time > 0 && now_secs() > time.saturating_add(objectvm::lend::MAX_CLOCK_STEP_SECS) {
+                    continue;
+                }
+                let at = now_secs().max(time);
                 let op = Op::LendPrices { program: zyn_vm::program::lend_prices(), at, prices };
                 for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
                     if let objectvm::Receipt::Refused(why) = r {
@@ -3269,7 +3307,8 @@ fn main() {
                 l.v2() && now_secs() >= l.time.saturating_add(tick_secs)
             });
             if tick.unwrap_or(false) {
-                let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at: now_secs() };
+                let at = node.lock().map(|n| lend_clock_next(n.state().market.lend.time)).unwrap_or_else(|_| now_secs());
+                let op = Op::LendTime { program: zyn_vm::program::lend_prices(), at };
                 for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
                     if let objectvm::Receipt::Refused(why) = r {
                         eprintln!("zyn-object-node: lending clock refused: {why}");

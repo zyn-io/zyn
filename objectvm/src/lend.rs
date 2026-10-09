@@ -112,6 +112,13 @@ pub const MIN_BID_BPS: i128 = 100;
 /// share of its reserve in Zyn's pool for the pair: what an auction and the
 /// backstop can actually sell.
 pub const DEPTH_LIMIT_BPS: i128 = 2_500;
+/// How far one post may move the lending clock (§179.6): a host clock jump
+/// cannot accrue years of interest in one step; a node behind posts in steps.
+pub const MAX_CLOCK_STEP_SECS: u64 = 3_600;
+/// A top-up goes in past the caps and the depth limit when its position is
+/// within this share of its liquidation line (§179.6): the cap must not keep
+/// a borrower from saving their own position.
+pub const TOP_UP_NEAR_LINE_BPS: i128 = 9_000;
 
 /// What the operator allows per asset.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -722,6 +729,63 @@ impl ObjectVm {
         Ok(())
     }
 
+    /// Whether `asset`'s price is fresh enough to borrow or take collateral
+    /// out on. Ages by the operator's clock, never by epochs (which anyone
+    /// can hurry with intents); a clock that stalls is the node's to catch,
+    /// and it stops taking lending intents when it does (§179.6).
+    fn lend_fresh(&self, asset: &Address) -> bool {
+        self.market.lend.fresh(asset, self.epoch)
+    }
+
+    /// From §179.6, borrowing opens only under guarded rules v2: a mainnet
+    /// whose limits did not land (a malformed entry was skipped) never lends
+    /// against unguarded, ageless prices.
+    fn lending_guarded(&self) -> Result<(), &'static str> {
+        if self.lend_179() && !(self.market.lend.guarded && self.market.lend.v2()) {
+            return Err("borrowing opens only once lending is guarded under rules v2");
+        }
+        Ok(())
+    }
+
+    /// From §179.6: one post moves the lending clock at most
+    /// [`MAX_CLOCK_STEP_SECS`] (the first post sets it).
+    fn clock_step(&self, at: u64) -> Result<(), &'static str> {
+        let now = self.market.lend.time;
+        if self.lend_179() && now > 0 && at > now.saturating_add(MAX_CLOCK_STEP_SECS) {
+            return Err("the lending clock moves at most an hour per post");
+        }
+        Ok(())
+    }
+
+    /// Whether a position stands within [`TOP_UP_NEAR_LINE_BPS`] of its
+    /// liquidation line at the prices health uses.
+    fn near_line(&self, p: &Position) -> bool {
+        let Some(risk) = self.market.lend.listed.get(&p.collateral_asset).map(|l| l.risk) else { return false };
+        let Ok((cv, dv)) = self.position_values(p) else { return false };
+        // dv / cv ≥ 90% of the line, without dividing.
+        dv.saturating_mul(zyn_lend::BPS).saturating_mul(10_000) >= cv.saturating_mul(risk.liquidation_bps as i128).saturating_mul(TOP_UP_NEAR_LINE_BPS)
+    }
+
+    /// From §179.6: what liquidity in pool `p` may leave — never so much that
+    /// collateral backing loans in its pair passes the depth limit. Liquidity
+    /// added to lift the limit for one position stays as long as it is needed.
+    pub(crate) fn check_depth_after(&self, a: &Address, b: &Address, ra: i128, rb: i128) -> Result<(), &'static str> {
+        if !self.lend_179() || !self.market.lend.v2() {
+            return Ok(());
+        }
+        for (c, other, reserve) in [(a, b, ra), (b, a, rb)] {
+            let backing = self.market.lend.collateral_backing(c, other);
+            if backing == 0 {
+                continue;
+            }
+            let limit = zyn_lend::math::mul_div(reserve.max(0), DEPTH_LIMIT_BPS, zyn_lend::BPS).map_err(|_| "overflow")?;
+            if backing > limit {
+                return Err("this liquidity backs open loans; take out less, or once they shrink");
+            }
+        }
+        Ok(())
+    }
+
     fn own_position(&self, who: &AccountId, position: &Hash) -> Result<Position, &'static str> {
         let p = *self.market.lend.positions.get(position).ok_or("no such position")?;
         if &p.owner != who {
@@ -739,6 +803,19 @@ impl ObjectVm {
         }
         if !self.issued.contains_key(asset) || self.market.is_derived(asset) || self.market.lend.is_receipt(asset) {
             return Err("only an asset that exists and was not made here can be lent");
+        }
+        // From §179.6: while loans against it are open, its line can only
+        // rise and its penalty only fall — re-listing must not liquidate
+        // anyone who was healthy a moment ago. The most a new loan may take
+        // can still come down.
+        if self.lend_179() {
+            if let Some(old) = self.market.lend.listed.get(asset).map(|l| l.risk) {
+                let l = &self.market.lend;
+                let open = l.positions.values().any(|p| &p.collateral_asset == asset && p.debt_shares.0 > 0) || l.lots.values().any(|x| &x.collateral_asset == asset);
+                if open && (risk.liquidation_bps < old.liquidation_bps || risk.penalty_bps > old.penalty_bps) {
+                    return Err("while loans against it are open, its liquidation line can only rise and its penalty only fall");
+                }
+            }
         }
         let time = self.market.lend.time;
         match self.market.lend.listed.get_mut(asset) {
@@ -813,6 +890,7 @@ impl ObjectVm {
         if at < self.market.lend.time {
             return Err("the lending clock cannot run backwards");
         }
+        self.clock_step(at)?;
         self.accrue_all(at, &CURVE_V2)?;
         self.market.lend.time = at;
         Ok(Receipt::Lent { id: [0u8; 32] })
@@ -849,6 +927,7 @@ impl ObjectVm {
         if at < self.market.lend.time {
             return Err("prices older than the last ones");
         }
+        self.clock_step(at)?;
         for (a, p) in prices {
             if !self.market.lend.listed.contains_key(a) {
                 return Err("a price for an asset that is not lent here");
@@ -994,11 +1073,12 @@ impl ObjectVm {
         }
         let src = lend_source(borrower, nonce);
         self.fresh_source(&src)?;
+        self.lending_guarded()?;
         if !self.market.lend.listed.contains_key(collateral_asset) {
             return Err("that collateral is not accepted here");
         }
         let risk = self.market.lend.listed[collateral_asset].risk;
-        if !self.market.lend.fresh(collateral_asset, self.epoch) || !self.market.lend.fresh(borrow_asset, self.epoch) {
+        if !self.lend_fresh(collateral_asset) || !self.lend_fresh(borrow_asset) {
             return Err("prices are stale or still moving; borrowing waits for the next confirmed price");
         }
         let (pc, pb) = (self.lend_price(collateral_asset)?, self.lend_price(borrow_asset)?);
@@ -1093,7 +1173,9 @@ impl ObjectVm {
         }
         // Rules v2: the collateral cap and the depth limit hold here as they
         // do when a position opens.
-        if self.market.lend.v2() {
+        // From §179.6, a position near its line takes a top-up past both: a
+        // cap filled by others must not keep a borrower from saving theirs.
+        if self.market.lend.v2() && !(self.lend_179() && self.near_line(&p)) {
             if let Some(lc) = self.market.lend.limits.get(&p.collateral_asset) {
                 let held = self.market.lend.collateral_held(&p.collateral_asset).checked_add(amount.0).ok_or("collateral overflow")?;
                 if held > lc.collateral_cap.0 {
@@ -1124,7 +1206,8 @@ impl ObjectVm {
         }
         p.collateral = Fixed(p.collateral.0 - amount.0);
         if p.debt_shares.0 > 0 {
-            if !self.market.lend.fresh(&p.collateral_asset, self.epoch) || !self.market.lend.fresh(&p.borrow_asset, self.epoch) {
+            self.lending_guarded()?;
+            if !self.lend_fresh(&p.collateral_asset) || !self.lend_fresh(&p.borrow_asset) {
                 return Err("prices are stale or still moving; taking collateral out waits for the next confirmed price");
             }
             let risk = self.market.lend.listed.get(&p.collateral_asset).ok_or("that collateral is not accepted here")?.risk;

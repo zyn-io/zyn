@@ -865,3 +865,95 @@ fn bold_lists_under_rules_v2_and_lends_against_eth() {
     assert!(c.vm.market.lend.lots.contains_key(&carol), "liquidated on BOLD's own price");
     assert!(c.vm.market.lend.positions.contains_key(&bob), "Bob's BOLD debt got cheaper, not riskier");
 }
+
+// ---- The pre-campaign audit (9 Oct 2026, DECISIONS §179.6). Mainnet has
+// these rules from genesis; testnet from `objectvm::TESTNET_FAIR_BATCHES_FROM`.
+
+/// The same chain, judged by mainnet's rules.
+fn on_mainnet(mut c: Chain) -> Chain {
+    c.vm.chain_id = 26460;
+    c
+}
+
+#[test]
+fn no_borrowing_until_lending_is_guarded_under_rules_v2() {
+    // Listed and priced, but no limits landed: before, this lent against
+    // ageless prices with no breaker; now it refuses.
+    let mut c = on_mainnet(market());
+    assert!(!c.vm.market.lend.guarded);
+    assert_eq!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(1)), Err("borrowing opens only once lending is guarded under rules v2"));
+    // Testnet's history, before the switch, lent as it did.
+    let mut t = market();
+    assert!(t.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(1)).is_ok());
+    // Under guarded rules v2 it lends.
+    let mut c = on_mainnet(v2());
+    assert!(c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(1)).is_ok());
+}
+
+#[test]
+fn the_lending_clock_moves_at_most_an_hour_per_post() {
+    let mut c = on_mainnet(v2());
+    let t = c.now();
+    assert_eq!(c.refused(Op::LendTime { program: program::lend_prices(), at: t + 3_601 }), "the lending clock moves at most an hour per post");
+    let zec = Fixed(5_000 * WAD / 100);
+    assert_eq!(c.refused(Op::LendPrices { program: program::lend_prices(), at: t + 7_200, prices: vec![(ZEC, zec)] }), "the lending clock moves at most an hour per post");
+    // A node that was away catches up in steps.
+    c.tick(t + 3_600);
+    c.tick(t + 7_200);
+    assert_eq!(c.now(), t + 7_200);
+}
+
+#[test]
+fn relisting_cannot_tighten_the_line_under_open_loans() {
+    let mut c = on_mainnet(v2());
+    c.open(BOB, ZEC, Fixed::whole(100), SOL, Fixed::whole(1)).unwrap();
+    let list = |max: u32, line: u32, pen: u32| Op::LendList { program: program::lend_list(), asset: ZEC, max_ltv_bps: max, liquidation_bps: line, penalty_bps: pen };
+    let old = c.vm.market.lend.listed[&ZEC].risk;
+    let why = "while loans against it are open, its liquidation line can only rise and its penalty only fall";
+    assert_eq!(c.refused(list(old.max_ltv_bps - 500, old.liquidation_bps - 100, old.penalty_bps)), why);
+    assert_eq!(c.refused(list(old.max_ltv_bps, old.liquidation_bps, old.penalty_bps + 100)), why);
+    // What a new loan may take can still come down.
+    c.ok(list(old.max_ltv_bps - 500, old.liquidation_bps, old.penalty_bps));
+}
+
+#[test]
+fn liquidity_that_loans_depend_on_stays_in_the_pool() {
+    let mut c = on_mainnet(v2());
+    // 700 of the 750 ZEC the 3,000 ZEC pool allows.
+    c.open(BOB, ZEC, Fixed::whole(700), SOL, Fixed::whole(1)).unwrap();
+    let pid = market::pool_id(&ZEC, &SOL);
+    let p = c.vm.market.pools[&pid];
+    // Dave's pool shares, out of the claims the pool paid them into.
+    let lp = market::lp_asset(&pid);
+    let owed: Vec<(Hash, Fixed)> = c.vm.market.claims.iter().filter(|(_, x)| x.owner == DAVE && x.asset == lp).map(|(i, x)| (*i, x.amount)).collect();
+    let outputs = owed.iter().map(|(_, a)| c.note(DAVE, lp, *a)).collect();
+    c.ok(Op::Claim { owner: DAVE, program: program::claim(), claims: owed.iter().map(|(i, _)| *i).collect(), outputs });
+    let remove = |c: &mut Chain, share_bps: i128| {
+        let shares = Fixed(p.shares.0 * share_bps / 10_000);
+        let (inputs, change) = c.fund(DAVE, market::lp_asset(&pid), shares);
+        let nonce = c.fresh();
+        c.apply(Op::RemoveLiquidity { provider: DAVE, program: program::remove_liquidity(), pool: pid, shares, min_a: Fixed::ZERO, min_b: Fixed::ZERO, inputs, change, nonce })
+    };
+    // Taking 10% out leaves 2,700 ZEC: 675 may back loans, 700 do.
+    match remove(&mut c, 1_000) {
+        Receipt::Refused(why) => assert_eq!(why, "this liquidity backs open loans; take out less, or once they shrink"),
+        other => panic!("{other:?}"),
+    }
+    // 5% leaves 2,850: 712.5 may.
+    assert!(!ObjectVm::rejected(&remove(&mut c, 500)));
+}
+
+#[test]
+fn a_position_near_its_line_takes_a_top_up_past_the_cap() {
+    let mut c = on_mainnet(v2());
+    // ZEC at $50, SOL at $150: 300 ZEC ($15,000) backs 50 SOL ($7,500), 50% of
+    // a 60% line — then ZEC falls to $40: 62.5%… past it; to $43: 58%, near.
+    let pos = c.open(BOB, ZEC, Fixed::whole(300), SOL, Fixed::whole(50)).unwrap();
+    let held = c.vm.market.lend.collateral_held(&ZEC);
+    c.limits(ZEC, (held / WAD) as i64, 10_000, 1);
+    assert_eq!(c.add(BOB, &pos, ZEC, Fixed::whole(10)), Err("this collateral is at its cap"));
+    let t = c.now();
+    c.prices_c(t + 10, 4_300, 15_000);
+    c.prices_c(t + 11, 4_300, 15_000);
+    assert!(c.add(BOB, &pos, ZEC, Fixed::whole(10)).is_ok(), "near its line, the top-up goes in");
+}
