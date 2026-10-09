@@ -231,3 +231,16 @@ dialog a { color: #e8a916; }
 .app b { font: 700 24px Bricolage; }
 .app span { font-size: 13px; color: #4d5255; }
 .app code { font: 11px Mono; color: #a56b00; }
+
+/* The wallet in views (9 Oct 2026): Home is a balance, not every form. */
+.zec-mini { margin: 0 0 44px; border: 1px solid #1f24282d; border-radius: 14px; background: #fffaf0; padding: 22px 24px; display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; justify-content: space-between; }
+.zec-mini b { display: block; font: 700 40px/1 Bricolage; margin: 8px 0 4px; }
+.zec-mini-go { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.zec-mini-go .quiet { font-size: 14px; font-weight: 700; color: #1f2428; padding: 8px 0; }
+.settings .setting { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 18px 0; border-bottom: 1px solid #1f24281f; }
+.settings .setting b { font-weight: 700; }
+.settings .setting .muted { color: #6d716f; margin: 4px 0 0; font-size: 13px; }
+.settings .setting input[type=checkbox] { width: 20px; height: 20px; accent-color: #e8a916; flex: none; }
+#withdraw-mine { display: block; margin: 2px 0 6px; color: #e8a916; }
+.settings .setting b { font: 700 17px Plex; }
+.settings { margin-top: 8px; }
