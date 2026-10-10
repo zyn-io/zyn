@@ -669,7 +669,8 @@ function renderZec(v) {
   root.querySelector('#zec-detail').textContent = parts.join(' · ') || 'Shielded. Only this phrase can see it.';
   renderZecAddress(v);
   root.querySelector('#zec-go').disabled = held === 0 || zecSending;
-  if (v.syncedTo >= 0) zecStatus('up to date');
+  // "up to date" is said by a sync that finished, never by opening the
+  // wallet at the block it last stood at.
   const notes = root.querySelector('#zec-notes');
   const shieldLog = activity(config, identity).filter((a) => a.kind === 'shield').slice(0, 6);
   const shields = shieldLog.map((a) => `<li><b>${escapeHtml(a.amount)} ZEC</b><span>shielded from transparent</span><code>${escapeHtml(short(a.tx || ''))}</code></li>`);
@@ -845,7 +846,7 @@ async function zecSync() {
         if (e.kind === 'received') note(`Received ${zecText(e.zatoshi)} ZEC${e.memo ? ` — “${e.memo}”` : ''}.`);
       }
     });
-    if (current === generation && zecAccount === account) { renderZec(view); void zecTransparent(); }
+    if (current === generation && zecAccount === account) { renderZec(view); zecStatus('up to date'); void zecTransparent(); }
   } catch (e) {
     if (current === generation) zecStatus(e.message, true);
   } finally {
@@ -957,6 +958,7 @@ function bindZec() {
         else if (s.to) zecStatus(syncText(s));
       });
       renderZec(view);
+      zecStatus('up to date');
       form.reset();
       logActivity(config, identity, { kind: 'out', title: 'Sent ZEC', symbol: 'ZEC', amount: `−${zecText(zat)}`, to, tx: view.txid });
       renderActivity();
