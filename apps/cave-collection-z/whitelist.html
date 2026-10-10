@@ -184,6 +184,12 @@
         .dig.working i { animation: none; }
         .apply:hover:not([disabled]) { transform: none; }
       }
+      .regi { margin-top: 26px; }
+      .regi-say { margin: 0 0 18px; font-family: var(--sans); font-size: 15px; line-height: 1.6; color: var(--read); }
+      .regi-say strong { color: var(--ink); }
+      .regi .hint { display: block; margin-top: 12px; }
+      .regi .out b { font-family: var(--mono); letter-spacing: 0.08em; color: var(--ink); }
+      .regi .out a { color: var(--acid); }
     </style>
   </head>
   <body>
@@ -255,6 +261,22 @@
             </div>
             <p class="out" id="out" role="status" aria-live="polite"></p>
           </form>
+        </div>
+      </div>
+
+      <div class="ledger regi" id="regi">
+        <div class="ledger-index">
+          <span>register / REGI</span>
+          <span><b>holders</b></span>
+          <span>free</span>
+        </div>
+        <div class="ledger-body">
+          <p class="regi-say">Hold <strong>REGI</strong> on Arc? Sign once with that wallet and get your code straight away. It is free: nothing is sent or burned, and your REGI stays where it is.</p>
+          <div class="apply-row">
+            <button class="apply" id="regi-go" type="button">Sign with my Arc wallet</button>
+          </div>
+          <p class="out" id="regi-out" role="status" aria-live="polite"></p>
+          <span class="hint">For wallets that held REGI at the snapshot. We keep a keyed hash of the wallet, so it gets one place, and never the address itself. Signing again shows the same code.</span>
         </div>
       </div>
 
@@ -414,6 +436,45 @@
           apply.disabled = false;
         }
       });
+    </script>
+    <script>
+      // REGI holders (DECISIONS §181): one signature, no transaction. The
+      // message is the one functions/api/whitelist/regi.js checks, byte for byte.
+      (() => {
+        const go = document.getElementById('regi-go');
+        const out = document.getElementById('regi-out');
+        const say = (text, ok) => { out.textContent = text; out.className = 'out' + (ok === true ? ' ok' : ok === false ? ' bad' : ''); };
+        const wallets = [];
+        window.addEventListener('eip6963:announceProvider', (e) => { if (e.detail?.provider) wallets.push(e.detail.provider); });
+        window.dispatchEvent(new Event('eip6963:requestProvider'));
+        const hexOf = (s) => '0x' + [...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('');
+        go.addEventListener('click', async () => {
+          const eth = wallets[0] || window.ethereum;
+          if (!eth?.request) { say('No Arc or EVM wallet in this browser. Open this page in the browser that has it.', false); return; }
+          go.disabled = true;
+          try {
+            say('Connect your wallet…');
+            const [account] = await eth.request({ method: 'eth_requestAccounts' });
+            const wallet = String(account || '').toLowerCase();
+            const date = new Date().toISOString();
+            const message = `Cave whitelist: REGI holder sign-up\nWallet: ${wallet}\nDate: ${date}\nThis signature only proves you hold this wallet. It moves nothing.`;
+            say('Sign the message in your wallet. It moves nothing.');
+            const signature = await eth.request({ method: 'personal_sign', params: [hexOf(message), account] });
+            const r = await fetch('/api/whitelist/regi', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ wallet, date, signature }) });
+            const data = await r.json().catch(() => ({}));
+            if (!data.ok) { say(data.error || 'That did not go through. Try again.', false); return; }
+            out.className = 'out ok';
+            out.innerHTML = '';
+            out.append('Your code: ');
+            const b = document.createElement('b'); b.textContent = data.code; out.append(b);
+            out.append(data.already ? '. Same code as before. ' : '. Keep it. ');
+            const a = document.createElement('a'); a.href = '/mint'; a.textContent = 'Link it on /mint'; out.append(a);
+            out.append(' with your Nap account.');
+          } catch (e) {
+            say(e?.code === 4001 ? 'You declined in your wallet. Nothing was signed.' : (e?.message || 'That did not go through.'), false);
+          } finally { go.disabled = false; }
+        });
+      })();
     </script>
   </body>
 </html>
