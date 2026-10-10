@@ -134,7 +134,7 @@ async function home() {
       : `<span class="verify wait">Replay catching up</span>`;
   const anchored = s.anchored_through != null
     ? `Through epoch ${num(s.anchored_through)}`
-    : 'Not yet — the first anchor waits on a funded vault';
+    : 'Not yet — the first anchor comes with the first ZEC deposit or withdrawal';
   const kinds = Object.entries(s.kinds || {}).sort((a, b) => b[1] - a[1])
     .map(([k, n]) => `<li><span>${esc(k)}</span><b>${num(n)}</b></li>`).join('');
   return `
