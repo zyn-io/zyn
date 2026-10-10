@@ -2,15 +2,13 @@
 
 ## Main post (announces the article)
 
-Every chain is a glass house.
+Every chain is a glass house: your balance, trades and history, public forever.
 
-Your balance, your trades, your history: public forever, by default.
-
-Each chain now builds its own small private room. None of them is neutral ground.
+Each chain builds its own small private room. None is neutral ground.
 
 The Cave is. Come in with any coin; leave with your privacy.
 
-Read the ZCave manifesto 👇
+The ZCave manifesto 👇
 [link to the article]
 
 ---
