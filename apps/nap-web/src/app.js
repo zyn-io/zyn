@@ -268,6 +268,25 @@ const WHERE = IN_APP ? { closing: 'Closing the app' }
   : IN_EXTENSION ? { closing: 'Closing Nap' }
   : { closing: 'Closing this tab' };
 
+/// Nap for Chrome: the newest release's zip, and how to load it. Only where
+/// it can be installed — not inside the extension or the phone app, and not
+/// on a phone's browser.
+const EXTENSION_ZIP = 'https://github.com/zyn-io/nap-wallet/releases/latest/download/nap-wallet-chrome.zip';
+const EXTENSION_RELEASE = 'https://github.com/zyn-io/nap-wallet/releases/latest';
+const canInstallExtension = () => !IN_EXTENSION && !IN_APP && !IN_POPUP && !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+function extensionSteps() {
+  return `<div class="ext-get">
+    <div class="ext-head"><b>Nap for Chrome</b><a class="ext-download" href="${EXTENSION_ZIP}" rel="noopener">Download →</a></div>
+    <ol>
+      <li>Unzip <code>nap-wallet-chrome.zip</code>.</li>
+      <li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b> (top right).</li>
+      <li>Click <b>Load unpacked</b> and choose the unzipped folder.</li>
+      <li>Pin Nap from the puzzle-piece menu, then restore with your recovery phrase.</li>
+    </ol>
+    <p class="ext-fine">Works in Chrome, Brave, Edge and Arc. <a href="${EXTENSION_RELEASE}" target="_blank" rel="noopener">Release notes</a></p>
+  </div>`;
+}
+
 function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'restore')) {
   if (mode !== 'create') generatedWords = '';
   shell(`<main class="onboard">
@@ -279,6 +298,7 @@ function onboarding(mode = keptWallet() ? 'kept' : (claimCode ? 'create' : 'rest
       ${IN_EXTENSION || setupMode
     ? `<div class="promise"><span>02</span><p><b>Saved here, sealed with your password.</b>${tip('Only the key is stored, sealed under your password. Never your phrase.')}</p></div>`
     : `<div class="promise"><span>02</span><p><b>Not saved unless you set a password.</b>${tip(`${WHERE.closing} forgets the key. With a password, only the key is stored, sealed under it. Never your phrase.`)}</p></div>`}
+      ${canInstallExtension() ? extensionSteps() : ''}
     </section>
     <section class="entry panel">
       ${mode === 'kept' ? '' : `<div class="tabs"><button data-mode="restore" class="${mode === 'restore' ? 'active' : ''}">Restore</button><button data-mode="create" class="${mode === 'create' ? 'active' : ''}">Create new</button></div>`}
@@ -447,6 +467,7 @@ function wallet(message = '') {
       <div data-view="settings" hidden>
         <section class="activity settings">
           <div class="setting"><div><b>Recovery</b><p class="muted">How to restore this wallet in any Nap.</p></div><button class="quiet" id="recovery-link">Show →</button></div>
+          ${canInstallExtension() ? `<div class="setting setting-ext">${extensionSteps()}</div>` : ''}
           <label class="setting art-consent"><div><b>Show artwork</b><p class="muted">Pictures come from Nap's media gateway, which then learns your IP address and which items you hold.</p></div><input type="checkbox" id="art-toggle"></label>
           ${identity.zec ? '<div class="setting"><div><b>Zcash scan</b><p class="muted">Missing ZEC you received before this wallet was made here?</p></div><button class="quiet" id="settings-rescan">Scan from an earlier block →</button></div>' : ''}
         </section>
