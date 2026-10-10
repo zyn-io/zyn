@@ -14,6 +14,9 @@ const api = () => (LOCAL && params.get('api')) || APIS[network];
 const main = document.getElementById('main');
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+/// A Solana transaction signature: 64 bytes in base58.
+const isSolanaSig = (v) => typeof v === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(v);
+const solscan = (sig) => `https://solscan.io/tx/${encodeURIComponent(sig)}${network === 'testnet' ? '?cluster=devnet' : ''}`;
 const short = (h, n = 8) => (isHex(h) ? `${h.slice(0, n)}…${h.slice(-4)}` : esc(h));
 const hash = (h) => `<span class="hash" title="${esc(h)}">${short(h)}</span>`;
 const num = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—');
@@ -94,7 +97,9 @@ function detail(t) {
   if (d.root) parts.push(`root ${hash(d.root)}`);
   if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
   if (d.burn) parts.push(`burn ${hash(d.burn)}`);
-  if (d.asset && !d.serial && d.serial !== 0) parts.push(`asset ${hash(d.asset)}`);
+  if (d.coin) parts.push(`<b>${esc(d.coin)}</b>`);
+  else if (d.asset && !d.serial && d.serial !== 0) parts.push(`asset ${hash(d.asset)}`);
+  if (d.source) parts.push(`source ${hash(d.source)}`);
   if (d.network) parts.push(`${esc(d.network)}${d.origin ? ` · ${hash(d.origin)}` : ''} · ${esc(d.decimals)} decimals`);
   return parts.join(' · ');
 }
@@ -182,6 +187,23 @@ async function epochPage(n) {
 
 async function txPage(n) {
   const t = await get(`/api/tx/${n}`);
+  // The other end of a bridge deposit: the claim that took it, or the
+  // deposits a claim took; and, when the page was opened from a Solana
+  // signature, that transaction — checked against the ledger again here.
+  const sig = new URLSearchParams(location.search).get('sol');
+  let fromSolana = '';
+  if (t.kind === 'Bridge deposit' && isSolanaSig(sig)) {
+    const hit = await get(`/api/solana/${sig}`).catch(() => null);
+    fromSolana = hit?.seq === n
+      ? `<div class="wide"><dt>Solana transaction</dt><dd><a href="${solscan(sig)}" target="_blank" rel="noreferrer" class="mono small">${esc(sig.slice(0, 12))}…${esc(sig.slice(-6))}</a> <span class="verify yes">✓ its hash is this deposit's source</span></dd></div>`
+      : `<div class="wide"><dt>Solana transaction</dt><dd><span class="verify no">✗ that signature is not this deposit's source</span></dd></div>`;
+  }
+  const link = (s) => `<a href="/tx/${s}" data-link class="mono">#${num(s)}</a>`;
+  const other = t.kind === 'Bridge deposit'
+    ? `<div><dt>Claimed</dt><dd>${t.claimed_in != null ? `in ${link(t.claimed_in)}` : '<span class="dim">not yet</span>'}</dd></div>`
+    : t.kind === 'Bridge deposit claimed' && t.deposits?.length
+      ? `<div><dt>Deposits taken</dt><dd>${t.deposits.map(link).join(', ')}</dd></div>`
+      : '';
   return `
     <nav class="crumbs"><a href="/" data-link>Home</a> / <a href="/epoch/${t.epoch}" data-link>Epoch ${num(t.epoch)}</a> / Tx #${num(n)}</nav>
     <section class="panel">
@@ -192,6 +214,7 @@ async function txPage(n) {
         <div><dt>Epoch</dt><dd><a href="/epoch/${t.epoch}" data-link>${num(t.epoch)}</a></dd></div>
         <div><dt>Notes</dt><dd>${t.created == null ? 'not shown for lending' : `${t.created} created · ${t.spent} spent`}</dd></div>
         <div><dt>Public detail</dt><dd>${detail(t) || '<span class="dim">none — who and how much stay private</span>'}</dd></div>
+        ${fromSolana}${other}
         <div><dt>Settled</dt><dd>${anchorBadge(t.anchor)}</dd></div>
       </dl>
     </section>`;
@@ -230,8 +253,15 @@ async function assetsPage() {
 // Search and routing.
 
 async function search(q) {
-  const v = q.trim().toLowerCase();
+  const raw = q.trim();
+  const v = raw.toLowerCase();
   if (!v) return;
+  if (isSolanaSig(raw)) {
+    const hit = await get(`/api/solana/${raw}`).catch((e) => (e.status === 404 ? null : Promise.reject(e)));
+    if (hit) return navigate(`/tx/${hit.seq}`, { sol: raw });
+    main.innerHTML = `<p class="empty">No bridge deposit on the ${network} ledger comes from that Solana transaction yet. A deposit shows here once Solana finalizes it and the bridge records it, usually within a minute or two.</p>`;
+    return;
+  }
   const m = v.match(/^(?:epoch\s*|e)(\d+)$/);
   if (m) return navigate(`/epoch/${m[1]}`);
   const t = v.match(/^#?(\d+)$/);
@@ -242,7 +272,7 @@ async function search(q) {
       || (market?.collections || []).some((c) => c.asset === v);
     if (hit) return navigate('/assets');
   }
-  main.innerHTML = `<p class="empty">Nothing public matches “${esc(q)}”. Try an epoch (e12), a transaction (#34), or a coin, collection or pool address.</p>`;
+  main.innerHTML = `<p class="empty">Nothing public matches “${esc(q)}”. Try an epoch (e12), a transaction (#34), a Solana deposit's signature, or a coin, collection or pool address.</p>`;
 }
 
 function route() {
@@ -275,9 +305,13 @@ async function render() {
   }
 }
 
-function navigate(path) {
-  const q = network === 'testnet' ? '?network=testnet' : '';
-  history.pushState({}, '', path + q + (LOCAL && params.get('api') ? `${q ? '&' : '?'}api=${encodeURIComponent(params.get('api'))}` : ''));
+function navigate(path, extra = {}) {
+  const q = new URLSearchParams();
+  if (network === 'testnet') q.set('network', 'testnet');
+  for (const [k, v] of Object.entries(extra)) q.set(k, v);
+  if (LOCAL && params.get('api')) q.set('api', params.get('api'));
+  const qs = q.toString();
+  history.pushState({}, '', path + (qs ? `?${qs}` : ''));
   render();
   window.scrollTo(0, 0);
 }

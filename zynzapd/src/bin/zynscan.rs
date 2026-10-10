@@ -10,6 +10,10 @@
 //! * **Transactions**: sequence, epoch, the kind of operation, accepted or
 //!   refused, and how many notes it created and spent.
 //! * **Market state**: the node's own public `zyn_market` and `zyn_status`.
+//! * **Bridge deposits by their source**: a Solana signature finds the
+//!   deposit it made (`/api/solana/<signature>`), through the ledger's own
+//!   reference for it (`sol_bridge::tx_ref`); a deposit names the claim that
+//!   took it, and the claim the deposits it took — never the account.
 //!
 //! What it does not serve is the reason it exists at tier 2 (DECISIONS
 //! §130.12, §133.4): "private from the public; we can see them". Accounts,
@@ -54,6 +58,32 @@ fn hex(b: &[u8]) -> String {
 
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// A bridged coin's name, for the ones Zyn's bridges carry.
+fn coin_name(network: &[u8], origin: &[u8]) -> Option<&'static str> {
+    let net = String::from_utf8_lossy(network);
+    if origin.is_empty() {
+        return if net.starts_with("solana") {
+            Some("SOL.zy")
+        } else if net.starts_with("eip155:") {
+            Some("ETH.zy")
+        } else if net.starts_with("bitcoin") {
+            Some("BTC.zy")
+        } else {
+            None
+        };
+    }
+    // Liquity BOLD: mainnet, and the Sepolia stand-in.
+    match hex(origin).as_str() {
+        "6440f144b7e50d6a8439336510312d2f54beb01d" | "d58c9e3eebe83fda55d59c186e86b37aa5d0f79a" => Some("BOLD.zy"),
+        _ => None,
+    }
+}
+
+/// A Solana signature: 64 bytes in base58 (88 characters at most).
+fn is_solana_signature(s: &str) -> bool {
+    (64..=88).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() && !b"0OIl".contains(&c))
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +246,9 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
             json!({ "network": String::from_utf8_lossy(network), "origin": hex(origin), "decimals": decimals }),
         ),
         // Like a ZEC deposit: which asset arrived, not how much or for whom.
-        Op::DepositCommitted { asset, .. } => ("Bridge deposit", true, json!({ "asset": hex(asset) })),
+        // `source` is the ledger's hash of the transaction on the other chain,
+        // which is public there; whoever holds that transaction can match it.
+        Op::DepositCommitted { asset, external_ref, .. } => ("Bridge deposit", true, json!({ "asset": hex(asset), "source": hex(external_ref) })),
         Op::ClaimDeposit { asset, .. } => ("Bridge deposit claimed", false, json!({ "asset": hex(asset) })),
         // Lending: which pool or pair, as a swap shows its pool; never how
         // much, never whose. Listings and prices are the operator's, public.
@@ -275,6 +307,14 @@ struct Index {
     next_epoch: u64,
     applied_in_open: usize,
     anchors: BTreeMap<u64, (u64, String)>,
+    /// Accepted bridge deposits by their source reference.
+    refs: BTreeMap<[u8; 32], u64>,
+    /// Deposits not yet claimed, by where they wait; and which claim took
+    /// each deposit that was.
+    waiting: BTreeMap<[u8; 32], Vec<u64>>,
+    claimed_in: BTreeMap<u64, u64>,
+    /// Bridged coins' names, by asset.
+    coins: BTreeMap<[u8; 32], &'static str>,
     market: Value,
     status: Value,
     error: Option<String>,
@@ -293,6 +333,10 @@ impl Index {
             next_epoch: 0,
             applied_in_open: 0,
             anchors: BTreeMap::new(),
+            refs: BTreeMap::new(),
+            waiting: BTreeMap::new(),
+            claimed_in: BTreeMap::new(),
+            coins: BTreeMap::new(),
             market: Value::Null,
             status: Value::Null,
             error: None,
@@ -305,6 +349,10 @@ impl Index {
         self.vm = fresh.vm;
         self.epochs.clear();
         self.txs.clear();
+        self.refs.clear();
+        self.waiting.clear();
+        self.claimed_in.clear();
+        self.coins.clear();
         self.next_epoch = 0;
         self.applied_in_open = 0;
     }
@@ -334,11 +382,14 @@ impl Index {
                     .map_err(|e| format!("seq {seq} does not verify: {e:?}"))?;
                 let op = authorized.into_intent();
                 let receipts = self.vm.apply_committed(*seq, &op, record);
-                let (kind, operator, detail) = describe(&op, &receipts);
+                let (kind, operator, mut detail) = describe(&op, &receipts);
                 let refusal = receipts.iter().find_map(|r| match r {
                     Receipt::Refused(why) => Some(why.to_string()),
                     _ => None,
                 });
+                if refusal.is_none() {
+                    self.bridge_links(&op, &receipts, *seq, &mut detail);
+                }
                 let (refusal, created, spent) = redact(kind, operator, refusal, op.created().len(), op.retired().len());
                 self.txs.insert(*seq, Tx {
                     seq: *seq,
@@ -404,6 +455,53 @@ impl Index {
         }
         self.error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
         self.at = now();
+    }
+
+    /// What ties a bridge deposit to its source and to the claim that took it.
+    fn bridge_links(&mut self, op: &Op, receipts: &[Receipt], seq: u64, detail: &mut Value) {
+        match op {
+            Op::RegisterBridged { network, origin, .. } => {
+                if let Some(name) = coin_name(network, origin) {
+                    self.coins.insert(objectvm::bridge::asset_of(network, origin), name);
+                }
+            }
+            Op::DepositCommitted { asset, external_ref, .. } => {
+                self.refs.insert(*external_ref, seq);
+                for r in receipts {
+                    if let Receipt::DepositWaiting { key, .. } = r {
+                        self.waiting.entry(*key).or_default().push(seq);
+                    }
+                }
+                if let Some(name) = self.coins.get(asset) {
+                    detail["coin"] = json!(name);
+                }
+            }
+            Op::ClaimDeposit { owner, secret, asset, .. } => {
+                let key = objectvm::bridge::deposit_key(&objectvm::bridge::deposit_commitment(owner, secret), asset);
+                for d in self.waiting.remove(&key).unwrap_or_default() {
+                    self.claimed_in.insert(d, seq);
+                }
+                if let Some(name) = self.coins.get(asset) {
+                    detail["coin"] = json!(name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A transaction as its own page shows it: with the anchor that carries
+    /// it, and for the bridge, the claim or deposits on the other end.
+    fn tx_json(&self, t: &Tx) -> Value {
+        let mut v = t.json();
+        v["anchor"] = self.anchor_for(t.epoch);
+        match t.kind {
+            "Bridge deposit" => v["claimed_in"] = json!(self.claimed_in.get(&t.seq)),
+            "Bridge deposit claimed" => {
+                v["deposits"] = json!(self.claimed_in.iter().filter(|(_, c)| **c == t.seq).map(|(d, _)| *d).collect::<Vec<_>>())
+            }
+            _ => {}
+        }
+        v
     }
 
     /// The first anchor at or after `epoch`: an anchor covers every epoch
@@ -502,12 +600,18 @@ fn route(ix: &Index, network: &str, path: &str) -> (u16, Value) {
             }
             if let Some(n) = p.strip_prefix("/api/tx/").and_then(|s| s.parse::<u64>().ok()) {
                 return match ix.txs.get(&n) {
-                    Some(t) => {
-                        let mut v = t.json();
-                        v["anchor"] = ix.anchor_for(t.epoch);
-                        (200, v)
-                    }
+                    Some(t) => (200, ix.tx_json(t)),
                     None => (404, json!({ "error": "no such transaction yet" })),
+                };
+            }
+            if let Some(sig) = p.strip_prefix("/api/solana/") {
+                if !is_solana_signature(sig) {
+                    return (400, json!({ "error": "that is not a Solana transaction signature" }));
+                }
+                let r = zynzapd::sol_bridge::tx_ref(sig);
+                return match ix.refs.get(&r) {
+                    Some(seq) => (200, json!({ "seq": seq, "source": hex(&r) })),
+                    None => (404, json!({ "error": "no bridge deposit on this ledger comes from that transaction", "source": hex(&r) })),
                 };
             }
             (404, json!({ "error": "not found" }))
@@ -678,6 +782,70 @@ mod tests {
         j.sync().unwrap();
         ix.ingest().unwrap();
         assert_eq!(route(&ix, "testnet", "/api/txs").1.as_array().unwrap().len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Solana signature finds the deposit it made, the deposit names its
+    /// coin and the claim that took it, and the claim names the deposit —
+    /// with no account anywhere in what is served.
+    #[test]
+    fn a_solana_signature_finds_its_deposit_and_the_claim() {
+        use zyn_vm::note_enc::{seal, viewing_public, StaticSecret};
+        let dir = std::env::temp_dir().join(format!("zynscan-bridge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut j = zyn::journal::Journal::open(&dir, 212).unwrap();
+        let mut vm = zynzapd::object_verify::fresh(212, 16);
+        let sig = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tEvKMs9JdXn6JWb4FWkVZTH9c";
+        let sol = objectvm::bridge::asset_of(b"solana", b"");
+        let (owner, secret) = ([0xA1; 32], [0x5E; 32]);
+        let commitment = objectvm::bridge::deposit_commitment(&owner, &secret);
+        let ops = [
+            Op::RegisterBridged { program: zyn_vm::program::bridge_register(), network: b"solana".to_vec(), origin: vec![], decimals: 9 },
+            Op::DepositCommitted { program: zyn_vm::program::deposit(), asset: sol, gross: zynzapd::sol_bridge::fixed_of(100_000_000), external_ref: zynzapd::sol_bridge::tx_ref(sig), commitment },
+        ];
+        let mut receipts = Vec::new();
+        for op in ops {
+            let enc = zyn_vm::verify::encode_authorized::<ObjectVm>(&zyn_vm::verify::Authorized::operator(op.clone()));
+            let seq = vm.seq() + 1;
+            j.record(0, seq, &enc).unwrap();
+            receipts = vm.apply_committed(seq, &op, &enc);
+            assert!(!ObjectVm::rejected(&receipts[0]), "{receipts:?}");
+        }
+        j.sync().unwrap();
+        let mut ix = Index::new(212, 16, dir.clone());
+        ix.ingest().unwrap();
+
+        let (code, found) = route(&ix, "testnet", &format!("/api/solana/{sig}"));
+        assert_eq!(code, 200, "{found}");
+        let seq = found["seq"].as_u64().unwrap();
+        let (_, tx) = route(&ix, "testnet", &format!("/api/tx/{seq}"));
+        assert_eq!(tx["kind"], "Bridge deposit");
+        assert_eq!(tx["detail"]["coin"], "SOL.zy");
+        assert_eq!(tx["detail"]["source"], hex(&zynzapd::sol_bridge::tx_ref(sig)));
+        assert_eq!(tx["claimed_in"], Value::Null, "not claimed yet");
+        assert_eq!(route(&ix, "testnet", "/api/solana/4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM2xZ3m8yHGa3a8z1iRsMk7nnbmfxDm9BcFqahE6EBV8HVb").0, 404, "another signature finds nothing");
+        assert_eq!(route(&ix, "testnet", "/api/solana/not-a-signature").0, 400);
+
+        // The claim, by the depositor: linked both ways, the account nowhere.
+        let net = receipts.iter().find_map(|r| match r { Receipt::DepositWaiting { amount, .. } => Some(*amount), _ => None }).unwrap();
+        let enc = seal(&viewing_public(&StaticSecret::from([0x11; 32])), StaticSecret::from([0x42; 32]), b"n").unwrap();
+        let claim = Op::ClaimDeposit {
+            owner,
+            program: zyn_vm::program::claim(),
+            secret,
+            asset: sol,
+            output: objectvm::Output { note: zyn_vm::object::Note { asset: sol, amount: net, owner, nonce: [7; 32] }, enc },
+        };
+        let mut detail = describe(&claim, &[]).2;
+        ix.bridge_links(&claim, &[], 99, &mut detail);
+        ix.txs.insert(99, Tx { seq: 99, epoch: 0, kind: "Bridge deposit claimed", operator: false, ok: true, refusal: None, created: Some(1), spent: Some(0), detail });
+        let (_, tx) = route(&ix, "testnet", &format!("/api/tx/{seq}"));
+        assert_eq!(tx["claimed_in"], 99);
+        let (_, c) = route(&ix, "testnet", "/api/tx/99");
+        assert_eq!(c["deposits"], json!([seq]));
+        assert_eq!(c["detail"]["coin"], "SOL.zy");
+        assert!(!c.to_string().contains(&hex(&owner)) && !tx.to_string().contains(&hex(&owner)), "no account: {c} {tx}");
+        assert!(!tx.to_string().contains("100000000"), "no amount: {tx}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
