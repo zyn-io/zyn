@@ -284,7 +284,10 @@
       const loadedAt = Date.now();
 
       let solved = null;        // { handle, nonce, window }
-      let dig = null;           // the dig in flight, one at a time
+      // The dig in flight, one at a time. Not `dig`: that is the indicator
+      // above, and a second `dig` in this scope stopped the whole script
+      // from running (from 27 Sep to 10 Oct 2026).
+      let digging = null;
       let digHandle = '';
 
       function say(message, ok) {
@@ -339,18 +342,18 @@
           return Promise.resolve();
         }
         if (solved && solved.handle === handle && solved.window >= windowNow() - 1) return Promise.resolve();
-        if (dig && digHandle === handle) return dig;
+        if (digging && digHandle === handle) return digging;
         digHandle = handle;
         setDig('working', 'digging');
         const window_ = windowNow();
-        dig = solve(handle).then((nonce) => {
+        digging = solve(handle).then((nonce) => {
           if (digHandle !== handle) return;
-          dig = null;
+          digging = null;
           if (nonce === null) { setDig('', 'dig failed — press Apply to try again'); return; }
           solved = { handle, nonce, window: window_ };
           setDig('done', 'through');
         });
-        return dig;
+        return digging;
       }
 
       handleEl.addEventListener('blur', startDig);
