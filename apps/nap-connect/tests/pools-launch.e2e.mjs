@@ -71,7 +71,9 @@ await page.waitForFunction(() => /ZEC/.test(document.querySelector('#coin-mcap')
 await connectJade();
 await page.waitForFunction(() => /You hold/.test(document.querySelector('#trade-balance').textContent), null, { timeout: 60000 });
 const report = {};
-for (const [side, values] of [['buy', ['abc', '0', '-1', '1e3', '0.0000001', '999']], ['sell', ['abc', '0', '-5', '1.5', '99999999999']]]) {
+// A buy above the balance is no longer refused (§178): Jade offers to bring the rest
+// in through Nap, which jade-fund.e2e.mjs covers; so no oversized buy here.
+for (const [side, values] of [['buy', ['abc', '0', '-1', '1e3', '0.0000001']], ['sell', ['abc', '0', '-5', '1.5', '99999999999']]]) {
   await page.click(`[data-trade="${side}"]`);
   await page.waitForTimeout(300);
   for (const v of values) {
@@ -90,7 +92,7 @@ await page.goto(`${JADE}/coin/${TGRAD}?network=testnet&nap=${NAP}`, { waitUntil:
 await page.waitForSelector('#coin-title', { timeout: 30000 });
 await page.waitForTimeout(4000);
 const nf = `${await page.textContent('#coin-title')} ${await page.textContent('#coin-description')}`;
-ok(/not found/i.test(nf) && /priced in ZEC\.zy/.test(nf), `jade, a coin it does not list: says why (${nf.trim().slice(0, 90)})`);
+ok(/not found/i.test(nf) && /No coin has this address on testnet/.test(nf), `jade, a coin it does not list: says why (${nf.trim().slice(0, 90)})`);
 ok(/^[—\s]*$/.test(await page.textContent('#coin-mcap')) && /^[—\s]*$/.test(await page.textContent('#trade-output')), 'jade, a coin it does not list: nothing of the last coin stays on screen');
 await page.screenshot({ path: `${S}/jade-not-listed.png`, fullPage: true });
 

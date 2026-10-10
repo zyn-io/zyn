@@ -78,6 +78,13 @@ for (const v of VENUES) {
       await page.goto(v.url.replace('#/markets', '#/portfolio'));
       await page.waitForFunction(() => /^[0-9a-f]{64}$/.test(document.querySelector('#pf-id-zyn')?.textContent || ''), null, { timeout: 30000 });
       const shown = await page.evaluate(() => ({ zyn: document.querySelector('#pf-id-zyn').textContent, zec: document.querySelector('#pf-id-zec').textContent }));
+      // The portfolio asks for notes and positions; Nap asks the holder first (audit,
+      // 9 Oct 2026). Answer those cards so the next venue finds Nap's window free.
+      for (let i = 0; i < 2; i++) {
+        const share = await win.waitForSelector('main:has(.kicker:text-is("SHARE")) #yes', { timeout: 15000 }).catch(() => null);
+        if (!share) break;
+        await win.click('#yes');
+      }
       const base = `${new URL(v.url).origin}/vendor/zec/`;
       const z = await import(`data:text/javascript,${encodeURIComponent(await (await fetch(`${base}nap_zec.js`)).text())}`);
       await z.default({ module_or_path: Buffer.from(await (await fetch(`${base}nap_zec_bg.wasm`)).arrayBuffer()) });
