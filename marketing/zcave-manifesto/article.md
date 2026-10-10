@@ -65,6 +65,8 @@ Members take on roles by choice, and each role is kept by work anyone can check:
 - **Lookouts** run and check the infrastructure: replicas, the public RPC, audits.
 - **Lanterns** bring people in, with events, guides and onboarding.
 
+**Cave Projects.** Builder teams doing privacy work, on Zcash or any chain, can join the Cave as projects. A project is public: its name, its team and its milestones. It proves it controls its repo or domain and earns a Cave Project mark on the ledger that can't be transferred. In return it gets code reviews from Lookouts, mentoring from Diggers, demo days from Lanterns, shared legal counsel paid by the treasury (Cave is not a law firm and gives no legal advice), and grants that members vote on and release milestone by milestone. Projects pay a flat service fee and give up nothing else: no equity, no tokens. Projects don't vote: votes stay one per Cave item, and members stay private.
+
 The DAO's treasury has no key. It pays out only what members vote to pay. Votes run on Zcash blocks, which nobody can speed up, and the rules are fixed before the first proposal, so nobody can rewrite them mid-vote.
 
 Moles dig. Owls watch. Moths carry light to people outside.
