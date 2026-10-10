@@ -346,6 +346,8 @@ pub struct Market {
     pub burns: BTreeMap<Hash, Address>,
     /// Gated sales' lists and per-account counts (§168), by collection.
     pub sale_gates: BTreeMap<Address, crate::sale::Gate>,
+    /// Sale credit (§182): budgets, burns' credit waiting, credit held.
+    pub credits: crate::sale::Credits,
     /// Collections' DAOs (§172), by collection.
     pub daos: BTreeMap<Address, crate::dao::Dao>,
     /// The Zcash clock DAOs' strict windows run on (§173): height and hash.
@@ -376,6 +378,7 @@ impl Market {
             && self.curve_quotes.is_empty()
             && self.routes.is_empty()
             && self.sale_gates.is_empty()
+            && self.credits.is_empty()
             && self.daos.is_empty()
             && self.dao_clock.is_none()
             && self.sales.is_empty()
@@ -627,6 +630,10 @@ impl Market {
         if let Some(c) = &self.dao_clock {
             crate::dao::clock_section(&mut e, c);
         }
+        // And sale credit, once there is any (§182).
+        if !self.credits.is_empty() {
+            crate::sale::credits_section(&mut e, &self.credits);
+        }
         e.leaf()
     }
 
@@ -640,7 +647,10 @@ impl Market {
         // proposals carry their own terms. It carries MARKET14's tail too.
         // MARKET16 (§176) once a DAO has a Zyn track: its proposals carry the
         // team's vote. It carries MARKET15's tail too.
-        let v16 = self.daos.values().any(|d| d.zyn.is_some());
+        // MARKET17 (§182) once a sale has credit: it carries MARKET16's tail
+        // too, with the Zcash clock optional, since credit needs no clock.
+        let v17 = !self.credits.is_empty();
+        let v16 = v17 || self.daos.values().any(|d| d.zyn.is_some());
         let v15 = v16 || self.dao_clock.is_some();
         let v14 = v15 || !self.daos.is_empty();
         let v13 = v14 || !self.sale_gates.is_empty();
@@ -650,7 +660,7 @@ impl Market {
         // MARKET12 (§167) only while a route waits: it carries MARKET11 too.
         // MARKET13 (§168) once a sale is gated: it carries MARKET12's tail too.
         // MARKET14 (§172) once a collection has a DAO: it carries MARKET13's too.
-        e.bytes(if v16 { b"MARKET16" } else if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        e.bytes(if v17 { b"MARKET17" } else if v16 { b"MARKET16" } else if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -736,7 +746,17 @@ impl Market {
         if v14 {
             crate::dao::encode(e, &self.daos, v15, v16);
         }
-        if v15 {
+        if v17 {
+            match self.dao_clock {
+                None => {
+                    e.u8(0);
+                }
+                Some((h, hash)) => {
+                    e.u8(1).u32(h).bytes(&hash);
+                }
+            }
+            crate::sale::encode_credits(e, &self.credits);
+        } else if v15 {
             let (h, hash) = self.dao_clock.expect("v15 means started");
             e.u32(h).bytes(&hash);
         }
@@ -755,14 +775,15 @@ impl Market {
         // v9 predates lending rules v2 (§160) and reads as rules 0.
         // v10 predates quote assets (§166) and reads as none named.
         let tag = d.take_bytes(8).ok()?;
-        let v16 = tag == b"MARKET16";
+        let v17 = tag == b"MARKET17";
+        let v16 = v17 || tag == b"MARKET16";
         let v15 = v16 || tag == b"MARKET15";
         let v14 = v15 || tag == b"MARKET14";
         let v13 = v14 || tag == b"MARKET13";
         let v12 = v13 || tag == b"MARKET12";
         let v11 = v12 || tag == b"MARKET11";
         let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
-            b"MARKET16" | b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET17" | b"MARKET16" | b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -913,7 +934,14 @@ impl Market {
         if v14 {
             m.daos = crate::dao::decode(d, v15, v16)?;
         }
-        if v15 {
+        if v17 {
+            m.dao_clock = match d.u8().ok()? {
+                0 => None,
+                1 => Some((d.u32().ok()?, d.hash().ok()?)),
+                _ => return None,
+            };
+            m.credits = crate::sale::decode_credits(d)?;
+        } else if v15 {
             m.dao_clock = Some((d.u32().ok()?, d.hash().ok()?));
         }
         Some(m)

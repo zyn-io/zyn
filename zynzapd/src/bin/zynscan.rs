@@ -239,6 +239,12 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // A burn is public on its own chain already; which Zyn account it
         // belongs to is not shown (the commitment hides it).
         Op::PostVoucher { collection, burn, count, .. } => ("Burn posted", true, json!({ "collection": hex(collection), "burn": hex(burn), "tickets": count })),
+        // Sale credit (§182): the team's funding is public (it is the team's),
+        // a burn's credit is public as its burn is on its own chain; who takes
+        // it up and spends it is not.
+        Op::FundSaleCredit { collection, amount, .. } => ("Sale credit funded", true, json!({ "collection": hex(collection), "amount": amount.0.to_string() })),
+        Op::PostCredit { collection, burn, amount, .. } => ("Burn credited", true, json!({ "collection": hex(collection), "burn": hex(burn), "amount": amount.0.to_string() })),
+        Op::RedeemCredit { collection, .. } => ("Credit taken up", false, json!({ "collection": hex(collection) })),
         Op::ClaimVoucherItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
         Op::RegisterBridged { network, origin, decimals, .. } => (
             "Bridged asset registered",

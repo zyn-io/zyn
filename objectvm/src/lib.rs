@@ -547,6 +547,34 @@ pub enum Op {
         collection: Address,
         cap: u32,
     },
+    /// Pay into a sale for burns to be credited against (§182): floor and
+    /// treasury at once, and the amount becomes the sale's credit budget.
+    FundSaleCredit {
+        funder: AccountId,
+        program: ProgramId,
+        collection: Address,
+        amount: Fixed,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// One burn on another chain, recorded once, as credit worth `amount`
+    /// in the sale under the burner's `commitment` (§182). Operator only.
+    PostCredit {
+        program: ProgramId,
+        collection: Address,
+        burn: Hash,
+        commitment: Hash,
+        amount: Fixed,
+    },
+    /// Take up a burn's credit by revealing the secret behind its commitment
+    /// from this account (§182).
+    RedeemCredit {
+        buyer: AccountId,
+        program: ProgramId,
+        collection: Address,
+        secret: Hash,
+    },
     /// One burn on another chain, recorded once, as `count` tickets under
     /// ids from the burner's `commitment` (§145). Operator only.
     PostVoucher {
@@ -757,6 +785,9 @@ pub enum Receipt {
     OpenMintPosted { collection: Address, count: u32 },
     VoucherCapSet { collection: Address, cap: u32 },
     VoucherPosted { first: Hash, count: u32 },
+    SaleCreditFunded { collection: Address, budget: Fixed },
+    CreditPosted { key: Hash, amount: Fixed },
+    CreditRedeemed { amount: Fixed },
     BridgedRegistered { asset: Address },
     DepositWaiting { key: Hash, amount: Fixed },
     /// A lending intent applied; `id` is its source (or the receipt asset,
@@ -781,6 +812,7 @@ impl Op {
             | Op::CreateCurve { inputs, .. }
             | Op::CurveTrade { inputs, .. }
             | Op::BuyTickets { inputs, .. }
+            | Op::FundSaleCredit { inputs, .. }
             | Op::ClaimItems { inputs, .. }
             | Op::ClaimVoucherItems { inputs, .. }
             | Op::MintOpen { inputs, .. }
@@ -823,6 +855,7 @@ impl Op {
             | Op::CreateCurve { change, .. }
             | Op::CurveTrade { change, .. }
             | Op::BuyTickets { change, .. }
+            | Op::FundSaleCredit { change, .. }
             | Op::LendSupply { change, .. }
             | Op::LendWithdraw { change, .. }
             | Op::LendOpen { change, .. }
@@ -2377,6 +2410,21 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_set_voucher_cap(collection, *cap)
             }),
+            Op::FundSaleCredit { funder, program, collection, amount, nonce, inputs, change } => one(if *program != program::sale_tickets() {
+                Err("wrong program for sale credit")
+            } else {
+                self.apply_fund_sale_credit(funder, collection, *amount, nonce, inputs, change)
+            }),
+            Op::PostCredit { program, collection, burn, commitment, amount } => one(if *program != program::sale_vouchers() {
+                Err("wrong program for sale credit")
+            } else {
+                self.apply_post_credit(collection, burn, commitment, *amount)
+            }),
+            Op::RedeemCredit { buyer, program, collection, secret } => one(if *program != program::sale_claim() {
+                Err("wrong program for sale credit")
+            } else {
+                self.apply_redeem_credit(buyer, collection, secret)
+            }),
             Op::PostVoucher { program, collection, burn, commitment, count } => one(if *program != program::sale_vouchers() {
                 Err("wrong program for burn tickets")
             } else {
@@ -2562,6 +2610,8 @@ impl MicrochainVm for ObjectVm {
             Op::CreateCurve { creator, .. } => vec![*creator],
             Op::CurveTrade { trader, .. } => vec![*trader],
             Op::BuyTickets { buyer, .. } | Op::ClaimItems { buyer, .. } | Op::ClaimVoucherItems { buyer, .. } | Op::MintOpen { buyer, .. } => vec![*buyer],
+            Op::FundSaleCredit { funder, .. } => vec![*funder],
+            Op::RedeemCredit { buyer, .. } => vec![*buyer],
             Op::ClaimDeposit { owner, .. } => vec![*owner],
             Op::LendSupply { lender, .. } | Op::LendWithdraw { lender, .. } => vec![*lender],
             Op::LendOpen { borrower, .. }
@@ -3053,6 +3103,17 @@ impl MicrochainVm for ObjectVm {
             Op::SetVoucherCap { program, collection, cap } => {
                 e.u8(33).bytes(&program.0).bytes(collection).u32(*cap);
             }
+            Op::FundSaleCredit { funder, program, collection, amount, nonce, inputs, change } => {
+                e.u8(65).bytes(funder).bytes(&program.0).bytes(collection).fixed(*amount).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PostCredit { program, collection, burn, commitment, amount } => {
+                e.u8(66).bytes(&program.0).bytes(collection).bytes(burn).bytes(commitment).fixed(*amount);
+            }
+            Op::RedeemCredit { buyer, program, collection, secret } => {
+                e.u8(67).bytes(buyer).bytes(&program.0).bytes(collection).bytes(secret);
+            }
             Op::PostVoucher { program, collection, burn, commitment, count } => {
                 e.u8(34).bytes(&program.0).bytes(collection).bytes(burn).bytes(commitment).u32(*count);
             }
@@ -3543,6 +3604,23 @@ impl MicrochainVm for ObjectVm {
                 }
                 Some(Op::ClaimDeposit { owner, program, secret, asset, output: one.remove(0) })
             }
+            65 => Some(Op::FundSaleCredit {
+                funder: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            66 => Some(Op::PostCredit {
+                program: ProgramId(d.hash().ok()?),
+                collection: d.hash().ok()?,
+                burn: d.hash().ok()?,
+                commitment: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+            }),
+            67 => Some(Op::RedeemCredit { buyer: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, secret: d.hash().ok()? }),
             33 => Some(Op::SetVoucherCap { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, cap: d.u32().ok()? }),
             34 => Some(Op::PostVoucher {
                 program: ProgramId(d.hash().ok()?),

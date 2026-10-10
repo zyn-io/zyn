@@ -1,0 +1,32 @@
+{
+  "zcave": {
+    "chain": "solana",
+    "chain_name": "Solana",
+    "cluster": "mainnet",
+    "symbol": "ZCAVE",
+    "mint": "GQepeKGNpNatDRMPivFYVsJmfWUsJhtzFhBthCtLpump",
+    "decimals": 6,
+    "curve": "2MLraLvpEq5CXTiJS6ETKhLpmZKUHV2eB5AZwxs2r5rg",
+    "zec_decimals": 8
+  },
+  "regi": {
+    "chain": "evm",
+    "chain_name": "Arc",
+    "chain_id": 5042,
+    "rpc": "https://rpc.quicknode.mainnet.arc.io",
+    "symbol": "REGI",
+    "token": "0x93D5b8c53ee763C2c4522bF0d958ce51Af4360ae",
+    "decimals": 18,
+    "v4": {
+      "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+      "slot": "bfb2c46a4308e57a10d2c1bd1de3d26f82e89e6a8d840e77e53def66f1f0f999",
+      "quote": "0x3600000000000000000000000000000000000000",
+      "quote_decimals": 6
+    },
+    "add_chain": {
+      "chainName": "Arc",
+      "nativeCurrency": { "name": "USDC", "symbol": "USDC", "decimals": 18 },
+      "rpcUrls": ["https://rpc.quicknode.mainnet.arc.io"]
+    }
+  }
+}

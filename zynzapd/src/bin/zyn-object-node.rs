@@ -439,6 +439,8 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
                 // A gated sale (§168): who is on the list stays blinded; how
                 // many are, and the price rule, are public.
                 "gate": vm.market.sale_gates.get(&s.collection).map(|g| serde_json::json!({ "base": g.base, "listed": g.allowed.len() })),
+                // Sale credit (§182): what the team's funding still covers.
+                "credit_budget": vm.market.credits.budgets.get(&s.collection).map_or(0, |b| b.0).to_string(),
             })
             .to_string()
         })
@@ -1191,6 +1193,30 @@ fn handle(
                 "listed": gate.is_none_or(|g| g.allowed.contains_key(&key)),
                 "bought": gate.and_then(|g| g.allowed.get(&key)).copied().unwrap_or(0),
                 "base": gate.map(|g| g.base),
+            });
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
+        }
+        // Sale credit (§182), by the blinded keys only the wallet can derive:
+        // what it holds (`credit_key`) and which of its burns' credit waits
+        // (`credit_pending_key`, comma-separated, at most 64).
+        "zyn_saleCredit" => {
+            let get = |k: &str| field(body, k).and_then(|h| unhex(&h)).and_then(|b| <[u8; 32]>::try_from(b).ok());
+            let Some(collection) = get("collection") else {
+                return err("zyn_saleCredit needs a collection");
+            };
+            let pending: Vec<[u8; 32]> = field(body, "pending")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|k| !k.is_empty())
+                .take(64)
+                .filter_map(|k| unhex(k).and_then(|b| <[u8; 32]>::try_from(b).ok()))
+                .collect();
+            let n = node.lock().unwrap();
+            let c = &n.state().market.credits;
+            let v = serde_json::json!({
+                "budget": c.budgets.get(&collection).map_or(0, |b| b.0).to_string(),
+                "held": get("key").and_then(|k| c.held.get(&k)).map_or(0, |h| h.0).to_string(),
+                "pending": pending.iter().filter_map(|k| c.pending.get(k).map(|a| serde_json::json!({ "key": hex(k), "amount": a.0.to_string() }))).collect::<Vec<_>>(),
             });
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
         }

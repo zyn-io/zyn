@@ -17,16 +17,18 @@ test('a payment is sent in full, not cut to 8 decimals', () => {
   assert.equal((zstore.match(/pay: exact\(/g) || []).length, 3, 'item buy, market buy and tickets pay exactly');
 });
 
-test('a burn is capped at the burn tickets left, and never shares a code', () => {
-  // Over the cap the chain refuses the whole burn and the tokens are gone.
-  assert.match(zstore, /const n = whole\('burn-in', max\);/);
+test('a burn asks for no more credit than the sale has left, and never shares a code', () => {
+  // Past the budget a burn gets only what is left, and the tokens are gone either way.
+  assert.match(zstore, /if \(want > budget\) return fail\(/);
   assert.match(zstore, /try \{ sale = await chainSale\(\); \}/, 'the sale is read again right before a burn');
   // A reused memo is refused by the chain; the second burn earned nothing.
   assert.match(zstore, /ask\('zyn_burnMemo', \{ fresh: true \}\)/);
 });
 
 test('counts are whole numbers, checked before they reach BigInt or Nap', () => {
-  for (const id of ['count-in', 'burn-in', 'mint-in']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
+  for (const id of ['count-in', 'mint-in']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
+  // Credit is a decimal of ZEC, read to WAD without a float.
+  assert.match(zstore, /if \(!\/\^\\d\*\\\.\?\\d\+\$\/\.test\(v \|\| ''\)\) return null;/);
   assert.doesNotMatch(zstore, /Math\.min\(20, Number\(el\('count-in'\)\.value\)\)/);
 });
 
@@ -47,7 +49,7 @@ test('"nothing was paid" is said only when Nap said no', () => {
 });
 
 test('the whitelist runs one dig at a time and never says "reload"', () => {
-  assert.match(whitelist, /if \(dig && digHandle === handle\) return dig;/);
+  assert.match(whitelist, /if \(digging && digHandle === handle\) return digging;/);
   assert.doesNotMatch(whitelist, /Reload and try again/);
   assert.doesNotMatch(whitelist, /Places are given, not bought/);
   // Since §168 the list gates the sale: the page must not say it gates nothing.

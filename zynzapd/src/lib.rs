@@ -37,6 +37,7 @@ mod restore;
 pub mod rpc;
 pub mod sale;
 pub mod tap;
+pub mod burn_credit;
 pub mod burn_watch;
 pub mod sale_draw;
 pub mod eth_bridge;

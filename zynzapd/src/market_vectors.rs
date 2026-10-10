@@ -454,6 +454,23 @@ fn sale_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
                 change: vec![change()],
             }),
         ),
+        // Sale credit (§182).
+        ("credit_pending_key", hex(&objectvm::sale::credit_pending_key(&TOKEN, &voucher_commitment(&OWNER, &NONCE)))),
+        ("credit_key", hex(&objectvm::sale::credit_key(&TOKEN, &OWNER))),
+        ("credit_funding", hex(&objectvm::sale::credit_funding(&OWNER, &NONCE))),
+        (
+            "fund_sale_credit",
+            enc(&Op::FundSaleCredit {
+                funder: OWNER,
+                program: program::sale_tickets(),
+                collection: TOKEN,
+                amount: Fixed::whole(3),
+                nonce: NONCE,
+                inputs: input.to_vec(),
+                change: vec![change()],
+            }),
+        ),
+        ("redeem_credit", enc(&Op::RedeemCredit { buyer: OWNER, program: program::sale_claim(), collection: TOKEN, secret: NONCE })),
         (
             "mint_open",
             enc(&Op::MintOpen {

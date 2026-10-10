@@ -1,5 +1,6 @@
 //! `zyn-burn-watch` — Solana burns of the promotional token become Collection
-//! Z tickets on Zyn (DECISIONS §145).
+//! Z tickets on Zyn (DECISIONS §145), or, with `ZYN_BURN_POST=credit`, sale
+//! credit worth what they burned (§182).
 //!
 //! ```text
 //!   zyn-burn-watch status    the rate, the cap, how many burn tickets are left
@@ -23,6 +24,12 @@
 //!   ZYN_BURN_PRICES      file holding the last hour's readings
 //!                                         (/var/lib/zyn/burn-prices.json)
 //!   ZYN_BURN_PER_TICKET  base units burned per ticket, when no pool is set
+//!   ZYN_BURN_POST        tickets (§145) or credit (§182)             (tickets)
+//!   ZYN_BURN_CURVE       credit: the token's pump.fun bonding curve account,
+//!                        priced at its virtual reserves (instead of a pool)
+//!   ZYN_BURN_DECIMALS    credit: the token's decimal places              (6)
+//!   ZYN_BURN_ZEC_PER_TOKEN  credit: a fixed price in ZEC for a test token
+//!                        with no market (testnet only)
 //!   ZYN_BURN_NODE        the object ledger's JSON-RPC  (http://127.0.0.1:8599)
 //!   ZYN_SUBMIT_TOKEN     the operator door's token (read from the node's env)
 //!   ZYN_BURN_COLLECTION  the sale's collection                (Collection Z)
@@ -37,6 +44,7 @@ use objectvm::{ObjectVm, Op};
 use serde_json::{json, Value};
 use zyn_vm::spec::MicrochainVm;
 use zyn_vm::program;
+use zynzapd::burn_credit;
 use zynzapd::burn_watch::{burn_id, decode_burn, tickets_for};
 
 fn env(k: &str, d: &str) -> String {
@@ -52,6 +60,10 @@ fn hex(b: &[u8]) -> String {
 enum Rate {
     Fixed(u64),
     Pool { token_vault: String, zec_vault: String, zec_decimals: u32, prices: std::path::PathBuf },
+    /// A pump.fun bonding curve against bridged ZEC (credit only).
+    Curve { account: String, zec_decimals: u32, prices: std::path::PathBuf },
+    /// A fixed price in ZEC (WAD per whole token), for a test token.
+    ZecPerToken(u128),
 }
 
 /// The window the median rate is taken over.
@@ -61,6 +73,9 @@ struct Watch {
     rpc: String,
     mint: String,
     rate: Rate,
+    /// Post credit (§182) rather than tickets.
+    credit: bool,
+    decimals: u32,
     node: String,
     collection: [u8; 32],
     cursor: std::path::PathBuf,
@@ -73,7 +88,29 @@ fn watch() -> Result<Watch, String> {
         return Err("set ZYN_BURN_MINT to the token's mint address".into());
     }
     let pool = env("ZYN_BURN_POOL", "");
-    let rate = if pool.is_empty() {
+    let curve = env("ZYN_BURN_CURVE", "");
+    let credit = match env("ZYN_BURN_POST", "tickets").as_str() {
+        "tickets" => false,
+        "credit" => true,
+        other => return Err(format!("ZYN_BURN_POST is tickets or credit, not {other}")),
+    };
+    let zec_decimals: u32 = env("ZYN_BURN_ZEC_DECIMALS", "8").parse().map_err(|_| "ZYN_BURN_ZEC_DECIMALS must be a number".to_string())?;
+    let fixed_price = env("ZYN_BURN_ZEC_PER_TOKEN", "");
+    let rate = if !fixed_price.is_empty() {
+        if !credit {
+            return Err("ZYN_BURN_ZEC_PER_TOKEN prices credit; set ZYN_BURN_POST=credit".into());
+        }
+        let p: f64 = fixed_price.parse().map_err(|_| "ZYN_BURN_ZEC_PER_TOKEN is a number of ZEC".to_string())?;
+        Rate::ZecPerToken(burn_credit::wad(p).ok_or("ZYN_BURN_ZEC_PER_TOKEN must be above nothing")?)
+    } else if !curve.is_empty() {
+        if !credit {
+            return Err("ZYN_BURN_CURVE prices credit; set ZYN_BURN_POST=credit".into());
+        }
+        Rate::Curve { account: curve, zec_decimals, prices: env("ZYN_BURN_PRICES", "/var/lib/zyn/burn-prices.json").into() }
+    } else if pool.is_empty() {
+        if credit {
+            return Err("credit needs a price: set ZYN_BURN_CURVE or ZYN_BURN_POOL".into());
+        }
         let per_ticket: u64 = env("ZYN_BURN_PER_TICKET", "").parse().map_err(|_| "set ZYN_BURN_POOL to the token's pool, or ZYN_BURN_PER_TICKET to the base units one ticket costs".to_string())?;
         if per_ticket == 0 {
             return Err("ZYN_BURN_PER_TICKET must be above zero".into());
@@ -84,7 +121,7 @@ fn watch() -> Result<Watch, String> {
         Rate::Pool {
             token_vault: token_vault.trim().to_string(),
             zec_vault: zec_vault.trim().to_string(),
-            zec_decimals: env("ZYN_BURN_ZEC_DECIMALS", "8").parse().map_err(|_| "ZYN_BURN_ZEC_DECIMALS must be a number".to_string())?,
+            zec_decimals,
             prices: env("ZYN_BURN_PRICES", "/var/lib/zyn/burn-prices.json").into(),
         }
     };
@@ -99,6 +136,8 @@ fn watch() -> Result<Watch, String> {
         rpc: env("ZYN_BURN_RPC", "https://api.mainnet-beta.solana.com"),
         mint,
         rate,
+        credit,
+        decimals: env("ZYN_BURN_DECIMALS", "6").parse().map_err(|_| "ZYN_BURN_DECIMALS must be a number".to_string())?,
         node: env("ZYN_BURN_NODE", "http://127.0.0.1:8599"),
         collection,
         cursor: env("ZYN_BURN_CURSOR", "/var/lib/zyn/burn-cursor").into(),
@@ -151,10 +190,107 @@ impl Watch {
         Ok((spot, zynzapd::burn_watch::median_rate(&rates)))
     }
 
+    /// The token's price in ZEC (WAD per whole token) now, from the curve's
+    /// virtual reserves or the pool's two balances.
+    fn zec_per_token(&self) -> Result<u128, String> {
+        match &self.rate {
+            Rate::Curve { account, zec_decimals, .. } => {
+                let v = self.solana("getAccountInfo", json!([account, { "encoding": "base64", "commitment": "finalized" }]))?;
+                let data = v["value"]["data"][0].as_str().ok_or_else(|| format!("{account} is not an account"))?;
+                let bytes = base64_decode(data).ok_or("the curve's data is not base64")?;
+                let (price, complete) = burn_credit::pump_curve_price(&bytes, self.decimals, *zec_decimals).ok_or("the curve has no price")?;
+                if complete {
+                    return Err("the curve has completed; price the token from its pool (ZYN_BURN_POOL)".into());
+                }
+                Ok(price)
+            }
+            Rate::Pool { token_vault, zec_vault, zec_decimals, .. } => {
+                let (t, z) = (self.reserve(token_vault)?, self.reserve(zec_vault)?);
+                if t == 0 || *zec_decimals > 18 {
+                    return Err("the pool is empty".into());
+                }
+                z.checked_mul(10u128.pow(18 - zec_decimals))
+                    .and_then(|z| z.checked_mul(10u128.checked_pow(self.decimals)?))
+                    .map(|n| n / t)
+                    .filter(|p| *p > 0)
+                    .ok_or_else(|| "the pool prices the token at nothing".to_string())
+            }
+            Rate::ZecPerToken(p) => Ok(*p),
+            Rate::Fixed(_) => Err("credit needs a price".into()),
+        }
+    }
+
+    /// The price burns are valued at this pass: the lower median of the
+    /// hour's readings, None while still gathering.
+    fn credit_price(&self) -> Result<(u128, Option<u128>), String> {
+        let spot = self.zec_per_token()?;
+        // A fixed test price needs no hour of readings.
+        if let Rate::ZecPerToken(p) = self.rate {
+            return Ok((p, Some(p)));
+        }
+        let (Rate::Curve { prices, .. } | Rate::Pool { prices, .. }) = &self.rate else { return Err("credit needs a price".into()) };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        Ok((spot, burn_credit::record(prices, now, spot)?))
+    }
+
+    /// One pass in credit mode (§182): every finalized burn since the cursor
+    /// becomes credit worth what it burned, out of what is left of the budget.
+    fn once_credit(&self, sale: &Value) -> Result<(), String> {
+        let (_, median) = self.credit_price()?;
+        // Too few readings yet: nothing is read and the cursor stays.
+        let Some(price) = median else {
+            return Err(format!("valuing burns needs {} readings of the price; still gathering", burn_credit::MIN_READINGS));
+        };
+        let head = self.newest()?;
+        let over = sale["phase"].as_str() == Some("openmint") && sale["open_next"].as_u64() >= sale["open_count"].as_u64();
+        let mut budget: i128 = sale["credit_budget"].as_str().and_then(|b| b.parse().ok()).unwrap_or(0);
+        for sig in self.new_signatures()? {
+            let Some(tx) = Some(self.solana("getTransaction", json!([sig, { "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "finalized" }]))?).filter(|v| !v.is_null()) else {
+                continue;
+            };
+            let Some(b) = decode_burn(&tx, &self.mint) else { continue };
+            let Some(worth) = burn_credit::credit_for(b.amount as u128, self.decimals, price) else {
+                println!("{sig}: burned {} — worth nothing at the price", b.amount);
+                continue;
+            };
+            if over {
+                println!("{sig}: burned {} after the sale ended — no credit", b.amount);
+                continue;
+            }
+            // Past the budget, a burn gets what is left of it (§182.4).
+            let amount = worth.min(budget);
+            if amount <= 0 {
+                println!("{sig}: burned {} with the sale's credit budget spent — no credit", b.amount);
+                continue;
+            }
+            let receipts = self.submit(&Op::PostCredit {
+                program: program::sale_vouchers(),
+                collection: self.collection,
+                burn: burn_id(&sig),
+                commitment: b.commitment,
+                amount: zyn_vm::Fixed(amount),
+            })?;
+            if receipts.contains("already posted") {
+                continue;
+            }
+            if receipts.contains("Refused") {
+                println!("{sig}: not posted — {}", receipts.chars().take(160).collect::<String>());
+                continue;
+            }
+            budget -= amount;
+            println!("{sig}: {amount} credit (of {worth}) for burn {}", hex(&burn_id(&sig)));
+        }
+        if let Some(h) = head {
+            std::fs::write(&self.cursor, h).map_err(|e| format!("{}: {e}", self.cursor.display()))?;
+        }
+        Ok(())
+    }
+
     /// Base units one ticket costs for the burns this pass posts.
     fn per_ticket(&self, sale: &Value) -> Result<u64, String> {
         match &self.rate {
             Rate::Fixed(n) => Ok(*n),
+            Rate::Curve { .. } | Rate::ZecPerToken(_) => Err("this prices credit, not tickets".into()),
             Rate::Pool { .. } => {
                 let (_, median) = self.read_rate(sale)?;
                 // Too few readings yet: the burns wait, unposted, for the next pass.
@@ -211,6 +347,9 @@ impl Watch {
         let Some(sale) = self.sale()? else {
             return Err("there is no sale for this collection yet".into());
         };
+        if self.credit {
+            return self.once_credit(&sale);
+        }
         // The rate first: without one, nothing is read and the cursor stays,
         // so the burns wait for a priced pass.
         let per_ticket = self.per_ticket(&sale)?;
@@ -263,7 +402,19 @@ fn main() {
         "status" => {
             let sale = w.sale()?;
             println!("mint        {}", w.mint);
+            if w.credit {
+                println!("posts       credit (§182)");
+                match w.credit_price() {
+                    Ok((spot, median)) => println!("price       {spot} ZEC-wad per token now; burns valued at {}", median.map_or("— (gathering readings)".into(), |m| format!("{m} (hour's lower median)"))),
+                    Err(e) => println!("price       unknown: {e}"),
+                }
+                if let Some(s) = &sale {
+                    println!("budget      {} (ZEC-wad left)", s["credit_budget"].as_str().unwrap_or("0"));
+                }
+            }
             match &w.rate {
+                Rate::Curve { account, .. } => println!("curve       {account}"),
+                Rate::ZecPerToken(p) => println!("fixed       {p} ZEC-wad per token (test)"),
                 Rate::Fixed(n) => println!("per ticket  {n} base units (fixed)"),
                 Rate::Pool { token_vault, zec_vault, .. } => {
                     println!("pool        token {token_vault} · ZEC {zec_vault}");
@@ -308,4 +459,21 @@ fn main() {
         eprintln!("zyn-burn-watch {cmd}: {e}");
         std::process::exit(1);
     }
+}
+
+/// Standard base64, as Solana's RPC returns account data.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes().filter(|c| *c != b'=') {
+        acc = (acc << 6) | A.iter().position(|x| *x == c)? as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }

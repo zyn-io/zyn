@@ -9,6 +9,7 @@
 
 import { connect, discover, NAP_WEB } from './nap-connect.js';
 import * as sol from './solana-burn.js';
+import * as evm from './evm-burn.js';
 
 const initial = new URLSearchParams(location.search);
 const NETWORK = initial.get('network') === 'testnet' ? 'testnet' : 'mainnet';
@@ -411,42 +412,69 @@ async function chainSale() {
   return s;
 }
 
-// Burn tickets (§145): the token, per network, and the two Solana reads the
-// burn needs — asked of Solana directly, since its public RPC refuses
-// Cloudflare's workers.
+// Sale credit (§182): ZCAVE burned on Solana or REGI burned on Arc, worth
+// what was burned at its USD price, out of the credit the team paid in. The
+// tokens, per network, and the reads pricing them — asked of each chain
+// directly, since their public RPCs refuse Cloudflare's workers.
 let burnConfig = null;
-async function burnToken() {
+const SOLANA_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const EVM_ADDR = /^0x[0-9a-fA-F]{40}$/;
+function validBurn(c) {
+  if (!c || typeof c.symbol !== 'string' || !Number.isInteger(c.decimals)) return false;
+  const priced = (c.chain === 'solana' && (SOLANA_ADDR.test(c.curve || '') || /^\d*\.?\d+$/.test(c.zec_per_token || '')))
+    || (c.chain === 'evm' && (/^[0-9a-f]{64}$/.test(c.v4?.slot || '') && EVM_ADDR.test(c.v4?.manager || '') && EVM_ADDR.test(c.v4?.quote || '') || Number(c.usd) > 0));
+  return priced && (c.chain === 'solana' ? SOLANA_ADDR.test(c.mint) : EVM_ADDR.test(c.token) && Number.isInteger(c.chain_id) && /^https:\/\//.test(c.rpc || ''));
+}
+async function burnTokens() {
   burnConfig ??= fetch(NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json', { credentials: 'omit' })
     .then((r) => (r.ok ? r.json() : null))
-    .then((c) => (c && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.mint) && (/^\d+$/.test(c.per_ticket) || validPool(c.pool)) && Number.isInteger(c.decimals) ? c : null))
-    .catch(() => null);
+    .then((c) => Object.entries(c || {}).filter(([, t]) => validBurn(t)).map(([key, t]) => ({ ...t, key })))
+    .catch(() => []);
   return burnConfig;
 }
 
-/// A token priced by its pool against bridged ZEC on Solana (the user, 8 Oct
-/// 2026): a burn ticket costs one ticket price in ZEC at the pool's price.
-const SOLANA_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const validPool = (p) => !!p && SOLANA_ADDR.test(p.token_vault) && SOLANA_ADDR.test(p.zec_vault) && Number.isInteger(p.zec_decimals) && p.zec_decimals >= 0 && p.zec_decimals <= 18;
-/// Headroom on a pool-priced burn, in percent: the watcher prices burns at
-/// the median of the last hour, so the amount allows for the price moving.
+/// Burns are valued at the lower of the last hour's prices (the watchers'
+/// rule), so the page burns this much more than the credit asked for.
 const BURN_HEADROOM = 5n;
 
-/// Base units one ticket costs now: fixed, or the ticket's price in ZEC at
-/// the pool's price (rounded up) — the same sum the watcher makes.
-async function burnRate(cfg, ticketWad) {
-  if (!cfg.pool) return { perTicket: BigInt(cfg.per_ticket), floating: false };
-  const [t, z] = await Promise.all([cfg.pool.token_vault, cfg.pool.zec_vault].map((a) => solanaRead(cfg, 'getTokenAccountBalance', [a, { commitment: 'confirmed' }])));
-  const token = BigInt(t?.value?.amount || '0');
-  const zecWad = BigInt(z?.value?.amount || '0') * 10n ** BigInt(18 - cfg.pool.zec_decimals);
-  if (token === 0n || zecWad === 0n) throw new Error("The token's pool is empty; burning is paused.");
-  const n = BigInt(ticketWad) * token;
-  return { perTicket: (n + zecWad - 1n) / zecWad, floating: true };
+/// ZEC's USD price in this browser: Coinbase, Kraken and CoinGecko, the
+/// median of those that answer — only for showing how much to burn; the
+/// watcher values the burn with its own reads.
+async function zecUsd() {
+  const got = await Promise.all([
+    fetch('https://api.coinbase.com/v2/prices/ZEC-USD/spot', { credentials: 'omit' }).then((r) => r.json()).then((j) => Number(j?.data?.amount)),
+    fetch('https://api.kraken.com/0/public/Ticker?pair=ZECUSD', { credentials: 'omit' }).then((r) => r.json()).then((j) => Number(Object.values(j?.result || {})[0]?.c?.[0])),
+    fetch('https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd', { credentials: 'omit' }).then((r) => r.json()).then((j) => Number(j?.zcash?.usd)),
+  ].map((p) => p.catch(() => NaN)));
+  const ok = got.filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+  if (!ok.length) throw new Error("ZEC's price did not load; try again shortly.");
+  return ok[Math.floor(ok.length / 2)];
 }
-/// What to burn for `tickets`: whole tickets at a fixed rate; with headroom
-/// at a pool's price.
-const burnFor = (tickets, rate) => (rate.floating
-  ? (BigInt(tickets) * rate.perTicket * (100n + BURN_HEADROOM) + 99n) / 100n
-  : BigInt(tickets) * rate.perTicket);
+
+/// A token's price now, in ZEC (WAD) per whole token.
+async function zecPerToken(t) {
+  if (t.chain === 'solana') {
+    if (t.zec_per_token) return BigInt(Math.floor(Number(t.zec_per_token) * 1e18));
+    // pump.fun's bonding curve prices at its virtual reserves.
+    const info = await solanaRead(t, 'getAccountInfo', [t.curve, { encoding: 'base64', commitment: 'confirmed' }]);
+    const b = Uint8Array.from(atob(info?.value?.data?.[0] || ''), (c) => c.charCodeAt(0));
+    if (b.length < 49) throw new Error("The token's curve did not load.");
+    if (b[48]) throw new Error('The token has left its curve; burning waits for its pool to be set.');
+    const le = (i) => b.subarray(i, i + 8).reduceRight((v, x) => v * 256n + BigInt(x), 0n);
+    const [vt, vq] = [le(8), le(16)];
+    if (!vt || !vq) throw new Error("The token's curve is empty.");
+    return (vq * 10n ** BigInt(18 - (t.zec_decimals ?? 8)) * 10n ** BigInt(t.decimals)) / vt;
+  }
+  const usd = Number(t.usd) > 0 ? Number(t.usd) : await evm.v4Usd(t);
+  const p = usd / (await zecUsd());
+  if (!(p > 0)) throw new Error("The token's price did not load.");
+  return BigInt(Math.floor(p * 1e18));
+}
+
+/// Base units of the token to burn for `credit` (ZEC in WAD), with headroom.
+const burnFor = (credit, price, decimals) => (credit * 10n ** BigInt(decimals) * (100n + BURN_HEADROOM) + price * 100n - 1n) / (price * 100n);
+/// What a token is called where it lives.
+const chainName = (t) => t.chain_name || (t.chain === 'solana' ? 'Solana' : 'its chain');
 
 const SOLANA_PUBLIC = { mainnet: 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com' };
 async function solanaRead(cfg, method, params) {
@@ -465,13 +493,17 @@ const units = (raw, decimals) => {
   return `${(v / d).toLocaleString('en-US')}${f ? `.${f}` : ''}`;
 };
 
-/// Burn for `tickets`: Nap's memo, the holder's Solana wallet, one signed
-/// transaction. Returns the Solana signature.
-async function burnForTickets(cfg, amount, report) {
-  // A fresh code every burn: two burns never share one, so a second burn made
-  // before the first is posted still earns its own tickets.
+/// Nap's code for one burn: a fresh one every time, so a second burn made
+/// before the first is posted still earns its own credit.
+async function burnCode() {
   const { memo } = await ask('zyn_burnMemo', { fresh: true });
   if (!/^zyn:[0-9a-f]{64}$/.test(memo || '')) throw new Error('Nap did not give a burn code.');
+  return memo;
+}
+
+/// Burn ZCAVE: the holder's Solana wallet signs one transaction, a
+/// `burnChecked` and the memo. Returns the Solana signature.
+async function burnSolana(t, amount, memo, report) {
   const wallets = sol.solanaWallets();
   await new Promise((r) => setTimeout(r, 300));
   if (!wallets.length) throw new Error('No Solana wallet found in this browser. Install one (Phantom, Solflare, Backpack) and reload.');
@@ -480,16 +512,26 @@ async function burnForTickets(cfg, amount, report) {
   const { accounts } = await wallet.features['standard:connect'].connect();
   const account = accounts?.[0];
   if (!account) throw new Error(`${wallet.name} shared no account.`);
-  const held = await solanaRead(cfg, 'getTokenAccountsByOwner', [account.address, { mint: cfg.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
+  const held = await solanaRead(t, 'getTokenAccountsByOwner', [account.address, { mint: t.mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
   const ta = (held?.value || []).find((a) => BigInt(a.account?.data?.parsed?.info?.tokenAmount?.amount || '0') >= amount);
-  if (!ta) throw new Error(`That wallet holds less than ${units(amount, cfg.decimals)} ${cfg.symbol}.`);
-  const { value } = await solanaRead(cfg, 'getLatestBlockhash', [{ commitment: 'finalized' }]);
+  if (!ta) throw new Error(`That wallet holds less than ${units(amount, t.decimals)} ${t.symbol}.`);
+  const { value } = await solanaRead(t, 'getLatestBlockhash', [{ commitment: 'finalized' }]);
   const message = sol.burnMessage({
-    owner: account.address, tokenAccount: ta.pubkey, mint: cfg.mint, tokenProgram: ta.account.owner,
-    amount, decimals: cfg.decimals, memo, blockhash: value.blockhash,
+    owner: account.address, tokenAccount: ta.pubkey, mint: t.mint, tokenProgram: ta.account.owner,
+    amount, decimals: t.decimals, memo, blockhash: value.blockhash,
   });
-  report(`Approve the burn of ${units(amount, cfg.decimals)} ${cfg.symbol} in ${wallet.name}.`);
-  return sol.signAndSend(wallet, account, sol.unsigned(message), cfg.cluster === 'devnet' ? 'solana:devnet' : 'solana:mainnet');
+  report(`Approve the burn of ${units(amount, t.decimals)} ${t.symbol} in ${wallet.name}.`);
+  return sol.signAndSend(wallet, account, sol.unsigned(message), t.cluster === 'devnet' ? 'solana:devnet' : 'solana:mainnet');
+}
+
+/// Burn REGI: the holder's EVM wallet sends the token's transfer to 0x…dEaD
+/// with the code appended. Returns the transaction hash.
+async function burnEvm(t, amount, memo, report) {
+  report('Connecting your EVM wallet…');
+  const account = await evm.connect(t);
+  if ((await evm.balanceOf(t, account)) < amount) throw new Error(`That wallet holds less than ${units(amount, t.decimals)} ${t.symbol}.`);
+  report(`Approve the burn of ${units(amount, t.decimals)} ${t.symbol} in your wallet.`);
+  return evm.send(t, account, amount, memo.slice(4));
 }
 
 const PHASE_LABEL = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' };
@@ -499,35 +541,66 @@ const CLAIM_BLOCKS = 16128;
 async function mintPage() {
   const gen = generation;
   let sale = null;
-  let cfg = null;
-  // Base units per ticket, fixed or read from the token's pool.
-  let rate = null;
+  // Sale credit (§182): the tokens burnable for it, their prices as last
+  // read (per token, for half a minute), and this wallet's credit.
+  let tokens = [];
+  const prices = new Map();
+  let credit = null;
   // A gated sale (§168): this wallet's place on the list and its next prices,
   // as Nap reads them from the chain. Null when the sale is not gated.
   let access = null;
   const gated = () => !!sale?.gate;
   const ticketsTotal = (n) => (gated() && access?.prices ? access.prices.slice(0, n).reduce((t, x) => t + BigInt(x), 0n) : BigInt(sale.ticket_price) * BigInt(n));
-  const burnMax = () => Math.max(0, Math.min(20, Number(sale?.voucher_cap || 0) - Number(sale?.voucher_tickets || 0)));
+  /// A total after this wallet's credit: what ZEC.zy it still takes.
+  const afterCredit = (total) => {
+    if (!credit) return `${exact(total)} ZEC.zy`;
+    const used = credit < total ? credit : total;
+    return `${exact(total - used)} ZEC.zy (${exact(used)} from credit)`;
+  };
   const setTotal = () => {
     if (!sale || !el('total')) return;
     const n = whole('count-in', 20);
-    el('total').textContent = n ? `${exact(ticketsTotal(n))} ZEC.zy` : 'a whole number from 1 to 20';
+    el('total').textContent = n ? afterCredit(ticketsTotal(n)) : 'a whole number from 1 to 20';
     el('buy').disabled = !n || (gated() && !access?.listed);
   };
-  const setBurnTotal = () => {
-    if (!cfg || !rate || !el('burn-total')) return;
-    const max = burnMax();
-    el('burn-in').max = String(Math.max(1, max));
-    const n = whole('burn-in', max);
-    el('burn-total').textContent = n ? `${units(burnFor(n, rate), cfg.decimals)} ${cfg.symbol}${rate.floating ? `, with ${BURN_HEADROOM}% headroom` : ''}` : `a whole number from 1 to ${max}`;
-    el('burn-go').disabled = !n;
+  const token = () => tokens.find((t) => t.key === el('burn-token')?.value) || tokens[0];
+  const creditWanted = () => {
+    const v = el('credit-in')?.value.trim();
+    if (!/^\d*\.?\d+$/.test(v || '')) return null;
+    const [i, f = ''] = v.split('.');
+    if (f.length > 18) return null;
+    const w = BigInt(i || '0') * WAD + BigInt(f.padEnd(18, '0'));
+    return w > 0n ? w : null;
+  };
+  const priceOf = async (t) => {
+    const p = prices.get(t.key);
+    if (p && Date.now() - p.at < 30000) return p.value;
+    const value = await zecPerToken(t);
+    prices.set(t.key, { value, at: Date.now() });
+    return value;
+  };
+  const setBurnTotal = async () => {
+    const t = token();
+    if (!t || !el('burn-total')) return;
+    el('burn-go').textContent = t.chain === 'solana' ? 'Burn with a Solana wallet' : `Burn with an EVM wallet on ${chainName(t)}`;
+    const want = creditWanted();
+    if (!want) { el('burn-total').textContent = 'enter the credit you want, in ZEC'; el('burn-go').disabled = true; return; }
+    try {
+      const price = await priceOf(t);
+      if (t !== token() || want !== creditWanted()) return;
+      el('burn-total').textContent = `about ${units(burnFor(want, price, t.decimals), t.decimals)} ${t.symbol}, with ${BURN_HEADROOM}% headroom`;
+      el('burn-go').disabled = false;
+    } catch (e) {
+      el('burn-total').textContent = e.message;
+      el('burn-go').disabled = true;
+    }
   };
   const setMintTotal = () => {
     if (!sale || !el('mint')) return;
     const left = sale.open_count - sale.open_next;
     const n = whole('mint-in', Math.min(10, left));
     el('mint').disabled = !n;
-    el('mint').textContent = n ? `Mint ${n} for ${exact(BigInt(sale.open_price) * BigInt(n))} ZEC.zy` : `Mint 1 to ${Math.min(10, left)}`;
+    el('mint').textContent = n ? `Mint ${n} for ${afterCredit(BigInt(sale.open_price) * BigInt(n))}` : `Mint 1 to ${Math.min(10, left)}`;
   };
   const mine = async () => {
     const box = el('mine-box');
@@ -561,25 +634,9 @@ async function mintPage() {
       await readAccess();
       if (gen !== generation) return;
       setTotal();
-      cfg = await burnToken();
+      await readCredit();
       if (gen !== generation) return;
-      const left = burnMax();
-      // In a gated sale only listed wallets get burn tickets' items: no burn
-      // offered to anyone else.
-      el('burn').hidden = !(cfg && sale.phase === 'open' && left > 0 && (!gated() || access?.listed));
-      if (cfg) {
-        document.querySelectorAll('[data-burn-symbol]').forEach((x) => { x.textContent = cfg.symbol; });
-        try {
-          rate = await burnRate(cfg, sale.ticket_price);
-          el('burn-rate').textContent = `${rate.floating ? 'About ' : ''}${units(rate.perTicket, cfg.decimals)} ${cfg.symbol}`;
-          el('burn-floating').hidden = !rate.floating;
-        } catch (e) {
-          rate = null;
-          el('burn-rate').textContent = e.message;
-        }
-        el('burn-left').textContent = String(Math.max(0, Number(sale.voucher_cap || 0) - Number(sale.voucher_tickets || 0)));
-        setBurnTotal();
-      }
+      setTotal();
       if (sale.phase === 'openmint') {
         const open = sale.open_count - sale.open_next;
         el('left').textContent = String(open);
@@ -596,7 +653,7 @@ async function mintPage() {
       const serials = wins.flatMap((t) => t.serials);
       el('claim').disabled = !serials.length;
       el('claim-total-row').hidden = !serials.length;
-      el('claim-total').textContent = `${exact(BigInt(sale.claim_price) * BigInt(serials.length))} ZEC.zy`;
+      el('claim-total').textContent = afterCredit(BigInt(sale.claim_price) * BigInt(serials.length));
       const cards = await Promise.all(serials.map(async (x) => { const d = await describe(CAVE_Z, x); return `<figure>${art(d)}<figcaption>${esc(d.name)} ${rarityTag(d)}</figcaption></figure>`; }));
       if (gen !== generation) return;
       el('won-art').innerHTML = cards.join('');
@@ -612,6 +669,38 @@ async function mintPage() {
       el('broke').textContent = e.message;
       show('broke');
     }
+  };
+  // Sale credit (§182): what this wallet holds — taking up any burn's credit
+  // that has landed, which needs no approval — and what is left to burn for.
+  const readCredit = async () => {
+    const box = el('credit-box');
+    if (!box) return;
+    tokens = await burnTokens();
+    const budget = BigInt(sale?.credit_budget || '0');
+    credit = null;
+    if (current && (await quietly())) {
+      let c = await ask('zyn_saleCredit', {}).catch(() => null);
+      if (c && BigInt(c.waiting || '0') > 0n) {
+        await ask('zyn_takeUpCredit', {}).catch(() => null);
+        c = await ask('zyn_saleCredit', {}).catch(() => c);
+      }
+      if (c) credit = BigInt(c.held || '0') + BigInt(c.waiting || '0');
+    }
+    const over = sale?.phase === 'openmint' && sale.open_next >= sale.open_count;
+    box.hidden = !(tokens.length && sale && !over && (budget > 0n || (credit ?? 0n) > 0n));
+    if (box.hidden) return;
+    el('credit-held').textContent = credit != null ? `${exact(credit)} ZEC` : current ? 'open Nap to see it' : 'connect Nap to see it';
+    el('credit-budget').textContent = `${exact(budget)} ZEC`;
+    // Listed wallets only, while tickets sell in a gated sale: credit would buy nothing else then.
+    el('burn-form').hidden = budget === 0n || (gated() && sale.phase === 'open' && !access?.listed);
+    const select = el('burn-token');
+    if (select.options.length !== tokens.length) {
+      select.innerHTML = tokens.map((t) => `<option value="${esc(t.key)}">${esc(t.symbol)} · ${esc(chainName(t))}</option>`).join('');
+      // A first guess at the credit wanted: one of whatever the sale sells now.
+      el('credit-in').value = zec(sale.phase === 'openmint' ? sale.open_price : sale.phase === 'drawn' ? sale.claim_price : sale.ticket_price);
+    }
+    wireTips();
+    setBurnTotal();
   };
   // Where this wallet stands in a gated sale, and what the box says about it.
   const readAccess = async () => {
@@ -674,31 +763,35 @@ async function mintPage() {
     } finally { if (el(button)) el(button).disabled = false; }
   };
   el('count-in').oninput = setTotal;
-  el('burn-in').oninput = setBurnTotal;
+  el('credit-in').oninput = setBurnTotal;
+  el('burn-token').onchange = setBurnTotal;
   el('mint-in').oninput = setMintTotal;
   el('burn-go').onclick = async () => {
     if (!current) return pick();
     const out = el('out-burn');
     out.classList.remove('bad');
-    // The sale again, right before burning: a burn for more tickets than are
-    // left is refused whole by the chain, and the tokens are gone either way.
-    try { sale = await chainSale(); } catch (e) { out.textContent = e.message; out.classList.add('bad'); return; }
-    cfg = await burnToken();
-    if (gen !== generation || !cfg || !sale || sale.phase !== 'open') { out.textContent = 'Burning is closed.'; out.classList.add('bad'); return; }
-    const max = burnMax();
-    const n = whole('burn-in', max);
-    if (!n) { out.textContent = max ? `Burn for 1 to ${max} tickets — that is how many burn tickets are left.` : 'The burn tickets are all taken.'; out.classList.add('bad'); setBurnTotal(); return; }
+    const fail = (t) => { out.textContent = t; out.classList.add('bad'); };
+    // The sale again, right before burning: the tokens are gone either way,
+    // so nothing is burned for more credit than the sale has left.
+    try { sale = await chainSale(); } catch (e) { return fail(e.message); }
+    const t = token();
+    const want = creditWanted();
+    const budget = BigInt(sale?.credit_budget || '0');
+    if (gen !== generation || !t || !sale) return fail('Burning is closed.');
+    if (!want) return fail('Enter the credit you want, in ZEC.');
+    if (budget === 0n) return fail("The sale's credit is all taken.");
+    if (want > budget) return fail(`Only ${exact(budget)} ZEC of credit is left in the sale. Ask for that much or less.`);
     el('burn-go').disabled = true;
     try {
-      // The rate again too: a pool's price moves.
-      rate = await burnRate(cfg, sale.ticket_price);
-      setBurnTotal();
-      const sig = await burnForTickets(cfg, burnFor(n, rate), (t) => { out.textContent = t; });
-      out.textContent = `Burned. Your ${n} ticket${n > 1 ? 's' : ''} appear below once Solana finalizes it and the burn is posted — usually within a minute or two. Solana: ${sig.slice(0, 12)}…`;
+      prices.delete(t.key);
+      const amount = burnFor(want, await priceOf(t), t.decimals);
+      const memo = await burnCode();
+      const report = (x) => { out.textContent = x; };
+      const id = t.chain === 'solana' ? await burnSolana(t, amount, memo, report) : await burnEvm(t, amount, memo, report);
+      out.textContent = `Burned. Your credit shows here once ${chainName(t)} finalizes the burn and it is posted — usually within a minute or two. Transaction: ${String(id).slice(0, 14)}…`;
       for (const wait of [30000, 60000, 120000, 240000]) setTimeout(read, wait);
     } catch (e) {
-      out.textContent = e.code === 4001 || /reject|declin|cancel/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message;
-      out.classList.add('bad');
+      fail(e.code === 4001 || /reject|declin|cancel|denied/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message);
     } finally { if (el('burn-go')) el('burn-go').disabled = false; }
   };
   el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {

@@ -65,6 +65,7 @@ const KIND_CLASS = {
   'Sale opened': 'op', 'Sale closed': 'op', 'Draw posted': 'op', 'Open mint posted': 'op',
   'Burn posted': 'bridge', 'Burn tickets capped': 'op',
   'Bridge deposit': 'bridge', 'Bridge deposit claimed': 'claim', 'Bridged asset registered': 'op',
+  'Sale credit funded': 'op', 'Burn credited': 'bridge', 'Credit taken up': 'claim',
 };
 const kindChip = (t) => `<span class="chip ${KIND_CLASS[t.kind] || 'plain'}">${esc(t.kind)}</span>`;
 const status = (t) => (t.ok ? '<span class="ok">accepted</span>' : `<span class="bad" title="${esc(t.refusal)}">refused</span>`);
@@ -97,6 +98,8 @@ function detail(t) {
   if (d.root) parts.push(`root ${hash(d.root)}`);
   if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
   if (d.burn) parts.push(`burn ${hash(d.burn)}`);
+  // Sale credit (§182): the team's funding and a burn's credit, in ZEC.
+  if (d.amount !== undefined && (t.kind === 'Sale credit funded' || t.kind === 'Burn credited')) parts.push(`${wad(d.amount)} ZEC`);
   if (d.coin) parts.push(`<b>${esc(d.coin)}</b>`);
   else if (d.asset && !d.serial && d.serial !== 0) parts.push(`asset ${hash(d.asset)}`);
   if (d.source) parts.push(`source ${hash(d.source)}`);

@@ -32,8 +32,19 @@
 //!   may be; their winners claim by revealing the secret from that account and
 //!   pay the claim price like anyone.
 //!
+//! * **Sale credit** (`FundSaleCredit`, `PostCredit`, `RedeemCredit`,
+//!   DECISIONS §182): the team pays ZEC.zy into a sale as an ordinary sale
+//!   payment — the floor's and the treasury's shares at once — and the
+//!   amount becomes the sale's credit budget. The operator turns one burn of
+//!   a token on another chain, once, into credit worth what was burned,
+//!   under the burner's commitment, out of that budget. The burner takes it
+//!   up from their account by revealing the commitment's secret, and from
+//!   then on their tickets, claims and open mints are paid from it before
+//!   any note. Credit is spent only in its sale and is never paid out.
+//!
 //! The sale holds no value of its own: every payment is in the floor or a
-//! claim the moment it is made, so conservation needs nothing new.
+//! claim the moment it is made — credit included, which is paid in before it
+//! exists — so conservation needs nothing new.
 
 use zyn_vm::commit::{merkle_root, verify_proof, Encoder, Hash, ProofStep};
 use zyn_vm::derive::Address;
@@ -312,6 +323,83 @@ pub(crate) fn decode(d: &mut Decoder, v6: bool) -> Option<SaleState> {
     Some((sales, tickets, burns))
 }
 
+// ---------------------------------------------------------------------------
+// Sale credit (§182). Beside the sale, not in it: a chain with no credit
+// hashes and saves exactly as before.
+
+/// Where a burn's credit waits: by sale and the burner's commitment
+/// (`voucher_commitment`, the same one a burn ticket's memo carries).
+pub fn credit_pending_key(collection: &Address, commitment: &Hash) -> Hash {
+    id(b"objectvm.sale-credit-pending.v1", &[collection, commitment])
+}
+
+/// Where an account's credit in a sale is held once taken up: by a key that
+/// names the account only to whoever already knows it.
+pub fn credit_key(collection: &Address, account: &AccountId) -> Hash {
+    id(b"objectvm.sale-credit.v1", &[collection, account])
+}
+
+/// The id a team funding is paid under, so its treasury share has a home.
+pub fn credit_funding(funder: &AccountId, nonce: &Hash) -> Hash {
+    id(b"objectvm.sale-credit-fund.v1", &[funder, nonce])
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Credits {
+    /// What the team has paid in for burns and not yet handed out, by sale.
+    pub budgets: std::collections::BTreeMap<Address, Fixed>,
+    /// Credit posted for a burn and not yet taken up, by `credit_pending_key`.
+    pub pending: std::collections::BTreeMap<Hash, Fixed>,
+    /// Credit taken up, by `credit_key`.
+    pub held: std::collections::BTreeMap<Hash, Fixed>,
+}
+
+impl Credits {
+    pub fn is_empty(&self) -> bool {
+        self.budgets.is_empty() && self.pending.is_empty() && self.held.is_empty()
+    }
+}
+
+fn fixed_leaves(domain: &[u8], m: &std::collections::BTreeMap<Hash, Fixed>) -> (u32, Hash) {
+    let leaves: Vec<Hash> = m
+        .iter()
+        .map(|(k, v)| {
+            let mut e = Encoder::new();
+            e.bytes(domain).bytes(k).fixed(*v);
+            e.leaf()
+        })
+        .collect();
+    (leaves.len() as u32, merkle_root(&leaves))
+}
+
+/// Credit's part of the market's leaf, joined only once there is any.
+pub(crate) fn credits_section(e: &mut Encoder, c: &Credits) {
+    let (nb, b) = fixed_leaves(b"objectvm.sale-credit-budget-leaf.v1", &c.budgets);
+    let (np, p) = fixed_leaves(b"objectvm.sale-credit-pending-leaf.v1", &c.pending);
+    let (nh, h) = fixed_leaves(b"objectvm.sale-credit-held-leaf.v1", &c.held);
+    e.bytes(b"objectvm.sale-credits.v1").u32(nb).bytes(&b).u32(np).bytes(&p).u32(nh).bytes(&h);
+}
+
+pub(crate) fn encode_credits(e: &mut Encoder, c: &Credits) {
+    for m in [&c.budgets, &c.pending, &c.held] {
+        e.u32(m.len() as u32);
+        for (k, v) in m {
+            e.bytes(k).fixed(*v);
+        }
+    }
+}
+
+pub(crate) fn decode_credits(d: &mut Decoder) -> Option<Credits> {
+    let mut read = || -> Option<std::collections::BTreeMap<Hash, Fixed>> {
+        let mut m = std::collections::BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            m.insert(d.hash().ok()?, d.fixed().ok()?);
+        }
+        Some(m)
+    };
+    Some(Credits { budgets: read()?, pending: read()?, held: read()? })
+}
+
 impl ObjectVm {
     fn sale(&self, collection: &Address) -> Result<(Sale, CollectionTerms), &'static str> {
         let s = *self.market.sales.get(collection).ok_or("that collection has no sale")?;
@@ -319,10 +407,42 @@ impl ObjectVm {
         Ok((s, t))
     }
 
-    /// Take `amount` of the collection's quote asset from `who`: the treasury's
-    /// share owed to the creator, the rest into the floor.
+    /// Take `amount` for the sale from `who`: from their credit in it first
+    /// (§182), which was paid into the floor and the treasury when the team
+    /// funded it, and the rest from their notes.
     #[allow(clippy::too_many_arguments)]
     fn take_sale_payment(
+        &mut self,
+        who: &AccountId,
+        collection: &Address,
+        payment: &Hash,
+        amount: Fixed,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<(), &'static str> {
+        let key = credit_key(collection, who);
+        let credit = self.market.credits.held.get(&key).map_or(0, |c| c.0);
+        if credit <= 0 {
+            return self.pay_into_sale(who, collection, payment, amount, inputs, change);
+        }
+        let used = credit.min(amount.0);
+        if used < amount.0 {
+            self.pay_into_sale(who, collection, payment, Fixed(amount.0 - used), inputs, change)?;
+        } else if !inputs.is_empty() || !change.is_empty() {
+            return Err("credit covers this payment; spend no notes");
+        }
+        if used == credit {
+            self.market.credits.held.remove(&key);
+        } else {
+            self.market.credits.held.insert(key, Fixed(credit - used));
+        }
+        Ok(())
+    }
+
+    /// Take `amount` of the collection's quote asset from `who`'s notes: the
+    /// treasury's share owed to the creator, the rest into the floor.
+    #[allow(clippy::too_many_arguments)]
+    fn pay_into_sale(
         &mut self,
         who: &AccountId,
         collection: &Address,
@@ -523,6 +643,82 @@ impl ObjectVm {
         sale.tickets = s.tickets + count;
         sale.voucher_tickets = s.voucher_tickets + count;
         Ok(Receipt::VoucherPosted { first, count })
+    }
+
+    /// The team pays into a sale for burns to be credited against (§182): an
+    /// ordinary payment — floor and treasury at once — that becomes budget.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_fund_sale_credit(
+        &mut self,
+        funder: &AccountId,
+        collection: &Address,
+        amount: Fixed,
+        nonce: &Hash,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase == Phase::OpenMint && s.open_next >= s.open_count {
+            return Err("the sale is over");
+        }
+        if amount.0 <= 0 {
+            return Err("fund a sale with something");
+        }
+        let payment = credit_funding(funder, nonce);
+        if self.market.claims.contains_key(&crate::market::claim_id(&treasury_source(collection, &payment), 0)) {
+            return Err("that nonce was already used");
+        }
+        // Notes only: credit never funds credit.
+        self.pay_into_sale(funder, collection, &payment, amount, inputs, change)?;
+        let budget = self.market.credits.budgets.get(collection).map_or(0, |b| b.0);
+        let budget = budget.checked_add(amount.0).ok_or("budget overflow")?;
+        self.market.credits.budgets.insert(*collection, Fixed(budget));
+        Ok(Receipt::SaleCreditFunded { collection: *collection, budget: Fixed(budget) })
+    }
+
+    /// One burn on another chain, recorded once, becomes credit worth what it
+    /// burned, out of the sale's budget, under the burner's commitment (§182).
+    pub(crate) fn apply_post_credit(&mut self, collection: &Address, burn: &Hash, commitment: &Hash, amount: Fixed) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase == Phase::OpenMint && s.open_next >= s.open_count {
+            return Err("the sale is over");
+        }
+        if amount.0 <= 0 {
+            return Err("a burn's credit is worth something");
+        }
+        if burn == &[0; 32] || commitment == &[0; 32] {
+            return Err("a burn names itself and a commitment");
+        }
+        if self.market.burns.contains_key(burn) {
+            return Err("that burn is already posted");
+        }
+        let budget = self.market.credits.budgets.get(collection).map_or(0, |b| b.0);
+        if amount.0 > budget {
+            return Err("the sale's credit budget does not cover that burn");
+        }
+        let key = credit_pending_key(collection, commitment);
+        let pending = self.market.credits.pending.get(&key).map_or(0, |p| p.0).checked_add(amount.0).ok_or("credit overflow")?;
+        self.market.burns.insert(*burn, *collection);
+        if budget == amount.0 {
+            self.market.credits.budgets.remove(collection);
+        } else {
+            self.market.credits.budgets.insert(*collection, Fixed(budget - amount.0));
+        }
+        self.market.credits.pending.insert(key, Fixed(pending));
+        Ok(Receipt::CreditPosted { key, amount })
+    }
+
+    /// Take up a burn's credit (§182): revealing the secret behind its
+    /// commitment, from the account the commitment names, moves it there.
+    pub(crate) fn apply_redeem_credit(&mut self, buyer: &AccountId, collection: &Address, secret: &Hash) -> Result<Receipt, &'static str> {
+        self.sale(collection)?;
+        let key = credit_pending_key(collection, &voucher_commitment(buyer, secret));
+        let amount = *self.market.credits.pending.get(&key).ok_or("no credit waits for this account")?;
+        let held = credit_key(collection, buyer);
+        let total = self.market.credits.held.get(&held).map_or(0, |h| h.0).checked_add(amount.0).ok_or("credit overflow")?;
+        self.market.credits.pending.remove(&key);
+        self.market.credits.held.insert(held, Fixed(total));
+        Ok(Receipt::CreditRedeemed { amount })
     }
 
     pub(crate) fn apply_close_sale(&mut self, collection: &Address, zcash_height: u32, zcash_hash: &Hash) -> Result<Receipt, &'static str> {

@@ -62,8 +62,9 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 // file Nap ships — and share one module for it.
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
 await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
-// The burn button's token (§145): one file per network. Mainnet's exists only
-// once the token does; without it the page offers no burn.
+await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
+// The tokens burnable for sale credit (§182): one file per network, a token
+// per key. Without it the page offers no burn.
 for (const f of ['burn.json', 'burn-testnet.json']) {
   await cp(new URL(f, root), new URL(f, output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 }
@@ -145,15 +146,22 @@ for (const page of pages) {
   }
 }
 
-// The Solana endpoints a burn reads its blockhash and token accounts from
-// (§145): each burn config's own `rpc`, or the cluster's public endpoint.
-// Solana's public RPC refuses Cloudflare's workers, so the page asks it
-// directly — and the policy names exactly those origins.
+// The chains a burn reads (§182): each token's own `rpc`, or its Solana
+// cluster's public endpoint — their public RPCs refuse Cloudflare's workers,
+// so the page asks them directly — and, for a token priced in USD, the
+// exchanges it reads ZEC's price from. The policy names exactly those.
 const SOLANA_PUBLIC = { mainnet: 'https://api.mainnet-beta.solana.com', devnet: 'https://api.devnet.solana.com' };
+const ZEC_PRICES = ['https://api.coinbase.com', 'https://api.kraken.com', 'https://api.coingecko.com'];
 const solanaOrigins = new Set();
 for (const f of ['burn.json', 'burn-testnet.json']) {
   const c = await readFile(new URL(f, root), 'utf8').then(JSON.parse).catch(() => null);
-  if (c) solanaOrigins.add(new URL(c.rpc || SOLANA_PUBLIC[c.cluster] || SOLANA_PUBLIC.mainnet).origin);
+  for (const t of Object.values(c || {})) {
+    if (t?.chain === 'solana') solanaOrigins.add(new URL(t.rpc || SOLANA_PUBLIC[t.cluster] || SOLANA_PUBLIC.mainnet).origin);
+    if (t?.chain === 'evm') {
+      solanaOrigins.add(new URL(t.rpc).origin);
+      if (!(Number(t.usd) > 0)) ZEC_PRICES.forEach((o) => solanaOrigins.add(o));
+    }
+  }
 }
 
 const csp = [

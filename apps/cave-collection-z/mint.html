@@ -304,8 +304,12 @@
       .won-art img { width: 100%; height: auto; aspect-ratio: 1; border: 1px solid var(--line); background: #0d0f0c; image-rendering: pixelated; }
       .won-art figcaption { display: grid; gap: 5px; justify-items: start; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
       .won-art figcaption .tag { font-size: 7.5px; padding: 3px 6px; }
-      .burn { display: grid; gap: 14px; margin-top: 10px; padding-top: 22px; border-top: 1px dashed var(--line); }
-      .burn[hidden] { display: none; }
+      .tip { width: 18px; height: 18px; margin-left: 6px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 10px/1 var(--sans); cursor: pointer; vertical-align: middle; text-transform: none; letter-spacing: 0; }
+      .tip[aria-expanded="true"] { color: var(--acid); border-color: var(--acid); }
+      .bubble { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.55); font-family: var(--sans); font-size: 13.5px; line-height: 1.55; color: var(--read); max-width: 60ch; text-transform: none; letter-spacing: 0; }
+      .credit #burn-form { display: grid; gap: 14px; }
+      .credit #burn-form[hidden] { display: none; }
+      .credit select { font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; }
       .say.small { font-size: 13.5px; color: var(--read-dim); }
       .nav { display: flex; flex-wrap: wrap; gap: 0 22px; margin: 26px 0 0; }
       .nav a { display: inline-flex; align-items: center; min-height: 44px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 6px; }
@@ -399,31 +403,6 @@
             <p class="out" id="out" role="status" aria-live="polite"></p>
             </div>
 
-            <div class="burn" id="burn" hidden>
-              <p class="say">
-                <strong>Or burn <span data-burn-symbol>the token</span> for tickets.</strong>
-                <span id="burn-rate">—</span> on Solana is one ticket, into the same draw at the same odds.
-                The burn carries a code from your Nap, so the tickets are yours and nobody else's — without
-                your Solana wallet ever naming your Zyn account. <span id="burn-left">—</span> burn tickets left.
-                <span id="burn-floating" hidden>A burn ticket costs one ticket price in ZEC, at the token's price against bridged ZEC on Solana. Burns are priced at the pool's price over the last hour, so the amount carries 5% headroom; anything burned past whole tickets is not returned.</span>
-              </p>
-              <label class="field">
-                <span>Tickets to burn for</span>
-                <input id="burn-in" type="number" min="1" max="20" step="1" value="1" />
-              </label>
-              <div class="total">
-                <span>To burn</span>
-                <b id="burn-total">—</b>
-              </div>
-              <button class="act ghost" id="burn-go" type="button">Burn with a Solana wallet</button>
-              <p class="say small">
-                A burn cannot be undone. A burn ticket costs nothing into the pool; if it wins, its items are
-                claimed at the claim price like any other. Burns that arrive after the sale closes, after the
-                burn tickets run out, or for more tickets than are left earn no tickets — this page lets you burn
-                only for what is left.
-              </p>
-              <p class="out" id="out-burn" role="status" aria-live="polite"></p>
-            </div>
           </section>
 
           <section class="state" id="s-closed" hidden>
@@ -468,6 +447,39 @@
             <p class="out" id="out-mint" role="status" aria-live="polite"></p>
           </section>
 
+          <section class="state credit" id="credit-box" hidden>
+            <p class="say">
+              <strong>Pay with ZCAVE or REGI</strong>
+              Burn ZCAVE on Solana or REGI on Arc for credit in this sale, worth what you burn at its USD
+              price. Credit pays tickets, claims and the open mint before any ZEC.zy.
+              <button class="tip" type="button" aria-expanded="false" data-tip="The burn carries a code from your Nap, so the credit is yours and nobody else's, and your Solana or Arc wallet never names your Zyn account. The team paid ZEC into the sale for this credit, so items bought with it back the floor like any others.">i</button>
+            </p>
+            <div class="total"><span>Your credit</span><b id="credit-held">—</b></div>
+            <div class="total"><span>Credit left in the sale</span><b id="credit-budget">—</b></div>
+            <div id="burn-form">
+              <label class="field">
+                <span>Token</span>
+                <select id="burn-token"></select>
+              </label>
+              <label class="field">
+                <span>Credit (ZEC)</span>
+                <input id="credit-in" type="number" min="0.001" step="0.001" value="0.01" />
+              </label>
+              <div class="total">
+                <span>To burn</span>
+                <b id="burn-total">—</b>
+              </div>
+              <button class="act ghost" id="burn-go" type="button">Burn</button>
+              <p class="say small">
+                A burn cannot be undone. It is valued at the lower of the last hour's prices, so this page
+                burns 5% more than the credit asked for. A burn past the credit left in the sale gets only what
+                is left. Credit is spent only in this sale and is never paid out; what is unspent when the sale
+                ends is gone.
+              </p>
+            </div>
+            <p class="out" id="out-burn" role="status" aria-live="polite"></p>
+          </section>
+
           <section class="state" id="s-soldout" hidden>
             <p class="say"><strong>All 4,444 are out.</strong> From here they change hands on the market.</p>
             <a class="act" href="/market">The market</a>
@@ -502,6 +514,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=5"></script>
+    <script type="module" src="/zstore.js?v=6"></script>
   </body>
 </html>

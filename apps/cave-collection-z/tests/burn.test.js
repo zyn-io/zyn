@@ -42,35 +42,64 @@ test("it burns only with Nap's memo and a real token program", () => {
   assert.throws(() => sol.burnMessage({ ...INPUT, tokenProgram: sol.MEMO_PROGRAM }), /token program/);
 });
 
-test('the page may reach Solana only where a burn config says, and only to read', async () => {
+test('the page reaches only the burn tokens\' chains and ZEC\'s price, and only to read', async () => {
   const headers = await readFile(new URL('../dist/_headers', import.meta.url), 'utf8');
-  assert.match(headers, /connect-src 'self' https:\/\/zyn-rpc\.cavebro\.win https:\/\/api\.devnet\.solana\.com/);
+  const connect = headers.match(/connect-src ([^;]+);/)[1].split(' ').sort();
+  assert.deepEqual(connect, [
+    "'self'", 'https://api.coinbase.com', 'https://api.coingecko.com', 'https://api.devnet.solana.com', 'https://api.kraken.com',
+    'https://api.mainnet-beta.solana.com', 'https://ethereum-sepolia-rpc.publicnode.com', 'https://rpc.quicknode.mainnet.arc.io', 'https://zyn-rpc.cavebro.win',
+  ].sort());
   const zstore = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
-  const asked = [...zstore.matchAll(/solanaRead\(cfg, '(\w+)'/g)].map((m) => m[1]).sort();
-  // A pool-priced token's rate reads the pool's two reserves (8 Oct 2026).
-  assert.deepEqual(asked, ['getLatestBlockhash', 'getTokenAccountBalance', 'getTokenAccountsByOwner'], 'the page reads; the wallet sends');
+  const asked = [...zstore.matchAll(/solanaRead\(t, '(\w+)'/g)].map((m) => m[1]).sort();
+  // The curve's account for the price; the holder's token accounts and a blockhash to burn.
+  assert.deepEqual(asked, ['getAccountInfo', 'getLatestBlockhash', 'getTokenAccountsByOwner'], 'the page reads; the wallet sends');
+  const evm = await readFile(new URL('../evm-burn.js', import.meta.url), 'utf8');
+  assert.deepEqual([...evm.matchAll(/rpc\(cfg\.rpc, '(\w+)'/g)].map((m) => m[1]), ['eth_call', 'eth_call'], 'balance and pool price, read; the wallet sends');
 });
 
-test('no burn is offered on mainnet until the token exists', async () => {
-  const mainnet = await readFile(new URL('../burn.json', import.meta.url), 'utf8').catch(() => null);
-  if (mainnet) {
-    const c = JSON.parse(mainnet);
-    assert.equal(c.cluster, 'mainnet');
-    assert.match(c.per_ticket, /^\d+$/);
-  }
+test('the tokens: ZCAVE on Solana and REGI on Arc on mainnet; test stand-ins on testnet', async () => {
+  const m = JSON.parse(await readFile(new URL('../burn.json', import.meta.url), 'utf8'));
+  assert.deepEqual([m.zcave.chain, m.zcave.cluster, m.zcave.mint, m.zcave.curve], ['solana', 'mainnet', 'GQepeKGNpNatDRMPivFYVsJmfWUsJhtzFhBthCtLpump', '2MLraLvpEq5CXTiJS6ETKhLpmZKUHV2eB5AZwxs2r5rg']);
+  assert.deepEqual([m.regi.chain, m.regi.chain_id, m.regi.token.toLowerCase()], ['evm', 5042, '0x93d5b8c53ee763c2c4522bf0d958ce51af4360ae']);
+  assert.ok(!m.regi.usd && !m.zcave.zec_per_token, 'mainnet prices from markets, never a fixed number');
   const t = JSON.parse(await readFile(new URL('../burn-testnet.json', import.meta.url), 'utf8'));
-  assert.equal(t.cluster, 'devnet', 'the testnet store burns on Solana devnet');
+  assert.equal(t.zcave.cluster, 'devnet', 'the testnet store burns on Solana devnet');
+  assert.equal(t.regi.chain_id, 11155111, 'and on Sepolia');
 });
 
-test('a pool-priced burn costs one ticket price in ZEC at the pool, with headroom', async () => {
-  const src = await (await import('node:fs/promises')).readFile(new URL('../zstore.js', import.meta.url), 'utf8');
+test('the REGI pool slot is keccak(pool id ‖ 6), where Uniswap v4 keeps slot0', async () => {
+  const { keccak_256 } = await import('@noble/hashes/sha3');
+  const m = JSON.parse(await readFile(new URL('../burn.json', import.meta.url), 'utf8'));
+  const six = new Uint8Array(32); six[31] = 6;
+  const id = Uint8Array.from(Buffer.from('0530f18eb32d732cc8b067bbd0b2ba7e5d807d4f5cf4f7d74429f2a78d3120c8', 'hex'));
+  assert.equal(Buffer.from(keccak_256(new Uint8Array([...id, ...six]))).toString('hex'), m.regi.v4.slot);
+});
+
+test('a curve-priced burn: ZEC per token at the virtual reserves, then 5% headroom over the credit', async () => {
+  const src = await readFile(new URL('../zstore.js', import.meta.url), 'utf8');
   const body = (name) => src.slice(src.indexOf(name), src.indexOf('\n}\n', src.indexOf(name)) + 2);
-  const burnRate = new Function('solanaRead', `${body('async function burnRate')}; return burnRate;`)(async (cfg, method, [account]) => ({ value: { amount: account === 'T' ? '1000000000000' : '1000000000' } }));
-  // 1,000,000 tokens (6 places) against 10 ZEC (8 places): a 0.01 ZEC ticket is 1,000 tokens.
-  const rate = await burnRate({ pool: { token_vault: 'T', zec_vault: 'Z', zec_decimals: 8 } }, '10000000000000000');
-  assert.deepEqual(rate, { perTicket: 1000000000n, floating: true });
+  // The ZCAVE curve as Solana served it on 10 Oct 2026.
+  const data = new Uint8Array(166);
+  const put = (at, v) => { for (let i = 0; i < 8; i++) { data[at + i] = Number(v & 0xffn); v >>= 8n; } };
+  put(8, 1007685028645276n); put(16, 290109280n);
+  const account = { value: { data: [Buffer.from(data).toString('base64')] } };
+  const zecPerToken = new Function('solanaRead', 'evm', 'zecUsd', 'atob', `${body('async function zecPerToken')}; return zecPerToken;`)(async () => account, null, null, (x) => Buffer.from(x, 'base64').toString('binary'));
+  const price = await zecPerToken({ chain: 'solana', curve: 'C', decimals: 6, zec_decimals: 8 });
+  assert.equal(price, 2878967849n, '2.879e-9 ZEC a ZCAVE');
   const BURN_HEADROOM = 5n;
   const burnFor = new Function('BURN_HEADROOM', `return ${src.match(/const burnFor = ([^;]+);/)[1]};`)(BURN_HEADROOM);
-  assert.equal(burnFor(3, rate), 3150000000n, '5% over three tickets');
-  assert.equal(burnFor(3, { perTicket: 7n, floating: false }), 21n, 'a fixed rate has no headroom');
+  const ticket = 10n ** 16n; // 0.01 ZEC
+  const n = burnFor(ticket, price, 6);
+  assert.ok(n * price >= ticket * 10n ** 6n * 105n / 100n, 'at least 5% over the credit, at the price');
+  assert.equal(n, 3647140416538n, 'about 3,647,140 ZCAVE for a ticket');
+});
+
+test('a REGI burn is the token\'s transfer to 0x…dEaD with the code appended', async () => {
+  const evm = await import('../evm-burn.js');
+  const c = '5e'.repeat(32);
+  const d = evm.burnData(250000n * 10n ** 18n, c);
+  assert.equal(d, `0xa9059cbb${'0'.repeat(24)}000000000000000000000000000000000000dead${(250000n * 10n ** 18n).toString(16).padStart(64, '0')}${c}`);
+  assert.equal((d.length - 2) / 2, 4 + 32 * 3, 'exactly one word after the call: what the watcher accepts');
+  assert.throws(() => evm.burnData(1n, 'zyn:' + c), /commitment/);
+  assert.throws(() => evm.burnData(0n, c), /nothing/);
 });
