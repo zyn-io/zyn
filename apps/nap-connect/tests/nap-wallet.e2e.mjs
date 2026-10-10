@@ -125,6 +125,12 @@ ok(await waitNotice(p, /Withdrawal recorded/), `withdrawn: ${await noticeOf(p)}`
 
 // ---- "Pay it from my ZEC" re-arms the review ------------------------------
 await view(p, 'zec');
+// ZEC_SEND=1 waits for the Zcash sync (a fresh restore takes minutes) so the
+// shielded send below runs against the real balance.
+if (process.env.ZEC_SEND) {
+  await p.waitForFunction(() => /up to date/.test(document.querySelector('#zec-sync')?.textContent || ''), null, { timeout: 30 * 60_000 }).catch(() => {});
+  ok(/up to date/.test(await p.textContent('#zec-sync')), `the Zcash wallet syncs: ${await p.textContent('#zec-sync')}`);
+}
 const held = Number(await p.textContent('#zec-total').catch(() => '0')) || 0;
 if (held > 0.0003) {
   await p.fill('#zec-to', mine);

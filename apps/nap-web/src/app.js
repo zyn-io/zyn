@@ -963,12 +963,17 @@ function bindZec() {
       logActivity(config, identity, { kind: 'out', title: 'Sent ZEC', symbol: 'ZEC', amount: `−${zecText(zat)}`, to, tx: view.txid });
       renderActivity();
       note(`Sent ${zecText(zat)} ZEC. Transaction ${view.txid}.`);
+      disarm();
     } catch (err) {
       note(err.message, true);
       zecStatus('ready');
-    } finally {
-      zecSending = false;
       disarm();
+    } finally {
+      // Not disarmed here: the Review press returns from inside the try, and
+      // disarming on every exit undid the review at once, so Confirm never
+      // appeared and no ZEC could be sent from this view (23 Sep to 10 Oct
+      // 2026, found by nap-wallet.e2e.mjs).
+      zecSending = false;
       go.disabled = false;
     }
   };
