@@ -33,7 +33,10 @@ export const EXCLUDED = new Set([
   '0x15b27781d5236c0fff232803597ba36ab9d96464', // fee vault
   '0xe6275eccfc47d88e2bacfc21e0e2606678d73de8', // reward tracker
 ]);
-const STEP = 100_000; // the RPC's widest log range
+/// The widest log range the RPC takes: 100,000 on Arc's own (which throttles
+/// log queries hard), 10,000 on QuickNode's public endpoint, which answers
+/// (ARC_RPC=https://rpc.quicknode.mainnet.arc.io ARC_STEP=10000).
+const STEP = Number(process.env.ARC_STEP || 100_000);
 
 async function rpc(method, params) {
   // Paced: Arc's public RPC limits how fast one client may ask.
@@ -46,6 +49,7 @@ async function rpc(method, params) {
       return b.result;
     } catch (e) {
       if (i >= 8 || /range|too large/i.test(e.message)) throw e;
+      if (process.env.PROGRESS) console.error(`  ${e.message}; again in ${2 ** Math.min(i, 5)} s`);
       // A rate limit: back off and ask again.
       await new Promise((z) => setTimeout(z, 1000 * 2 ** Math.min(i, 5)));
     }
@@ -67,6 +71,7 @@ async function deployBlock(to) {
 /// Balances at `block`, from every Transfer up to it.
 export async function balancesAt(block) {
   const from = await deployBlock(block);
+  if (process.env.PROGRESS) console.error(`REGI's first block: ${from}`);
   const bal = new Map();
   // The RPC also caps how many logs one answer holds: a busy range is
   // halved until it fits.
@@ -83,6 +88,7 @@ export async function balancesAt(block) {
     }
     a = b + 1;
     step = Math.min(STEP, step * 2);
+    if (process.stderr.isTTY || process.env.PROGRESS) process.stderr.write(`\r  blocks ${a - from} of ${block - from + 1}, ${bal.size} addresses`);
     for (const l of logs) {
       const f = `0x${l.topics[1].slice(26)}`, t = `0x${l.topics[2].slice(26)}`, v = BigInt(l.data);
       bal.set(f, (bal.get(f) || 0n) - v);
