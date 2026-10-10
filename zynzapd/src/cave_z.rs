@@ -240,6 +240,112 @@ pub fn terms_v2(p: &AllocationPolicy) -> TermsV2 {
     }
 }
 
+/// Collection Z's terms, v3 (DECISIONS §182): v2's, except that burns no
+/// longer become free, capped tickets — burning ZCAVE on Solana or REGI on
+/// Arc gives credit in the sale worth what was burned at its USD price, at
+/// the lower median of the last hour (at least ten readings), and credit
+/// pays tickets, claims and the open mint before any ZEC.zy. The team pays
+/// ZEC into the sale for that credit first, as an ordinary sale payment, so
+/// token-paid items back the floor like any others. The draw's policy, and
+/// so its digest, is unchanged; v2's terms digest is named as superseded.
+pub const TERMS_V3_VERSION: &str = "cave-sale-terms/v3";
+const TERMS_V3_DOMAIN: &[u8] = b"cave.sale.terms.v3";
+
+/// v2's published terms digest (§175), which v3 replaces before any ticket.
+const SUPERSEDES_V2: &str = "9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c";
+
+/// What credit pays: tickets (1), claims (2) and the open mint (4).
+pub const CREDIT_PAYS: u8 = 0b111;
+/// USD (1): a burn is worth its token's USD price over ZEC's.
+pub const CREDIT_PRICED_IN_USD: u8 = 1;
+/// §182.6: the lower median of the last hour's readings, at least ten.
+pub const CREDIT_MEDIAN_SECONDS: u32 = 3_600;
+pub const CREDIT_MIN_READINGS: u32 = 10;
+/// The tokens burned for credit, as the watchers read them: the chain and the
+/// token in its own written form.
+pub const CREDIT_TOKENS: [(&str, &str); 2] = [
+    ("solana", "GQepeKGNpNatDRMPivFYVsJmfWUsJhtzFhBthCtLpump"),
+    ("eip155:5042", "0x93d5b8c53ee763c2c4522bf0d958ce51af4360ae"),
+];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermsV3 {
+    /// v2, whose burn-ticket fields v3 drops: no burn tickets are sold.
+    pub v2: TermsV2,
+    pub supersedes: [u8; 32],
+    pub credit_pays: u8,
+    pub credit_priced: u8,
+    pub credit_median_seconds: u32,
+    pub credit_min_readings: u32,
+    pub credit_tokens: Vec<(String, String)>,
+}
+
+impl TermsV3 {
+    /// v2's fields in v2's order up to its DAO terms, then the credit rule
+    /// and its tokens (each string length-prefixed). Integers big-endian.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let v2 = &self.v2;
+        let t = &v2.v1;
+        let mut out = Vec::new();
+        let mut text = |out: &mut Vec<u8>, s: &str| {
+            out.extend_from_slice(&(s.len() as u32).to_be_bytes());
+            out.extend_from_slice(s.as_bytes());
+        };
+        text(&mut out, TERMS_V3_VERSION);
+        out.extend_from_slice(&self.supersedes);
+        out.extend_from_slice(&t.policy_digest);
+        out.extend_from_slice(&t.collection_id);
+        out.extend_from_slice(&t.manifest_root);
+        out.push(v2.treasury_kind);
+        out.push(t.network);
+        out.extend_from_slice(&t.entry_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.claim_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.open_mint_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&t.min_confirmations.to_be_bytes());
+        out.extend_from_slice(&t.claim_window_blocks.to_be_bytes());
+        out.extend_from_slice(&(t.treasury_bps as u32).to_be_bytes());
+        out.extend_from_slice(&v2.gate_base.to_be_bytes());
+        out.extend_from_slice(&v2.gate_step_zatoshi.to_be_bytes());
+        out.extend_from_slice(&v2.dao_backers.to_be_bytes());
+        out.extend_from_slice(&v2.dao_window_blocks.to_be_bytes());
+        out.extend_from_slice(&v2.dao_quorum_bps.to_be_bytes());
+        out.push(self.credit_pays);
+        out.push(self.credit_priced);
+        out.extend_from_slice(&self.credit_median_seconds.to_be_bytes());
+        out.extend_from_slice(&self.credit_min_readings.to_be_bytes());
+        out.extend_from_slice(&(self.credit_tokens.len() as u32).to_be_bytes());
+        for (chain, token) in &self.credit_tokens {
+            text(&mut out, chain);
+            text(&mut out, token);
+        }
+        out
+    }
+
+    /// SHA-256 over the length-prefixed domain and payload, as v1 and v2.
+    pub fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let payload = self.canonical_bytes();
+        let mut h = Sha256::new();
+        h.update((TERMS_V3_DOMAIN.len() as u32).to_be_bytes());
+        h.update(TERMS_V3_DOMAIN);
+        h.update((payload.len() as u32).to_be_bytes());
+        h.update(&payload);
+        h.finalize().into()
+    }
+}
+
+pub fn terms_v3(p: &AllocationPolicy) -> TermsV3 {
+    TermsV3 {
+        v2: terms_v2(p),
+        supersedes: unhex32(SUPERSEDES_V2),
+        credit_pays: CREDIT_PAYS,
+        credit_priced: CREDIT_PRICED_IN_USD,
+        credit_median_seconds: CREDIT_MEDIAN_SECONDS,
+        credit_min_readings: CREDIT_MIN_READINGS,
+        credit_tokens: CREDIT_TOKENS.iter().map(|(c, t)| (c.to_string(), t.to_string())).collect(),
+    }
+}
+
 /// The manifest as the allocator needs it, from the builder's `content.json`.
 ///
 /// The item id is derived here rather than read, because it is a function of
@@ -270,6 +376,7 @@ mod tests {
     /// the recorded values and nothing else.
     #[test]
     fn the_digests_are_the_published_ones() {
+        const V3_DIGEST: &str = "cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315";
         let p = policy();
         p.validate().expect("valid");
         assert_eq!(
@@ -288,6 +395,9 @@ mod tests {
             "9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c",
             "the re-issued terms (§175)"
         );
+        let v3 = terms_v3(&p);
+        assert_eq!(hex(&v3.supersedes), hex(&v2.digest()), "v3 names the v2 it replaces");
+        assert_eq!(hex(&v3.digest()), V3_DIGEST, "the credit terms (§182)");
     }
 
     /// §168.2's prices, from the terms rather than from the ledger's code.

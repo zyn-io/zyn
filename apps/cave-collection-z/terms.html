@@ -287,7 +287,7 @@
 
       <div class="ledger">
         <div class="ledger-index">
-          <span>cave-sale-terms/v2</span>
+          <span>cave-sale-terms/v3</span>
           <span>4,444 · <b>committed</b></span>
         </div>
         <div class="ledger-body">
@@ -309,13 +309,20 @@
             <div><span>Split</span><b>Of every payment, 90% to the collection's pool, 10% to the ZCaveDAO treasury</b></div>
             <div><span>Treasury</span><b>ZCaveDAO's: no key can spend it; it pays only on a passed proposal</b></div>
             <div><span>DAO rules</span><b>10 items back a proposal · votes run 8,064 Zcash blocks (7 days) · passes with more yes than no and at least 10% of items voting · fixed at the first proposal</b></div>
-            <div><span>Burn tickets</span><b>One ticket per 0.01 ZEC of the token, at the median of the last hour's pool price against bridged ZEC on Solana · at most 20 per burn · at most 20 in the whole sale</b></div>
+            <div><span>Sale credit</span><b>Burning ZCAVE (Solana, GQep…pump) or REGI (Arc, 0x93D5…60ae) gives credit worth what was burned at its USD price, at the lower median of the last hour (at least 10 readings) · credit pays tickets, claims and the open mint before ZEC.zy · the team pays ZEC into the sale for it first, split 90/10 like any payment</b></div>
+            <div><span>Burn tickets</span><b>None: credit replaces them</b></div>
             <div><span>Policy digest</span><b class="hash">a572a74778052829a768adb56f84404353ee5ad188b274b36b5fa58c68500b13</b></div>
-            <div><span>Terms digest</span><b class="hash">9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c</b></div>
-            <div><span>Replaces</span><b class="hash">f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e</b></div>
+            <div><span>Terms digest</span><b class="hash">cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315</b></div>
+            <div><span>Replaces</span><b class="hash">9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c</b></div>
           </div>
 
           <p class="smallprint" style="margin-top:18px;max-width:66ch">
+            <strong>Re-issued 10 Oct 2026, before any ticket was sold.</strong> The second terms
+            (<span class="hash">9267d58e…3d3c</span>, <a href="/cave-sale-terms-v2.hex">bytes</a>) gave up to 20 free
+            tickets for burning the Solana token. These give credit for burning ZCAVE or REGI instead, paid for by
+            the team so the floor is unchanged. Everything else, and the draw, is as before.
+          </p>
+          <p class="smallprint" style="max-width:66ch">
             <strong>Re-issued 8 Oct 2026, before any ticket was sold.</strong> The first terms
             (<span class="hash">f2c32420…a59e</span>, <a href="/cave-sale-terms-v1.hex">bytes</a>) sent the 10% to a
             team account and did not state the whitelist, the rising price, the DAO or the burn rule.
@@ -347,28 +354,31 @@
           <li><b>Draw</b><span>Run once over every ticket bought before the announced close, from the announced drand round and the Zcash reveal block. Its result is posted on Zyn as a Merkle root; anyone holding the public inputs can run it again and get the same root.</span></li>
           <li><b>Claim</b><span>A winner claims with a proof against that root, at the claim price per item, within 16,128 blocks after the close. Only the wallet that bought a ticket can claim it; nobody can be refused one the draw gave.</span></li>
           <li><b>Open mint</b><span>After the window, what the draw handed nobody and what winners left sell at the open-mint price, in an order fixed by the draw.</span></li>
-          <li><b>Burn tickets</b><span>Burning the Cave token on Solana also gives tickets in the same draw at the same odds. They pay nothing into the pool; a winning one pays the claim price per item, and only a listed wallet can claim it, within the claim window. Burns after the close, past the cap, or under one ticket get nothing and are not refunded.</span></li>
+          <li><b>Sale credit</b><span>Burn ZCAVE on Solana or REGI on Arc from <a href="/mint">/mint</a>, with a code from your Nap, and get credit in this sale worth what you burned at its USD price. It pays tickets, claims and the open mint before any ZEC.zy, under the same whitelist and rising price. The team paid ZEC into the sale for it, so items bought with credit back the pool like any others. A burn past the credit left gets only what is left; credit is spent only in this sale, is never paid out, and what is unspent when the sale ends is gone.</span></li>
           <li><b>ZCaveDAO</b><span>Holders of the collection's items are its members. The treasury pays only on a proposal that passed under the rules above.</span></li>
         </ul>
         <p class="smallprint" style="margin-top:14px;max-width:66ch">
-          <strong>What the operator decides.</strong> Zyn cannot read Solana, so the operator's burn watcher decides which burns count and at what pool price; the count is checkable against Solana's burns. The operator orders transactions, so it can delay or refuse a ticket, a claim or a vote. It sets the burn cap on the ledger, where anyone can read it; a cap above 20 would break these terms. It cannot change a price or the split once the sale starts, change a proposal's rules, or give itself items. The operator and replicas see which item voted.
+          <strong>What the operator decides.</strong> Zyn cannot read Solana or Arc, so the operator's burn watchers decide which burns count and at what price; every burn is on its own chain and every credit on Zyn, so both are checkable. The operator orders transactions, so it can delay or refuse a ticket, a claim, a burn's credit or a vote. The credit budget is on the ledger, where anyone can read it. It cannot change a price or the split once the sale starts, change a proposal's rules, or give itself items. The operator and replicas see which item voted.
         </p>
       </section>
 
       <section style="margin-top:52px">
         <h2 style="font-family:var(--serif);font-size:26px;margin:0">Check it yourself</h2>
         <p class="smallprint" style="margin-top:12px;max-width:66ch">
-          These are the canonical bytes — <strong>236 of them</strong>, the exact input the digest is
-          taken over (also at <a href="/cave-sale-terms-v2.hex">/cave-sale-terms-v2.hex</a>).
+          These are the canonical bytes — <strong>345 of them</strong>, the exact input the digest is
+          taken over (also at <a href="/cave-sale-terms-v3.hex">/cave-sale-terms-v3.hex</a>).
         </p>
-        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f7632f2c3242060baf60e0c19
-3b41dc726b6677d85c158a62ba200c948d48a177a59ea572a74778052829a768
+        <div class="bytes" id="bytes">00000012636176652d73616c652d7465726d732f76339267d58e849caf1bff4a
+622451185c609e476ac0d026e3c95761bee73cae3d3ca572a74778052829a768
 adb56f84404353ee5ad188b274b36b5fa58c68500b13024277b607ce4edbf78f
 e2855aba562096d00264729168bd0ddea71bdf5b5f1e0c56593e1b16bd513a4c
 88baf31d42602acd89db85aef2b0dcbc4e4bce108426010000000000000f4240
 000000000007a1200000000000144b500000000600003f00000003e80000000a
-00000000000f42400000000a00001f80000003e800000000000f424000000e10
-0000000a0000001400000014</div>
+00000000000f42400000000a00001f80000003e8070100000e100000000a0000
+000200000006736f6c616e610000002c47516570654b474e704e617444524d50
+6976465956734a6d665755734a68747a466842746843744c70756d700000000b
+6569703135353a353034320000002a3078393364356238633533656537363363
+32633435323262663064393538636535316166343336306165</div>
         <button class="act ghost" id="copy-bytes" type="button" style="margin-top:14px">Copy the bytes</button>
         <p class="out" id="out" role="status" aria-live="polite"></p>
 
@@ -378,12 +388,12 @@ e2855aba562096d00264729168bd0ddea71bdf5b5f1e0c56593e1b16bd513a4c
         <pre class="recipe">from hashlib import sha256
 
 payload = bytes.fromhex(open("terms.hex").read().strip())
-domain  = b"cave.sale.terms.v2"
+domain  = b"cave.sale.terms.v3"
 h = sha256()
 h.update(len(domain).to_bytes(4, "big"));  h.update(domain)
 h.update(len(payload).to_bytes(4, "big")); h.update(payload)
 print(h.hexdigest())
-# 9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c</pre>
+# cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315</pre>
       </section>
 
       <div class="not-yet">

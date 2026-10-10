@@ -472,7 +472,14 @@ async function zecPerToken(t) {
 }
 
 /// Base units of the token to burn for `credit` (ZEC in WAD), with headroom.
-const burnFor = (credit, price, decimals) => (credit * 10n ** BigInt(decimals) * (100n + BURN_HEADROOM) + price * 100n - 1n) / (price * 100n);
+/// Rounded up to a figure a person can read and type: whole tokens from a
+/// thousand up, four places below — so the page burns what it shows.
+const burnFor = (credit, price, decimals) => {
+  const exact = (credit * 10n ** BigInt(decimals) * (100n + BURN_HEADROOM) + price * 100n - 1n) / (price * 100n);
+  const keep = exact >= 1000n * 10n ** BigInt(decimals) ? 0 : 4;
+  const step = decimals > keep ? 10n ** BigInt(decimals - keep) : 1n;
+  return ((exact + step - 1n) / step) * step;
+};
 /// What a token is called where it lives.
 const chainName = (t) => t.chain_name || (t.chain === 'solana' ? 'Solana' : 'its chain');
 
@@ -634,15 +641,17 @@ async function mintPage() {
       await readAccess();
       if (gen !== generation) return;
       setTotal();
-      await readCredit();
-      if (gen !== generation) return;
-      setTotal();
       if (sale.phase === 'openmint') {
         const open = sale.open_count - sale.open_next;
         el('left').textContent = String(open);
         show(open > 0 ? 'openmint' : 'soldout');
         setMintTotal();
       } else show(sale.phase === 'open' ? 'open' : sale.phase === 'closed' ? 'closed' : 'drawn');
+      // After show(), which hides every other section: credit sits beside each phase.
+      await readCredit();
+      if (gen !== generation) return;
+      setTotal();
+      setMintTotal();
       if (sale.phase === 'drawn' && Number.isSafeInteger(sale.close_zcash_height)) {
         el('claim-deadline').textContent = `Claims close at Zcash block ${(sale.close_zcash_height + CLAIM_BLOCKS).toLocaleString('en-US')} — about two weeks after the door shut. A win not claimed by then goes to the open mint.`;
       }
@@ -689,8 +698,8 @@ async function mintPage() {
     const over = sale?.phase === 'openmint' && sale.open_next >= sale.open_count;
     box.hidden = !(tokens.length && sale && !over && (budget > 0n || (credit ?? 0n) > 0n));
     if (box.hidden) return;
-    el('credit-held').textContent = credit != null ? `${exact(credit)} ZEC` : current ? 'open Nap to see it' : 'connect Nap to see it';
-    el('credit-budget').textContent = `${exact(budget)} ZEC`;
+    el('credit-held').textContent = credit != null ? `${zec(credit)} ZEC` : current ? 'open Nap to see it' : 'connect Nap to see it';
+    el('credit-budget').textContent = `${zec(budget)} ZEC`;
     // Listed wallets only, while tickets sell in a gated sale: credit would buy nothing else then.
     el('burn-form').hidden = budget === 0n || (gated() && sale.phase === 'open' && !access?.listed);
     const select = el('burn-token');

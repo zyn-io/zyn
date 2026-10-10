@@ -87,11 +87,13 @@ test('a curve-priced burn: ZEC per token at the virtual reserves, then 5% headro
   const price = await zecPerToken({ chain: 'solana', curve: 'C', decimals: 6, zec_decimals: 8 });
   assert.equal(price, 2878967849n, '2.879e-9 ZEC a ZCAVE');
   const BURN_HEADROOM = 5n;
-  const burnFor = new Function('BURN_HEADROOM', `return ${src.match(/const burnFor = ([^;]+);/)[1]};`)(BURN_HEADROOM);
+  const at = src.indexOf('const burnFor = ');
+  const burnFor = new Function('BURN_HEADROOM', `${src.slice(at, src.indexOf('\n};\n', at) + 3)} return burnFor;`)(BURN_HEADROOM);
   const ticket = 10n ** 16n; // 0.01 ZEC
   const n = burnFor(ticket, price, 6);
   assert.ok(n * price >= ticket * 10n ** 6n * 105n / 100n, 'at least 5% over the credit, at the price');
-  assert.equal(n, 3647140416538n, 'about 3,647,140 ZCAVE for a ticket');
+  assert.equal(n, 3647141000000n, '3,647,141 ZCAVE for a ticket: rounded up to whole tokens');
+  assert.equal(burnFor(ticket, 10n ** 18n, 18), 105n * 10n ** 14n, 'under a thousand, four places: 0.0105');
 });
 
 test('a REGI burn is the token\'s transfer to 0x…dEaD with the code appended', async () => {

@@ -9,14 +9,15 @@
 //! It prints. It does not broadcast, sign, or write to the chain: publishing is
 //! a deliberate act and this is the thing you read before taking it.
 //!
-//!   zyn-cave-terms                 print the policy and terms (v2), with digests
-//!   zyn-cave-terms bytes           v2's canonical bytes, as hex
+//!   zyn-cave-terms                 print the policy and terms (v3), with digests
+//!   zyn-cave-terms bytes           v3's canonical bytes, as hex
+//!   zyn-cave-terms bytes-v2        v2's (superseded, §182)
 //!   zyn-cave-terms bytes-v1        v1's (superseded, §175)
 //!   zyn-cave-terms announce <H>    the close announcement for close height H
 
 
 use cave_randomness::CloseAnnouncement;
-use zynzapd::cave_z::{policy, terms, terms_v2};
+use zynzapd::cave_z::{policy, terms, terms_v2, terms_v3};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
@@ -66,8 +67,10 @@ fn main() {
     // recompute is a number, not a commitment — so the bytes have to be
     // publishable, not only their hash.
     let v2 = terms_v2(&p);
+    let v3 = terms_v3(&p);
     match std::env::args().nth(1).as_deref() {
-        Some("bytes") => return println!("{}", hex(&v2.canonical_bytes())),
+        Some("bytes") => return println!("{}", hex(&v3.canonical_bytes())),
+        Some("bytes-v2") => return println!("{}", hex(&v2.canonical_bytes())),
         Some("bytes-v1") => return println!("{}", hex(&t.canonical_bytes())),
         _ => {}
     }
@@ -99,13 +102,16 @@ fn main() {
         v2.dao_backers, v2.dao_window_blocks, v2.dao_quorum_bps
     );
     println!(
-        "burn tickets          {} zatoshi of the token each, median of {} s (>= {} readings); <= {} per burn, {} in all",
-        v2.burn_ticket_zatoshi, v2.burn_median_seconds, v2.burn_min_readings, v2.burn_per_burn, v2.burn_cap
+        "sale credit           burns of {} valued in USD, lower median of {} s (>= {} readings); pays tickets, claims, open mint",
+        v3.credit_tokens.iter().map(|(c, t)| format!("{t} on {c}")).collect::<Vec<_>>().join(" and "),
+        v3.credit_median_seconds,
+        v3.credit_min_readings
     );
+    println!("burn tickets          none (v2's are replaced by credit)");
     println!();
     println!("POLICY DIGEST  {}", hex(&t.policy_digest));
-    println!("TERMS DIGEST   {}  (cave-sale-terms/v2)", hex(&v2.digest()));
-    println!("SUPERSEDES     {}  (v1)", hex(&v2.supersedes));
+    println!("TERMS DIGEST   {}  (cave-sale-terms/v3)", hex(&v3.digest()));
+    println!("SUPERSEDES     {}  (v2)", hex(&v3.supersedes));
 }
 
 #[cfg(test)]

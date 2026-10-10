@@ -84,21 +84,33 @@ test('the published terms page carries bytes that reproduce the digest', async (
   // does not carry.
   const { createHash } = await import('node:crypto');
   const payload = Buffer.from(hex, 'hex');
-  const domain = Buffer.from('cave.sale.terms.v2');
+  const domain = Buffer.from('cave.sale.terms.v3');
   const len = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
   const digest = createHash('sha256')
     .update(len(domain.length)).update(domain)
     .update(len(payload.length)).update(payload)
     .digest('hex');
-  assert.equal(digest, '9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c');
+  assert.equal(digest, 'cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315');
   assert.ok(page.includes(digest), 'and states the digest it reproduces');
 });
 
 test('the raw bytes served beside the page are the same bytes', async () => {
   const page = await readFile(new URL('../terms.html', import.meta.url), 'utf8');
   const inPage = (page.match(/id="bytes">([\s\S]*?)<\/div>/) || [])[1].replace(/\s+/g, '');
-  const raw = (await readFile(new URL('../dist/cave-sale-terms-v2.hex', import.meta.url), 'utf8')).trim();
+  const raw = (await readFile(new URL('../dist/cave-sale-terms-v3.hex', import.meta.url), 'utf8')).trim();
   assert.equal(raw, inPage, 'the downloadable file and the page must not drift');
+});
+
+test('the terms on the page hash to the published v3 digest (§182)', async () => {
+  const { createHash } = await import('node:crypto');
+  const len = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+  const hash = (domain, raw) => { const p = Buffer.from(raw, 'hex'); const d = Buffer.from(domain); return createHash('sha256').update(len(d.length)).update(d).update(len(p.length)).update(p).digest('hex'); };
+  const v3 = (await readFile(new URL('../dist/cave-sale-terms-v3.hex', import.meta.url), 'utf8')).trim();
+  assert.equal(hash('cave.sale.terms.v3', v3), 'cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315');
+  // v3 names the v2 it replaces, whose bytes stay checkable beside it.
+  assert.ok(v3.includes('9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c'));
+  const v2 = (await readFile(new URL('../dist/cave-sale-terms-v2.hex', import.meta.url), 'utf8')).trim();
+  assert.equal(hash('cave.sale.terms.v2', v2), '9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c');
 });
 
 test('the replaced terms stay checkable', async () => {
@@ -111,7 +123,9 @@ test('the replaced terms stay checkable', async () => {
   const digest = createHash('sha256').update(len(domain.length)).update(domain).update(len(payload.length)).update(payload).digest('hex');
   assert.equal(digest, 'f2c3242060baf60e0c193b41dc726b6677d85c158a62ba200c948d48a177a59e');
   const page = await readFile(new URL('../terms.html', import.meta.url), 'utf8');
-  assert.ok(page.includes(digest), 'the page names what it replaces');
+  // v3 replaced v2 (named whole on the page); v1 is named by its short form.
+  assert.ok(page.includes(`${digest.slice(0, 8)}…${digest.slice(-4)}`), 'the page still names v1');
+  assert.ok(page.includes('9267d58e849caf1bff4a622451185c609e476ac0d026e3c95761bee73cae3d3c'), 'and v2, which v3 replaces');
 });
 
 test('the terms page says what it does not prove', async () => {
