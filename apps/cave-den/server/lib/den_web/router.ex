@@ -6,6 +6,17 @@ defmodule DenWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :blob do
+    plug DenWeb.Cors
+  end
+
+  scope "/blob", DenWeb do
+    pipe_through :blob
+    post "/", BlobController, :create
+    get "/:id", BlobController, :show
+    options "/*any", BlobController, :show
+  end
+
   scope "/door", DenWeb do
     pipe_through :api
     get "/keys", DoorController, :keys

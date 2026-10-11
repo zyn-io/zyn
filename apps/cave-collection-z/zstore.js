@@ -860,57 +860,20 @@ async function chatPage() {
   wireTips();
   const out = el('chat-out');
   const say = (t, bad = false) => { out.textContent = t; out.classList.toggle('bad', bad); };
-  const { DenClient, ROOMS } = await import('./den.js');
-  let room = 'general';
-  const counts = {};
-  const drawRooms = () => {
-    el('rooms').innerHTML = ROOMS.map(([id, title]) => `<button type="button" data-room="${esc(id)}" aria-current="${id === room}">${esc(title)} <small>${counts[id] ?? ''}</small></button>`).join('');
-    el('rooms').querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => { room = b.dataset.room; drawRooms(); drawLog(); }; });
-    el('room-title').textContent = ROOMS.find(([id]) => id === room)[1];
-    el('room-meta').textContent = counts[room] ? `${counts[room]} in the room` : '';
-  };
-  const line = (l) => `<li class="${l.mine ? 'mine' : ''}"><b>${esc(l.from)}</b>${esc(l.text)}</li>`;
-  const drawLog = async () => {
-    const log = await den.log(room);
-    el('log').innerHTML = log.length ? log.map(line).join('') : '<li class="note">Nothing here yet. Words you read are kept on this device only.</li>';
-    el('log').scrollTop = el('log').scrollHeight;
-  };
-  const den = new DenClient({
-    base: CHAT,
-    keysUrl: '/den-keys.json',
-    prefix: NETWORK,
-    on: (event, d) => {
-      if (gen !== generation) return;
-      if (event === 'text' && d.room === room) { el('log').insertAdjacentHTML('beforeend', line(d)); el('log').scrollTop = el('log').scrollHeight; }
-      if (event === 'ready' || event === 'members') { counts[d.room] = d.members.length; drawRooms(); }
-      if (event === 'offline') el('den-status').textContent = 'Reconnecting…';
-      if (event === 'online') el('den-status').textContent = '';
-      if (event === 'error') { el('den-status').textContent = `${d.room}: ${d.error}`; }
-    },
-  });
+  const [{ DenClient }, { mountDen }] = await Promise.all([import('./den.js'), import('./den-ui.js')]);
+  const den = new DenClient({ base: CHAT, keysUrl: '/den-keys.json', prefix: NETWORK });
+  // Local builds only: the tests reach the client.
+  if (LOCAL) window.__den = den;
   const me = await den.start();
   const open = (session) => {
+    if (gen !== generation) return;
     el('me').textContent = me.name;
     document.querySelector('.ledger').hidden = true;
     document.querySelector('.register h1').hidden = true;
     el('den').hidden = false;
-    drawRooms();
-    drawLog();
+    mountDen(den, el, me);
     den.connect(session);
   };
-  el('say').onsubmit = async (e) => {
-    e.preventDefault();
-    const text = el('say-text').value.trim();
-    if (!text) return;
-    el('say-text').value = '';
-    try {
-      await den.send(room, text);
-      el('log').insertAdjacentHTML('beforeend', line({ from: me.name, text, mine: true }));
-      el('log').querySelector('.note')?.remove();
-      el('log').scrollTop = el('log').scrollHeight;
-    } catch (err) { el('den-status').textContent = err.message; el('say-text').value = text; }
-  };
-  el('say-text').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el('say').requestSubmit(); } };
   // A session or yesterday's token kept on this device: in without Nap.
   const kept = await den.session().catch(() => null);
   if (kept) return open(kept);

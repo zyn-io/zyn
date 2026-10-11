@@ -13,7 +13,7 @@ defmodule DenWeb.Cors do
         conn
         |> put_resp_header("access-control-allow-origin", origin)
         |> put_resp_header("access-control-allow-methods", "GET, POST, OPTIONS")
-        |> put_resp_header("access-control-allow-headers", "content-type")
+        |> put_resp_header("access-control-allow-headers", "content-type, authorization")
         |> put_resp_header("vary", "origin")
       else
         conn

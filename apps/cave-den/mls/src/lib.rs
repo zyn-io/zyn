@@ -199,6 +199,52 @@ impl Member {
         Ok(())
     }
 
+    /// One-time invitations to this device (KeyPackages), for the den to hand
+    /// out to whoever adds it to a private room.
+    pub fn key_packages(&mut self, n: usize) -> Result<Vec<Vec<u8>>, String> {
+        (0..n)
+            .map(|_| {
+                let bundle = KeyPackage::builder().build(SUITE, &self.provider, &self.signer, self.credential.clone()).map_err(err("key package"))?;
+                bundle.key_package().tls_serialize_detached().map_err(err("key package bytes"))
+            })
+            .collect()
+    }
+
+    /// Add devices to a private room by their KeyPackages: a commit for the
+    /// room (pending until the den orders it) and a Welcome for the new ones.
+    pub fn add(&mut self, room: &str, key_packages: &[Vec<u8>]) -> Result<(Vec<u8>, Vec<u8>), String> {
+        let (provider, signer) = (&self.provider, &self.signer);
+        let mut kps = Vec::new();
+        for b in key_packages {
+            let kp = KeyPackageIn::tls_deserialize_exact(b).map_err(err("key package"))?;
+            kps.push(kp.validate(provider.crypto(), ProtocolVersion::Mls10).map_err(err("key package check"))?);
+        }
+        let group = self.groups.get_mut(room).ok_or_else(|| format!("not in {room}"))?;
+        let (commit, welcome, _info) = group.add_members(provider, signer, &kps).map_err(err("add"))?;
+        Ok((commit.tls_serialize_detached().map_err(err("commit bytes"))?, welcome.tls_serialize_detached().map_err(err("welcome bytes"))?))
+    }
+
+    /// Join a private room from the Welcome someone sent this device.
+    /// Returns the room.
+    pub fn accept(&mut self, welcome: &[u8]) -> Result<String, String> {
+        let msg = MlsMessageIn::tls_deserialize_exact(welcome).map_err(err("welcome"))?;
+        let MlsMessageBodyIn::Welcome(w) = msg.extract() else { return Err("that is not a Welcome".into()) };
+        let group = StagedWelcome::new_from_welcome(&self.provider, &join_config(), w, None)
+            .map_err(err("welcome"))?
+            .into_group(&self.provider)
+            .map_err(err("join from welcome"))?;
+        let room = String::from_utf8(group.group_id().as_slice().to_vec()).map_err(err("room id"))?;
+        self.groups.insert(room.clone(), group);
+        Ok(room)
+    }
+
+    /// A secret every member of the room derives alike for this epoch, and
+    /// nobody else: the voice room's media key comes from it.
+    pub fn export(&self, room: &str, label: &str, len: usize) -> Result<Vec<u8>, String> {
+        let group = self.groups.get(room).ok_or_else(|| format!("not in {room}"))?;
+        group.export_secret(self.provider.crypto(), label, room.as_bytes(), len).map_err(err("export"))
+    }
+
     /// Words for a room, encrypted.
     pub fn send(&mut self, room: &str, text: &str) -> Result<Vec<u8>, String> {
         let (provider, signer) = (&self.provider, &self.signer);
@@ -426,6 +472,28 @@ mod wasm {
             let keys: Vec<String> = serde_json::from_str(keys).map_err(|e| JsError::new(&e.to_string()))?;
             self.0.remove(room, &keys).map_err(js)
         }
+        /// `n` invitations to this device, as a JSON array of base64 strings.
+        pub fn key_packages(&mut self, n: usize) -> Result<String, JsError> {
+            use base64::Engine;
+            let kps = self.0.key_packages(n).map_err(js)?;
+            let enc: Vec<String> = kps.iter().map(|k| base64::engine::general_purpose::STANDARD.encode(k)).collect();
+            serde_json::to_string(&enc).map_err(|e| JsError::new(&e.to_string()))
+        }
+        /// Key packages as a JSON array of base64; `{commit, welcome}` (base64) as JSON.
+        pub fn add(&mut self, room: &str, key_packages: &str) -> Result<String, JsError> {
+            use base64::Engine;
+            let b64 = base64::engine::general_purpose::STANDARD;
+            let kps: Vec<String> = serde_json::from_str(key_packages).map_err(|e| JsError::new(&e.to_string()))?;
+            let kps: Result<Vec<Vec<u8>>, _> = kps.iter().map(|k| b64.decode(k)).collect();
+            let (commit, welcome) = self.0.add(room, &kps.map_err(|e| JsError::new(&e.to_string()))?).map_err(js)?;
+            Ok(serde_json::json!({ "commit": b64.encode(commit), "welcome": b64.encode(welcome) }).to_string())
+        }
+        pub fn accept(&mut self, welcome: &[u8]) -> Result<String, JsError> {
+            self.0.accept(welcome).map_err(js)
+        }
+        pub fn export(&self, room: &str, label: &str, len: usize) -> Result<Vec<u8>, JsError> {
+            self.0.export(room, label, len).map_err(js)
+        }
         pub fn confirm(&mut self, room: &str) -> Result<u64, JsError> {
             self.0.confirm(room).map_err(js)
         }
@@ -551,6 +619,36 @@ mod tests {
         assert_eq!(a.epoch("lanterns").unwrap(), b.epoch("lanterns").unwrap());
         let m = b.send("lanterns", "in step").unwrap();
         assert_eq!(text(a.receive("lanterns", &m).unwrap()), "in step");
+    }
+
+    /// A private room: invitations from the den's KeyPackage store, an Add
+    /// and a Welcome, words both ways, and the same voice key on both sides.
+    #[test]
+    fn a_private_room_by_invitation() {
+        let (mut a, mut b, mut c) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
+        let kps_b = b.key_packages(2).unwrap();
+        let _ = a.create("dm-7f3a").unwrap();
+        let (commit, welcome) = a.add("dm-7f3a", &kps_b[..1]).unwrap();
+        assert!(envelope(&commit).unwrap().commit && !envelope(&commit).unwrap().external);
+        a.confirm("dm-7f3a").unwrap();
+        assert_eq!(b.accept(&welcome).unwrap(), "dm-7f3a");
+        assert_eq!(a.members("dm-7f3a").unwrap().len(), 2);
+        let m = b.send("dm-7f3a", "just us").unwrap();
+        assert_eq!(text(a.receive("dm-7f3a", &m).unwrap()), "just us");
+        // The voice key: alike for members, unknowable to others, new each epoch.
+        let ka = a.export("dm-7f3a", "cave-den voice", 32).unwrap();
+        assert_eq!(ka, b.export("dm-7f3a", "cave-den voice", 32).unwrap());
+        assert!(c.export("dm-7f3a", "cave-den voice", 32).is_err());
+        let kps_c = c.key_packages(1).unwrap();
+        let (commit2, welcome2) = a.add("dm-7f3a", &kps_c).unwrap();
+        a.confirm("dm-7f3a").unwrap();
+        b.receive("dm-7f3a", &commit2).unwrap();
+        c.accept(&welcome2).unwrap();
+        let k2 = a.export("dm-7f3a", "cave-den voice", 32).unwrap();
+        assert_ne!(k2, ka, "a new epoch, a new key");
+        assert_eq!(k2, c.export("dm-7f3a", "cave-den voice", 32).unwrap());
+        // A device already in the room cannot be added a second time.
+        assert!(a.add("dm-7f3a", &kps_b[1..]).is_err(), "B's key is already a member");
     }
 
     /// The token round trip against a door key: what the door signs is the

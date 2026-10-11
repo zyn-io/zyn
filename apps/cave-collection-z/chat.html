@@ -49,6 +49,46 @@
       .log li.note { color: var(--muted); font-size: 13px; }
       .say-form { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
       .say-form textarea { flex: 1; min-height: 44px; max-height: 160px; resize: vertical; font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; }
+      .den aside .group { margin: 8px 0 0; font: 9px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+      .mini { font: 12px var(--sans); color: var(--read); background: transparent; border: 1px solid var(--line); padding: 3px 8px; cursor: pointer; }
+      .mini[aria-pressed="true"] { color: var(--acid); border-color: var(--acid); }
+      .link { font: 12px var(--sans); color: var(--muted); background: transparent; border: 0; cursor: pointer; text-decoration: underline dotted; }
+      .badge { background: var(--acid); color: #000; border-radius: 9px; padding: 0 6px; font-weight: 600; }
+      #search { font: 14px var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 7px 9px; }
+      .found { display: grid; gap: 4px; max-height: 40vh; overflow-y: auto; }
+      .found button { text-align: left; font: 12px/1.4 var(--sans); color: var(--read); background: rgba(0, 0, 0, 0.4); border: 1px solid var(--line); padding: 6px 8px; cursor: pointer; }
+      .head-acts { display: flex; gap: 10px; align-items: center; }
+      .voice, .members { padding: 10px 18px; border-bottom: 1px solid var(--line); font: 13px var(--sans); color: var(--read); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+      .voice { background: rgba(199, 240, 75, 0.06); }
+      .members { display: grid; }
+      .members .who { margin: 0; display: flex; gap: 10px; align-items: center; }
+      .log li { position: relative; padding-right: 8px; }
+      .log li .t { font: 11px var(--sans); color: var(--muted); margin-left: 6px; }
+      .log li .body { margin-top: 2px; }
+      .log li.ping { background: rgba(199, 240, 75, 0.05); }
+      .log li.gone em { color: var(--muted); }
+      .log mark { background: transparent; color: var(--acid); }
+      .log mark.me { background: rgba(199, 240, 75, 0.18); }
+      .log blockquote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; }
+      .log .acts { display: none; gap: 6px; margin-top: 4px; }
+      .log li:hover .acts, .log li:focus-within .acts { display: flex; }
+      .log .acts button, .log .chip, .emoji button { font: 11px var(--sans); color: var(--muted); background: transparent; border: 1px solid var(--line); padding: 1px 6px; cursor: pointer; }
+      .log .chips { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+      .log .chip.on { color: var(--acid); border-color: var(--acid); }
+      .emoji { display: flex; gap: 4px; margin-top: 4px; }
+      .emoji button { font-size: 16px; }
+      .att { max-width: min(360px, 100%); max-height: 320px; display: block; border: 1px solid var(--line); }
+      .file { font: 13px var(--sans); color: var(--acid); background: transparent; border: 1px solid var(--line); padding: 6px 10px; cursor: pointer; }
+      .typing { margin: 0; padding: 0 18px; min-height: 18px; font: 12px var(--sans); color: var(--muted); }
+      .banner { margin: 0; padding: 6px 18px; font: 12px var(--sans); color: var(--read); border-top: 1px solid var(--line); }
+      .banner button { margin-left: 8px; }
+      dialog.pick { max-width: 420px; width: calc(100% - 32px); background: #0b0d0b; color: var(--ink); border: 1px solid var(--line); }
+      dialog.pick form { display: grid; gap: 12px; }
+      dialog.pick h2 { margin: 0; font: 400 18px var(--mono); }
+      dialog.pick .who { display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; font: 14px var(--sans); }
+      dialog.pick label { display: grid; gap: 4px; font: 12px var(--sans); color: var(--muted); }
+      dialog.pick input[name=title] { font: 14px var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 8px; }
+      dialog.pick .row { display: flex; gap: 10px; }
       @media (max-width: 720px) { .den { grid-template-columns: 1fr; } .den aside { border-right: 0; border-bottom: 1px solid var(--line); } .den nav { grid-auto-flow: column; overflow-x: auto; } }
     </style>
   </head>
@@ -77,8 +117,8 @@
             <button class="tip" type="button" aria-expanded="false" data-tip="Your chat name comes from a key made on this device, not from your wallet or item. The door checks your pass and signs a blinded token; the den admits the device the token names, and cannot tell which pass it came from. Each visit's token is fetched a day ahead, so from your second day the den cannot even time it.">i</button>
           </p>
           <ul class="facts-list">
-            <li>Messages are end-to-end encrypted (MLS). The den relays words it cannot read; only members' devices hold the keys.</li>
-            <li>The Cave team runs the den. It sees which device names are in which room and when they write, not whose they are. On your first day, entering right after the pass check can be timed together.</li>
+            <li>Messages, files and voice are end-to-end encrypted (MLS). The den relays what it cannot read; only members' devices hold the keys.</li>
+            <li>The Cave team runs the den. It sees which device names are in which room, when they write or talk, file sizes and the names of open rooms, not whose they are. On your first day, entering right after the pass check can be timed together.</li>
             <li>Your words are kept on this device. Clearing the browser's data forgets them and your chat name.</li>
             <li>Selling, moving or redeeming your item ends your entry at the end of the day.</li>
           </ul>
@@ -90,21 +130,46 @@
       <div class="den" id="den" hidden>
         <aside>
           <p class="me">You are <b id="me">—</b></p>
+          <label class="visually-hidden" for="search">Search</label>
+          <input id="search" type="search" placeholder="Search this device" autocomplete="off" />
+          <div id="found" class="found" hidden></div>
           <nav id="rooms" aria-label="Rooms"></nav>
+          <button type="button" class="mini" id="notify">Notify</button>
           <p class="out" id="den-status" role="status" aria-live="polite"></p>
         </aside>
         <section>
-          <header><h2 id="room-title">General</h2><span id="room-meta"></span></header>
+          <header>
+            <h2 id="room-title">General</h2>
+            <span class="head-acts"><button type="button" class="mini" id="voice-go" hidden>Join voice</button><button type="button" class="link" id="room-meta" title="Members"></button></span>
+          </header>
+          <div class="voice" id="voice" hidden>
+            <span id="voice-who">Voice</span>
+            <span><button type="button" class="mini" id="voice-mute" aria-pressed="false">Mute</button> <button type="button" class="mini" id="voice-leave">Leave voice</button></span>
+          </div>
+          <div class="members" id="members" hidden></div>
           <ol class="log" id="log" aria-live="polite"></ol>
+          <p class="typing" id="typing" aria-live="polite"></p>
+          <p class="banner" id="say-banner" hidden></p>
           <form class="say-form" id="say">
+            <button type="button" class="mini" id="attach" title="Attach a file (sealed on this device, up to 25 MB)">File</button>
+            <input type="file" id="attach-file" hidden />
             <label class="visually-hidden" for="say-text">Message</label>
-            <textarea id="say-text" maxlength="2000" placeholder="Write to the room" required></textarea>
+            <textarea id="say-text" maxlength="4000" placeholder="Write to the room (@m-… to mention)" required></textarea>
             <button class="act" type="submit">Send</button>
           </form>
         </section>
       </div>
+
+      <dialog class="pick" id="pick">
+        <form method="dialog">
+          <h2>Members</h2>
+          <div class="who"></div>
+          <label>Name (only members see it)<input name="title" maxlength="60" autocomplete="off" /></label>
+          <div class="row"><button class="act" type="submit">Make it</button><button class="act ghost" type="button" data-close>Close</button></div>
+        </form>
+      </dialog>
     </main>
 
-    <script type="module" src="/zstore.js?v=8"></script>
+    <script type="module" src="/zstore.js?v=9"></script>
   </body>
 </html>

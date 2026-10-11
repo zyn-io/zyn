@@ -69,6 +69,7 @@ await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
 // Phoenix socket client (pinned to the den's version), and the day keys the
 // door publishes — the one file every holder's page uses.
 await cp(new URL('den.js', root), new URL('den.js', output));
+await cp(new URL('den-ui.js', root), new URL('den-ui.js', output));
 await mkdir(new URL('den/', output), { recursive: true });
 for (const f of ['den_mls.js', 'den_mls_bg.wasm']) {
   await cp(new URL(`../cave-den/mls/pkg/${f}`, root), new URL(`den/${f}`, output)).catch(() => {
@@ -76,6 +77,7 @@ for (const f of ['den_mls.js', 'den_mls_bg.wasm']) {
   });
 }
 await cp(new URL('node_modules/phoenix/priv/static/phoenix.mjs', root), new URL('den/phoenix.mjs', output));
+await cp(new URL('den-voice-worker.js', root), new URL('den/voice-worker.js', output));
 await cp(new URL('den-keys.json', root), new URL('den-keys.json', output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 // The tokens burnable for sale credit (§182): one file per network, a token
 // per key. Without it the page offers no burn.
@@ -199,13 +201,16 @@ const csp = [
   "object-src 'none'",
 ].join('; ');
 
-// /chat alone talks to the den and runs its MLS library's wasm;
-// the rest of the site keeps the policy above. Cloudflare applies every
+// /chat alone talks to the den, runs its MLS library's wasm and may use the
+// microphone (voice rooms); the rest of the site keeps the policies above. Cloudflare applies every
 // matching rule, so /chat first detaches the site-wide policy ("!").
 const CHAT_ORIGIN = 'chat.cavebro.win';
 const chatCsp = csp
   .replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
-  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`);
+  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`)
+  // Images opened from sealed files, and the voice worker.
+  .replace("img-src 'self' data:", "img-src 'self' data: blob:")
+  .replace("font-src 'self'", "font-src 'self'; worker-src 'self'; media-src 'self' blob:");
 
 await writeFile(
   new URL('_headers', output),
@@ -229,10 +234,14 @@ await writeFile(
     '/chat',
     '  ! Content-Security-Policy',
     `  Content-Security-Policy: ${chatCsp}`,
+    '  ! Permissions-Policy',
+    '  Permissions-Policy: geolocation=(), microphone=(self), camera=(), payment=()',
     '',
     '/chat/*',
     '  ! Content-Security-Policy',
     `  Content-Security-Policy: ${chatCsp}`,
+    '  ! Permissions-Policy',
+    '  Permissions-Policy: geolocation=(), microphone=(self), camera=(), payment=()',
     '',
   ].join('\n'),
 );

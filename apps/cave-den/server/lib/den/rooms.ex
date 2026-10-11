@@ -17,6 +17,7 @@ defmodule Den.Rooms do
       field :epoch, :integer, default: 0
       field :group_info, :binary
       field :seq, :integer, default: 0
+      field :kind, :string, default: "open"
       timestamps(type: :utc_datetime)
     end
   end
@@ -62,7 +63,50 @@ defmodule Den.Rooms do
   end
 
   def get(id), do: Repo.get(Room, id)
-  def all, do: Repo.all(from r in Room, order_by: r.id)
+
+  @doc "The rooms any member sees: open and proposal rooms. Private ones are known only to their members."
+  def listed, do: Repo.all(from r in Room, where: r.kind != "private", order_by: [r.inserted_at, r.id], select: %{id: r.id, title: r.title, kind: r.kind})
+
+  @doc "A room a member names, open to all members."
+  def open_room(title) do
+    title = title |> String.trim() |> String.slice(0, 40)
+    if title == "", do: {:error, :title}, else: insert(slug(title), title, "open")
+  end
+
+  @doc "A private room: an unguessable id, no title, no GroupInfo ever kept."
+  def private_room(id) do
+    if id =~ ~r/^p-[0-9a-f]{32}$/, do: insert(id, "", "private"), else: {:error, :id}
+  end
+
+  @doc "A ZCaveDAO proposal's room (the den makes these)."
+  def proposal_room(n) when is_integer(n), do: insert("proposal-#{n}", "Proposal ##{n}", "proposal")
+
+  defp insert(id, title, kind) do
+    if Repo.get(Room, id) do
+      {:error, :exists}
+    else
+      Repo.insert(%Room{id: id, title: title, kind: kind})
+    end
+  end
+
+  defp slug(title) do
+    base = title |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-") |> String.slice(0, 24)
+    "r-" <> base <> "-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower)
+  end
+
+  @doc "Count one `what` for a device today; :ok under `limit`."
+  def quota(key, what, limit) do
+    day = Date.to_iso8601(Date.utc_today())
+    Repo.transaction(fn ->
+      n = Repo.one(from q in "quota", where: q.key == ^key and q.day == ^day and q.what == ^what, select: q.count) || 0
+      if n >= limit, do: Repo.rollback(:quota)
+      Repo.insert_all("quota", [%{key: key, day: day, what: what, count: n + 1}], on_conflict: [set: [count: n + 1]], conflict_target: [:key, :day, :what])
+    end)
+    |> case do
+      {:ok, _} -> :ok
+      {:error, :quota} -> {:error, :quota}
+    end
+  end
 
   def now, do: DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -80,13 +124,13 @@ defmodule Den.Rooms do
 
   @doc "A room's first GroupInfo, from whoever makes the group first."
   def create(room, group_info) do
-    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and is_nil(r.group_info)), set: [group_info: group_info, epoch: 0, updated_at: now()])
+    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and is_nil(r.group_info) and r.kind != "private"), set: [group_info: group_info, epoch: 0, updated_at: now()])
     if n == 1, do: :ok, else: {:error, :exists}
   end
 
-  @doc "The GroupInfo for the epoch the room is in, from a member who is in it."
+  @doc "The GroupInfo for the epoch the room is in, from a member who is in it. Never kept for a private room."
   def info(room, epoch, group_info) do
-    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and r.epoch == ^epoch), set: [group_info: group_info, updated_at: now()])
+    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and r.epoch == ^epoch and r.kind != "private"), set: [group_info: group_info, updated_at: now()])
     if n == 1, do: :ok, else: {:error, :stale}
   end
 
@@ -101,7 +145,10 @@ defmodule Den.Rooms do
         r = Repo.get!(Room, room)
 
         cond do
-          is_nil(r.group_info) ->
+          r.kind == "private" and env.external ->
+            Repo.rollback(:private)
+
+          is_nil(r.group_info) and r.kind != "private" ->
             Repo.rollback({:no_group, r.epoch})
 
           env.commit and env.epoch != r.epoch ->
@@ -151,6 +198,12 @@ defmodule Den.Rooms do
     old = Date.utc_today() |> Date.add(-2) |> Date.to_iso8601()
     Repo.delete_all(from i in "issued", where: i.day < ^old)
     Repo.delete_all(from s in "spent", where: s.day < ^old)
+    Repo.delete_all(from q in "quota", where: q.day < ^old)
+    Repo.delete_all(from i in "inbox", where: i.inserted_at < ^keep)
+    Repo.delete_all(from k in "key_packages", where: k.key in ^ended)
+    old_blobs = Repo.all(from b in "blobs", where: b.inserted_at < ^keep, select: b.id)
+    for id <- old_blobs, do: File.rm(Path.join(Den.Blobs.dir(), id))
+    Repo.delete_all(from b in "blobs", where: b.id in ^old_blobs)
     {by_room, ended}
   end
 end

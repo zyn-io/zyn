@@ -36,3 +36,4 @@ deps/
 tmp/
 priv/keys/
 den-keys.json
+priv/blobs/

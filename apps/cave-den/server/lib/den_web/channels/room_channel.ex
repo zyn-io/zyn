@@ -27,7 +27,7 @@ defmodule DenWeb.RoomChannel do
       room ->
         Rooms.seat(id, socket.assigns.key)
         info = room.group_info && Base.encode64(room.group_info)
-        {:ok, %{title: room.title, epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(id)}, assign(socket, :room, id)}
+        {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(id)}, assign(socket, :room, id)}
     end
   end
 
@@ -70,7 +70,25 @@ defmodule DenWeb.RoomChannel do
     else
       {:error, {:epoch, e}} -> {:reply, {:error, %{reason: "epoch", epoch: e}}, socket}
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
+      {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, why} -> {:reply, {:error, %{reason: inspect(why)}}, socket}
+    end
+  end
+
+  # Someone is writing: their device name only, not stored.
+  def handle_in("typing", _, socket) do
+    broadcast_from!(socket, "typing", %{key: socket.assigns.key})
+    {:noreply, socket}
+  end
+
+  # After an Add the den ordered: the Welcome for the devices added.
+  def handle_in("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 do
+    with {:ok, welcome} <- decode(b64),
+         true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/^[0-9a-f]{64}$/)) || {:error, :keys} do
+      Den.Inbox.deliver(keys, socket.assigns.room, welcome)
+      {:reply, :ok, socket}
+    else
+      {:error, why} -> {:reply, {:error, %{reason: to_string(why)}}, socket}
     end
   end
 

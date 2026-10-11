@@ -3,6 +3,9 @@ defmodule DenWeb.UserSocket do
   use Phoenix.Socket
 
   channel "room:*", DenWeb.RoomChannel
+  channel "lobby", DenWeb.LobbyChannel
+  channel "inbox:*", DenWeb.InboxChannel
+  channel "voice:*", DenWeb.VoiceChannel
 
   @impl true
   def connect(%{"session" => session}, socket, _info) do

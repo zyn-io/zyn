@@ -1,39 +1,48 @@
 // The den: ZCaveDAO's members' chat (DECISIONS §184), in the page.
 //
-// This device holds an MLS signature key and a pseudonym made from it, and
-// its rooms' state; the den (chat.cavebro.win, Elixir) relays and orders
-// ciphertext it cannot read. Entry is a day token the door signed blind:
-// the door checks a member pass and signs a token it cannot see; the den
-// later admits the device the token names, and cannot tell which pass it
-// came from. Day keys come from cavebro.win/den-keys.json — one file for
+// This device holds an MLS signature key, a pseudonym made from it, and its
+// rooms' state; the den (chat.cavebro.win, Elixir) relays and orders
+// ciphertext it cannot read. Entry is a day token the door signed blind: the
+// door checks a member pass and signs a token it cannot see; the den later
+// admits the device the token names, and cannot tell which pass it came
+// from. Day keys come from cavebro.win/den-keys.json — one file for
 // everyone — never from the den.
 //
+// Inside a room every message is a small JSON document sealed by MLS: words
+// (with a reply), reactions, edits and deletions by their author, files
+// (encrypted here with a one-time key, the ciphertext stored by the den), a
+// private room's title. Private rooms grow by invitation (MLS Add and
+// Welcome). Voice rooms send audio sealed per frame under a key every member
+// derives from the room's group, so the den forwards what it cannot hear.
+//
 // Everything that must survive a reload stays in this browser (IndexedDB):
-// the device, its session, tomorrow's token, and the words it has read —
-// which forward secrecy means nobody can decrypt again later.
+// the device, its session, tomorrow's token, its private rooms, and the
+// words it has read — which forward secrecy means nobody can decrypt later.
 
 import { Socket } from './den/phoenix.mjs';
 import init, { Den, token_blind as tokenBlind, token_finalize as tokenFinalize } from './den/den_mls.js';
 
-export const ROOMS = [['general', 'General'], ['diggers', 'Diggers'], ['lookouts', 'Lookouts'], ['lanterns', 'Lanterns']];
-const KEEP = 500;
+const KEEP = 1000;
+const INVITATIONS = 5;
+export const VOICE_LABEL = 'cave-den voice';
 
 // ---------------------------------------------------------------------------
 // Bytes and storage.
 
-const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
-const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+export const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+export const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const unhex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
+const hex = (u8) => [...u8].map((x) => x.toString(16).padStart(2, '0')).join('');
+const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
 const day = (offset = 0) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
 function store(prefix) {
-  const open = () => new Promise((resolve, reject) => {
+  const db = new Promise((resolve, reject) => {
     const r = indexedDB.open('cave-den', 1);
     r.onupgradeneeded = () => r.result.createObjectStore('kv');
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
-  const db = open();
   const tx = async (mode, f) => {
     const d = await db;
     return new Promise((resolve, reject) => {
@@ -50,6 +59,15 @@ function store(prefix) {
   };
 }
 
+/// A room message's body, decoded: older devices sent bare words.
+function decode(text) {
+  try {
+    const m = JSON.parse(text);
+    if (m && m.v === 1 && typeof m.t === 'string') return m;
+  } catch { /* words */ }
+  return { v: 1, t: 'msg', id: `old-${hex(rand(6))}`, text };
+}
+
 // ---------------------------------------------------------------------------
 
 export class DenClient {
@@ -59,7 +77,11 @@ export class DenClient {
     Object.assign(this, { base, keysUrl, on, kv: store(prefix) });
     this.queue = Promise.resolve();
     this.channels = new Map();
+    this.joined = new Map(); // id → a promise of the channel's join
+    this.rooms = new Map(); // id → { id, title, kind }
     this.seq = {};
+    this.read = {};
+    this.typingAt = 0;
   }
 
   /// Run MLS steps one at a time: the group state is one thing.
@@ -75,12 +97,19 @@ export class DenClient {
     this.den = saved ? Den.restore(saved) : new Den();
     if (!saved) await this.save();
     this.seq = (await this.kv.get('seq')) || {};
-    return { name: this.den.name(), key: this.den.key() };
+    this.read = (await this.kv.get('read')) || {};
+    for (const r of (await this.kv.get('private')) || []) this.rooms.set(r.id, r);
+    this.me = { name: this.den.name(), key: this.den.key() };
+    return this.me;
   }
 
   async save() {
     await this.kv.put('device', this.den.save());
     await this.kv.put('seq', this.seq);
+  }
+
+  async keepPrivate() {
+    await this.kv.put('private', [...this.rooms.values()].filter((r) => r.kind === 'private'));
   }
 
   async dayKey(d) {
@@ -96,11 +125,13 @@ export class DenClient {
     return j;
   }
 
+  // ---- Entry ---------------------------------------------------------------
+
   /// A session without asking for the pass: the one kept, or one from the
   /// token kept since yesterday. Null when the pass is needed.
   async session() {
     const s = await this.kv.get('session');
-    if (s && s.until * 1000 > Date.now() + 60_000) return s;
+    if (s && s.until * 1000 > Date.now() + 60_000) return (this.sessionToken = s);
     const held = await this.kv.get(`token:${day()}`);
     if (held) {
       await this.kv.del(`token:${day()}`);
@@ -130,16 +161,40 @@ export class DenClient {
   async enter(token) {
     const s = await this.post('/door/enter', token);
     await this.kv.put('session', s);
+    this.sessionToken = s;
     return s;
   }
 
-  /// Connect with a session and take this device into every room.
+  // ---- The socket and the rooms ---------------------------------------------
+
+  /// Connect with a session: the lobby, this device's inbox, every room.
   connect(session) {
+    this.sessionToken = session;
     this.socket = new Socket(`${this.base.replace(/^http/, 'ws')}/socket`, { params: { session: session.session } });
     this.socket.onError(() => this.on('offline'));
     this.socket.onOpen(() => this.on('online'));
     this.socket.connect();
-    for (const [room] of ROOMS) this.joinRoom(room);
+
+    this.lobby = this.socket.channel('lobby');
+    this.lobby.on('room', (r) => this.addRoom(r));
+    this.lobby.join().receive('ok', ({ rooms }) => rooms.forEach((r) => this.addRoom(r)));
+    for (const r of this.rooms.values()) if (r.kind === 'private') this.joinRoom(r.id);
+
+    const inbox = this.socket.channel(`inbox:${this.den.key()}`);
+    this.inbox = inbox;
+    inbox.on('welcome', (w) => this.lock(() => this.accept([{ id: null, room: w.room, welcome: w.welcome }])));
+    inbox.join().receive('ok', ({ welcomes, key_packages: left }) => this.lock(async () => {
+      await this.accept(welcomes);
+      if (left < INVITATIONS) await this.push(inbox, 'publish', { key_packages: JSON.parse(this.den.key_packages(INVITATIONS - left)) }).catch(() => {});
+      await this.save();
+    }));
+  }
+
+  addRoom(r) {
+    if (this.rooms.has(r.id) && this.channels.has(r.id)) return;
+    this.rooms.set(r.id, { ...this.rooms.get(r.id), ...r });
+    this.on('rooms', [...this.rooms.values()]);
+    this.joinRoom(r.id);
   }
 
   push(ch, event, payload) {
@@ -152,19 +207,26 @@ export class DenClient {
   }
 
   joinRoom(room) {
+    if (this.channels.has(room)) return;
     const ch = this.socket.channel(`room:${room}`);
     this.channels.set(room, ch);
     ch.on('msg', (m) => this.lock(() => this.take(room, m)));
     ch.on('expired', ({ keys }) => this.lock(() => this.removeStale(room, keys, true)));
-    ch.join()
-      .receive('ok', (state) => this.lock(() => this.sync(room, state)))
-      .receive('error', (e) => this.on('error', { room, error: e?.reason || 'could not open the room' }));
+    ch.on('typing', ({ key }) => this.on('typing', { room, key }));
+    this.joined.set(room, new Promise((resolve) => {
+      ch.join()
+        .receive('ok', (state) => { resolve(true); this.lock(() => this.sync(room, state)); })
+        .receive('error', (e) => { resolve(false); this.on('error', { room, error: e?.reason || 'could not open the room' }); });
+    }));
   }
 
   /// In the room's group, caught up, and with members whose day ended taken out.
   async sync(room, state, tries = 0) {
     const ch = this.channels.get(room);
+    const kind = state.kind || this.rooms.get(room)?.kind;
     if (!this.den.rooms().includes(room)) {
+      // A private room is entered by invitation only: wait for the Welcome.
+      if (kind === 'private') return;
       try {
         if (!state.group_info) {
           const info = this.den.create(room);
@@ -173,7 +235,7 @@ export class DenClient {
           const commit = this.den.join(room, unb64(state.group_info));
           const r = await this.push(ch, 'relay', { bytes: b64(commit) });
           this.seq[room] = r.seq;
-          await this.push(ch, 'info', { epoch: Number(this.den.epoch(room)), group_info: b64(this.den.group_info(room)) }).catch(() => {});
+          await this.publishInfo(room);
         }
         await this.save();
       } catch (e) {
@@ -187,38 +249,222 @@ export class DenClient {
       const { messages } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
       for (const m of messages) await this.take(room, m);
     }
-    this.on('ready', { room, members: JSON.parse(this.den.members(room)) });
+    this.on('ready', { room, members: this.members(room) });
     const present = (await this.push(ch, 'state', {})).present || [];
-    const stale = JSON.parse(this.den.members(room)).map((m) => m.key).filter((k) => k !== this.den.key() && !present.includes(k));
+    const stale = this.members(room).map((m) => m.key).filter((k) => k !== this.den.key() && !present.includes(k));
     if (stale.length) await this.removeStale(room, stale, false);
   }
 
-  /// One relayed message: read it, keep the words.
+  async publishInfo(room) {
+    if (this.rooms.get(room)?.kind === 'private') return;
+    await this.push(this.channels.get(room), 'info', { epoch: Number(this.den.epoch(room)), group_info: b64(this.den.group_info(room)) }).catch(() => {});
+  }
+
+  members(room) {
+    try { return JSON.parse(this.den.members(room)); } catch { return []; }
+  }
+
+  inRoom(room) {
+    return this.den.rooms().includes(room);
+  }
+
+  /// One relayed message: read it, keep it.
   async take(room, m) {
     if ((this.seq[room] || 0) >= m.seq) return;
     this.seq[room] = m.seq;
-    if (!this.den.rooms().includes(room)) return;
+    if (!this.inRoom(room)) return;
     let ev;
     try { ev = JSON.parse(this.den.receive(room, unb64(m.bytes))); } catch { await this.save(); return; } // before this device joined, or its own
     if (ev.kind === 'text') {
-      await this.keep(room, { seq: m.seq, from: ev.from, text: ev.text, at: Date.now() });
-      this.on('text', { room, from: ev.from, text: ev.text, mine: false });
+      await this.apply(room, { ...decode(ev.text), from: ev.from, key: ev.key, seq: m.seq, at: Date.now() });
     } else if (ev.kind === 'commit') {
       if (!ev.members.some((x) => x.key === this.den.key())) {
         // Taken out (a day that ended without renewal): join again if admitted.
         this.den.forget(room);
         await this.save();
-        return this.sync(room, await this.push(this.channels.get(room), 'state', {}));
+        if (this.rooms.get(room)?.kind !== 'private') return this.sync(room, await this.push(this.channels.get(room), 'state', {}));
+        return;
       }
       this.on('members', { room, members: ev.members });
     }
     await this.save();
   }
 
+  // ---- Messages --------------------------------------------------------------
+
+  async log(room) {
+    return (await this.kv.get(`log:${room}`)) || [];
+  }
+
+  /// Apply one sealed document to the room's log: words added; a reaction,
+  /// edit or deletion applied to the message it names (edits and deletions
+  /// only from that message's own author).
+  async apply(room, m, mine = false) {
+    const log = await this.log(room);
+    const at = (id) => log.findIndex((x) => x.id === id);
+    let shown = null;
+    if (m.t === 'msg' || m.t === 'file') {
+      if (at(m.id) >= 0) return;
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: m.text || '', reply: m.reply || null, file: m.t === 'file' ? m.file : null, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
+      log.push(shown);
+    } else if (m.t === 'react') {
+      const i = at(m.to);
+      if (i < 0 || typeof m.emoji !== 'string' || !m.emoji || [...m.emoji].length > 4) return;
+      const r = (log[i].reactions[m.emoji] ||= []);
+      const k = r.indexOf(m.from);
+      if (k >= 0) r.splice(k, 1); else r.push(m.from);
+      if (!r.length) delete log[i].reactions[m.emoji];
+      shown = log[i];
+    } else if (m.t === 'edit' || m.t === 'del') {
+      const i = at(m.to);
+      if (i < 0 || log[i].key !== m.key) return;
+      if (m.t === 'edit') Object.assign(log[i], { text: String(m.text || '').slice(0, 4000), edited: true });
+      else Object.assign(log[i], { text: '', file: null, deleted: true });
+      shown = log[i];
+    } else if (m.t === 'title') {
+      const r = this.rooms.get(room);
+      if (r && r.kind === 'private') { r.title = String(m.text || '').slice(0, 60); await this.keepPrivate(); this.on('rooms', [...this.rooms.values()]); }
+      return;
+    } else return;
+    await this.kv.put(`log:${room}`, log.slice(-KEEP));
+    this.on('message', { room, message: shown, kind: m.t, mine, mention: !mine && (m.text || '').includes(`@${this.me.name}`) });
+  }
+
+  /// Send one sealed document to a room, and keep it here.
+  send(room, body) {
+    return this.lock(async () => {
+      const ch = this.channels.get(room);
+      const m = { v: 1, id: hex(rand(8)), ...body };
+      for (let tries = 0; tries < 2; tries++) {
+        try {
+          const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
+          this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
+          await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq, at: Date.now() }, true);
+          this.markRead(room);
+          await this.save();
+          return m.id;
+        } catch (e) {
+          if (e.reason !== 'epoch') throw e;
+          // Behind: catch up, then send again.
+          const { messages } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
+          for (const x of messages) await this.take(room, x);
+        }
+      }
+      throw new Error('The room moved while sending; try again.');
+    });
+  }
+
+  say(room, text, reply = null) {
+    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}) });
+  }
+  react(room, to, emoji) { return this.send(room, { t: 'react', to, emoji }); }
+  edit(room, to, text) { return this.send(room, { t: 'edit', to, text: String(text).slice(0, 4000) }); }
+  remove(room, to) { return this.send(room, { t: 'del', to }); }
+
+  typing(room) {
+    if (Date.now() - this.typingAt < 3000) return;
+    this.typingAt = Date.now();
+    this.channels.get(room)?.push('typing', {});
+  }
+
+  // ---- Files -----------------------------------------------------------------
+
+  /// A file: sealed here with a one-time key, its ciphertext to the den, the
+  /// key only in the room's message.
+  async sendFile(room, file) {
+    if (file.size > 25 * 1024 * 1024) throw new Error('A file is at most 25 MB.');
+    const raw = rand(32);
+    const iv = rand(12);
+    const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
+    const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, await file.arrayBuffer()));
+    const r = await fetch(`${this.base}/blob/`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${this.sessionToken.session}` }, body: sealed, credentials: 'omit' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `The den answered ${r.status}`);
+    return this.send(room, { t: 'file', file: { blob: j.id, name: String(file.name).slice(0, 120), mime: String(file.type || 'application/octet-stream').slice(0, 80), size: file.size, key: b64(raw), iv: b64(iv) } });
+  }
+
+  /// A file from the den, opened here.
+  async openFile(file) {
+    const r = await fetch(`${this.base}/blob/${file.blob}`, { headers: { authorization: `Bearer ${this.sessionToken.session}` }, credentials: 'omit' });
+    if (!r.ok) throw new Error('That file is gone (files are kept 30 days).');
+    const key = await crypto.subtle.importKey('raw', unb64(file.key), 'AES-GCM', false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(file.iv) }, key, await r.arrayBuffer());
+    return new Blob([plain], { type: file.mime });
+  }
+
+  // ---- Private rooms ---------------------------------------------------------
+
+  /// A private room with these devices: made here, each invited by one of
+  /// its own one-time invitations; the den keeps no GroupInfo for it.
+  startPrivate(keys, title) {
+    return this.lock(async () => {
+      const id = `p-${hex(rand(16))}`;
+      await this.push(this.lobby, 'private_room', { id });
+      this.den.create(id);
+      this.rooms.set(id, { id, title: String(title || '').slice(0, 60), kind: 'private' });
+      await this.keepPrivate();
+      this.joinRoom(id);
+      if (!(await this.joined.get(id))) throw new Error('The den would not open the room.');
+      await this.invite(id, keys);
+      if (title) await this.lockless_send(id, { t: 'title', text: title });
+      this.on('rooms', [...this.rooms.values()]);
+      await this.save();
+      return id;
+    });
+  }
+
+  /// Add devices to a private room this device is in.
+  invite(room, keys) {
+    const run = async () => {
+      const kps = [];
+      for (const k of keys) kps.push((await this.push(this.lobby, 'claim', { key: k })).key_package);
+      const { commit, welcome } = JSON.parse(this.den.add(room, JSON.stringify(kps)));
+      try {
+        const r = await this.push(this.channels.get(room), 'relay', { bytes: commit });
+        this.seq[room] = r.seq;
+        this.den.confirm(room);
+      } catch (e) {
+        this.den.discard(room);
+        throw e;
+      }
+      await this.push(this.channels.get(room), 'invite', { to: keys, welcome });
+      this.on('members', { room, members: this.members(room) });
+      await this.save();
+    };
+    return run();
+  }
+
+  /// A send inside a lock already held.
+  async lockless_send(room, body) {
+    const m = { v: 1, id: hex(rand(8)), ...body };
+    const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
+    this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
+    await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
+  }
+
+  /// Welcomes in this device's inbox: into those private rooms.
+  async accept(welcomes) {
+    const taken = [];
+    for (const w of welcomes) {
+      try {
+        const room = this.den.accept(unb64(w.welcome));
+        if (!this.rooms.has(room)) this.rooms.set(room, { id: room, title: '', kind: 'private' });
+        await this.keepPrivate();
+        this.joinRoom(room);
+        this.on('rooms', [...this.rooms.values()]);
+      } catch { /* already in it, or not for this device */ }
+      if (w.id) taken.push(w.id);
+    }
+    if (taken.length) await this.push(this.inbox, 'taken', { ids: taken }).catch(() => {});
+    await this.save();
+  }
+
+  // ---- Leaving ---------------------------------------------------------------
+
   /// Take out devices whose day ended. Every member's device tries; the den
   /// keeps the first commit, the others step back.
   async removeStale(room, keys, wait) {
-    if (!this.den.rooms().includes(room)) return;
+    if (!this.inRoom(room)) return;
     if (wait) await new Promise((r) => setTimeout(r, Math.random() * 3000));
     const ours = keys.filter((k) => k !== this.den.key());
     const commit = this.den.remove(room, JSON.stringify(ours));
@@ -227,47 +473,169 @@ export class DenClient {
       const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(commit) });
       this.seq[room] = r.seq;
       this.den.confirm(room);
-      await this.push(this.channels.get(room), 'info', { epoch: Number(this.den.epoch(room)), group_info: b64(this.den.group_info(room)) }).catch(() => {});
-      this.on('members', { room, members: JSON.parse(this.den.members(room)) });
+      await this.publishInfo(room);
+      this.on('members', { room, members: this.members(room) });
     } catch {
       this.den.discard(room);
     }
     await this.save();
   }
 
-  send(room, text) {
-    return this.lock(async () => {
-      const ch = this.channels.get(room);
-      for (let tries = 0; tries < 2; tries++) {
-        try {
-          const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, text)) });
-          this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
-          await this.keep(room, { seq: r.seq, from: this.den.name(), text, at: Date.now(), mine: true });
-          await this.save();
-          return;
-        } catch (e) {
-          if (e.reason !== 'epoch') throw e;
-          // Behind: catch up, then send again.
-          const { messages } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
-          for (const m of messages) await this.take(room, m);
-        }
+  // ---- Unread ----------------------------------------------------------------
+
+  async unread(room) {
+    const last = this.read[room] || 0;
+    return (await this.log(room)).filter((m) => !m.mine && m.seq > last).length;
+  }
+
+  markRead(room) {
+    this.read[room] = this.seq[room] || 0;
+    this.kv.put('read', this.read);
+  }
+
+  /// Search the words this device keeps, in every room.
+  async search(q) {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return [];
+    const out = [];
+    for (const r of this.rooms.values()) {
+      for (const m of await this.log(r.id)) {
+        if (!m.deleted && ((m.text || '').toLowerCase().includes(needle) || (m.file?.name || '').toLowerCase().includes(needle))) out.push({ room: r.id, message: m });
       }
-      throw new Error('The room moved while sending; try again.');
-    });
+    }
+    return out.slice(-200);
   }
 
-  async keep(room, line) {
-    const log = (await this.kv.get(`log:${room}`)) || [];
-    log.push(line);
-    await this.kv.put(`log:${room}`, log.slice(-KEEP));
+  // ---- Voice -----------------------------------------------------------------
+
+  /// The room's voice key for this epoch: every member derives it alike.
+  async voiceKey(room) {
+    const raw = this.den.export(room, VOICE_LABEL, 32);
+    return { index: Number(this.den.epoch(room)) % 256, key: await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']) };
   }
 
-  log(room) {
-    return this.kv.get(`log:${room}`).then((l) => l || []);
+  /// Join a room's voice: one connection to the den, our microphone up,
+  /// eight slots down, every frame sealed here and opened here.
+  async joinVoice(room, onSlots) {
+    if (!this.inRoom(room)) throw new Error('Enter the room first.');
+    const voice = new Voice(this, room, onSlots);
+    await voice.start();
+    this.voice = voice;
+    return voice;
   }
 
   /// Forget this device: its key, rooms, session, tokens and words.
   async forget() {
-    for (const k of ['device', 'seq', 'session', `token:${day()}`, `token:${day(1)}`, ...ROOMS.map(([r]) => `log:${r}`)]) await this.kv.del(k);
+    for (const k of ['device', 'seq', 'read', 'session', 'private', `token:${day()}`, `token:${day(1)}`, ...[...this.rooms.keys()].map((r) => `log:${r}`)]) await this.kv.del(k);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Voice: WebRTC to the den's forwarding unit; each audio frame sealed with
+// AES-GCM under the room's voice key: [ciphertext ‖ tag][iv 12][key index 1].
+
+const supportsScript = typeof RTCRtpScriptTransform !== 'undefined';
+
+class Voice {
+  constructor(client, room, onSlots) {
+    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], sealed: 0, opened: 0, failed: 0 });
+  }
+
+  async refreshKey() {
+    const { index, key } = await this.client.voiceKey(this.room);
+    this.keys.set(index, key);
+    this.current = index;
+    if (this.keys.size > 3) this.keys.delete([...this.keys.keys()][0]);
+    this.worker?.postMessage({ keys: [...this.keys.entries()], current: index });
+  }
+
+  async seal(frame) {
+    const key = this.keys.get(this.current);
+    const iv = rand(12);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, frame.data));
+    const out = new Uint8Array(ct.length + 13);
+    out.set(ct); out.set(iv, ct.length); out[ct.length + 12] = this.current;
+    frame.data = out.buffer;
+    this.sealed++;
+    return frame;
+  }
+
+  async open(frame) {
+    const d = new Uint8Array(frame.data);
+    if (d.length < 29) throw new Error('short');
+    const key = this.keys.get(d[d.length - 1]);
+    if (!key) throw new Error('no key for that epoch');
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: d.subarray(d.length - 13, d.length - 1) }, key, d.subarray(0, d.length - 13));
+    frame.data = plain;
+    this.opened++;
+    return frame;
+  }
+
+  transform(endpoint, mode) {
+    if (supportsScript) {
+      this.worker ??= new Worker(new URL('./den/voice-worker.js', import.meta.url));
+      this.worker.postMessage({ keys: [...this.keys.entries()], current: this.current });
+      this.worker.onmessage = (e) => { if (e.data.count) { this.sealed = e.data.sealed; this.opened = e.data.opened; } };
+      endpoint.transform = new RTCRtpScriptTransform(this.worker, { mode });
+      return;
+    }
+    const { readable, writable } = endpoint.createEncodedStreams();
+    const step = mode === 'seal' ? (f) => this.seal(f) : (f) => this.open(f);
+    readable.pipeThrough(new TransformStream({
+      transform: async (frame, ctl) => { try { ctl.enqueue(await step(frame)); } catch { this.failed++; } },
+    })).pipeTo(writable);
+  }
+
+  async start() {
+    await this.refreshKey();
+    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+      .catch((e) => { throw new Error(e?.name === 'NotAllowedError' ? 'The microphone is blocked for this page.' : 'No microphone found.'); });
+    const pc = new RTCPeerConnection({ encodedInsertableStreams: !supportsScript, bundlePolicy: 'max-bundle' });
+    this.pc = pc;
+    const up = pc.addTransceiver(this.mic.getAudioTracks()[0], { direction: 'sendonly' });
+    this.transform(up.sender, 'seal');
+    this.downs = [];
+    for (let i = 0; i < 8; i++) this.downs.push(pc.addTransceiver('audio', { direction: 'recvonly' }));
+    for (const t of this.downs) this.transform(t.receiver, 'open');
+    pc.ontrack = (e) => {
+      const audio = new Audio();
+      audio.srcObject = new MediaStream([e.track]);
+      audio.autoplay = true;
+      audio.play().catch(() => {});
+      (this.audios ||= []).push(audio);
+    };
+    const ch = this.client.socket.channel(`voice:${this.room}`);
+    this.ch = ch;
+    ch.on('ice', (c) => pc.addIceCandidate(c).catch(() => {}));
+    ch.on('slots', (slots) => {
+      this.people = Object.entries(slots).map(([mid, key]) => ({ mid, key }));
+      this.onSlots(this.people);
+    });
+    pc.onicecandidate = (e) => { if (e.candidate) ch.push('ice', e.candidate.toJSON()); };
+    await new Promise((resolve, reject) => ch.join().receive('ok', resolve).receive('error', (e) => reject(new Error(e?.reason || 'could not join the voice room'))));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const answer = await this.client.push(ch, 'offer', { type: 'offer', sdp: offer.sdp });
+    await pc.setRemoteDescription(answer);
+    // A new epoch (someone joined or left the room): a new voice key.
+    this.offMembers = setInterval(() => {
+      const e = Number(this.client.den.epoch(this.room)) % 256;
+      if (e !== this.current) this.refreshKey();
+    }, 1000);
+  }
+
+  mute(on) {
+    this.mic.getAudioTracks().forEach((t) => { t.enabled = !on; });
+  }
+
+  async leave() {
+    clearInterval(this.offMembers);
+    try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
+    this.ch.leave();
+    this.pc.close();
+    this.mic.getTracks().forEach((t) => t.stop());
+    (this.audios || []).forEach((a) => { a.srcObject = null; });
+    this.worker?.terminate();
+    this.client.voice = null;
   }
 }
