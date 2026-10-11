@@ -4,7 +4,8 @@ ARG OTP=28.4.3
 ARG DEBIAN=bookworm-20260824-slim
 
 FROM hexpm/elixir:${ELIXIR}-erlang-${OTP}-debian-${DEBIAN} AS build
-RUN apt-get update -y && apt-get install -y build-essential git && rm -rf /var/lib/apt/lists/*
+# ex_webrtc's native parts (voice): DTLS over OpenSSL, SRTP over libsrtp.
+RUN apt-get update -y && apt-get install -y build-essential git pkg-config libssl-dev libsrtp2-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV MIX_ENV=prod
 RUN mix local.hex --force && mix local.rebar --force
@@ -19,7 +20,7 @@ COPY config/runtime.exs config/
 RUN mix release
 
 FROM debian:bookworm-20260824-slim
-RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses6 locales ca-certificates && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update -y && apt-get install -y libstdc++6 openssl libssl3 libsrtp2-1 libncurses6 locales ca-certificates && rm -rf /var/lib/apt/lists/* \
   && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 MIX_ENV=prod PHX_SERVER=true
 WORKDIR /app
