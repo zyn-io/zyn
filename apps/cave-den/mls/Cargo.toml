@@ -1,0 +1,31 @@
+[package]
+name = "den-mls"
+version = "0.1.0"
+edition = "2021"
+description = "The Cave den's end-to-end encryption: OpenMLS groups and RFC 9474 blind tokens, for the browser (wasm) and tests"
+license = "MIT"
+publish = false
+
+# Its own workspace: built for wasm on its own, never part of the node's.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openmls = { version = "0.9.1", features = ["js"] }
+openmls_rust_crypto = "0.6.0"
+openmls_basic_credential = "0.6.0"
+openmls_traits = "0.6.0"
+openmls_memory_storage = "0.6.0"
+blind-rsa-signatures = "0.18.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+rand = "0.8"
+getrandom = { version = "0.2", features = ["js"] }
+wasm-bindgen = "=0.2.128"
+
+[profile.release]
+opt-level = "z"
+lto = true

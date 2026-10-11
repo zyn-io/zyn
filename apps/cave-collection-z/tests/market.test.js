@@ -77,10 +77,8 @@ test('the store reads only public things itself, and nothing with an account in 
   // ZCaveDAO reads the team's published /dao.json, and a role sign-up sends
   // only the contact and note the member types — never an account or item.
   // Proposal texts are stored and read by their hash (§172): public words.
-  // The members' chat's door gets the holder's member pass code, only when
-  // they press Enter (§183) — a pass, not an account or an item.
-  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/proposal-text'", "'/api/roles'", '`/api/proposal-text?hash=${h}&network=${NETWORK}`', "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet', "'https://api.coinbase.com/v2/prices/ZEC-USD/spot'", "'https://api.kraken.com/0/public/Ticker?pair=ZECUSD'", "'https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd'", '`${CHAT}/auth`'].sort());
-  assert.match(zstore, /fetch\(`\$\{CHAT\}\/auth`, \{ method: 'POST', headers: \{ 'content-type': 'application\/json' \}, body: JSON\.stringify\(\{ token: r\.token \}\)/, 'the chat door gets the pass code and nothing else');
+  // The members' chat (§184) talks to its den from den.js, tested in chat.test.js.
+  assert.deepEqual([...new Set(fetches)].sort(), ["'/api/proposal-text'", "'/api/roles'", '`/api/proposal-text?hash=${h}&network=${NETWORK}`', "'/api/whitelist/bind'", "'/collection-z.json'", "'/dao.json'", 'RPC', 'url.pathname', "NETWORK === 'testnet' ? '/burn-testnet.json' : '/burn.json'", 'cfg.rpc || SOLANA_PUBLIC[cfg.cluster] || SOLANA_PUBLIC.mainnet', "'https://api.coinbase.com/v2/prices/ZEC-USD/spot'", "'https://api.kraken.com/0/public/Ticker?pair=ZECUSD'", "'https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd'"].sort());
   assert.match(zstore, /fetch\('\/api\/whitelist\/bind', \{ method: 'POST'/, 'the account goes only in the holder\'s own link request');
   assert.match(zstore, /url\.origin !== location\.origin \|\| !ROUTES\[path\]/, 'only this site\'s own store pages are fetched in place');
   // Every chain read goes through one helper. Its only fields are public ones:

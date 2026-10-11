@@ -64,18 +64,19 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
 await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
 await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
-// The members' chat's client (Converse.js, MPL-2.0, pinned in package.json):
-// the script, its styles, the OMEMO library and the curve25519 wasm it loads,
-// emoji, sounds and fonts — not its 7 MB of locales, which /chat never asks for.
-{
-  const from = new URL('node_modules/converse.js/', root);
-  await mkdir(new URL('converse/', output), { recursive: true });
-  for (const f of ['converse.min.js', 'converse.min.css', 'libomemo.esm.min.js', 'curve25519_compiled.wasm', 'emoji.json']) {
-    await cp(new URL(`dist/${f}`, from), new URL(`converse/${f}`, output));
-  }
-  for (const d of ['sounds', 'webfonts', 'images']) await cp(new URL(`dist/${d}/`, from), new URL(`converse/${d}/`, output), { recursive: true });
-  await cp(new URL('LICENSE', from), new URL('converse/LICENSE', output));
+// The members' chat (the den, §184): its client module, the den's MLS and
+// blind-token library built to wasm (apps/cave-den/mls, `./build.sh`), the
+// Phoenix socket client (pinned to the den's version), and the day keys the
+// door publishes — the one file every holder's page uses.
+await cp(new URL('den.js', root), new URL('den.js', output));
+await mkdir(new URL('den/', output), { recursive: true });
+for (const f of ['den_mls.js', 'den_mls_bg.wasm']) {
+  await cp(new URL(`../cave-den/mls/pkg/${f}`, root), new URL(`den/${f}`, output)).catch(() => {
+    throw new Error(`apps/cave-den/mls/pkg/${f} is missing: build it with apps/cave-den/mls/build.sh`);
+  });
 }
+await cp(new URL('node_modules/phoenix/priv/static/phoenix.mjs', root), new URL('den/phoenix.mjs', output));
+await cp(new URL('den-keys.json', root), new URL('den-keys.json', output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 // The tokens burnable for sale credit (§182): one file per network, a token
 // per key. Without it the page offers no burn.
 for (const f of ['burn.json', 'burn-testnet.json']) {
@@ -198,15 +199,13 @@ const csp = [
   "object-src 'none'",
 ].join('; ');
 
-// /chat alone talks to the chat server and runs the OMEMO library's wasm;
+// /chat alone talks to the den and runs its MLS library's wasm;
 // the rest of the site keeps the policy above. Cloudflare applies every
 // matching rule, so /chat first detaches the site-wide policy ("!").
 const CHAT_ORIGIN = 'chat.cavebro.win';
 const chatCsp = csp
   .replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
-  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`)
-  .replace("img-src 'self' data:", "img-src 'self' data: blob:")
-  .replace("font-src 'self'", "font-src 'self' data:; media-src 'self'; worker-src 'self' blob:");
+  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`);
 
 await writeFile(
   new URL('_headers', output),

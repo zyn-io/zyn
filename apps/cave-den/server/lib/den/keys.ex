@@ -1,0 +1,99 @@
+defmodule Den.Keys do
+  @moduledoc """
+  The door's day keys (RFC 9474, RSABSSA-SHA384-PSS-Randomized). Each UTC day
+  has its own RSA key: the door signs a blinded token for a day only on that
+  day or the day before, and the den admits a token only on its day, so a
+  holder who sells their item cannot have saved tokens for later.
+
+  Every key is published in advance, the same file for everyone
+  (`cavebro.win/den-keys.json`), and the page uses only those — so the door
+  cannot hand each holder a different key to recognise them by.
+
+  Private keys live in `keys_dir`, one PEM per day (`YYYY-MM-DD.pem`), made
+  ahead with `mix den.keys`.
+  """
+
+  @salt 48
+
+  def dir, do: Application.fetch_env!(:den, :keys_dir)
+
+  @doc "The day's private key, or :error."
+  def private(day) do
+    with true <- day =~ ~r/^\d{4}-\d{2}-\d{2}$/,
+         {:ok, pem} <- File.read(Path.join(dir(), day <> ".pem")),
+         [entry] <- :public_key.pem_decode(pem) do
+      {:ok, :public_key.pem_entry_decode(entry)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp public_of({:RSAPrivateKey, _, n, e, _, _, _, _, _, _, _}), do: {:RSAPublicKey, n, e}
+
+  @doc "The day's public key as SubjectPublicKeyInfo DER, as the page's library reads it."
+  def public_der(day) do
+    with {:ok, key} <- private(day) do
+      {:ok, :public_key.der_encode(:SubjectPublicKeyInfo, spki(public_of(key)))}
+    end
+  end
+
+  defp spki({:RSAPublicKey, _, _} = pub) do
+    {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 113_549, 1, 1, 1}, <<5, 0>>}, :public_key.der_encode(:RSAPublicKey, pub)}
+  end
+
+  @doc "Every day key from `from` for `days` days, public halves: %{day => base64 DER}."
+  def published(from, days) do
+    for d <- 0..(days - 1), day = Date.to_iso8601(Date.add(from, d)), {:ok, der} <- [public_der(day)], into: %{} do
+      {day, Base.encode64(der)}
+    end
+  end
+
+  @doc "Make the day's key if it does not exist."
+  def make(day) do
+    path = Path.join(dir(), day <> ".pem")
+
+    unless File.exists?(path) do
+      File.mkdir_p!(dir())
+      key = :public_key.generate_key({:rsa, 2048, 65_537})
+      File.write!(path, :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)]))
+      File.chmod!(path, 0o600)
+    end
+
+    :ok
+  end
+
+  @doc "Sign a blinded message with the day's key: m^d mod n, checked."
+  def blind_sign(day, blinded) do
+    with {:ok, {:RSAPrivateKey, _, n, e, d, _, _, _, _, _, _}} <- private(day),
+         k = byte_size(:binary.encode_unsigned(n)),
+         true <- byte_size(blinded) == k or {:error, :wrong_length},
+         m = :binary.decode_unsigned(blinded),
+         true <- m < n or {:error, :out_of_range} do
+      s = :crypto.mod_pow(m, d, n)
+      # RFC 9474 §4.3: check the signature before it leaves.
+      if :crypto.mod_pow(s, e, n) == :binary.encode_unsigned(m) do
+        {:ok, pad(s, k)}
+      else
+        {:error, :fault}
+      end
+    else
+      :error -> {:error, :no_key}
+      {:error, _} = err -> err
+      false -> {:error, :bad}
+    end
+  end
+
+  @doc "Whether `sig` is the day key's signature on (randomizer ‖ msg)."
+  def valid?(day, msg, randomizer, sig) do
+    case private(day) do
+      {:ok, key} ->
+        :public_key.verify(randomizer <> msg, :sha384, sig, public_of(key), rsa_padding: :rsa_pkcs1_pss_padding, rsa_pss_saltlen: @salt)
+
+      :error ->
+        false
+    end
+  end
+
+  defp pad(s, k) when byte_size(s) < k, do: :binary.copy(<<0>>, k - byte_size(s)) <> s
+  defp pad(s, _), do: s
+end

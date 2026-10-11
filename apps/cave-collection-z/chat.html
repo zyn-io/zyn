@@ -27,12 +27,29 @@
       .facts-list { margin: 0; padding: 0 0 0 18px; display: grid; gap: 8px; font-family: var(--sans); font-size: 14.5px; line-height: 1.55; color: var(--read); max-width: 64ch; }
       .door { display: grid; gap: 18px; }
       .door .act { justify-self: start; }
-      /* The chat takes the room once entered. */
-      body.in-chat .register { max-width: none; padding: 0; }
-      body.in-chat .register > :not(#chat) { display: none; }
-      #chat { height: calc(100vh - 72px); min-height: 480px; }
-      #chat[hidden] { display: none; }
-      #chat converse-root { height: 100%; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      /* The den, once entered. */
+      .den { display: grid; grid-template-columns: 220px 1fr; min-height: 70vh; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.45); }
+      .den[hidden] { display: none; }
+      .den aside { border-right: 1px solid var(--line); padding: 16px; display: grid; align-content: start; gap: 14px; }
+      .den .me { font-family: var(--sans); font-size: 13px; color: var(--muted); margin: 0; }
+      .den .me b { color: var(--acid); font-family: ui-monospace, Menlo, monospace; font-weight: 400; }
+      .den nav { display: grid; gap: 4px; }
+      .den nav button { text-align: left; font: 15px/1.4 var(--sans); color: var(--read); background: transparent; border: 0; padding: 8px 10px; cursor: pointer; display: flex; justify-content: space-between; }
+      .den nav button[aria-current="true"] { color: var(--ink); background: rgba(199, 240, 75, 0.08); box-shadow: inset 2px 0 0 var(--acid); }
+      .den nav small { color: var(--muted); font-size: 11px; }
+      .den section { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
+      .den header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+      .den header h2 { margin: 0; font: 400 20px var(--mono); color: var(--ink); }
+      .den header span { font: 12px var(--sans); color: var(--muted); }
+      .log { list-style: none; margin: 0; padding: 14px 18px; overflow-y: auto; max-height: 60vh; display: grid; gap: 10px; align-content: start; }
+      .log li { font: 15px/1.5 var(--sans); color: var(--read); overflow-wrap: anywhere; }
+      .log li b { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); margin-right: 8px; font-weight: 400; }
+      .log li.mine b { color: var(--acid); }
+      .log li.note { color: var(--muted); font-size: 13px; }
+      .say-form { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+      .say-form textarea { flex: 1; min-height: 44px; max-height: 160px; resize: vertical; font: 15px/1.5 var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 10px 12px; }
+      @media (max-width: 720px) { .den { grid-template-columns: 1fr; } .den aside { border-right: 0; border-bottom: 1px solid var(--line); } .den nav { grid-auto-flow: column; overflow-x: auto; } }
     </style>
   </head>
   <body data-page="chat">
@@ -55,23 +72,39 @@
         <div class="ledger-index"><h2 id="h-door">Enter</h2><span>holders of a Cave item</span></div>
         <div class="ledger-body door">
           <p class="say">
-            For holders of a Collection Z item. Nap shows the chat your member pass, and your name here comes from
-            that pass, not from your wallet.
-            <button class="tip" type="button" aria-expanded="false" data-tip="Nap makes the pass once per item and registers its hash on the ledger; after that, entering registers nothing new. The same pass gives the same chat name on every device. A new holder of the item gets a new pass and a new name.">i</button>
+            For holders of a Collection Z item. Nap shows the door your member pass; the door signs a day token it
+            cannot read, and this device enters with it under a name of its own.
+            <button class="tip" type="button" aria-expanded="false" data-tip="Your chat name comes from a key made on this device, not from your wallet or item. The door checks your pass and signs a blinded token; the den admits the device the token names, and cannot tell which pass it came from. Each visit's token is fetched a day ahead, so from your second day the den cannot even time it.">i</button>
           </p>
           <ul class="facts-list">
-            <li>Messages are end-to-end encrypted. The server keeps them sealed.</li>
-            <li>The Cave team runs the chat. It can see who is in which room and when, and it can link your chat name to your pass. The operator can link a pass to the item that made it.</li>
-            <li>Selling, moving or redeeming your item takes you out within a few minutes.</li>
+            <li>Messages are end-to-end encrypted (MLS). The den relays words it cannot read; only members' devices hold the keys.</li>
+            <li>The Cave team runs the den. It sees which device names are in which room and when they write, not whose they are. On your first day, entering right after the pass check can be timed together.</li>
+            <li>Your words are kept on this device. Clearing the browser's data forgets them and your chat name.</li>
+            <li>Selling, moving or redeeming your item ends your entry at the end of the day.</li>
           </ul>
           <button class="act" id="enter" type="button">Enter with Nap</button>
           <p class="out" id="chat-out" role="status" aria-live="polite"></p>
         </div>
       </section>
 
-      <div id="chat" hidden></div>
+      <div class="den" id="den" hidden>
+        <aside>
+          <p class="me">You are <b id="me">—</b></p>
+          <nav id="rooms" aria-label="Rooms"></nav>
+          <p class="out" id="den-status" role="status" aria-live="polite"></p>
+        </aside>
+        <section>
+          <header><h2 id="room-title">General</h2><span id="room-meta"></span></header>
+          <ol class="log" id="log" aria-live="polite"></ol>
+          <form class="say-form" id="say">
+            <label class="visually-hidden" for="say-text">Message</label>
+            <textarea id="say-text" maxlength="2000" placeholder="Write to the room" required></textarea>
+            <button class="act" type="submit">Send</button>
+          </form>
+        </section>
+      </div>
     </main>
 
-    <script type="module" src="/zstore.js?v=7"></script>
+    <script type="module" src="/zstore.js?v=8"></script>
   </body>
 </html>

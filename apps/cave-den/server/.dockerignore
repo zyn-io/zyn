@@ -1,0 +1,6 @@
+_build
+deps
+*.db*
+tmp
+priv/keys
+test

@@ -14,6 +14,6 @@
   "dependencies": {
     "@noble/curves": "^1.9.7",
     "@noble/hashes": "^1.8.0",
-    "converse.js": "14.0.0"
+    "phoenix": "1.8.15"
   }
 }
