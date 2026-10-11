@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-08",
+  "updated": "2026-10-11",
   "setup": [
     {
       "step": "Agree the charter",
@@ -18,8 +18,8 @@
       "state": "next"
     },
     {
-      "step": "The members' chat, opened with member passes",
-      "state": "next"
+      "step": "The members' chat, entered with a member pass",
+      "state": "done"
     },
     {
       "step": "Cave names, and roles on names",

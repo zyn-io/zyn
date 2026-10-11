@@ -1,0 +1,124 @@
+# ZCaveDAO members' chat (cavebro.win). One host, no federation, no sign-up:
+# accounts exist only through the gate's tokens (zyn-chat-gate), which it
+# issues to holders of a live member pass.
+hosts:
+  - chat.cavebro.win
+loglevel: info
+language: en
+
+listen:
+  # WebSocket for the web client, and the admin API for the gate. Bound to
+  # the host's loopback by Docker; nginx carries /ws to the world.
+  - port: 5280
+    ip: "0.0.0.0"
+    module: ejabberd_http
+    request_handlers:
+      /ws: ejabberd_http_ws
+  - port: 5281
+    ip: "0.0.0.0"
+    module: ejabberd_http
+    request_handlers:
+      /api: mod_http_api
+
+auth_method: jwt
+jwt_key: /opt/ejabberd/conf/jwt.jwk
+jwt_jid_field: jid
+
+# No server-to-server: only members, only here.
+s2s_access: none
+
+acl:
+  gate:
+    ip:
+      - 127.0.0.0/8
+      - 172.16.0.0/12
+
+access_rules:
+  local:
+    allow: all
+  c2s:
+    allow: all
+  muc_create:
+    allow: gate
+
+api_permissions:
+  "the gate":
+    from: mod_http_api
+    who:
+      acl: gate
+    what:
+      - create_room_with_opts
+      - set_room_affiliation
+      - get_room_affiliations
+      - get_room_occupants
+      - change_room_option
+      - kick_session
+      - connected_users_number
+      - status
+
+shaper:
+  normal:
+    rate: 3000
+    burst_size: 20000
+shaper_rules:
+  max_user_sessions: 10
+  c2s_shaper: normal
+
+modules:
+  mod_adhoc: {}
+  mod_avatar: {}
+  mod_blocking: {}
+  mod_caps: {}
+  # Rooms and direct messages carry only end-to-end encrypted words.
+  mod_cave_omemo_only: {}
+  mod_carboncopy: {}
+  mod_client_state: {}
+  mod_disco: {}
+  mod_http_api: {}
+  mod_last: {}
+  mod_mam:
+    assume_mam_usage: true
+    default: always
+  mod_muc:
+    host: rooms.chat.cavebro.win
+    access_create: muc_create
+    access_persistent: muc_create
+    history_size: 50
+    default_room_options:
+      members_only: true
+      persistent: true
+      public: false
+      public_list: false
+      anonymous: false
+      mam: true
+      allow_subscription: true
+      allow_change_subj: false
+      allowpm: participants
+  mod_muc_admin: {}
+  mod_admin_extra: {}
+  mod_offline: {}
+  mod_ping: {}
+  mod_private: {}
+  mod_privacy: {}
+  mod_pubsub:
+    access_createnode: local
+    plugins:
+      - flat
+      - pep
+    force_node_config:
+      # OMEMO keys: every member must be able to fetch every member's.
+      "eu.siacs.conversations.axolotl.*":
+        access_model: open
+      "urn:xmpp:omemo:2:*":
+        access_model: open
+      storage:bookmarks:
+        access_model: whitelist
+  mod_push: {}
+  mod_roster:
+    versioning: true
+  mod_stream_mgmt:
+    resend_on_timeout: if_offline
+  mod_vcard: {}
+  mod_vcard_xupdate: {}
+  mod_version:
+    show_os: false

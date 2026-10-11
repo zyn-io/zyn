@@ -50,7 +50,7 @@ await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 // The second half of the journey. Everything above gets a buyer as far as
 // owning an item; these are what they do next — see it, price it, sell it,
 // buy another, and leave. Same directory shape, so every one is a clean URL.
-for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules']) {
+for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules', 'chat']) {
   await mkdir(new URL(`${page}/`, output), { recursive: true });
   await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
 }
@@ -64,6 +64,18 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
 await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
 await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
+// The members' chat's client (Converse.js, MPL-2.0, pinned in package.json):
+// the script, its styles, the OMEMO library and the curve25519 wasm it loads,
+// emoji, sounds and fonts — not its 7 MB of locales, which /chat never asks for.
+{
+  const from = new URL('node_modules/converse.js/', root);
+  await mkdir(new URL('converse/', output), { recursive: true });
+  for (const f of ['converse.min.js', 'converse.min.css', 'libomemo.esm.min.js', 'curve25519_compiled.wasm', 'emoji.json']) {
+    await cp(new URL(`dist/${f}`, from), new URL(`converse/${f}`, output));
+  }
+  for (const d of ['sounds', 'webfonts', 'images']) await cp(new URL(`dist/${d}/`, from), new URL(`converse/${d}/`, output), { recursive: true });
+  await cp(new URL('LICENSE', from), new URL('converse/LICENSE', output));
+}
 // The tokens burnable for sale credit (§182): one file per network, a token
 // per key. Without it the page offers no burn.
 for (const f of ['burn.json', 'burn-testnet.json']) {
@@ -135,7 +147,7 @@ await writeFile(
 // injected. Computed rather than written down, because a hash maintained by
 // hand is a hash that goes stale and takes the site down with it.
 const pages = ['index.html', 'whitelist.html', 'deposit.html', 'terms.html', 'mint.html',
-  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html', 'rules.html', 'dao-rules.html'];
+  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html', 'rules.html', 'dao-rules.html', 'chat.html'];
 const scriptHashes = new Set();
 for (const page of pages) {
   const html = await readFile(new URL(page, root), 'utf8');
@@ -186,9 +198,20 @@ const csp = [
   "object-src 'none'",
 ].join('; ');
 
+// /chat alone talks to the chat server and runs the OMEMO library's wasm;
+// the rest of the site keeps the policy above. Cloudflare applies every
+// matching rule, so /chat first detaches the site-wide policy ("!").
+const CHAT_ORIGIN = 'chat.cavebro.win';
+const chatCsp = csp
+  .replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
+  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`)
+  .replace("img-src 'self' data:", "img-src 'self' data: blob:")
+  .replace("font-src 'self'", "font-src 'self' data:; media-src 'self'; worker-src 'self' blob:");
+
 await writeFile(
   new URL('_headers', output),
   [
+
     '/blobs/*',
     '  Content-Type: application/octet-stream',
     '  Cache-Control: public, max-age=31536000, immutable',
@@ -203,6 +226,14 @@ await writeFile(
     '  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()',
     // Nap in the browser answers from its own window; same-origin would cut it off.
     '  Cross-Origin-Opener-Policy: same-origin-allow-popups',
+    '',
+    '/chat',
+    '  ! Content-Security-Policy',
+    `  Content-Security-Policy: ${chatCsp}`,
+    '',
+    '/chat/*',
+    '  ! Content-Security-Policy',
+    `  Content-Security-Policy: ${chatCsp}`,
     '',
   ].join('\n'),
 );

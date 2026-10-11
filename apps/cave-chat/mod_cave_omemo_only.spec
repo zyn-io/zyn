@@ -1,0 +1,5 @@
+author: "Cave (cavebro.win)"
+category: "admin"
+summary: "Rooms and direct messages carry only OMEMO-encrypted words"
+home: "https://cavebro.win/chat"
+url: "https://cavebro.win/chat"

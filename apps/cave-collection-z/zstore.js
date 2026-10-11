@@ -21,6 +21,9 @@ const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e
 const ZEC_ZY = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 const WAD = 10n ** 18n;
 const PAGE = document.body.dataset.page;
+/// The members' chat (ejabberd behind its gate, on Contabo). A local build may
+/// point at a tunnel with ?chat=.
+const CHAT = (LOCAL && initial.get('chat')) || 'https://chat.cavebro.win';
 
 
 const el = (id) => document.getElementById(id);
@@ -847,6 +850,87 @@ function wireTips() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The members' chat: the holder's Nap shows the gate a member pass, the gate
+// checks it on the ledger and hands back a login, and Converse.js (XMPP, OMEMO)
+// opens the rooms. Converse is loaded only here.
+
+/// A login kept for this tab, so a reload does not ask Nap again.
+const CHAT_KEY = `cave.chat.${NETWORK}`;
+
+async function chatPage() {
+  const gen = generation;
+  wireTips();
+  const out = el('chat-out');
+  const say = (t, bad = false) => { out.textContent = t; out.classList.toggle('bad', bad); };
+  let kept = null;
+  try { kept = JSON.parse(sessionStorage.getItem(CHAT_KEY) || 'null'); } catch { kept = null; }
+  if (kept?.jid && kept?.password && kept.until > Date.now()) return openChat(kept);
+  el('enter').onclick = async () => {
+    if (!current) return pick();
+    el('enter').disabled = true;
+    try {
+      say("Approve the member pass in Nap's window.");
+      const r = await ask('zyn_daoPass', {});
+      if (gen !== generation) return;
+      if (!isHex(r?.token)) throw new Error('Nap did not give a pass code. Update Nap and try again.');
+      say('Checking your pass on the ledger…');
+      const res = await fetch(`${CHAT}/auth`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: r.token }), credentials: 'omit' });
+      const login = await res.json().catch(() => ({}));
+      if (!res.ok || !login.jid || !login.password) throw new Error(login.error || `The chat answered ${res.status}. Try again shortly.`);
+      // Kept for this tab only, for a day at most: the gate's login lasts longer.
+      try { sessionStorage.setItem(CHAT_KEY, JSON.stringify({ ...login, until: Date.now() + 86_400_000 })); } catch { /* not kept */ }
+      await openChat(login);
+    } catch (e) {
+      if (gen !== generation) return;
+      say(/holds no item/i.test(e?.message || '') ? 'This wallet holds no Collection Z item, so it has no member pass.' : failText(e, 'Not entered. Nothing was registered.'), e?.code !== 4001);
+    } finally { if (el('enter')) el('enter').disabled = false; }
+  };
+}
+
+async function openChat(login) {
+  document.body.classList.add('in-chat');
+  const box = el('chat');
+  box.hidden = false;
+  if (!document.querySelector('link[data-converse]')) {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = '/converse/converse.min.css'; css.dataset.converse = '1';
+    document.head.append(css);
+  }
+  if (!window.converse) {
+    await new Promise((resolve, reject) => {
+      const js = document.createElement('script');
+      js.type = 'module'; js.src = '/converse/converse.min.js'; js.onload = resolve; js.onerror = () => reject(new Error('The chat did not load; reload the page.'));
+      document.head.append(js);
+    });
+  }
+  box.innerHTML = '<converse-root></converse-root>';
+  window.converse.initialize({
+    assets_path: '/converse/',
+    view_mode: 'fullscreen',
+    theme: 'dracula',
+    dark_theme: 'dracula',
+    i18n: 'en',
+    loglevel: 'warn',
+    websocket_url: `${CHAT.replace(/^http/, 'ws')}/ws`,
+    discover_connection_methods: false,
+    jid: login.jid,
+    password: login.password,
+    auto_login: true,
+    auto_reconnect: true,
+    allow_registration: false,
+    allow_adhoc_commands: false,
+    show_client_info: false,
+    auto_join_rooms: (login.rooms || []).map((jid) => ({ jid, minimized: false })),
+    muc_nickname_from_jid: true,
+    muc_show_logs_before_join: true,
+    omemo_default: true,
+    persistent_store: 'IndexedDB',
+    show_images_inline: false,
+    embed_3rd_party_media_players: false,
+  });
+}
+
 async function daoPage() {
   const gen = generation;
   wireTips();
@@ -1191,8 +1275,8 @@ async function daoPage() {
   }
 }
 
-const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage, dao: daoPage };
-const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint', '/dao/': 'dao' };
+const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage, dao: daoPage, chat: chatPage };
+const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint', '/dao/': 'dao', '/chat/': 'chat' };
 let params = new URLSearchParams(location.search);
 
 function start(page) {

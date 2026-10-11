@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="ZCaveDAO members' chat: holders of a Cave item only, entered with Nap." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://cavebro.win/chat" />
+    <meta property="og:title" content="Members' chat" />
+    <meta property="og:description" content="ZCaveDAO members' chat, entered with Nap." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Members' chat" />
+    <meta name="twitter:description" content="ZCaveDAO members' chat, entered with Nap." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Members' chat</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
+    <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
+    <style>
+      .out { font-family: var(--sans); font-size: 14px; line-height: 1.55; color: var(--read); margin: 0; }
+      .out.bad { color: #e88; }
+      .out:empty { display: none; }
+      .tip { width: 18px; height: 18px; margin-left: 6px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 10px/1 var(--sans); cursor: pointer; vertical-align: middle; text-transform: none; letter-spacing: 0; }
+      .tip[aria-expanded="true"] { color: var(--acid); border-color: var(--acid); }
+      .bubble { margin: 10px 0 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.55); font-family: var(--sans); font-size: 13.5px; line-height: 1.55; color: var(--read); max-width: 60ch; text-transform: none; letter-spacing: 0; }
+      .facts-list { margin: 0; padding: 0 0 0 18px; display: grid; gap: 8px; font-family: var(--sans); font-size: 14.5px; line-height: 1.55; color: var(--read); max-width: 64ch; }
+      .door { display: grid; gap: 18px; }
+      .door .act { justify-self: start; }
+      /* The chat takes the room once entered. */
+      body.in-chat .register { max-width: none; padding: 0; }
+      body.in-chat .register > :not(#chat) { display: none; }
+      #chat { height: calc(100vh - 72px); min-height: 480px; }
+      #chat[hidden] { display: none; }
+      #chat converse-root { height: 100%; }
+    </style>
+  </head>
+  <body data-page="chat">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="/assets/cave-mark.svg" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="/dao">DAO</a>
+        <a href="/chat" aria-current="page">Chat</a>
+        <button class="act ghost small" type="button" data-wallet-button>Connect Nap</button>
+      </nav>
+    </header>
+    <main class="register">
+      <div class="backdrop" aria-hidden="true"></div>
+      <h1><span>Members'</span><span>chat</span></h1>
+
+      <section class="ledger" aria-labelledby="h-door">
+        <div class="ledger-index"><h2 id="h-door">Enter</h2><span>holders of a Cave item</span></div>
+        <div class="ledger-body door">
+          <p class="say">
+            For holders of a Collection Z item. Nap shows the chat your member pass, and your name here comes from
+            that pass, not from your wallet.
+            <button class="tip" type="button" aria-expanded="false" data-tip="Nap makes the pass once per item and registers its hash on the ledger; after that, entering registers nothing new. The same pass gives the same chat name on every device. A new holder of the item gets a new pass and a new name.">i</button>
+          </p>
+          <ul class="facts-list">
+            <li>Messages are end-to-end encrypted. The server keeps them sealed.</li>
+            <li>The Cave team runs the chat. It can see who is in which room and when, and it can link your chat name to your pass. The operator can link a pass to the item that made it.</li>
+            <li>Selling, moving or redeeming your item takes you out within a few minutes.</li>
+          </ul>
+          <button class="act" id="enter" type="button">Enter with Nap</button>
+          <p class="out" id="chat-out" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div id="chat" hidden></div>
+    </main>
+
+    <script type="module" src="/zstore.js?v=7"></script>
+  </body>
+</html>
