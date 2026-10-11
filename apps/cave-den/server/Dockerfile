@@ -26,4 +26,4 @@ WORKDIR /app
 RUN useradd --uid 9100 --system den && mkdir -p /var/lib/den && chown den /var/lib/den
 COPY --from=build --chown=den /app/_build/prod/rel/den ./
 USER den
-CMD ["/app/bin/server"]
+CMD ["/app/bin/den", "start"]
