@@ -22,7 +22,7 @@ defmodule DenWeb.LobbyChannel do
       broadcast!(socket, "room", %{id: r.id, title: r.title, kind: r.kind})
       {:reply, {:ok, %{id: r.id, title: r.title}}, socket}
     else
-      {:error, why} -> {:reply, {:error, %{reason: to_string(why)}}, socket}
+      {:error, why} -> {:reply, {:error, %{reason: said(why, "room")}}, socket}
     end
   end
 
@@ -31,7 +31,7 @@ defmodule DenWeb.LobbyChannel do
          {:ok, r} <- Rooms.private_room(id) do
       {:reply, {:ok, %{id: r.id}}, socket}
     else
-      {:error, why} -> {:reply, {:error, %{reason: to_string(why)}}, socket}
+      {:error, why} -> {:reply, {:error, %{reason: said(why, "private")}}, socket}
     end
   end
 
@@ -40,10 +40,17 @@ defmodule DenWeb.LobbyChannel do
          {:ok, bytes} <- Den.Inbox.claim(key) do
       {:reply, {:ok, %{key_package: Base.encode64(bytes)}}, socket}
     else
-      {:error, :none} -> {:reply, {:error, %{reason: "that device has no invitations left; ask it to come online"}}, socket}
-      {:error, why} -> {:reply, {:error, %{reason: to_string(why)}}, socket}
+      {:error, :none} -> {:reply, {:error, %{reason: "That member's device has to come online once before it can be invited."}}, socket}
+      {:error, why} -> {:reply, {:error, %{reason: said(why, "claim")}}, socket}
     end
   end
 
   def handle_in(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
+
+  # What a member reads when the den says no.
+  defp said(:quota, "room"), do: "A device can open 3 rooms a day. Try again tomorrow."
+  defp said(:quota, "private"), do: "A device can start 50 private rooms a day. Try again tomorrow."
+  defp said(:quota, "claim"), do: "That is enough invitations for today. Try again tomorrow."
+  defp said(:title, _), do: "Give the room a name."
+  defp said(why, _), do: to_string(why)
 end

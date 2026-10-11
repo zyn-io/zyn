@@ -149,6 +149,15 @@ async function tour(store, net) {
     const text = (await store.textContent('main').catch(() => '')) || '';
     ok(text.trim().length > 40 && errors.length === before && !/bound to your own key/.test(text), `${net} ${path}: renders, current copy`);
   }
+  // The members' chat: the door in its own panel, and the microphone allowed
+  // on /chat (voice rooms) while the rest of the store keeps it off.
+  const before = errors.length;
+  await store.goto(`${SITE}/chat${q.replace('&', '?')}`, { waitUntil: 'networkidle' });
+  await store.waitForTimeout(1500);
+  ok(errors.length === before && await store.isVisible('#enter'), `${net} /chat: the door renders`);
+  ok(await store.evaluate(() => getComputedStyle(document.querySelector('.register')).maxWidth === '940px' && getComputedStyle(document.querySelector('.ledger')).borderTopStyle === 'solid'), `${net} /chat: keeps its own layout`);
+  const policy = async (p) => (await store.request.get(`${SITE}${p}`)).headers()['permissions-policy'] || '';
+  ok(/microphone=\(self\)/.test(await policy('/chat/')) && /microphone=\(\)/.test(await policy('/items/')), `${net} /chat: only it may use the microphone`);
 }
 
 async function webPath(browser, net) {

@@ -68,6 +68,13 @@ function decode(text) {
   return { v: 1, t: 'msg', id: `old-${hex(rand(6))}`, text };
 }
 
+/// When a message was sent, by its sender's clock; one from the future (or
+/// none) counts as now.
+function sent(at) {
+  const now = Date.now();
+  return Number.isFinite(at) && at > 0 && at <= now + 60_000 ? Math.min(at, now) : now;
+}
+
 // ---------------------------------------------------------------------------
 
 export class DenClient {
@@ -276,7 +283,8 @@ export class DenClient {
     let ev;
     try { ev = JSON.parse(this.den.receive(room, unb64(m.bytes))); } catch { await this.save(); return; } // before this device joined, or its own
     if (ev.kind === 'text') {
-      await this.apply(room, { ...decode(ev.text), from: ev.from, key: ev.key, seq: m.seq, at: Date.now() });
+      const d = decode(ev.text);
+      await this.apply(room, { ...d, from: ev.from, key: ev.key, seq: m.seq, at: sent(d.at) });
     } else if (ev.kind === 'commit') {
       if (!ev.members.some((x) => x.key === this.den.key())) {
         // Taken out (a day that ended without renewal): join again if admitted.
@@ -334,12 +342,12 @@ export class DenClient {
   send(room, body) {
     return this.lock(async () => {
       const ch = this.channels.get(room);
-      const m = { v: 1, id: hex(rand(8)), ...body };
+      const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
       for (let tries = 0; tries < 2; tries++) {
         try {
           const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
           this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
-          await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq, at: Date.now() }, true);
+          await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
           this.markRead(room);
           await this.save();
           return m.id;
@@ -355,6 +363,8 @@ export class DenClient {
   }
 
   say(room, text, reply = null) {
+    // A new message after this one: others see the writing again at once.
+    this.typingAt = 0;
     return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}) });
   }
   react(room, to, emoji) { return this.send(room, { t: 'react', to, emoji }); }
@@ -436,7 +446,7 @@ export class DenClient {
 
   /// A send inside a lock already held.
   async lockless_send(room, body) {
-    const m = { v: 1, id: hex(rand(8)), ...body };
+    const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
     const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
     this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
     await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
@@ -486,6 +496,10 @@ export class DenClient {
   async unread(room) {
     const last = this.read[room] || 0;
     return (await this.log(room)).filter((m) => !m.mine && m.seq > last).length;
+  }
+
+  lastRead(room) {
+    return this.read[room] || 0;
   }
 
   markRead(room) {
@@ -598,12 +612,15 @@ class Voice {
     for (let i = 0; i < 8; i++) this.downs.push(pc.addTransceiver('audio', { direction: 'recvonly' }));
     for (const t of this.downs) this.transform(t.receiver, 'open');
     pc.ontrack = (e) => {
+      const stream = new MediaStream([e.track]);
       const audio = new Audio();
-      audio.srcObject = new MediaStream([e.track]);
+      audio.srcObject = stream;
       audio.autoplay = true;
       audio.play().catch(() => {});
       (this.audios ||= []).push(audio);
+      this.meter(e.transceiver.mid, stream);
     };
+    this.meter('me', this.mic);
     const ch = this.client.socket.channel(`voice:${this.room}`);
     this.ch = ch;
     ch.on('ice', (c) => pc.addIceCandidate(c).catch(() => {}));
@@ -624,7 +641,34 @@ class Voice {
     }, 1000);
   }
 
+  /// A level meter on one stream (a slot's mid, or 'me'), read after the
+  /// frames are opened: who is speaking, for the page.
+  meter(id, stream) {
+    try {
+      this.ac ||= new AudioContext();
+      const a = this.ac.createAnalyser();
+      a.fftSize = 512;
+      this.ac.createMediaStreamSource(stream).connect(a);
+      (this.meters ||= new Map()).set(id, a);
+    } catch { /* no levels; voice still works */ }
+  }
+
+  /// Each stream's loudness now, 0..1, by slot mid (and 'me').
+  levels() {
+    const out = {};
+    const buf = new Uint8Array(512);
+    for (const [id, a] of this.meters || []) {
+      a.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += ((v - 128) / 128) ** 2;
+      out[id] = Math.sqrt(sum / buf.length);
+    }
+    if (this.muted) out.me = 0;
+    return out;
+  }
+
   mute(on) {
+    this.muted = on;
     this.mic.getAudioTracks().forEach((t) => { t.enabled = !on; });
   }
 
@@ -636,6 +680,7 @@ class Voice {
     this.mic.getTracks().forEach((t) => t.stop());
     (this.audios || []).forEach((a) => { a.srcObject = null; });
     this.worker?.terminate();
+    this.ac?.close().catch(() => {});
     this.client.voice = null;
   }
 }

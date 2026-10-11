@@ -11,6 +11,13 @@ config :den,
   ecto_repos: [Den.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# SQLite has one writer. A transaction takes the write lock when it begins,
+# and waits for it, instead of failing with "Database busy" half way through.
+config :den, Den.Repo,
+  default_transaction_mode: :immediate,
+  busy_timeout: 5_000,
+  journal_mode: :wal
+
 # Configure the endpoint
 config :den, DenWeb.Endpoint,
   url: [host: "localhost"],

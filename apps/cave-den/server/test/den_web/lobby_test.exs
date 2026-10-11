@@ -25,7 +25,7 @@ defmodule DenWeb.LobbyTest do
     assert_broadcast "room", %{title: "Night watch!", kind: "open"}
     for t <- ["b", "c"], do: (ref = push(socket, "open_room", %{"title" => t}); assert_reply(ref, :ok, _))
     ref = push(socket, "open_room", %{"title" => "d"})
-    assert_reply ref, :error, %{reason: "quota"}
+    assert_reply ref, :error, %{reason: "A device can open 3 rooms a day. Try again tomorrow."}
     ref = push(socket, "private_room", %{"id" => "p-" <> String.duplicate("0f", 16)})
     assert_reply ref, :ok
     ref = push(socket, "private_room", %{"id" => "p-guessable"})
@@ -61,7 +61,7 @@ defmodule DenWeb.LobbyTest do
     ref = push(lobby, "claim", %{"key" => b})
     assert_reply ref, :ok, _
     ref = push(lobby, "claim", %{"key" => b})
-    assert_reply ref, :error, %{reason: "that device has no invitations left; ask it to come online"}
+    assert_reply ref, :error, %{reason: "That member's device has to come online once before it can be invited."}
     # A Welcome to B, through a room A is in.
     {:ok, _} = Den.Rooms.private_room("p-" <> String.duplicate("2d", 16))
     {:ok, _, room} = subscribe_and_join(sa, DenWeb.RoomChannel, "room:p-" <> String.duplicate("2d", 16))

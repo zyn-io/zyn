@@ -2,146 +2,439 @@
 // Everything here works on what den.js keeps on this device; nothing is
 // fetched in the clear but the den's ciphertext and the day keys.
 
-const EMOJI = ['👍', '❤️', '😂', '🎉', '👀', '🙏'];
+const EMOJI = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
+const GROUP_MS = 5 * 60_000;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const time = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const dayKey = (t) => new Date(t).toDateString();
+function dayName(t) {
+  const d = new Date(t);
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86_400_000);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+// A device's mark: a 5×5 mirrored pixel pattern from its key, so the same
+// device looks the same to everyone, without a name or picture to go on.
+const INKS = ['#c7f04b', '#f4b728', '#7fd1b9', '#e58a6b', '#b9a7e8', '#e9e6dc'];
+export function mark(key, px = 28) {
+  const h = String(key || '').replace(/[^0-9a-f]/gi, '').padEnd(16, '0');
+  const ink = INKS[parseInt(h.slice(0, 2), 16) % INKS.length];
+  let bits = parseInt(h.slice(2, 6), 16) & 0x7fff;
+  // Too few cells reads as nothing: take the other half instead.
+  if (bits.toString(2).replace(/0/g, '').length < 6) bits ^= 0x7fff;
+  let rects = '';
+  for (let i = 0; i < 15; i++) {
+    if (!((bits >> i) & 1)) continue;
+    const x = Math.floor(i / 5), y = i % 5;
+    rects += `<rect x="${x}" y="${y}" width="1" height="1"/>`;
+    if (x < 2) rects += `<rect x="${4 - x}" y="${y}" width="1" height="1"/>`;
+  }
+  return `<svg class="mark" width="${px}" height="${px}" viewBox="-1 -1 7 7" aria-hidden="true" shape-rendering="crispEdges"><rect x="-1" y="-1" width="7" height="7" fill="rgba(0,0,0,.55)"/><g fill="${ink}">${rects}</g></svg>`;
+}
+
+const ICON = {
+  reply: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h7a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  react: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 9.5c1.3 1.6 3.7 1.6 5 0" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 6h.01M10 6h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  edit: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 13 1-4 7-7 3 3-7 7-4 1Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  del: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6L11.5 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z M9 1.5V5h3.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+};
 
 export function mountDen(den, el, me) {
   let room = 'general';
   let reply = null;
   let editing = null;
+  let readFrom = 0;
+  let mentionAt = -1;
+  let mentionPick = 0;
   let notify = (() => { try { return localStorage.getItem('cave.den.notify') || 'mentions'; } catch { return 'mentions'; } })();
+  let propsOpen = (() => { try { return localStorage.getItem('cave.den.props') === 'open'; } catch { return false; } })();
   const counts = {};
   const typing = {};
   const urls = new Map();
+  const shown = [];
 
   const rooms = () => [...den.rooms.values()];
-  const title = (r) => r.title || (r.kind === 'private' ? 'Private room' : r.id);
-  const status = (t) => { el('den-status').textContent = t || ''; };
+  /// A room's name; a private room of two is named after the other person,
+  /// on both sides.
+  const title = (r) => {
+    if (r?.kind !== 'private') return r?.title || r?.id || '';
+    const others = den.inRoom(r.id) ? den.members(r.id).filter((m) => m.key !== me.key) : [];
+    if (others.length === 1) return others[0].name;
+    return r.title || others.map((m) => m.name).join(', ') || 'Private room';
+  };
+  const roomTitle = (id) => title(den.rooms.get(id) || { id });
+  let statusTimer;
+  const status = (t, sticky = false) => {
+    el('den-status').textContent = t || '';
+    clearTimeout(statusTimer);
+    if (t && !sticky) statusTimer = setTimeout(() => { el('den-status').textContent = ''; }, 6000);
+  };
+
+  el('me').textContent = me.name;
+  el('me-mark').innerHTML = mark(me.key, 32);
+
+  // The den fills the window below the site's bar; only the log scrolls.
+  document.querySelector('main.register')?.classList.add('wide');
+  const box = el('den');
+  const fit = () => {
+    const top = box.getBoundingClientRect().top + window.scrollY;
+    box.style.height = `${Math.max(480, window.innerHeight - top - 16)}px`;
+  };
+  fit();
+  window.addEventListener('resize', fit);
 
   // ---- The room list --------------------------------------------------------
 
   async function drawRooms() {
-    const groups = [['open', 'Rooms'], ['proposal', 'Proposals'], ['private', 'Private']];
+    const groups = [['open', 'Rooms', 'New room'], ['proposal', 'Proposals', null], ['private', 'Private', 'New private room']];
     const parts = [];
-    for (const [kind, label] of groups) {
+    for (const [kind, label, add] of groups) {
       const list = rooms().filter((r) => r.kind === kind);
       if (!list.length && kind === 'proposal') continue;
-      parts.push(`<p class="group">${label}${kind === 'open' ? ' <button type="button" class="mini" data-new="open">New</button>' : kind === 'private' ? ' <button type="button" class="mini" data-new="private">New</button>' : ''}</p>`);
+      // Proposals by number, the newest first.
+      if (kind === 'proposal') list.sort((x, y) => Number(y.id.split('-')[1]) - Number(x.id.split('-')[1]));
+      const items = [];
+      let unreadHere = 0;
       for (const r of list) {
         const n = await den.unread(r.id);
-        parts.push(`<button type="button" data-room="${esc(r.id)}" aria-current="${r.id === room}">${esc(title(r))}${n ? ` <small class="badge">${n}</small>` : ''}</button>`);
+        unreadHere += n;
+        const voiceHere = den.voice?.room === r.id;
+        items.push(`<button type="button" class="room${n ? ' unread' : ''}" data-room="${esc(r.id)}" aria-current="${r.id === room}"><span class="room-name">${esc(title(r))}</span>${voiceHere ? '<span class="live-dot" title="You are in voice here"></span>' : ''}${n ? `<span class="badge" aria-label="${n} unread">${n > 99 ? '99+' : n}</span>` : ''}</button>`);
       }
+      const collapsible = kind === 'proposal';
+      const open = !collapsible || propsOpen || list.some((r) => r.id === room);
+      parts.push(`<div class="group">
+        ${collapsible
+          ? `<button type="button" class="group-head" data-toggle="props" aria-expanded="${open}"><span>${label} · ${list.length}</span>${!open && unreadHere ? `<span class="badge">${unreadHere}</span>` : ''}<svg class="caret" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>`
+          : `<p class="group-head"><span>${label}</span>${add ? `<button type="button" class="add" data-new="${kind}" aria-label="${add}" title="${add}">+</button>` : ''}</p>`}
+        ${open ? items.join('') || '<p class="none">None yet.</p>' : ''}
+      </div>`);
     }
     el('rooms').innerHTML = parts.join('');
     el('rooms').querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => go(b.dataset.room); });
-    el('rooms').querySelectorAll('[data-new]').forEach((b) => { b.onclick = () => (b.dataset.new === 'open' ? newRoom() : pickMembers('New private room', (keys, name) => den.startPrivate(keys, name).then(go))); });
-    const r = den.rooms.get(room);
-    el('room-title').textContent = r ? title(r) : room;
-    el('room-meta').textContent = counts[room] ? `${counts[room]} in the room` : '';
-    el('voice-go').hidden = !den.inRoom(room) || !!den.voice;
+    el('rooms').querySelectorAll('[data-new]').forEach((b) => { b.onclick = () => (b.dataset.new === 'open' ? newRoom() : pickMembers('New private room', 'Make room', true, (keys, name) => den.startPrivate(keys, name).then(go))); });
+    const t = el('rooms').querySelector('[data-toggle]');
+    if (t) t.onclick = () => { propsOpen = !propsOpen; try { localStorage.setItem('cave.den.props', propsOpen ? 'open' : 'closed'); } catch { /* not kept */ } drawRooms(); };
+    drawHead();
   }
 
-  function go(id) {
+  function drawHead() {
+    const r = den.rooms.get(room);
+    el('room-title').textContent = title(r) || room;
+    el('room-title').classList.toggle('plain', r?.kind === 'private');
+    el('room-kind').textContent = r?.kind === 'private' ? 'Private' : r?.kind === 'proposal' ? 'Proposal' : '';
+    el('room-meta').textContent = counts[room] ? `Members · ${counts[room]}` : 'Members';
+    el('voice-go').hidden = !den.inRoom(room) || !!den.voice;
+    el('say-text').placeholder = den.inRoom(room) ? `Message ${title(r) || room}` : 'Joining the room…';
+    document.title = `${title(r) || 'Chat'} · Members' chat`;
+  }
+
+  function go(id, focus = null) {
     room = id;
-    reply = null; editing = null;
+    reply = null;
+    editing = null;
+    el('say-text').value = '';
+    el('den').classList.remove('drawer');
+    closeMentions();
     drawRooms();
-    drawLog();
+    drawLog(focus);
     drawComposer();
+    if (!el('members').hidden) drawMembers();
+  }
+
+  // ---- Dialogs ----------------------------------------------------------------
+
+  /// A small form in a dialog: a heading, a line, an optional field; resolves
+  /// with the field's value (or true), or null when closed.
+  function ask({ heading, text = '', field = null, yes, danger = false }) {
+    const d = el('ask');
+    d.querySelector('h2').textContent = heading;
+    d.querySelector('.ask-text').textContent = text;
+    d.querySelector('.ask-text').hidden = !text;
+    const label = d.querySelector('.ask-field');
+    label.hidden = !field;
+    const input = label.querySelector('input');
+    if (field) { label.querySelector('span').textContent = field; input.value = ''; }
+    const ok = d.querySelector('[data-yes]');
+    ok.textContent = yes;
+    ok.classList.toggle('danger', danger);
+    d.showModal();
+    if (field) input.focus(); else ok.focus();
+    return new Promise((resolve) => {
+      let answer = null;
+      d.querySelector('form').onsubmit = (e) => {
+        e.preventDefault();
+        const v = field ? input.value.trim() : true;
+        if (field && !v) return;
+        answer = v;
+        d.close();
+      };
+      d.querySelector('[data-close]').onclick = () => d.close();
+      d.onclose = () => resolve(answer);
+    });
   }
 
   async function newRoom() {
-    const name = prompt('Name the room (others see it).');
+    const name = await ask({ heading: 'New room', field: 'Name (everyone in the den sees it)', yes: 'Make room' });
     if (!name) return;
     try {
       const r = await den.push(den.lobby, 'open_room', { title: name });
+      status(`Opening ${name}…`);
       setTimeout(() => go(r.id), 600);
     } catch (e) { status(e.message); }
+  }
+
+  /// Every device this one knows of, from the rooms it is in.
+  function known() {
+    const all = new Map();
+    for (const r of rooms()) for (const m of den.members(r.id)) if (m.key !== me.key) all.set(m.key, m.name);
+    return [...all.entries()].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const nameOf = (key) => (key === me.key ? me.name : known().find((m) => m.key === key)?.name || 'a member');
+
+  function pickMembers(heading, yes, named, done) {
+    const already = named ? new Set() : new Set(den.members(room).map((m) => m.key));
+    const list = known().filter((m) => !already.has(m.key));
+    const d = el('pick');
+    d.querySelector('h2').textContent = heading;
+    d.querySelector('.who').innerHTML = list.length
+      ? list.map((m) => `<label class="pick-row"><input type="checkbox" value="${esc(m.key)}" data-name="${esc(m.name)}" />${mark(m.key, 24)}<span>${esc(m.name)}</span></label>`).join('')
+      : '<p class="none">No one to add yet. Members appear here once you share a room.</p>';
+    d.querySelector('.pick-name').hidden = !named;
+    d.querySelector('[name=title]').value = '';
+    d.querySelector('[type=submit]').textContent = yes;
+    d.showModal();
+    d.querySelector('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const picked = [...d.querySelectorAll('input[type=checkbox]:checked')];
+      if (!picked.length) return;
+      // No name given: each member sees the others' names.
+      const name = d.querySelector('[name=title]').value.trim();
+      d.close();
+      status('Sending invitations…', true);
+      try { await done(picked.map((x) => x.value), name); status('Invitations sent.'); } catch (err) { status(err.message); }
+    };
+    d.querySelector('[data-close]').onclick = () => d.close();
   }
 
   // ---- Messages -------------------------------------------------------------
 
   function words(text) {
-    return esc(text).replace(/@(m-[0-9a-f]{10})/g, (m, n) => `<mark class="${n === me.name ? 'me' : ''}">${m}</mark>`).replace(/\n/g, '<br>');
+    return esc(text)
+      .replace(/`([^`\n]{1,200})`/g, '<code>$1</code>')
+      .replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">${u}</a>`)
+      .replace(/@(m-[0-9a-f]{10})/g, (m, n) => `<mark class="${n === me.name ? 'me' : ''}">${m}</mark>`)
+      .replace(/\n/g, '<br>');
   }
 
-  function line(m, log) {
-    if (m.deleted) return `<li class="gone" data-id="${esc(m.id)}"><b>${esc(m.from)}</b><span class="t">${time(m.at)}</span><em>deleted</em></li>`;
-    const quoted = m.reply && log.find((x) => x.id === m.reply);
-    const q = quoted ? `<blockquote>${esc(quoted.from)}: ${esc((quoted.text || quoted.file?.name || '').slice(0, 120))}</blockquote>` : '';
-    let body = words(m.text);
-    if (m.file) {
-      const img = m.file.mime.startsWith('image/') && m.file.size <= 5 * 1048576;
-      body = img ? `<img class="att" data-blob="${esc(m.id)}" alt="${esc(m.file.name)}" />` : `<button type="button" class="file" data-file="${esc(m.id)}">${esc(m.file.name)} · ${size(m.file.size)}</button>`;
-    }
-    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.name) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.join(', '))}">${esc(e)} ${who.length}</button>`).join('');
+  /// One message as list items; `prev` decides the day line and whether it
+  /// continues the previous author's run.
+  function line(m, prev, log) {
+    const parts = [];
+    if (!prev || dayKey(prev.at) !== dayKey(m.at)) parts.push(`<li class="day" role="separator"><span>${dayName(m.at)}</span></li>`);
+    if (readFrom && !m.mine && m.seq > readFrom && (!prev || prev.mine || prev.seq <= readFrom)) parts.push('<li class="new-line" role="separator"><span>New</span></li>');
+    const cont = prev && !m.reply && prev.key === m.key && !prev.deleted && m.at - prev.at < GROUP_MS && !parts.length;
     const own = m.key === me.key;
-    return `<li class="${own ? 'mine' : ''}${m.text.includes(`@${me.name}`) ? ' ping' : ''}" data-id="${esc(m.id)}">
-      <b>${esc(m.from)}</b><span class="t">${time(m.at)}${m.edited ? ' · edited' : ''}</span>${q}<div class="body">${body}</div>
-      ${reactions ? `<div class="chips">${reactions}</div>` : ''}
-      <div class="acts"><button type="button" data-act="reply">Reply</button><button type="button" data-act="react">React</button>${own && !m.file ? '<button type="button" data-act="edit">Edit</button>' : ''}${own ? '<button type="button" data-act="del">Delete</button>' : ''}</div>
-    </li>`;
+    const head = `<p class="msg-head"><b class="who">${esc(m.from)}</b>${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
+    const gutter = cont ? `<span class="side-time">${time(m.at)}</span>` : mark(m.key);
+    if (m.deleted) {
+      parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>Message deleted</em></p></div></li>`);
+      return parts.join('');
+    }
+    const quoted = m.reply && log.find((x) => x.id === m.reply);
+    const q = m.reply ? `<button type="button" class="quote" data-jump="${esc(m.reply)}">${quoted ? `<b>${esc(quoted.from)}</b> ${esc(quoted.deleted ? 'Message deleted' : (quoted.text || quoted.file?.name || '').slice(0, 140))}` : 'An earlier message'}</button>` : '';
+    let body = `<div class="body">${words(m.text)}${m.edited && cont ? ' <span class="edited">edited</span>' : ''}</div>`;
+    if (m.file) {
+      const img = m.file.mime?.startsWith('image/') && m.file.size <= 5 * 1048576;
+      body = img
+        ? `<button type="button" class="att" data-view="${esc(m.id)}" aria-label="Open ${esc(m.file.name)}"><img data-blob="${esc(m.id)}" alt="${esc(m.file.name)}" /></button>`
+        : `<button type="button" class="file" data-file="${esc(m.id)}">${ICON.file}<span><b>${esc(m.file.name)}</b><small>${size(m.file.size)} · Download</small></span></button>`;
+    }
+    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.name) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.join(', '))}" aria-pressed="${who.includes(me.name)}">${esc(e)} <span>${who.length}</span></button>`).join('');
+    const ping = !own && (m.text || '').includes(`@${me.name}`);
+    parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
+      ${gutter}
+      <div class="msg-main">${cont ? '' : head}${q}${body}${reactions ? `<div class="chips">${reactions}</div>` : ''}</div>
+      <div class="tools" role="toolbar" aria-label="Message actions">
+        <button type="button" data-act="reply" aria-label="Reply" title="Reply">${ICON.reply}</button>
+        <button type="button" data-act="react" aria-label="React" title="React" aria-expanded="false">${ICON.react}</button>
+        ${own && !m.file ? `<button type="button" data-act="edit" aria-label="Edit" title="Edit">${ICON.edit}</button>` : ''}
+        ${own ? `<button type="button" data-act="del" aria-label="Delete" title="Delete">${ICON.del}</button>` : ''}
+      </div>
+    </li>`);
+    return parts.join('');
   }
 
-  async function drawLog() {
+  const nearBottom = () => { const b = el('log'); return b.scrollHeight - b.scrollTop - b.clientHeight < 120; };
+  const toBottom = () => { const b = el('log'); b.scrollTop = b.scrollHeight; el('jump').hidden = true; };
+
+  async function drawLog(focus = null) {
     const log = await den.log(room);
-    const box = el('log');
-    box.innerHTML = log.length ? log.map((m) => line(m, log)).join('') : `<li class="note">${den.inRoom(room) || den.rooms.get(room)?.kind !== 'private' ? 'Nothing here yet. What you read is kept on this device only.' : 'Waiting for an invitation to this room.'}</li>`;
-    box.scrollTop = box.scrollHeight;
+    readFrom = den.lastRead(room);
+    shown.length = 0;
+    shown.push(...log);
+    const b = el('log');
+    const priv = den.rooms.get(room)?.kind === 'private';
+    b.innerHTML = log.length
+      ? log.map((m, i) => line(m, log[i - 1], log)).join('')
+      : `<li class="empty"><b class="${priv ? 'plain' : ''}">${esc(roomTitle(room))}</b><span>${!den.inRoom(room) && priv ? 'Waiting for the invitation to arrive.' : 'No messages yet.'}</span></li>`;
+    for (const img of b.querySelectorAll('img[data-blob]')) showImage(img, log.find((m) => m.id === img.dataset.blob));
+    if (focus) flash(focus); else toBottom();
     den.markRead(room);
-    wireLog(log);
-    for (const img of box.querySelectorAll('img[data-blob]')) showImage(img, log.find((m) => m.id === img.dataset.blob));
     drawRooms();
   }
 
-  async function showImage(img, m) {
-    try {
-      if (!urls.has(m.id)) urls.set(m.id, URL.createObjectURL(await den.openFile(m.file)));
-      img.src = urls.get(m.id);
-    } catch (e) { img.replaceWith(Object.assign(document.createElement('em'), { textContent: e.message })); }
+  /// A new message (or a change to one) in the open room, without redrawing
+  /// the rest: the reader's place and hover stay put.
+  async function onMessage(d) {
+    const log = await den.log(room);
+    const i = log.findIndex((x) => x.id === d.message.id);
+    if (i < 0) return;
+    const b = el('log');
+    const stay = nearBottom() || d.mine;
+    const old = b.querySelector(`li[data-id="${CSS.escape(d.message.id)}"]`);
+    if (!old && (d.kind === 'msg' || d.kind === 'file')) {
+      b.querySelector('.empty')?.remove();
+      b.insertAdjacentHTML('beforeend', line(log[i], log[i - 1], log));
+    } else if (old) {
+      // Drop the day or "New" line drawn just before it; the redraw brings its own.
+      while (old.previousElementSibling && !old.previousElementSibling.dataset.id) old.previousElementSibling.remove();
+      old.insertAdjacentHTML('beforebegin', line(log[i], log[i - 1], log));
+      old.remove();
+    }
+    const img = b.querySelector(`li[data-id="${CSS.escape(d.message.id)}"] img[data-blob]`);
+    if (img) showImage(img, log[i]);
+    shown.length = 0;
+    shown.push(...log);
+    if (stay) toBottom();
+    else if (d.kind === 'msg' || d.kind === 'file') el('jump').hidden = false;
+    if (!document.hidden && stay) den.markRead(room);
   }
 
-  function wireLog(log) {
-    const box = el('log');
-    box.querySelectorAll('[data-file]').forEach((b) => {
-      b.onclick = async () => {
-        const m = log.find((x) => x.id === b.dataset.file);
-        try {
-          const url = URL.createObjectURL(await den.openFile(m.file));
-          Object.assign(document.createElement('a'), { href: url, download: m.file.name }).click();
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        } catch (e) { status(e.message); }
-      };
-    });
-    box.querySelectorAll('[data-react]').forEach((b) => { b.onclick = () => den.react(room, b.dataset.react, b.dataset.emoji).catch((e) => status(e.message)); });
-    box.querySelectorAll('[data-act]').forEach((b) => {
-      const id = b.closest('li').dataset.id;
-      const m = log.find((x) => x.id === id);
-      b.onclick = () => {
-        if (b.dataset.act === 'reply') { reply = m; editing = null; drawComposer(); el('say-text').focus(); }
-        if (b.dataset.act === 'edit') { editing = m; reply = null; el('say-text').value = m.text; drawComposer(); el('say-text').focus(); }
-        if (b.dataset.act === 'del' && confirm('Delete this message for everyone in the room?')) den.remove(room, id).catch((e) => status(e.message));
-        if (b.dataset.act === 'react') {
-          const bar = document.createElement('div');
-          bar.className = 'emoji';
-          bar.innerHTML = EMOJI.map((e) => `<button type="button">${e}</button>`).join('');
-          bar.querySelectorAll('button').forEach((x) => { x.onclick = () => { bar.remove(); den.react(room, id, x.textContent).catch((e) => status(e.message)); }; });
-          b.closest('li').append(bar);
-        }
-      };
-    });
+  function flash(id) {
+    const li = el('log').querySelector(`li[data-id="${CSS.escape(id)}"]`);
+    if (!li) { status('That message is no longer kept on this device.'); return; }
+    li.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    li.classList.remove('flash');
+    void li.offsetWidth;
+    li.classList.add('flash');
+  }
+
+  async function showImage(img, m) {
+    if (!m?.file) return;
+    try {
+      if (!urls.has(m.id)) urls.set(m.id, URL.createObjectURL(await den.openFile(m.file)));
+      const stay = nearBottom();
+      img.onload = () => { if (stay) toBottom(); };
+      img.src = urls.get(m.id);
+    } catch (e) { img.closest('.att')?.replaceWith(Object.assign(document.createElement('em'), { className: 'body', textContent: e.message })); }
+  }
+
+  async function download(m) {
+    status(`Opening ${m.file.name}…`, true);
+    try {
+      const url = URL.createObjectURL(await den.openFile(m.file));
+      Object.assign(document.createElement('a'), { href: url, download: m.file.name }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      status('');
+    } catch (e) { status(e.message); }
+  }
+
+  function closeEmoji() {
+    el('log').querySelectorAll('.emoji').forEach((x) => { x.closest('li')?.querySelector('[data-act="react"]')?.setAttribute('aria-expanded', 'false'); x.remove(); });
+  }
+
+  // One listener for the whole log: messages come and go under it.
+  el('log').addEventListener('click', async (e) => {
+    const t = e.target.closest('button');
+    if (!t) {
+      closeEmoji();
+      // No hover on a touch screen: a tap on a message shows its actions.
+      const tapped = e.target.closest('li.msg');
+      if (tapped && !e.target.closest('a') && matchMedia('(hover: none)').matches) {
+        el('log').querySelectorAll('.msg.touch').forEach((x) => { if (x !== tapped) x.classList.remove('touch'); });
+        tapped.classList.toggle('touch');
+      }
+      return;
+    }
+    const li = t.closest('li[data-id]');
+    const m = li && shown.find((x) => x.id === li.dataset.id);
+    if (t.dataset.jump) return flash(t.dataset.jump);
+    if (t.dataset.file && m) return download(m);
+    if (t.dataset.view && m) return view(m);
+    if (t.dataset.react) { closeEmoji(); return den.react(room, t.dataset.react, t.dataset.emoji).catch((err) => status(err.message)); }
+    if (t.dataset.emoji && t.closest('.emoji') && m) { closeEmoji(); return den.react(room, m.id, t.dataset.emoji).catch((err) => status(err.message)); }
+    if (!m || !t.dataset.act) return;
+    if (t.dataset.act === 'reply') { reply = m; editing = null; drawComposer(); el('say-text').focus(); }
+    if (t.dataset.act === 'edit') startEdit(m);
+    if (t.dataset.act === 'del') {
+      if (await ask({ heading: 'Delete message', text: 'It is removed for everyone in the room. Devices that already read it may keep their copy.', yes: 'Delete', danger: true })) den.remove(room, m.id).catch((err) => status(err.message));
+    }
+    if (t.dataset.act === 'react') {
+      const open = li.querySelector('.emoji');
+      closeEmoji();
+      if (open) return;
+      t.setAttribute('aria-expanded', 'true');
+      li.querySelector('.tools').insertAdjacentHTML('beforeend', `<div class="emoji" role="menu">${EMOJI.map((x) => `<button type="button" role="menuitem" data-emoji="${x}">${x}</button>`).join('')}</div>`);
+      li.querySelector('.emoji button').focus();
+    }
+  });
+  el('log').addEventListener('scroll', () => { if (!el('jump').hidden && nearBottom()) { el('jump').hidden = true; den.markRead(room); drawRooms(); } });
+  el('jump').onclick = () => { toBottom(); den.markRead(room); drawRooms(); };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEmoji(); });
+
+  function view(m) {
+    const d = el('lightbox');
+    d.querySelector('img').src = urls.get(m.id) || '';
+    d.querySelector('img').alt = m.file.name;
+    d.querySelector('.lb-name').textContent = `${m.file.name} · ${size(m.file.size)}`;
+    d.querySelector('[data-save]').onclick = () => download(m);
+    d.showModal();
+  }
+  el('lightbox').addEventListener('click', (e) => { if (e.target === el('lightbox') || e.target.closest('[data-close]')) el('lightbox').close(); });
+
+  // ---- The composer -----------------------------------------------------------
+
+  function grow() {
+    const t = el('say-text');
+    t.style.height = 'auto';
+    t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
+  }
+
+  function startEdit(m) {
+    editing = m;
+    reply = null;
+    el('say-text').value = m.text;
+    drawComposer();
+    grow();
+    el('say-text').focus();
   }
 
   function drawComposer() {
     const banner = el('say-banner');
     banner.hidden = !reply && !editing;
-    banner.innerHTML = reply ? `Replying to ${esc(reply.from)}: ${esc((reply.text || reply.file?.name || '').slice(0, 80))} <button type="button" id="say-cancel">Cancel</button>`
-      : editing ? `Editing your message <button type="button" id="say-cancel">Cancel</button>` : '';
+    banner.innerHTML = reply
+      ? `<span>Replying to <b>${esc(reply.from)}</b> <q>${esc((reply.text || reply.file?.name || '').slice(0, 90))}</q></span><button type="button" class="x" id="say-cancel" aria-label="Cancel reply">×</button>`
+      : editing ? '<span>Editing your message · <kbd>Esc</kbd> to cancel</span><button type="button" class="x" id="say-cancel" aria-label="Cancel editing">×</button>' : '';
     const c = el('say-cancel');
-    if (c) c.onclick = () => { reply = null; if (editing) el('say-text').value = ''; editing = null; drawComposer(); };
+    if (c) c.onclick = cancelCompose;
     const r = den.rooms.get(room);
     el('say').hidden = !den.inRoom(room) && r?.kind === 'private';
+    el('say').querySelector('[type=submit]').textContent = editing ? 'Save' : 'Send';
+    drawHead();
+  }
+
+  function cancelCompose() {
+    if (editing) el('say-text').value = '';
+    reply = null;
+    editing = null;
+    drawComposer();
+    grow();
   }
 
   el('say').onsubmit = async (e) => {
@@ -149,112 +442,181 @@ export function mountDen(den, el, me) {
     const text = el('say-text').value.trim();
     if (!text) return;
     el('say-text').value = '';
+    grow();
+    closeMentions();
+    const was = { reply, editing };
+    reply = null;
+    editing = null;
+    drawComposer();
     try {
-      if (editing) await den.edit(room, editing.id, text);
-      else await den.say(room, text, reply?.id || null);
-      reply = null; editing = null; drawComposer();
-    } catch (err) { status(err.message); el('say-text').value = text; }
+      if (was.editing) await den.edit(room, was.editing.id, text);
+      else await den.say(room, text, was.reply?.id || null);
+    } catch (err) {
+      status(err.message);
+      ({ reply, editing } = was);
+      el('say-text').value = text;
+      drawComposer();
+      grow();
+    }
   };
-  el('say-text').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el('say').requestSubmit(); } };
-  el('say-text').oninput = () => den.typing(room);
+
+  el('say-text').addEventListener('keydown', (e) => {
+    if (!el('mentions').hidden) {
+      const items = el('mentions').querySelectorAll('[data-pick]');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); mentionPick = (mentionPick + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; drawMentionPick(); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); items[mentionPick]?.click(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeMentions(); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); el('say').requestSubmit(); return; }
+    if (e.key === 'Escape' && (reply || editing)) { e.preventDefault(); cancelCompose(); return; }
+    if (e.key === 'ArrowUp' && !el('say-text').value) {
+      const last = [...shown].reverse().find((m) => m.key === me.key && !m.deleted && !m.file);
+      if (last) { e.preventDefault(); startEdit(last); }
+    }
+  });
+  el('say-text').addEventListener('input', () => { grow(); den.typing(room); drawMentions(); });
+
+  // @ and a few letters: the members this device knows, to pick from.
+  function drawMentions() {
+    const t = el('say-text');
+    const before = t.value.slice(0, t.selectionStart);
+    const m = before.match(/(^|\s)@([\w-]{0,12})$/);
+    if (!m) return closeMentions();
+    mentionAt = before.length - m[2].length - 1;
+    const q = m[2].toLowerCase();
+    const list = known().filter((x) => x.name.toLowerCase().includes(q)).slice(0, 6);
+    if (!list.length) return closeMentions();
+    mentionPick = Math.min(mentionPick, list.length - 1);
+    el('mentions').innerHTML = list.map((x, i) => `<li><button type="button" role="option" data-pick="${esc(x.name)}" aria-selected="${i === mentionPick}">${mark(x.key, 20)}<span>${esc(x.name)}</span></button></li>`).join('');
+    el('mentions').hidden = false;
+    el('mentions').querySelectorAll('[data-pick]').forEach((b) => {
+      b.onmousedown = (ev) => ev.preventDefault();
+      b.onclick = () => {
+        const v = t.value;
+        const end = t.selectionStart;
+        const ins = `@${b.dataset.pick} `;
+        t.value = v.slice(0, mentionAt) + ins + v.slice(end);
+        t.selectionStart = t.selectionEnd = mentionAt + ins.length;
+        closeMentions();
+        t.focus();
+      };
+    });
+  }
+  function drawMentionPick() { el('mentions').querySelectorAll('[data-pick]').forEach((b, i) => b.setAttribute('aria-selected', String(i === mentionPick))); }
+  function closeMentions() { el('mentions').hidden = true; mentionPick = 0; }
+  el('say-text').addEventListener('blur', () => setTimeout(closeMentions, 150));
+
+  // Files: the button, a paste, or a drop anywhere on the conversation.
+  async function sendFiles(files) {
+    for (const f of [...files].slice(0, 5)) {
+      if (f.size > 25 * 1048576) { status(`${f.name} is over 25 MB.`); continue; }
+      status(`Sealing and sending ${f.name}…`, true);
+      try { await den.sendFile(room, f); status(''); } catch (e) { status(e.message); }
+    }
+  }
   el('attach').onclick = () => el('attach-file').click();
-  el('attach-file').onchange = async () => {
-    const f = el('attach-file').files[0];
-    el('attach-file').value = '';
-    if (!f) return;
-    status(`Sealing and sending ${f.name}…`);
-    try { await den.sendFile(room, f); status(''); } catch (e) { status(e.message); }
-  };
+  el('attach-file').onchange = () => { sendFiles(el('attach-file').files).finally(() => { el('attach-file').value = ''; }); };
+  el('say-text').addEventListener('paste', (e) => { if (e.clipboardData?.files?.length) { e.preventDefault(); sendFiles(e.clipboardData.files); } });
+  const main = el('den-main');
+  let dragDepth = 0;
+  const canDrop = (e) => den.inRoom(room) && [...(e.dataTransfer?.types || [])].includes('Files');
+  main.addEventListener('dragenter', (e) => { if (!canDrop(e)) return; e.preventDefault(); dragDepth++; el('drop').hidden = false; });
+  main.addEventListener('dragover', (e) => { if (canDrop(e)) e.preventDefault(); });
+  main.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; el('drop').hidden = true; } });
+  main.addEventListener('drop', (e) => { if (!canDrop(e)) return; e.preventDefault(); dragDepth = 0; el('drop').hidden = true; sendFiles(e.dataTransfer.files); });
 
-  // ---- Members, private rooms ------------------------------------------------
-
-  /// Every device this one knows of, from the rooms it is in.
-  function known() {
-    const all = new Map();
-    for (const r of rooms()) for (const m of den.members(r.id)) if (m.key !== me.key) all.set(m.key, m.name);
-    return [...all.entries()].map(([key, name]) => ({ key, name }));
-  }
-
-  function pickMembers(heading, done) {
-    const list = known();
-    const d = el('pick');
-    d.querySelector('h2').textContent = heading;
-    d.querySelector('.who').innerHTML = list.length
-      ? list.map((m) => `<label><input type="checkbox" value="${esc(m.key)}" data-name="${esc(m.name)}" /> ${esc(m.name)}</label>`).join('')
-      : '<p class="note">No one yet: members appear here once they are in a room with you.</p>';
-    d.querySelector('[name=title]').value = '';
-    d.showModal();
-    d.querySelector('form').onsubmit = async (e) => {
-      e.preventDefault();
-      const picked = [...d.querySelectorAll('input[type=checkbox]:checked')];
-      if (!picked.length) return;
-      const name = d.querySelector('[name=title]').value.trim() || picked.map((x) => x.dataset.name).join(', ');
-      d.close();
-      status('Making the room and sending invitations…');
-      try { await done(picked.map((x) => x.value), name); status(''); } catch (err) { status(err.message); }
-    };
-    d.querySelector('[data-close]').onclick = () => d.close();
-  }
+  // ---- Members ----------------------------------------------------------------
 
   function drawMembers() {
-    const list = den.members(room);
+    const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : a.name.localeCompare(b.name)));
     const priv = den.rooms.get(room)?.kind === 'private';
-    el('members').innerHTML = `<p class="group">In this room</p>${list.map((m) => `<p class="who">${esc(m.name)}${m.key === me.key ? ' (you)' : ` <button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message privately</button>`}</p>`).join('')}
+    el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
+      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="who">${esc(m.name)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
     el('members').querySelectorAll('[data-dm]').forEach((b) => {
       b.onclick = async () => {
-        status(`Opening a private room with ${b.dataset.name}…`);
-        try { go(await den.startPrivate([b.dataset.dm], b.dataset.name)); status(''); } catch (e) { status(e.message); }
+        // Already a room of just the two of you: that one.
+        const pair = rooms().find((r) => r.kind === 'private' && den.inRoom(r.id) && (() => { const ks = den.members(r.id).map((x) => x.key); return ks.length === 2 && ks.includes(b.dataset.dm); })());
+        if (pair) return go(pair.id);
+        status(`Opening a private room with ${b.dataset.name}…`, true);
+        try { go(await den.startPrivate([b.dataset.dm], '')); status(''); } catch (e) { status(e.message); }
       };
     });
+    el('members').querySelector('[data-close]').onclick = toggleMembers;
     const inv = el('invite');
-    if (inv) inv.onclick = () => pickMembers('Invite to this room', (keys) => den.invite(room, keys));
+    if (inv) inv.onclick = () => pickMembers('Invite to this room', 'Invite', false, (keys) => den.invite(room, keys));
   }
-  el('room-meta').onclick = () => { el('members').hidden = !el('members').hidden; drawMembers(); };
+  function toggleMembers() {
+    const open = el('members').hidden;
+    el('members').hidden = !open;
+    el('room-meta').setAttribute('aria-expanded', String(open));
+    if (open) drawMembers();
+  }
+  el('room-meta').onclick = toggleMembers;
+
+  // The room list as a drawer, on a phone.
+  el('rooms-open').onclick = () => el('den').classList.toggle('drawer');
+  el('den-scrim').onclick = () => el('den').classList.remove('drawer');
 
   // ---- Search, notifications -----------------------------------------------
 
   el('search').oninput = async () => {
-    const q = el('search').value;
-    const box = el('found');
-    if (!q.trim()) { box.hidden = true; return; }
+    const q = el('search').value.trim();
+    const found = el('found');
+    if (!q) { found.hidden = true; return; }
     const hits = await den.search(q);
-    box.hidden = false;
-    box.innerHTML = hits.length ? hits.slice(-30).reverse().map((h) => `<button type="button" data-room="${esc(h.room)}"><b>${esc(title(den.rooms.get(h.room) || { id: h.room }))}</b> ${esc(h.message.from)}: ${esc((h.message.text || h.message.file?.name || '').slice(0, 80))}</button>`).join('') : '<p class="note">Nothing on this device matches.</p>';
-    box.querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => { box.hidden = true; el('search').value = ''; go(b.dataset.room); }; });
+    if (el('search').value.trim() !== q) return;
+    found.hidden = false;
+    const hl = (s) => {
+      const i = s.toLowerCase().indexOf(q.toLowerCase());
+      return i < 0 ? esc(s.slice(0, 90)) : `${i > 30 ? '…' : ''}${esc(s.slice(Math.max(0, i - 30), i))}<mark>${esc(s.slice(i, i + q.length))}</mark>${esc(s.slice(i + q.length, i + q.length + 60))}`;
+    };
+    found.innerHTML = hits.length
+      ? `<p class="found-count">${hits.length} on this device</p>${hits.slice(-30).reverse().map((h) => `<button type="button" data-room="${esc(h.room)}" data-id="${esc(h.message.id)}"><span class="found-where">${esc(roomTitle(h.room))} · ${esc(h.message.from)}</span><span>${hl(h.message.text || h.message.file?.name || '')}</span></button>`).join('')}`
+      : '<p class="none">No matches on this device.</p>';
+    found.querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => { found.hidden = true; el('search').value = ''; go(b.dataset.room, b.dataset.id); }; });
   };
+  el('search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { el('search').value = ''; el('found').hidden = true; } });
 
-  const drawNotify = () => { el('notify').textContent = { all: 'Notify: every message', mentions: 'Notify: mentions and private', off: 'Notify: off' }[notify]; };
-  el('notify').onclick = async () => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission();
-    notify = { mentions: 'all', all: 'off', off: 'mentions' }[notify];
+  el('notify').value = notify;
+  el('notify').onchange = async () => {
+    notify = el('notify').value;
+    if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission();
+    if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'denied') status('Notifications are blocked for this site in the browser settings.');
     try { localStorage.setItem('cave.den.notify', notify); } catch { /* not kept */ }
-    drawNotify();
   };
-  drawNotify();
 
   function ping(room_, m, mention) {
     if (!document.hidden || notify === 'off' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const priv = den.rooms.get(room_)?.kind === 'private';
     if (notify === 'mentions' && !mention && !priv) return;
-    const n = new Notification(title(den.rooms.get(room_) || { id: room_ }), { body: `${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`, tag: room_ });
+    const n = new Notification(roomTitle(room_), { body: `${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`, tag: room_ });
     n.onclick = () => { window.focus(); go(room_); n.close(); };
   }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && nearBottom()) { den.markRead(room); drawRooms(); } });
 
   // ---- Voice -----------------------------------------------------------------
 
-  async function drawVoice() {
+  let meterTimer;
+  function drawVoice() {
     const v = den.voice;
-    const people = v?.people;
     el('voice').hidden = !v;
-    el('voice-go').hidden = !!v || !den.inRoom(room);
+    drawHead();
+    clearInterval(meterTimer);
     if (!v) return;
-    const names = new Map(known().map((m) => [m.key, m.name]));
-    el('voice-who').textContent = `Voice in ${title(den.rooms.get(v.room) || { id: v.room })}: you${people?.length ? `, ${people.map((p) => names.get(p.key) || 'a member').join(', ')}` : ''}`;
+    el('voice-room').textContent = roomTitle(v.room);
+    el('voice-room').onclick = () => go(v.room);
+    const people = [{ mid: 'me', key: me.key }, ...(v.people || [])];
+    el('voice-who').innerHTML = people.map((p) => `<li data-mid="${esc(p.mid)}" title="${esc(nameOf(p.key))}">${mark(p.key, 22)}<span>${p.mid === 'me' ? 'You' : esc(nameOf(p.key))}</span></li>`).join('');
+    meterTimer = setInterval(() => {
+      const lv = den.voice?.levels?.() || {};
+      el('voice-who').querySelectorAll('li').forEach((li) => li.classList.toggle('speaking', (lv[li.dataset.mid] || 0) > 0.02));
+    }, 150);
   }
   el('voice-go').onclick = async () => {
-    status('Joining voice…');
-    try { await den.joinVoice(room, () => drawVoice()); status(''); drawVoice(); } catch (e) { status(e.message); }
+    el('voice-go').disabled = true;
+    status('Joining voice…', true);
+    try { await den.joinVoice(room, () => drawVoice()); status(''); drawVoice(); drawRooms(); } catch (e) { status(e.message); } finally { el('voice-go').disabled = false; }
   };
   el('voice-mute').onclick = () => {
     const on = el('voice-mute').getAttribute('aria-pressed') !== 'true';
@@ -262,28 +624,42 @@ export function mountDen(den, el, me) {
     el('voice-mute').setAttribute('aria-pressed', String(on));
     el('voice-mute').textContent = on ? 'Unmute' : 'Mute';
   };
-  el('voice-leave').onclick = async () => { await den.voice?.leave(); drawVoice(); drawRooms(); };
+  el('voice-leave').onclick = async () => {
+    await den.voice?.leave();
+    el('voice-mute').setAttribute('aria-pressed', 'false');
+    el('voice-mute').textContent = 'Mute';
+    drawVoice();
+    drawRooms();
+  };
 
   // ---- Events from den.js ---------------------------------------------------
 
+  function drawTyping() {
+    const who = Object.entries(typing).filter(([, t]) => Date.now() - t < 4000).map(([k]) => nameOf(k));
+    el('typing').innerHTML = who.length ? `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${esc(who.slice(0, 3).join(', '))}${who.length > 3 ? ` and ${who.length - 3} more` : ''} ${who.length > 1 ? 'are' : 'is'} writing` : '';
+  }
+
   den.on = (event, d) => {
     if (event === 'rooms') drawRooms();
-    if (event === 'ready' || event === 'members') { counts[d.room] = d.members.length; if (d.room === room) { drawRooms(); drawComposer(); if (!el('members').hidden) drawMembers(); } }
+    if (event === 'ready' || event === 'members') {
+      counts[d.room] = d.members.length;
+      if (d.room === room) { drawComposer(); if (!el('members').hidden) drawMembers(); }
+      if (event === 'ready' && d.room === room && !shown.length) drawLog();
+    }
     if (event === 'message') {
-      if (d.room === room) drawLog();
+      if (d.room === room) onMessage(d).then(drawRooms);
       else drawRooms();
       if (!d.mine && d.kind !== 'react') ping(d.room, d.message, d.mention);
+      if (d.room === room && !d.mine) { delete typing[d.message.key]; drawTyping(); }
     }
     if (event === 'typing' && d.room === room) {
       typing[d.key] = Date.now();
-      const names = new Map(known().map((m) => [m.key, m.name]));
-      const who = Object.entries(typing).filter(([, t]) => Date.now() - t < 4000).map(([k]) => names.get(k) || 'someone');
-      el('typing').textContent = who.length ? `${who.join(', ')} ${who.length > 1 ? 'are' : 'is'} writing…` : '';
-      setTimeout(() => { if (Date.now() - typing[d.key] >= 4000) el('typing').textContent = ''; }, 4100);
+      drawTyping();
+      setTimeout(drawTyping, 4100);
     }
-    if (event === 'offline') status('Reconnecting…');
+    if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
-    if (event === 'error') status(`${title(den.rooms.get(d.room) || { id: d.room })}: ${d.error}`);
+    if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
   };
 
   drawRooms();
