@@ -184,6 +184,22 @@ ok((await page.inputValue('#br-to')) === '0x111111111111111111111111111111111111
 await page.check('input[name="br-channel"][value="private"]'); await page.waitForTimeout(300);
 ok(await page.isHidden('#br-asset input[value="bold"] >> xpath=..'), 'BOLD has no private channel');
 await page.check('input[name="br-channel"][value="transparent"]');
+// A bridge deposit that arrived for this account and waits to be collected
+// shows in the Portfolio, with Collect: the chain is told to answer that
+// SOL.zy waits under the codes this account asks about.
+await ctx.route('https://zyn-rpc.cavebro.win/object', async (route) => {
+  const body = JSON.parse(route.request().postData() || '{}');
+  if (body.method !== 'zyn_waiting') return route.fallback();
+  // Every code asked about answers 0.25 SOL.zy; the account keeps those it
+  // asked about for SOL.zy (one per code it may have handed out).
+  const ids = String(body.ids || '').split(',').filter(Boolean);
+  route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jsonrpc: '2.0', id: body.id, result: ids.map((key) => ({ key, asset: '9204324e0511b4d1a90d0ff36242f044e894e1b71489d47abd824df273092ad1', amount: '250000000000000000' })) }) });
+});
+await page.goto(`${APP}/#/portfolio`);
+await page.waitForSelector('.pf-owed', { timeout: 60000 }).catch(() => {});
+const owedCard = ((await page.textContent('.pf-owed').catch(() => '')) || '').replace(/\s+/g, ' ');
+ok(/[\d.,]+ SOL\.zy arrived from the bridge/.test(owedCard) && await page.isVisible('#pf-collect'), `an arrived deposit is shown in the Portfolio, to collect: ${owedCard.slice(0, 90)}`);
+await ctx.unroute('https://zyn-rpc.cavebro.win/object');
 // Solana opens its own account.
 await page.click('#connect'); await page.click('#w-out');
 await page.click('#connect');
