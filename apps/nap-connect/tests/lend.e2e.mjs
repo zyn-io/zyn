@@ -4,7 +4,8 @@
 // approved in Nap, which shows the numbers the chain will use.
 //
 //   PHRASE_FILE=~/.zyn/test-wallets/bidder.phrase node tests/lend.e2e.mjs
-//   (NOTES=1 also requires private notes: a wallet that has deposited privately)
+//   (NOTES=1 also requires private notes: a wallet that has deposited privately;
+//    BRIDGE_ONLY=1 runs the bridge steps alone)
 //
 // NAP_LOCAL=<a Nap web build> serves that build as nap.zyn-network.com (its
 // /rpc, /zec… doors go to NAP_UPSTREAM, default https://nap.cavebro.win): to
@@ -103,6 +104,8 @@ async function approve(label, check) {
   await popup.click('#yes');
 }
 
+// BRIDGE_ONLY=1 skips lending, for a wallet with SOL.zy to withdraw but none to lend.
+if (!process.env.BRIDGE_ONLY) {
 // Lend 0.1 SOL.zy.
 await page.goto(`${APP}/#/lend/SOL`);
 await page.fill('#lend-amount', '0.1');
@@ -178,6 +181,7 @@ if (found) {
   }
   ok(gone, 'the closed position is gone and its collateral collected');
 }
+}
 
 // The bridge, moved here from Nap's own page: deposit addresses come from
 // Nap, Phantom/MetaMask are talked to by this page, withdrawals are signed
@@ -216,6 +220,15 @@ await page.click('#br-go');
 await approve('withdraw', (t) => /Withdraw SOL/.test(t) && t.includes(OUT_TO) && /Solana devnet will show this address/.test(t));
 await page.waitForFunction(() => /Withdrawal recorded|refused|error/i.test(document.querySelector('#toast').textContent), null, { timeout: 90000 }).catch(() => {});
 ok(/Withdrawal recorded/.test(await toast()), `withdraw: ${await toast()}`);
+// It is followed from here (§186): listed under Withdrawals, on ZynScan once
+// read there, then paid on devnet with its payout found and linked.
+await page.waitForFunction(() => /0\.01 SOL → HBvV7Y/.test(document.querySelector('#br-wd-list')?.textContent || ''), null, { timeout: 30000 }).catch(() => {});
+ok(/0\.01 SOL → HBvV7Y/.test(await page.textContent('#br-wd-list').catch(() => '')), `the withdrawal is listed: ${(await page.textContent('#br-wd-list').catch(() => '')).replace(/\s+/g, ' ').slice(0, 100)}`);
+await page.waitForFunction(() => document.querySelector('#br-wd-list .br-note')?.textContent.includes('paid'), null, { timeout: 300000 }).catch(() => {});
+const wd = await page.$$eval('#br-wd-list .br-note:first-child a', (as) => as.map((a) => [a.textContent, a.href]));
+ok(wd.some(([t, h]) => /On ZynScan/.test(t) && /scan\.zyn-network\.com\/tx\/\d+\?network=testnet/.test(h)), `the withdrawal links to ZynScan: ${JSON.stringify(wd.find(([t]) => /On ZynScan/.test(t)))}`);
+ok(wd.some(([t, h]) => /View on Solana/.test(t) && /explorer\.solana\.com\/tx\/[1-9A-HJ-NP-Za-km-z]{64,88}\?cluster=devnet/.test(h)), `paid: its devnet payout found and linked: ${JSON.stringify(wd.find(([t]) => /View on/.test(t)))}`);
+ok(wd.some(([t, h]) => /Payout on ZynScan/.test(t) && /\/tx\/\d+\?(network=testnet&sol=|sol=.*network=testnet)/.test(h)), `the payout on ZynScan, with its signature to check: ${JSON.stringify(wd.find(([t]) => /Payout/.test(t)))}`);
 await page.screenshot({ path: `${S}/lend-bridge.png`, fullPage: true });
 
 // The private channel: sizes for SOL, and this wallet's notes with their
