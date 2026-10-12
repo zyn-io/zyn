@@ -198,8 +198,9 @@ ok(solText === 'Open my Zyn account\n\nThis signature is the key to the account.
 // the new one opens that account.
 await page.click('#connect'); await page.click('#w-out');
 await page.click('#connect');
-await page.waitForSelector('#wallet-list button:has-text("Test Solana: account from before 12 Oct")');
-await page.click('#wallet-list button:has-text("Test Solana: account from before 12 Oct")');
+await page.waitForSelector('#wallet-list .w-more');
+await page.click('#wallet-list .w-more');
+await page.click('#wallet-list button:has-text("Sign its old sign-in once more")');
 await page.waitForSelector('#approve[open]', { timeout: 30000 });
 ok(/before 12 Oct/.test(await page.textContent('#a-title')), 'moving an older account asks first, and says the wallet will warn about the date');
 await page.click('#a-yes');
