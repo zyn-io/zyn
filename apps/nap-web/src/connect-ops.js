@@ -1090,8 +1090,8 @@ export const METHODS = {
           note: 'Paid from the vault once two custodians sign; the Zcash network fee comes out of the amount. A shielded address keeps the payout private.',
           run: async () => {
             const h = await holdings(ctx);
-            await bridges.withdrawZec(ctx.config, ctx.identity, h.held, to, wadText(amount));
-            return { ok: true };
+            // `exit`: the commitment its holder follows it by (ZynScan /api/exit).
+            return { ok: true, exit: await bridges.withdrawZec(ctx.config, ctx.identity, h.held, to, wadText(amount)) };
           },
         };
       }
@@ -1106,8 +1106,7 @@ export const METHODS = {
         note: `${b.chainName} will show this address receiving the amount from the vault${b.safe ? '; the Safe owners approve each payout, which can take hours' : b.multisig ? "; the multisig's owners approve each payout, which can take hours" : ''}.`,
         run: async () => {
           const h = await holdings(ctx);
-          await bridges.bridgeOut(ctx.config, ctx.identity, h.held, b, to, amount, st.bps);
-          return { ok: true };
+          return { ok: true, exit: await bridges.bridgeOut(ctx.config, ctx.identity, h.held, b, to, amount, st.bps) };
         },
       };
     },

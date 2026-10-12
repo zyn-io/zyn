@@ -12,8 +12,13 @@
 //! * **Market state**: the node's own public `zyn_market` and `zyn_status`.
 //! * **Bridge deposits by their source**: a Solana signature finds the
 //!   deposit it made (`/api/solana/<signature>`), through the ledger's own
-//!   reference for it (`sol_bridge::tx_ref`); a deposit names the claim that
-//!   took it, and the claim the deposits it took — never the account.
+//!   reference for it (`sol_bridge::tx_ref`); any chain's deposit by that
+//!   reference (`/api/ref/<hex>`); a deposit names the claim that took it,
+//!   and the claim the deposits it took — never the account.
+//! * **Withdrawals and their payouts**: a withdrawal names the transaction
+//!   that settled it, and the settlement the withdrawal and the payout on the
+//!   other chain. Its holder finds it by its exit commitment
+//!   (`/api/exit/<hex>`, `H(address ‖ salt)`: only the holder knows the salt).
 //!
 //! What it does not serve is the reason it exists at tier 2 (DECISIONS
 //! §130.12, §133.4): "private from the public; we can see them". Accounts,
@@ -81,6 +86,19 @@ fn coin_name(network: &[u8], origin: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// 32 bytes written as 64 hex digits.
+fn hash32(s: &str) -> Option<[u8; 32]> {
+    let s = s.trim_start_matches("0x");
+    if s.len() != 64 || !s.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
 /// A Solana signature: 64 bytes in base58 (88 characters at most).
 fn is_solana_signature(s: &str) -> bool {
     (64..=88).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() && !b"0OIl".contains(&c))
@@ -132,9 +150,13 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
     match op {
         Op::Mint { .. } => ("Mint (devnet)", true, Value::Null),
         Op::Spend { .. } => ("Transfer", false, Value::Null),
+        // Which chain's transaction paid it is filled in by `bridge_links`,
+        // which knows the exit's coin; ZEC's is a Zcash txid.
         Op::SettleExit { index, txid, .. } => ("Exit paid", true, json!({ "index": index, "zcash_txid": hex(txid) })),
         Op::Register { .. } => ("Register", false, Value::Null),
-        Op::Withdraw { .. } => ("Withdraw to Zcash", false, Value::Null),
+        // Which coin leaves is filled in by `bridge_links`; never how much,
+        // whose, or where to.
+        Op::Withdraw { .. } => ("Withdrawal", false, Value::Null),
         Op::Deposit { .. } => ("Deposit", true, Value::Null),
         Op::DepositWithFee { .. } => ("Deposit", true, Value::Null),
         Op::PlaceOffer { .. } => ("Offer placed", false, Value::Null),
@@ -321,6 +343,10 @@ struct Index {
     claimed_in: BTreeMap<u64, u64>,
     /// Bridged coins' names, by asset.
     coins: BTreeMap<[u8; 32], &'static str>,
+    /// The transaction that made each exit (by its index in `vm.exits`),
+    /// and the one that settled it.
+    exit_tx: Vec<u64>,
+    exit_paid_in: BTreeMap<u32, u64>,
     market: Value,
     status: Value,
     error: Option<String>,
@@ -343,6 +369,8 @@ impl Index {
             waiting: BTreeMap::new(),
             claimed_in: BTreeMap::new(),
             coins: BTreeMap::new(),
+            exit_tx: Vec::new(),
+            exit_paid_in: BTreeMap::new(),
             market: Value::Null,
             status: Value::Null,
             error: None,
@@ -359,6 +387,8 @@ impl Index {
         self.waiting.clear();
         self.claimed_in.clear();
         self.coins.clear();
+        self.exit_tx.clear();
+        self.exit_paid_in.clear();
         self.next_epoch = 0;
         self.applied_in_open = 0;
     }
@@ -387,7 +417,11 @@ impl Index {
                 let authorized = zyn_vm::verify::decode_authorized::<ObjectVm>(record, &self.vm)
                     .map_err(|e| format!("seq {seq} does not verify: {e:?}"))?;
                 let op = authorized.into_intent();
+                let exits_before = self.vm.exits.len();
                 let receipts = self.vm.apply_committed(*seq, &op, record);
+                for _ in exits_before..self.vm.exits.len() {
+                    self.exit_tx.push(*seq);
+                }
                 let (kind, operator, mut detail) = describe(&op, &receipts);
                 let refusal = receipts.iter().find_map(|r| match r {
                     Receipt::Refused(why) => Some(why.to_string()),
@@ -482,6 +516,21 @@ impl Index {
                     detail["coin"] = json!(name);
                 }
             }
+            Op::Withdraw { asset, .. } => {
+                if let Some(name) = self.coins.get(asset) {
+                    detail["coin"] = json!(name);
+                }
+            }
+            Op::SettleExit { index, txid, .. } => {
+                self.exit_paid_in.insert(*index, seq);
+                detail["withdrawn_in"] = json!(self.exit_tx.get(*index as usize));
+                // A bridged coin's payout is that chain's transaction (an
+                // Ethereum hash as it is; Solana's and Bitcoin's as the
+                // ledger's hash of it), not a Zcash one.
+                if let Some(name) = self.vm.exits.get(*index as usize).and_then(|e| self.coins.get(&e.asset)) {
+                    *detail = json!({ "index": index, "coin": name, "payout": hex(txid), "withdrawn_in": self.exit_tx.get(*index as usize) });
+                }
+            }
             Op::ClaimDeposit { owner, secret, asset, .. } => {
                 let key = objectvm::bridge::deposit_key(&objectvm::bridge::deposit_commitment(owner, secret), asset);
                 for d in self.waiting.remove(&key).unwrap_or_default() {
@@ -504,6 +553,11 @@ impl Index {
             "Bridge deposit" => v["claimed_in"] = json!(self.claimed_in.get(&t.seq)),
             "Bridge deposit claimed" => {
                 v["deposits"] = json!(self.claimed_in.iter().filter(|(_, c)| **c == t.seq).map(|(d, _)| *d).collect::<Vec<_>>())
+            }
+            // The settlement of the exit this withdrawal made, once there is one.
+            "Withdrawal" if t.ok => {
+                let index = self.exit_tx.iter().position(|s| *s == t.seq);
+                v["paid_in"] = json!(index.and_then(|i| self.exit_paid_in.get(&(i as u32))));
             }
             _ => {}
         }
@@ -619,6 +673,40 @@ fn route(ix: &Index, network: &str, path: &str) -> (u16, Value) {
                     Some(seq) => (200, json!({ "seq": seq, "source": hex(&r) })),
                     None => (404, json!({ "error": "no bridge deposit on this ledger comes from that transaction", "source": hex(&r) })),
                 };
+            }
+            if let Some(h) = p.strip_prefix("/api/ref/") {
+                let Some(r) = hash32(h) else { return (400, json!({ "error": "a reference is 32 bytes of hex" })) };
+                return match ix.refs.get(&r) {
+                    Some(seq) => (200, json!({ "seq": seq, "source": hex(&r) })),
+                    None => (404, json!({ "error": "no bridge deposit on this ledger has that reference yet" })),
+                };
+            }
+            // The settlement a payout made: by the payout's hash as the ledger
+            // keeps it (an Ethereum transaction hash as it is; a Solana or
+            // Bitcoin transaction as its reference, which its holder computes).
+            if let Some(h) = p.strip_prefix("/api/payout/") {
+                let Some(t) = hash32(h) else { return (400, json!({ "error": "a payout is 32 bytes of hex" })) };
+                let Some(i) = ix.vm.exits.iter().position(|e| e.paid_by == Some(t)) else {
+                    return (404, json!({ "error": "no settlement on this ledger names that payout yet" }));
+                };
+                return (200, json!({ "index": i, "withdrawn_in": ix.exit_tx.get(i), "paid_in": ix.exit_paid_in.get(&(i as u32)) }));
+            }
+            // A withdrawal by its exit commitment, which only its holder can
+            // compute: the transaction that made it and the one that paid it.
+            if let Some(h) = p.strip_prefix("/api/exit/") {
+                let Some(d) = hash32(h) else { return (400, json!({ "error": "an exit commitment is 32 bytes of hex" })) };
+                let Some((i, e)) = ix.vm.exits.iter().enumerate().find(|(_, e)| e.destination == d) else {
+                    return (404, json!({ "error": "no withdrawal on this ledger has that commitment yet" }));
+                };
+                let withdrawn_in = ix.exit_tx.get(i);
+                return (200, json!({
+                    "index": i,
+                    "coin": ix.coins.get(&e.asset),
+                    "withdrawn_in": withdrawn_in,
+                    "epoch": withdrawn_in.and_then(|s| ix.txs.get(s)).map(|t| t.epoch),
+                    "paid_in": ix.exit_paid_in.get(&(i as u32)),
+                    "payout": e.paid_by.map(|t| hex(&t)),
+                }));
             }
             (404, json!({ "error": "not found" }))
         }
@@ -831,6 +919,11 @@ mod tests {
         assert_eq!(tx["claimed_in"], Value::Null, "not claimed yet");
         assert_eq!(route(&ix, "testnet", "/api/solana/4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM2xZ3m8yHGa3a8z1iRsMk7nnbmfxDm9BcFqahE6EBV8HVb").0, 404, "another signature finds nothing");
         assert_eq!(route(&ix, "testnet", "/api/solana/not-a-signature").0, 400);
+        // Pinned for the pages that compute it (Zyn Lend's track.js, ZynScan's
+        // solanaRef): SHA-256 over 0x00, the domain and the signature's text.
+        assert_eq!(hex(&zynzapd::sol_bridge::tx_ref(sig)), "e8649289550e63f40323372733f719829647bcba16c973bf9eb9620c1fe327b7");
+        let vault: [u8; 20] = [0xe1, 0x7b, 0xb5, 0x94, 0x3b, 0x34, 0x13, 0x3f, 0x6a, 0x8a, 0x5d, 0x22, 0x1b, 0xe4, 0xed, 0x94, 0x93, 0xb3, 0xef, 0x27];
+        assert_eq!(hex(&zynzapd::eth_bridge::deposit_ref(11155111, &vault, 2, 7)), "8882f15f2e084ee02b366814462d2ffbb1c89a56fdc93f41c955da029cb6f650");
 
         // The claim, by the depositor: linked both ways, the account nowhere.
         let net = receipts.iter().find_map(|r| match r { Receipt::DepositWaiting { amount, .. } => Some(*amount), _ => None }).unwrap();
@@ -853,5 +946,63 @@ mod tests {
         assert!(!c.to_string().contains(&hex(&owner)) && !tx.to_string().contains(&hex(&owner)), "no account: {c} {tx}");
         assert!(!tx.to_string().contains("100000000"), "no amount: {tx}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A withdrawal is found by its exit commitment, names the settlement
+    /// once there is one, and the settlement names the withdrawal and the
+    /// payout on the coin's own chain — with no account, amount or address.
+    #[test]
+    fn a_withdrawal_finds_its_settlement_and_payout() {
+        let dir = std::env::temp_dir().join(format!("zynscan-exit-{}", std::process::id()));
+        let mut ix = Index::new(212, 16, dir);
+        let eth = objectvm::bridge::asset_of(b"eip155:11155111", b"");
+        ix.coins.insert(eth, "ETH.zy");
+        let destination = [0xD5; 32];
+        let holder = [0xA1; 32];
+        let withdraw = Op::Withdraw {
+            holder,
+            program: zyn_vm::program::withdraw(),
+            inputs: vec![],
+            asset: eth,
+            amount: zyn_vm::Fixed::whole(2),
+            destination,
+            outputs: vec![],
+        };
+        // As ingest records it: the exit, made by transaction 7.
+        ix.vm.exits.push(objectvm::PendingExit { asset: eth, amount: zyn_vm::Fixed::whole(2), destination, since_epoch: 3, paid_by: None });
+        ix.exit_tx.push(7);
+        let (kind, _, mut detail) = describe(&withdraw, &[]);
+        assert_eq!(kind, "Withdrawal");
+        ix.bridge_links(&withdraw, &[], 7, &mut detail);
+        ix.txs.insert(7, Tx { seq: 7, epoch: 3, kind, operator: false, ok: true, refusal: None, created: Some(0), spent: Some(1), detail });
+
+        let (code, found) = route(&ix, "testnet", &format!("/api/exit/{}", hex(&destination)));
+        assert_eq!(code, 200, "{found}");
+        assert_eq!((found["withdrawn_in"].clone(), found["epoch"].clone(), found["paid_in"].clone(), found["payout"].clone()), (json!(7), json!(3), Value::Null, Value::Null));
+        assert_eq!(found["coin"], "ETH.zy");
+        assert_eq!(route(&ix, "testnet", "/api/tx/7").1["paid_in"], Value::Null, "not paid yet");
+
+        // The bridge settles it with the Ethereum transaction's hash.
+        let payout = [0xEE; 32];
+        ix.vm.exits[0].paid_by = Some(payout);
+        let settle = Op::SettleExit { program: zyn_vm::program::settle_exit(), index: 0, txid: payout };
+        let mut detail = describe(&settle, &[]).2;
+        ix.bridge_links(&settle, &[], 9, &mut detail);
+        ix.txs.insert(9, Tx { seq: 9, epoch: 4, kind: "Exit paid", operator: true, ok: true, refusal: None, created: Some(0), spent: Some(0), detail });
+        let (_, s) = route(&ix, "testnet", "/api/tx/9");
+        assert_eq!((s["detail"]["coin"].clone(), s["detail"]["payout"].clone(), s["detail"]["withdrawn_in"].clone()), (json!("ETH.zy"), json!(hex(&payout)), json!(7)));
+        assert!(s["detail"].get("zcash_txid").is_none(), "an ETH payout is not a Zcash transaction: {s}");
+        assert_eq!(route(&ix, "testnet", "/api/tx/7").1["paid_in"], 9);
+        let found = route(&ix, "testnet", &format!("/api/exit/{}", hex(&destination))).1;
+        assert_eq!((found["paid_in"].clone(), found["payout"].clone()), (json!(9), json!(hex(&payout))));
+
+        // What anyone else sees of the withdrawal: its coin, nothing more.
+        let w = route(&ix, "testnet", "/api/tx/7").1.to_string();
+        assert!(!w.contains(&hex(&holder)) && !w.contains(&hex(&destination)) && !w.contains("2000000000000000000"), "{w}");
+        let by_payout = route(&ix, "testnet", &format!("/api/payout/0x{}", hex(&payout))).1;
+        assert_eq!((by_payout["withdrawn_in"].clone(), by_payout["paid_in"].clone()), (json!(7), json!(9)));
+        assert_eq!(route(&ix, "testnet", &format!("/api/exit/{}", hex(&[0x01; 32]))).0, 404);
+        assert_eq!(route(&ix, "testnet", "/api/exit/zz").0, 400);
+        assert_eq!(route(&ix, "testnet", &format!("/api/ref/{}", hex(&[0x02; 32]))).0, 404);
     }
 }

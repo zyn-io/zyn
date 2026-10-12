@@ -17,6 +17,13 @@ const isHex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 /// A Solana transaction signature: 64 bytes in base58.
 const isSolanaSig = (v) => typeof v === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(v);
 const solscan = (sig) => `https://solscan.io/tx/${encodeURIComponent(sig)}${network === 'testnet' ? '?cluster=devnet' : ''}`;
+const etherscan = (h) => `https://${network === 'testnet' ? 'sepolia.' : ''}etherscan.io/tx/0x${encodeURIComponent(h)}`;
+/// The ledger's reference for a Solana transaction (sol_bridge::tx_ref):
+/// SHA-256 over a 0x00 byte, the domain and the signature's text.
+async function solanaRef(sig) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`\0objectvm.solana-tx.v1${sig}`));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 const short = (h, n = 8) => (isHex(h) ? `${h.slice(0, n)}…${h.slice(-4)}` : esc(h));
 const hash = (h) => `<span class="hash" title="${esc(h)}">${short(h)}</span>`;
 const num = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—');
@@ -60,7 +67,7 @@ async function get(path) {
 const KIND_CLASS = {
   'Curve trade': 'trade', Swap: 'trade', 'Offer taken': 'trade', 'Coin created': 'create', 'Pool created': 'create',
   'Collection registered': 'op', 'Fees set': 'op', 'Curve terms set': 'op', 'Item minted': 'op', 'Exit paid': 'op',
-  Deposit: 'bridge', 'Withdraw to Zcash': 'bridge', Claim: 'claim',
+  Deposit: 'bridge', Withdrawal: 'bridge', 'Withdraw to Zcash': 'bridge', Claim: 'claim',
   'Tickets bought': 'trade', 'Items claimed': 'claim', 'Open mint': 'trade',
   'Sale opened': 'op', 'Sale closed': 'op', 'Draw posted': 'op', 'Open mint posted': 'op',
   'Burn posted': 'bridge', 'Burn tickets capped': 'op',
@@ -91,6 +98,7 @@ function detail(t) {
   if (d.bond !== undefined) parts.push(`bond ${wad(d.bond)} ZEC.zy`);
   if (d.cap !== undefined) parts.push(`cap ${num(d.cap)}`);
   if (d.zcash_txid) parts.push(`Zcash tx ${hash(d.zcash_txid)}`);
+  if (d.payout) parts.push(`payout ${hash(d.payout)}`);
   if (d.tickets !== undefined) parts.push(`${num(d.tickets)} ticket${d.tickets === 1 ? '' : 's'}`);
   if (Array.isArray(d.serials)) parts.push(d.serials.map((x) => `#${esc(x)}`).join(', '));
   if (d.ticket_price !== undefined) parts.push(`ticket ${wad(d.ticket_price)} · claim ${wad(d.claim_price)} · open ${wad(d.open_price)} ZEC.zy`);
@@ -202,11 +210,15 @@ async function txPage(n) {
       : `<div class="wide"><dt>Solana transaction</dt><dd><span class="verify no">✗ that signature is not this deposit's source</span></dd></div>`;
   }
   const link = (s) => `<a href="/tx/${s}" data-link class="mono">#${num(s)}</a>`;
-  const other = t.kind === 'Bridge deposit'
+  let other = t.kind === 'Bridge deposit'
     ? `<div><dt>Claimed</dt><dd>${t.claimed_in != null ? `in ${link(t.claimed_in)}` : '<span class="dim">not yet</span>'}</dd></div>`
     : t.kind === 'Bridge deposit claimed' && t.deposits?.length
       ? `<div><dt>Deposits taken</dt><dd>${t.deposits.map(link).join(', ')}</dd></div>`
       : '';
+  // A withdrawal and the settlement that paid it, both ways; the payout on
+  // its own chain where the ledger's record of it can be read as a link.
+  if (t.kind === 'Withdrawal' && t.ok) other = `<div><dt>Paid</dt><dd>${t.paid_in != null ? `in ${link(t.paid_in)}` : '<span class="dim">not yet</span>'}</dd></div>`;
+  if (t.kind === 'Exit paid' && t.detail?.payout) other = `${t.detail.withdrawn_in != null ? `<div><dt>Withdrawal</dt><dd>${link(t.detail.withdrawn_in)}</dd></div>` : ''}<div class="wide"><dt>Payout</dt><dd>${await payoutLink(t.detail, sig)}</dd></div>`;
   return `
     <nav class="crumbs"><a href="/" data-link>Home</a> / <a href="/epoch/${t.epoch}" data-link>Epoch ${num(t.epoch)}</a> / Tx #${num(n)}</nav>
     <section class="panel">
@@ -221,6 +233,20 @@ async function txPage(n) {
         <div><dt>Settled</dt><dd>${anchorBadge(t.anchor)}</dd></div>
       </dl>
     </section>`;
+}
+
+/// A settlement's payout on its own chain. An Ethereum hash is the
+/// transaction itself; a Solana payout is the ledger's hash of it, so it
+/// links once the page holds the signature that hashes to it.
+async function payoutLink(d, sig) {
+  if (d.coin === 'ETH.zy' || d.coin === 'BOLD.zy') return `<a href="${etherscan(d.payout)}" target="_blank" rel="noreferrer" class="mono small">0x${esc(d.payout.slice(0, 10))}…${esc(d.payout.slice(-6))}</a> <span class="dim">on Ethereum</span>`;
+  if (d.coin === 'SOL.zy' && isSolanaSig(sig)) {
+    return (await solanaRef(sig)) === d.payout
+      ? `<a href="${solscan(sig)}" target="_blank" rel="noreferrer" class="mono small">${esc(sig.slice(0, 12))}…${esc(sig.slice(-6))}</a> <span class="verify yes">✓ its hash is this payout</span>`
+      : '<span class="verify no">✗ that signature is not this payout</span>';
+  }
+  if (d.coin === 'SOL.zy') return `${hash(d.payout)} <span class="dim">the ledger's hash of the Solana transaction; search its signature to open it</span>`;
+  return hash(d.payout);
 }
 
 async function assetsPage() {
@@ -255,27 +281,57 @@ async function assetsPage() {
 // ---------------------------------------------------------------------------
 // Search and routing.
 
-async function search(q) {
+/// Where a search goes: a page (and its query), or a message.
+async function resolve(q) {
   const raw = q.trim();
   const v = raw.toLowerCase();
-  if (!v) return;
+  if (!v) return null;
+  const miss = (e) => (e.status === 404 ? null : Promise.reject(e));
   if (isSolanaSig(raw)) {
-    const hit = await get(`/api/solana/${raw}`).catch((e) => (e.status === 404 ? null : Promise.reject(e)));
-    if (hit) return navigate(`/tx/${hit.seq}`, { sol: raw });
-    main.innerHTML = `<p class="empty">No bridge deposit on the ${network} ledger comes from that Solana transaction yet. A deposit shows here once Solana finalizes it and the bridge records it, usually within a minute or two.</p>`;
-    return;
+    const hit = await get(`/api/solana/${raw}`).catch(miss);
+    if (hit) return { path: `/tx/${hit.seq}`, extra: { sol: raw } };
+    const paid = await get(`/api/payout/${await solanaRef(raw)}`).catch(miss);
+    if (paid?.paid_in != null) return { path: `/tx/${paid.paid_in}`, extra: { sol: raw } };
+    return { html: `<p class="empty">Nothing on the ${network} ledger comes from that Solana transaction yet. A deposit shows here once Solana finalizes it and the bridge records it, usually within a minute or two; a payout once the bridge settles it.</p>` };
   }
   const m = v.match(/^(?:epoch\s*|e)(\d+)$/);
-  if (m) return navigate(`/epoch/${m[1]}`);
+  if (m) return { path: `/epoch/${m[1]}` };
   const t = v.match(/^#?(\d+)$/);
-  if (t) return navigate(`/tx/${t[1]}`);
-  if (isHex(v)) {
+  if (t) return { path: `/tx/${t[1]}` };
+  const h = v.replace(/^0x/, '');
+  if (isHex(h)) {
+    // A deposit's reference, a payout's hash, or a withdrawal's commitment.
+    const dep = await get(`/api/ref/${h}`).catch(miss);
+    if (dep) return { path: `/tx/${dep.seq}` };
+    const paid = await get(`/api/payout/${h}`).catch(miss);
+    if (paid?.paid_in != null) return { path: `/tx/${paid.paid_in}` };
+    const exit = await get(`/api/exit/${h}`).catch(miss);
+    if (exit?.withdrawn_in != null) return { path: `/tx/${exit.withdrawn_in}` };
     const { market } = await get('/api/market');
-    const hit = (market?.curves || []).some((c) => c.token === v) || (market?.pools || []).some((p) => p.id === v)
-      || (market?.collections || []).some((c) => c.asset === v);
-    if (hit) return navigate('/assets');
+    const hit = (market?.curves || []).some((c) => c.token === h) || (market?.pools || []).some((p) => p.id === h)
+      || (market?.collections || []).some((c) => c.asset === h);
+    if (hit) return { path: '/assets' };
   }
-  main.innerHTML = `<p class="empty">Nothing public matches “${esc(q)}”. Try an epoch (e12), a transaction (#34), a Solana deposit's signature, or a coin, collection or pool address.</p>`;
+  return { html: `<p class="empty">Nothing public matches “${esc(q)}”. Try an epoch (e12), a transaction (#34), a Solana or Ethereum transaction, or a coin, collection or pool address.</p>` };
+}
+
+async function search(q) {
+  const r = await resolve(q);
+  if (!r) return;
+  if (r.path) return navigate(r.path, r.extra);
+  main.innerHTML = r.html;
+}
+
+/// `/find/<anything a search takes>`: for links from elsewhere (Zyn Lend)
+/// that know a transaction on another chain, not its number here.
+async function findPage(q) {
+  const r = await resolve(q);
+  if (!r?.path) return r?.html || '';
+  const qs = new URLSearchParams();
+  if (network === 'testnet') qs.set('network', 'testnet');
+  for (const [k, v] of Object.entries(r.extra || {})) qs.set(k, v);
+  history.replaceState({}, '', r.path + (qs.toString() ? `?${qs}` : ''));
+  return route()();
 }
 
 function route() {
@@ -283,6 +339,7 @@ function route() {
   let m;
   if ((m = p.match(/^\/epoch\/(\d+)$/))) return () => epochPage(Number(m[1]));
   if ((m = p.match(/^\/tx\/(\d+)$/))) return () => txPage(Number(m[1]));
+  if ((m = p.match(/^\/find\/([^/]+)$/))) return () => findPage(decodeURIComponent(m[1]));
   if (p === '/assets') return assetsPage;
   return home;
 }
