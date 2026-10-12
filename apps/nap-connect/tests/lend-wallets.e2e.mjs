@@ -2,9 +2,11 @@
 //
 // Zyn Lend with wallets a holder already has: a stand-in Solana wallet (Wallet
 // Standard) and a stand-in Ethereum wallet (EIP-6963), both signing
-// deterministically, open a Zyn account in the page. They sign the app's
-// sign-in (EIP-4361 / the Solana sign-in format), and the Ethereum one
-// writes v as 27/28 at first and as 0/1 later — the same account either way.
+// deterministically, open a Zyn account in the page. The Ethereum one signs
+// the app's EIP-4361 sign-in and writes v as 27/28 at first and as 0/1
+// later — the same account either way. The Solana one signs plain words (a
+// Solana sign-in's fixed date goes stale), and an account it opened under the
+// old sign-in (2–12 Oct 2026) moves over with one more signature.
 import { chromium } from 'playwright-core';
 const APP = process.env.APP || 'https://lend.zyn-network.com';
 const S = process.env.SHOTS || '/tmp';
@@ -190,8 +192,31 @@ await page.click('#wallet-list button:has-text("Test Solana")');
 await page.waitForFunction(() => /^[0-9a-f]{5}…/.test(document.querySelector('#connect').textContent.trim()), null, { timeout: 60000 }).catch(() => {});
 const sh = (await page.textContent('#connect')).trim();
 ok(/^[0-9a-f]{5}…/.test(sh) && sh !== acctEvm, `a Solana wallet opens its own account: ${sh}`);
-const siws = await page.evaluate(() => window.__msgs.at(-1));
-ok(/^lend\.zyn-network\.com wants you to sign in with your Solana account:\nHBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy\n\n.+\n\nURI: https:\/\/lend\.zyn-network\.com\nVersion: 1\nNonce: zynaccount1\nIssued At: 2026-10-02T00:00:00Z$/.test(siws), `the Solana wallet signs a Solana sign-in: ${JSON.stringify(siws).slice(0, 90)}`);
+const solText = await page.evaluate(() => window.__msgs.at(-1));
+ok(solText === 'Open my Zyn account\n\nThis signature is the key to the account. Sign it only on lend.zyn-network.com.\n\nWallet: HBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy\nVersion: 2', `the Solana wallet signs plain words, no sign-in date to go stale: ${JSON.stringify(solText).slice(0, 90)}`);
+// Its account from before 12 Oct: one more signature of the old sign-in, then
+// the new one opens that account.
+await page.click('#connect'); await page.click('#w-out');
+await page.click('#connect');
+await page.waitForSelector('#wallet-list button:has-text("Test Solana: account from before 12 Oct")');
+await page.click('#wallet-list button:has-text("Test Solana: account from before 12 Oct")');
+await page.waitForSelector('#approve[open]', { timeout: 30000 });
+ok(/before 12 Oct/.test(await page.textContent('#a-title')), 'moving an older account asks first, and says the wallet will warn about the date');
+await page.click('#a-yes');
+await page.waitForFunction((was) => { const t = document.querySelector('#connect').textContent.trim(); return /^[0-9a-f]{5}…/.test(t) && t !== was; }, sh, { timeout: 60000 }).catch(() => {});
+const old = (await page.textContent('#connect')).trim();
+const oldText = await page.evaluate(() => window.__msgs.at(-1));
+ok(/^[0-9a-f]{5}…/.test(old) && old !== sh && /^lend\.zyn-network\.com wants you to sign in with your Solana account:\nHBvV7YqSRSPW4YEBsDvpvF2PrUWFubqVbTNYafkddTsy\n[\s\S]*Nonce: zynaccount1\nIssued At: 2026-10-02T00:00:00Z$/.test(oldText), `the old sign-in, signed once more, opens the older account: ${old}`);
+await page.click('#connect'); await page.click('#w-out');
+await page.click('#connect');
+await page.waitForSelector('#wallet-list button:has-text("Test Solana")');
+await page.click('#wallet-list button >> text="Test Solana"');
+await page.waitForFunction(() => /^[0-9a-f]{5}…/.test(document.querySelector('#connect').textContent.trim()), null, { timeout: 60000 }).catch(() => {});
+ok((await page.textContent('#connect')).trim() === old, 'from then on the new sign-in opens the older account');
+// Unlinked again, so the next run starts where this one did.
+await page.click('#connect'); await page.click('[data-unlink="sol"]'); await page.click('#a-yes');
+await page.waitForTimeout(1500);
+await page.click('#connect').catch(() => {}); await page.click('#w-out').catch(() => {});
 // Under Private, BTC is not offered while Mezo's channel is closed.
 await page.goto(`${APP}/#/bridge`); await page.waitForTimeout(600);
 await page.check('#br-asset input[value="btc"]');
