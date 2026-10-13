@@ -40,7 +40,9 @@ jobs:
             server/deps
             server/_build
           key: mix-${{ runner.os }}-${{ hashFiles('server/mix.lock', 'server/native/**/Cargo.lock') }}
-      - run: mix deps.get
+      # The den itself always compiles afresh: its native library is built
+      # into priv/native, outside the cache, only when its module compiles.
+      - run: mix deps.get && rm -rf _build/test/lib/den
         working-directory: server
       - run: MIX_ENV=test mix compile --warnings-as-errors
         working-directory: server
