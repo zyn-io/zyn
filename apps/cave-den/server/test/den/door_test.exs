@@ -79,6 +79,17 @@ defmodule Den.DoorTest do
     assert Den.Door.enter("den-token-v1|2026-10-12|nope|x", r, sig, nil) == {:error, :token}
   end
 
+  test "a device the den's moderators kicked or banned is refused at the door, and its token is not spent" do
+    {key, sk} = device()
+    {msg, r, sig} = token(key)
+    owner = String.duplicate("0a", 32)
+    :ok = Den.Mod.set_owner(owner)
+    :ok = Den.Mod.ban(owner, key, "spam")
+    assert Den.Door.enter(msg, r, sig, proof(msg, sk)) == {:error, :out}
+    :ok = Den.Mod.unban(owner, key)
+    assert {:ok, _} = Den.Door.enter(msg, r, sig, proof(msg, sk))
+  end
+
   test "a member cannot enter as another device: the token names a key the member does not hold" do
     {victim, _victim_sk} = device()
     {_mine, my_sk} = device()

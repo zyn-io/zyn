@@ -192,7 +192,8 @@ defmodule Den.Rooms do
       _ -> []
     end
     admitted = if keys == [], do: [], else: Repo.all(from d in Device, where: d.key in ^keys and d.until > ^now, select: d.key)
-    Enum.uniq(seated ++ admitted)
+    # A kicked or banned device is gone too: any member's page takes it out.
+    Enum.uniq(seated ++ admitted) |> Enum.reject(&Den.Mod.out?/1)
   end
 
   @doc """
@@ -405,6 +406,30 @@ defmodule Den.Rooms do
       _ -> false
     end
   end
+
+  @doc """
+  A kicked or banned device: its connections drop, and every open room it is
+  a member of is told to take it out (members' pages do, by commit).
+  """
+  def expel(key) do
+    DenWeb.Endpoint.broadcast("device:" <> key, "disconnect", %{})
+
+    for r <- Repo.all(from r in Room, where: r.kind != "private" and not is_nil(r.public_state)), key in members(r) do
+      DenWeb.Endpoint.broadcast("room:" <> r.id, "expired", %{keys: [key]})
+    end
+
+    :ok
+  end
+
+  @doc "A moderator deletes one message (never a commit) by its number."
+  def delete_message(room, seq) when is_integer(seq) do
+    case Repo.delete_all(from m in Message, where: m.room == ^room and m.seq == ^seq and m.commit == false) do
+      {1, _} -> :ok
+      _ -> {:error, :no_message}
+    end
+  end
+
+  def delete_message(_, _), do: {:error, :no_message}
 
   @doc "Messages after `seq`, oldest first."
   def since(room, seq, limit \\ 500) do

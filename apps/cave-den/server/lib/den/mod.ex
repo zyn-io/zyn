@@ -34,6 +34,13 @@ defmodule Den.Mod do
   @mod_perms ~w(administrator manage_server manage_roles manage_channels manage_messages timeout kick ban manage_invites)
 
   def perm_names, do: @perms
+
+  @doc "A slow mode's window in words: \"30 seconds\", \"5 minutes\", \"6 hours\"."
+  def slow_text(s) when s >= 3600, do: plural(div(s, 3600), "hour")
+  def slow_text(s) when s >= 60, do: plural(div(s, 60), "minute")
+  def slow_text(s), do: plural(s, "second")
+  defp plural(1, w), do: "1 #{w}"
+  defp plural(n, w), do: "#{n} #{w}s"
   def slow_choices, do: @slow
   def everyone, do: @everyone
 

@@ -15,7 +15,12 @@ defmodule DenWeb.VoiceChannel do
     DenWeb.Heap.channel()
     case Den.Rooms.get(room) do
       nil -> {:error, %{reason: "no such room"}}
-      r -> if Den.Rooms.may_enter?(r, socket.assigns.key), do: {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}, else: {:error, %{reason: "no such room"}}
+      r ->
+        cond do
+          not Den.Rooms.may_enter?(r, socket.assigns.key) -> {:error, %{reason: "no such room"}}
+          Den.Mod.muted?(socket.assigns.key) -> {:error, %{reason: "You are timed out and cannot join voice for now."}}
+          true -> {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
+        end
     end
   end
 

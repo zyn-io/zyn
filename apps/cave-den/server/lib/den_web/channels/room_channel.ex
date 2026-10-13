@@ -12,6 +12,14 @@ defmodule DenWeb.RoomChannel do
   * "relay" {bytes} → a commit (only at the room's epoch: the first wins) or
     words; relayed to the others, stored for `retention_days`.
   * "info" {epoch, group_info} → the GroupInfo for the epoch the room is in.
+  * "delete" {seq} → a moderator's (Manage messages) deletion of a message
+    (never a commit): gone from history, and everyone told `deleted`.
+
+  Words (not commits) are refused from a device that is timed out, kicked or
+  banned, from one the room's "Who may post" leaves out, and past the room's
+  slow mode: at most #{4} a window of `slow_seconds` (a message and a few
+  reactions; pages hold messages to one a window themselves, and hide a
+  second one from a device inside it by the den's `at`).
   """
   # Joins and messages are not logged: a topic names a device or a private room.
   use Phoenix.Channel, log_join: false, log_handle_in: false
@@ -31,7 +39,11 @@ defmodule DenWeb.RoomChannel do
         {:error, %{reason: "no such room"}}
 
       room ->
-        if Rooms.may_enter?(room, socket.assigns.key), do: enter(id, room, socket), else: {:error, %{reason: "no such room"}}
+        cond do
+          not Rooms.may_enter?(room, socket.assigns.key) -> {:error, %{reason: "no such room"}}
+          Den.Mod.out?(socket.assigns.key) -> {:error, %{reason: "removed"}}
+          true -> enter(id, room, socket)
+        end
     end
   end
 
@@ -74,7 +86,7 @@ defmodule DenWeb.RoomChannel do
       end)
 
     kept = Enum.reverse(kept)
-    msgs = for m <- kept, do: %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: Base.encode64(m.bytes)}
+    msgs = for m <- kept, do: %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: Base.encode64(m.bytes), at: at(m)}
     {:reply, {:ok, %{messages: msgs, more: length(kept) < length(rows) or length(rows) == 500}}, socket}
   end
 
@@ -121,16 +133,20 @@ defmodule DenWeb.RoomChannel do
 
   defp handle("relay", %{"bytes" => b64}, socket) when is_binary(b64) do
     with {:ok, bytes} <- decode(b64),
+         :ok <- may_write(bytes, socket),
          true <- Den.Limits.disk_ok?() || {:error, :disk},
          :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(bytes)),
          {:ok, m} <- Rooms.relay(socket.assigns.room, bytes, socket.assigns.key) do
-      broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64})
+      broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64, at: at(m)})
       if m.commit and socket.assigns.kind == "private", do: Rooms.announce_members(socket.assigns.room)
-      {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch)}}, socket}
+      {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch), at: at(m)}}, socket}
     else
       {:error, {:epoch, e}} -> {:reply, {:error, %{reason: "epoch", epoch: e}}, socket}
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
+      {:error, {:muted, until}} -> {:reply, {:error, %{reason: "You are timed out#{until_text(until)}.", code: "timeout", until: until && DateTime.to_unix(until)}}, socket}
+      {:error, :no_post} -> {:reply, {:error, %{reason: "You do not have permission to send messages in this channel.", code: "no_post"}}, socket}
+      {:error, {:slow, secs}} -> {:reply, {:error, %{reason: "Slow mode is on: one message every #{Den.Mod.slow_text(secs)}.", code: "slow", slow: secs}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
       {:error, :may_not_remove} -> {:reply, {:error, %{reason: "only a moderator allowed to kick may take that member out of the room"}}, socket}
       {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
@@ -145,8 +161,20 @@ defmodule DenWeb.RoomChannel do
 
   # Someone is writing: their device name only, not stored.
   defp handle("typing", _, socket) do
-    broadcast_from!(socket, "typing", %{key: socket.assigns.key})
+    unless Den.Mod.muted?(socket.assigns.key), do: broadcast_from!(socket, "typing", %{key: socket.assigns.key})
     {:noreply, socket}
+  end
+
+  defp handle("delete", %{"seq" => seq}, socket) when is_integer(seq) do
+    with true <- Den.Mod.can?(socket.assigns.key, "manage_messages") || {:error, :forbidden},
+         :ok <- Rooms.delete_message(socket.assigns.room, seq) do
+      Den.Mod.log(socket.assigns.key, "message deleted", socket.assigns.room, "##{seq}")
+      broadcast!(socket, "deleted", %{seq: seq})
+      {:reply, :ok, socket}
+    else
+      {:error, :forbidden} -> {:reply, {:error, %{reason: "You do not have permission to delete others' messages."}}, socket}
+      {:error, :no_message} -> {:reply, {:error, %{reason: "That message is not in this room any more."}}, socket}
+    end
   end
 
   # After an Add the den ordered: the Welcome for the devices added.
@@ -167,6 +195,54 @@ defmodule DenWeb.RoomChannel do
   end
 
   defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
+
+  defp at(%{inserted_at: %DateTime{} = t}), do: DateTime.to_unix(t)
+  defp at(_), do: System.os_time(:second)
+
+  @burst 4
+
+  # Commits always pass (a device keeps its own state in step); words only
+  # from a device that may write in this room now.
+  defp may_write(bytes, socket) do
+    key = socket.assigns.key
+
+    case Den.Mls.envelope(bytes) do
+      {:ok, %{commit: false}} ->
+        room = Rooms.get(socket.assigns.room)
+
+        cond do
+          s = Den.Mod.sanction(key) -> {:error, {:muted, s.until}}
+          not Den.Mod.may_post?(room, key) -> {:error, :no_post}
+          not slow_ok?(room, key) -> {:error, {:slow, room.slow_seconds}}
+          true -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp slow_ok?(%{slow_seconds: secs}, key) when is_integer(secs) and secs > 0 do
+    if Den.Mod.can?(key, "bypass_slow") do
+      true
+    else
+      now = System.monotonic_time(:millisecond)
+      recent = Enum.filter(Process.get(:den_slow, []), &(now - &1 < secs * 1000))
+
+      if length(recent) >= @burst do
+        Process.put(:den_slow, recent)
+        false
+      else
+        Process.put(:den_slow, [now | recent])
+        true
+      end
+    end
+  end
+
+  defp slow_ok?(_, _), do: true
+
+  defp until_text(nil), do: ""
+  defp until_text(%DateTime{} = t), do: " until #{Calendar.strftime(t, "%H:%M")} UTC"
 
   defp decode(b64, max \\ @max)
 

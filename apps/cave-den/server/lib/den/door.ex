@@ -88,6 +88,7 @@ defmodule Den.Door do
          {:ok, sig} <- Base.decode16(sig_hex || "", case: :lower) |> ok_or(:token),
          true <- Den.Keys.valid?(day, msg, randomizer, sig) || {:error, :signature},
          true <- holds_key?(key, msg, proof_hex) || {:error, :proof},
+         true <- not Den.Mod.out?(key) || {:error, :out},
          :ok <- spend(msg, day) do
       until = Date.from_iso8601!(day) |> Date.add(1) |> DateTime.new!(~T[00:00:00]) |> DateTime.add(@grace, :second)
       Den.Rooms.admit(key, until)

@@ -21,7 +21,9 @@ defmodule DenWeb.UserSocket do
 
     with {:ok, %{key: key}} <- Phoenix.Token.verify(DenWeb.Endpoint, "den", session, max_age: 3 * 86_400),
          %DateTime{} = until <- Den.Rooms.device_until(key),
-         :gt <- DateTime.compare(until, DateTime.utc_now()) do
+         :gt <- DateTime.compare(until, DateTime.utc_now()),
+         # Kicked or banned by the den's moderators.
+         false <- Den.Mod.out?(key) do
       {:ok, assign(socket, :key, key)}
     else
       _ -> :error

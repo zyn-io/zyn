@@ -14,6 +14,7 @@ defmodule DenWeb.DoorController do
     signature: {403, "that token was not signed by the door for its day"},
     spent: {403, "that token was already used"},
     proof: {403, "this device did not prove it holds the key its token names"},
+    out: {403, "this device was removed from the den by its moderators"},
     closed: {404, "this den does not let people in that way"},
     invite: {403, "that invite is not good: it was used, withdrawn or has expired"},
     pass: {400, "send the hash of this device's pass code"},
