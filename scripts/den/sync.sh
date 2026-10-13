@@ -65,7 +65,7 @@ grep -rqE 'zyn-rpc\.cavebro\.win' server/config && blocked+=("dev config points 
 
 # It must build and pass on its own.
 (cd mls && ./build.sh >/dev/null 2>&1 && cargo test --quiet 2>&1 | grep -E '^test result' | awk '{p+=$4; f+=$6} END {print "mls: " p " passed, " f " failed"; exit f > 0}')
-(cd server && mix deps.get >/dev/null && (cd ../web && ./build.sh dist >/dev/null && node --test tests/ 2>&1 | grep -E '^ℹ (pass|fail)' | sed 's/^/web: /') && MIX_ENV=test mix test 2>&1 | grep -E '[0-9]+ tests?, [0-9]+ failures?' | sed 's/^/server: /' | tee /dev/stderr | grep -q ' 0 failures')
+(cd server && mix deps.get >/dev/null && (cd ../web && ./build.sh dist >/dev/null && node --test tests/*.test.js 2>&1 | grep -E '^ℹ (pass|fail)' | sed 's/^/web: /') && MIX_ENV=test mix test 2>&1 | grep -E '[0-9]+ tests?, [0-9]+ failures?' | sed 's/^/server: /' | tee /dev/stderr | grep -q ' 0 failures')
 rm -rf mls/target mls/pkg server/_build server/deps web/dist web/node_modules
 
 git add -A
