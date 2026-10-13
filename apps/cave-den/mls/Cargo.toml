@@ -2,7 +2,7 @@
 name = "den-mls"
 version = "0.1.0"
 edition = "2021"
-description = "The Cave den's end-to-end encryption: OpenMLS groups and RFC 9474 blind tokens, for the browser (wasm) and tests"
+description = "The den's end-to-end encryption: OpenMLS groups and RFC 9474 blind tokens, for the browser (wasm) and tests"
 license = "MIT OR Apache-2.0"
 publish = false
 

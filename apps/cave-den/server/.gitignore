@@ -43,5 +43,6 @@ priv/native/
 # The page, built by ../web/build.sh
 /priv/page/
 
-# A host's own modules (apps/cave-den/cave/build-server.sh), compiled in when present
-/extra/
+# A host's own modules (a gate, add-on processes), compiled in when present
+/extra/*
+!/extra/README.md

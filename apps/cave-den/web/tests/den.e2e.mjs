@@ -5,7 +5,7 @@
 //
 //   (cd ../server && mix phx.server)   # the dev den: every way in open
 //   ./build.sh ../server/priv/page      # its page
-//   node tests/den.e2e.mjs
+//   node tests/den.e2e.mjs            (CHROMIUM=… for another Chrome)
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
@@ -13,7 +13,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-const require = createRequire(new URL('../../../nap-connect/package.json', import.meta.url));
+// playwright-core from this package (npm install), or from PLAYWRIGHT_FROM, a folder that has it.
+const require = createRequire(process.env.PLAYWRIGHT_FROM ? `${process.env.PLAYWRIGHT_FROM.replace(/\/$/, '')}/package.json` : import.meta.url);
 const { chromium } = require('playwright-core');
 const DEN = process.env.DEN || 'http://localhost:4000';
 const SHOTS = process.env.SHOTS || tmpdir();

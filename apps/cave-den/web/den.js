@@ -23,7 +23,7 @@ import init, { Den, token_blind as tokenBlind, token_finalize as tokenFinalize }
 
 const KEEP = 1000;
 const INVITATIONS = 5;
-export const VOICE_LABEL = 'cave-den voice';
+export const VOICE_LABEL = 'den voice';
 
 // ---------------------------------------------------------------------------
 // Bytes and storage.
@@ -53,9 +53,9 @@ const hex = (u8) => [...u8].map((x) => x.toString(16).padStart(2, '0')).join('')
 const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
 const day = (offset = 0) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
-function store(prefix) {
+function store(name, prefix) {
   const db = new Promise((resolve, reject) => {
-    const r = indexedDB.open('cave-den', 1);
+    const r = indexedDB.open(name, 1);
     r.onupgradeneeded = () => r.result.createObjectStore('kv');
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -95,10 +95,11 @@ function sent(at) {
 // ---------------------------------------------------------------------------
 
 export class DenClient {
-  /// base: the den's https origin; keysUrl: the published day keys; prefix:
-  /// what this browser keeps it under (one per network); on(event, data).
-  constructor({ base, keysUrl, prefix = 'mainnet', on = () => {} }) {
-    Object.assign(this, { base, keysUrl, on, kv: store(prefix) });
+  /// base: the den's https origin; keysUrl: the published day keys; db and
+  /// prefix: the browser database and key prefix it keeps this device under;
+  /// on(event, data).
+  constructor({ base, keysUrl, db = 'den', prefix = 'den', on = () => {} }) {
+    Object.assign(this, { base, keysUrl, on, kv: store(db, prefix) });
     this.queue = Promise.resolve();
     this.channels = new Map();
     this.joined = new Map(); // id → a promise of the channel's join

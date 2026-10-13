@@ -4,9 +4,9 @@ defmodule Mix.Tasks.Den.Keys do
       mix den.keys [--days 45] [--out den-keys.json]
 
   Makes a private key for each day from today that has none (in `keys_dir`),
-  and writes every public key from today on to `--out` — the file the Cave's
-  site publishes, the same for everyone, so the door cannot tell holders
-  apart by their keys.
+  and writes every public key from today on to `--out`: the file the host
+  publishes, the same for everyone, so the door cannot tell members apart by
+  their keys.
   """
   use Mix.Task
 

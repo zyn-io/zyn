@@ -41,6 +41,8 @@ cargo install wasm-bindgen-cli --version 0.2.128
 (cd server && mix setup && mix test)
 web/build.sh                             # the page → server/priv/page/
 (cd web && npm test)
+# In a browser, against a dev den (cd server && mix phx.server):
+(cd web && npm install && npm run e2e)
 ```
 
 ## Run

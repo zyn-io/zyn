@@ -7,7 +7,7 @@ import { enter as gate } from './gate.js';
 
 const el = (id) => document.getElementById(id);
 const config = await fetch('./config.json', { credentials: 'omit' }).then((r) => r.json());
-const den = new DenClient({ base: location.origin, keysUrl: config.keysUrl || '/den-keys.json', prefix: config.prefix || 'den' });
+const den = new DenClient({ base: location.origin, keysUrl: config.keysUrl || '/den-keys.json', db: config.db || 'den', prefix: config.prefix || 'den' });
 // Local builds only: the tests reach the client.
 if (['localhost', '127.0.0.1'].includes(location.hostname)) window.__den = den;
 

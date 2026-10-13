@@ -11,6 +11,6 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SERVER=${1:-$HERE/../server}
-rm -rf "$SERVER/extra" && mkdir -p "$SERVER/extra"
+rm -rf "$SERVER/extra/lib" "$SERVER/extra/test" && mkdir -p "$SERVER/extra"
 cp -R "$HERE/server/lib" "$HERE/server/test" "$SERVER/extra/"
 echo "Cave modules in $SERVER/extra"

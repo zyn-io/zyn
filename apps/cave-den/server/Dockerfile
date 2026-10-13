@@ -21,6 +21,7 @@ RUN mix deps.compile
 COPY priv priv
 COPY native native
 COPY lib lib
+COPY extra extra
 RUN mix compile
 COPY config/runtime.exs config/
 RUN mix release

@@ -1,5 +1,5 @@
 defmodule DenWeb.Cors do
-  @moduledoc "The door answers the Cave's own pages, and nobody else's."
+  @moduledoc "The door answers the den's own page and the origins in `:origins`, and nobody else's."
   import Plug.Conn
 
   def init(opts), do: opts

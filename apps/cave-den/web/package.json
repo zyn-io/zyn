@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "build": "./build.sh dist",
-    "test": "./build.sh dist >/dev/null && node --test tests/"
+    "test": "./build.sh dist >/dev/null && node --test tests/",
+    "e2e": "node tests/den.e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1"
   }
 }

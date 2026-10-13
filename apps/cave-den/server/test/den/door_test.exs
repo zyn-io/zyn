@@ -43,14 +43,14 @@ defmodule Den.DoorTest do
   end
 
   defp token(key, day \\ "2026-10-12") do
-    msg = "cave-den-token-v1|#{day}|#{key}|#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}"
+    msg = "den-token-v1|#{day}|#{key}|#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}"
     randomizer = :crypto.strong_rand_bytes(32)
     {:ok, k} = Den.Keys.private("2026-10-12")
     sig = :public_key.sign(randomizer <> msg, :sha384, k, rsa_padding: :rsa_pkcs1_pss_padding, rsa_pss_saltlen: 48)
     {msg, Base.encode16(randomizer, case: :lower), Base.encode16(sig, case: :lower)}
   end
 
-  defp proof(msg, sk), do: :crypto.sign(:eddsa, :none, "cave-den-enter-v1|" <> msg, [sk, :ed25519]) |> Base.encode16(case: :lower)
+  defp proof(msg, sk), do: :crypto.sign(:eddsa, :none, "den-enter-v1|" <> msg, [sk, :ed25519]) |> Base.encode16(case: :lower)
 
   test "a token admits its device on its day, once, when the device proves its key" do
     {key, sk} = device()
@@ -60,7 +60,7 @@ defmodule Den.DoorTest do
     assert {:ok, %{key: ^key}} = Phoenix.Token.verify(DenWeb.Endpoint, "den", s, max_age: 3 * 86_400)
     assert Den.Door.enter(msg, r, sig, proof(msg, sk)) == {:error, :spent}
     assert Den.Door.enter(String.replace(msg, "2026-10-12", "2026-10-13"), r, sig, proof(msg, sk)) == {:error, :day}
-    assert Den.Door.enter("cave-den-token-v1|2026-10-12|nope|x", r, sig, nil) == {:error, :token}
+    assert Den.Door.enter("den-token-v1|2026-10-12|nope|x", r, sig, nil) == {:error, :token}
   end
 
   test "a member cannot enter as another device: the token names a key the member does not hold" do

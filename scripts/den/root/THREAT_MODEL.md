@@ -33,7 +33,7 @@ The door and the den are one server run by one operator.
    per pass per day, and never sees the token itself.
 2. The client unblinds the token and presents it to the den together with its
    device key and an Ed25519 signature by that key over
-   `cave-den-enter-v1|<token>`. The den checks the day's signature and the
+   `den-enter-v1|<token>`. The den checks the day's signature and the
    proof of key, then spends the token once.
 3. Each day has one signing key, published ahead in one file for everyone. A
    client takes keys only from that file, so the door cannot give each member

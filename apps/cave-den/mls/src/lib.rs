@@ -389,7 +389,7 @@ pub struct Envelope {
 
 /// What `prove` signs: a label, then the token's message.
 pub fn enter_payload(token_msg: &str) -> Vec<u8> {
-    [b"cave-den-enter-v1|".as_slice(), token_msg.as_bytes()].concat()
+    [b"den-enter-v1|".as_slice(), token_msg.as_bytes()].concat()
 }
 
 pub fn envelope(bytes: &[u8]) -> Result<Envelope, String> {
@@ -446,7 +446,7 @@ pub mod token {
         let pk = door_key(pk_der)?;
         let mut nonce = [0u8; 16];
         getrandom::getrandom(&mut nonce).map_err(err("randomness"))?;
-        let msg = format!("cave-den-token-v1|{day}|{device_key}|{}", hex::encode(nonce));
+        let msg = format!("den-token-v1|{day}|{device_key}|{}", hex::encode(nonce));
         let r = pk.blind(&mut DefaultRng, msg.as_bytes()).map_err(err("blind"))?;
         Ok(Pending {
             msg,
@@ -695,17 +695,17 @@ mod tests {
         let m = b.send("p-7f3a00000000000000000000000000aa", "just us").unwrap();
         assert_eq!(text(a.receive("p-7f3a00000000000000000000000000aa", &m).unwrap()), "just us");
         // The voice key: alike for members, unknowable to others, new each epoch.
-        let ka = a.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap();
-        assert_eq!(ka, b.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap());
-        assert!(c.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).is_err());
+        let ka = a.export("p-7f3a00000000000000000000000000aa", "den voice", 32).unwrap();
+        assert_eq!(ka, b.export("p-7f3a00000000000000000000000000aa", "den voice", 32).unwrap());
+        assert!(c.export("p-7f3a00000000000000000000000000aa", "den voice", 32).is_err());
         let kps_c = c.key_packages(1).unwrap();
         let (commit2, welcome2) = a.add("p-7f3a00000000000000000000000000aa", &kps_c, &[c.key()]).unwrap();
         a.confirm("p-7f3a00000000000000000000000000aa").unwrap();
         b.receive("p-7f3a00000000000000000000000000aa", &commit2).unwrap();
         c.accept(&welcome2).unwrap();
-        let k2 = a.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap();
+        let k2 = a.export("p-7f3a00000000000000000000000000aa", "den voice", 32).unwrap();
         assert_ne!(k2, ka, "a new epoch, a new key");
-        assert_eq!(k2, c.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap());
+        assert_eq!(k2, c.export("p-7f3a00000000000000000000000000aa", "den voice", 32).unwrap());
         // A device already in the room cannot be added a second time.
         assert!(a.add("p-7f3a00000000000000000000000000aa", &kps_b[1..], &[b.key()]).is_err(), "B's key is already a member");
         // An invitation that is not the device asked for is refused: here C's,
@@ -774,7 +774,7 @@ mod tests {
     #[test]
     fn a_device_proves_its_key() {
         let a = Member::new().unwrap();
-        let msg = format!("cave-den-token-v1|2026-10-13|{}|{}", a.key(), "00".repeat(16));
+        let msg = format!("den-token-v1|2026-10-13|{}|{}", a.key(), "00".repeat(16));
         let sig = a.prove(&msg).unwrap();
         assert_eq!(sig.len(), 64);
         let crypto = a.provider.crypto();
