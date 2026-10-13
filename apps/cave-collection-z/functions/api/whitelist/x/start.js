@@ -1,5 +1,8 @@
 // X sign-in for the whitelist (DECISIONS §187.8), step one: send the applicant
-// to X with a fresh state and PKCE challenge. The wallet to link comes from the
+// to X with a fresh state and PKCE challenge. The state is also set as a
+// cookie in this browser, and the callback finishes only where it matches:
+// otherwise someone could start a sign-in for their own wallet and get an
+// approved applicant to approve it on X, linking the applicant's place to them. The wallet to link comes from the
 // page (the Zyn account Nap is connected to) and waits here, keyed by the
 // state, for ten minutes. Nothing is asked of X but the account's id and handle
 // (scope users.read, which X requires tweet.read beside).
@@ -26,12 +29,27 @@ export async function onRequestGet({ request, env }) {
     code_challenge: challenge,
     code_challenge_method: 'S256',
   }).toString();
-  return Response.redirect(to.toString(), 302);
+  return new Response(null, {
+    status: 302,
+    headers: { location: to.toString(), 'set-cookie': `${COOKIE}=${state}; Path=/api/whitelist/x; Max-Age=600; HttpOnly; Secure; SameSite=Lax`, 'cache-control': 'no-store' },
+  });
 }
+
+/// The cookie that binds a sign-in to the browser that started it. Lax, so X
+/// sending the browser back (a top-level navigation) carries it.
+export const COOKIE = 'cave-xauth';
 
 /// The popup's last page, which tells /mint how it went and closes.
 export function done(request, result) {
-  return Response.redirect(`${new URL(request.url).origin}/x-done/?r=${encodeURIComponent(result)}`, 302);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: `${new URL(request.url).origin}/x-done/?r=${encodeURIComponent(result)}`,
+      // Whatever happened, this sign-in is over.
+      'set-cookie': `${COOKIE}=; Path=/api/whitelist/x; Max-Age=0; HttpOnly; Secure; SameSite=Lax`,
+      'cache-control': 'no-store',
+    },
+  });
 }
 
 export function b64url(bytes) {

@@ -78,6 +78,8 @@ test('the round trip: state and PKCE, a token, the account, the token revoked', 
   assert.equal(to.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(to.searchParams.get('redirect_uri'), 'https://cavebro.win/api/whitelist/x/callback');
   const state = to.searchParams.get('state');
+  assert.match(go.headers.get('set-cookie'), new RegExp(`^cave-xauth=${state}; Path=/api/whitelist/x; Max-Age=600; HttpOnly; Secure; SameSite=Lax$`), 'the state is bound to this browser');
+  const cookie = { cookie: `other=1; cave-xauth=${state}` };
   const seen = [];
   const real = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -92,11 +94,16 @@ test('the round trip: state and PKCE, a token, the account, the token revoked', 
     return Response.json({ revoked: true });
   };
   try {
-    const back = await callback({ request: new Request(`https://cavebro.win/api/whitelist/x/callback?state=${state}&code=abc`), env });
+    // Another browser (an applicant sent this link by someone else) cannot finish it.
+    const elsewhere = await callback({ request: new Request(`https://cavebro.win/api/whitelist/x/callback?state=${state}&code=abc`), env });
+    assert.equal(elsewhere.headers.get('location'), 'https://cavebro.win/x-done/?r=expired');
+    assert.equal(seen.length, 0, 'nothing was asked of X for it');
+    const back = await callback({ request: new Request(`https://cavebro.win/api/whitelist/x/callback?state=${state}&code=abc`, { headers: cookie }), env });
     assert.equal(back.headers.get('location'), 'https://cavebro.win/x-done/?r=linked');
     assert.ok(seen.some((u) => u.endsWith('/oauth2/revoke')), 'the token is revoked');
     // The state is spent: the same callback again finds nothing waiting.
-    const again = await callback({ request: new Request(`https://cavebro.win/api/whitelist/x/callback?state=${state}&code=abc`), env });
+    assert.match(back.headers.get('set-cookie'), /^cave-xauth=; .*Max-Age=0/, 'the sign-in is over');
+    const again = await callback({ request: new Request(`https://cavebro.win/api/whitelist/x/callback?state=${state}&code=abc`, { headers: cookie }), env });
     assert.equal(again.headers.get('location'), 'https://cavebro.win/x-done/?r=expired');
   } finally {
     globalThis.fetch = real;

@@ -6,7 +6,7 @@
 // to them — the same row a code links. Only the X account's id and handle are
 // read; the token is never kept.
 
-import { done } from './start.js';
+import { COOKIE, done } from './start.js';
 
 const TOKEN = 'https://api.x.com/2/oauth2/token';
 const REVOKE = 'https://api.x.com/2/oauth2/revoke';
@@ -19,6 +19,9 @@ export async function onRequestGet({ request, env }) {
   const state = String(url.searchParams.get('state') || '');
   const code = String(url.searchParams.get('code') || '');
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(state) || !code) return done(request, 'failed');
+  // Only the browser that started this sign-in may finish it.
+  const mine = (request.headers.get('cookie') || '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || '';
+  if (!same(mine, state)) return done(request, 'expired');
   const waiting = await env.CAVE_WHITELIST.get(`xauth:${state}`);
   if (!waiting) return done(request, 'expired');
   await env.CAVE_WHITELIST.delete(`xauth:${state}`);
@@ -31,6 +34,14 @@ export async function onRequestGet({ request, env }) {
     return done(request, 'failed');
   }
   return done(request, await link(env, me, account));
+}
+
+/// Equal strings, compared without stopping at the first difference.
+function same(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
 }
 
 /// The X account behind a sign-in: its id and handle. The token is revoked
