@@ -60,4 +60,6 @@ config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
 
 # Every way in, for trying them; the issuer token is for local use only.
-config :den, entry: [:invite, :approval, :external], issuer_token: "dev-issuer-token-not-for-any-real-den-0001"
+config :den, entry: [:invite, :approval, :external], issuer_token: "dev-issuer-token-not-for-any-real-den-0001",
+  # Tests from this machine ask many times an hour.
+  door_per_minute: 1_000_000, ask_per_hour: 1_000_000

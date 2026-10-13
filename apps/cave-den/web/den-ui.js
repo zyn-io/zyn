@@ -25,8 +25,16 @@ const INKS = ['#c7f04b', '#f4b728', '#7fd1b9', '#e58a6b', '#b9a7e8', '#e9e6dc'];
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 const inlineImage = (f) => INLINE.has(String(f?.mime).toLowerCase()) && f.size <= 5 * 1048576;
 
+/// A 64-bit FNV-1a over the whole key, hex: a mark depends on every byte of
+/// it, not on the part a name shows.
+function spread(key) {
+  let h = 0xcbf29ce484222325n;
+  for (const c of String(key || '')) h = BigInt.asUintN(64, (h ^ BigInt(c.charCodeAt(0))) * 0x100000001b3n);
+  return h.toString(16).padStart(16, '0');
+}
+
 export function mark(key, px = 28) {
-  const h = String(key || '').replace(/[^0-9a-f]/gi, '').padEnd(16, '0');
+  const h = spread(key);
   const ink = INKS[parseInt(h.slice(0, 2), 16) % INKS.length];
   let bits = parseInt(h.slice(2, 6), 16) & 0x7fff;
   // Too few cells reads as nothing: take the other half instead.
@@ -43,7 +51,7 @@ export function mark(key, px = 28) {
 
 /// A longer look at a key than its name: 80 bits, in groups, for telling
 /// apart two devices whose short names happen to match.
-const fingerprint = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `Key ${key.slice(0, 20).match(/.{4}/g).join(' ')}` : '');
+const fingerprint = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `Key ${key.match(/.{4}/g).join(' ')}` : '');
 
 const ICON = {
   reply: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h7a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
@@ -205,7 +213,7 @@ export function mountDen(den, el, me) {
     return [...all.entries()].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
   }
   // A device's name is its key's first ten hex digits (as the core names it).
-  const nameOf = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `m-${key.slice(0, 10)}` : 'a member');
+  const nameOf = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `m-${key.slice(0, 20)}` : 'a member');
 
   function pickMembers(heading, yes, named, done) {
     const already = named ? new Set() : new Set(den.members(room).map((m) => m.key));
@@ -238,7 +246,7 @@ export function mountDen(den, el, me) {
     return esc(text)
       .replace(/`([^`\n]{1,200})`/g, '<code>$1</code>')
       .replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">${u}</a>`)
-      .replace(/@(m-[0-9a-f]{10})/g, (m, n) => `<mark class="${n === me.name ? 'me' : ''}">${m}</mark>`)
+      .replace(/@(m-[0-9a-f]{20})/g, (m, n) => `<mark class="${n === me.name ? 'me' : ''}">${m}</mark>`)
       .replace(/\n/g, '<br>');
   }
 
@@ -541,7 +549,12 @@ export function mountDen(den, el, me) {
   function drawMembers() {
     const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : a.name.localeCompare(b.name)));
     const priv = den.rooms.get(room)?.kind === 'private';
+    // Two names that start alike are how one member poses as another: say so.
+    const starts = new Map();
+    for (const m of list) starts.set(m.name.slice(0, 8), (starts.get(m.name.slice(0, 8)) || 0) + 1);
+    const alike = [...starts.values()].some((n) => n > 1);
     el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
+      ${alike ? '<p class="alike" role="note">Two members here have names that start alike. Compare whole names before you trust who is who.</p>' : ''}
       <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="who" title="${esc(fingerprint(m.key))}">${esc(m.name)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
     el('members').querySelectorAll('[data-dm]').forEach((b) => {

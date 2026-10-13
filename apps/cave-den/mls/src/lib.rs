@@ -374,7 +374,8 @@ fn is_private(room: &str) -> bool {
 
 /// A device's name: from its signature key, so no client can choose it.
 pub fn name_of(key: &[u8]) -> String {
-    format!("m-{}", &hex::encode(key)[..10])
+    // 80 bits: too many to grind a key whose name matches another member's.
+    format!("m-{}", &hex::encode(key)[..20])
 }
 
 /// What the server can read from a relayed message without any key: the
