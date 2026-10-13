@@ -48,7 +48,7 @@ if git -C "$ZYN" grep -qE '^SECRET_KEY_BASE=|secret_key_base: "[^"]{64,}"' HEAD 
   echo "refusing: prod config holds a secret_key_base" >&2; exit 1
 fi
 # Nor where the servers are, or whose machine built it.
-if grep -rIlE --exclude-dir=.git '(95\.111\.240|168\.119\.53|192\.168)\.[0-9]+|/Users/[a-z]+/' .; then
+if grep -rIlE --exclude-dir=.git '(95\.111\.240|168\.119\.53|192\.168\.1)\.[0-9]+|\{ *(95, *111, *240|168, *119, *53|192, *168, *1),|/Users/[a-z]+/' .; then
   echo "refusing: the files above name a server address or a local path" >&2; exit 1
 fi
 big=$(find . -path ./.git -prune -o -type f -size +20M -print)

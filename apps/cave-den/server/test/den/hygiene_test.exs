@@ -7,18 +7,19 @@ defmodule Den.HygieneTest do
 
   test "voice offers no loopback, link-local or Docker address; with public_only, no private one" do
     for ip <- [{127, 0, 0, 1}, {169, 254, 1, 2}, {172, 17, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 1}, {0xFE80, 0, 0, 0, 0, 0, 0, 1}], do: refute(Den.Voice.ip_ok?(ip))
-    for ip <- [{95, 111, 240, 24}, {192, 168, 1, 21}, {10, 0, 0, 5}], do: assert(Den.Voice.ip_ok?(ip))
+    for ip <- [{203, 0, 113, 24}, {192, 168, 50, 10}, {10, 0, 0, 5}], do: assert(Den.Voice.ip_ok?(ip))
     Application.put_env(:den, :voice_public_only, true)
-    refute Den.Voice.ip_ok?({192, 168, 1, 21})
+    refute Den.Voice.ip_ok?({192, 168, 50, 10})
     refute Den.Voice.ip_ok?({10, 0, 0, 5})
-    assert Den.Voice.ip_ok?({95, 111, 240, 24})
+    assert Den.Voice.ip_ok?({203, 0, 113, 24})
     Application.delete_env(:den, :voice_public_only)
   end
 
   test "the door says when its day keys run out" do
     dir = Path.join(System.tmp_dir!(), "den-keys-#{System.unique_integer([:positive])}")
+    was = Application.get_env(:den, :keys_dir)
     Application.put_env(:den, :keys_dir, dir)
-    on_exit(fn -> File.rm_rf(dir) end)
+    on_exit(fn -> File.rm_rf(dir) && Application.put_env(:den, :keys_dir, was) end)
     today = ~D[2026-10-13]
     assert Den.Keys.days_ahead(today) == 0
     assert capture_log(fn -> Den.Keys.check(today) end) =~ "no key for today"
