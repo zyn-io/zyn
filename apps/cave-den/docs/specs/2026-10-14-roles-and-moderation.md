@@ -69,7 +69,7 @@ Permissions:
 | Manage server | change the den's name, icon, description and limits |
 | Manage channels | create, rename, reorder and delete open rooms; set slow mode and who may post |
 | Manage roles | create and edit roles below its own; give and take them |
-| Manage messages | delete anyone's message; pin |
+| Manage messages | delete anyone's message |
 | Timeout members | stop a device from posting, reacting, typing and speaking for a while |
 | Kick members | remove a device from every open room (it may come back with its pass) |
 | Ban members | remove a device and refuse it at the door and on every channel |
@@ -127,9 +127,11 @@ a clock and its remaining time.
 
 ### Kick
 
-The moderator's page sends Remove commits for that device's leaves in every
-open room it is in. The den accepts a commit that removes another member only
-when one of these holds:
+The den marks the device kicked until its day ends, drops its connections,
+and tells every open room it is in to take it out: members' pages remove it
+by commit, as they already do for a device whose day ended (the first commit
+wins). The den accepts a commit that removes another member from an open room
+only when one of these holds:
 
 - the sender may Kick (or Ban) and is above the removed device,
 - the removed device's pass has ended (today's housekeeping), or
@@ -138,21 +140,31 @@ when one of these holds:
 This also closes today's gap where any member could remove any other from an
 open room. The NIF's `commit` returns the removed keys so the den can check.
 
-A kicked device can rejoin open rooms with its pass (Discord's kick).
+A kicked device can come back the next day with its pass (Discord's kick,
+where the person may rejoin).
 
 ### Ban
 
-The den records the key (with reason and who banned), withdraws its pass and
-the invite or burn it came in with, refuses it at the door and on every
-channel, and the moderator's page removes it from every open room as for a
-kick. Private rooms: members are told and their pages remove it. Unban
-removes the record; the device needs a new invite to return.
+The den records the key (with reason and who banned), refuses it at the door
+and on every channel, drops its connections, and members' pages remove it
+from every open room as for a kick. Private rooms: the den refuses the
+device's channel; members decide whether to take it out. Unban removes the
+record.
+
+A ban is by device. The den cannot link a device to the pass (or burn) it came
+in with: that is what the blind day tokens are for. So a banned person can come
+back with a new device from the same pass, as a new member name (at most 3 a
+day per pass). Moderators ban that device too; on a den with burn entry each
+new pass costs a burn. A host who wants bans that follow the pass would have
+to give up that separation; not offered.
 
 ### Deleting a message
 
 Manage messages (or the author, as today): the den deletes the stored
-ciphertext for that `seq` and broadcasts `deleted {seq}`; pages hide it and
-drop their copy. The den logs who deleted, not what.
+ciphertext for that `seq` (never a commit) and broadcasts `deleted {seq}`;
+pages hide it and drop their copy. The den does not keep who sent a message,
+so deletion does not follow the role order (as on Discord). The den logs who
+deleted, not what.
 
 ## Audit log
 
@@ -198,7 +210,7 @@ Just enough to use it before project 2:
 - Role colours on names; moderators shown first in the member list.
 - A member's menu (click their name): Timeout, Kick, Ban, Give role, for
   those allowed.
-- Delete on any message for Manage messages.
+- Delete on any message for Manage messages. (Pins come with project 3.)
 - The slow mode countdown and the "no permission" composer.
 - A plain settings dialog for the owner: roles (name, colour, permissions,
   order), channels (slow mode, who may post, topic), bans. Project 2
