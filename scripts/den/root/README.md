@@ -23,11 +23,12 @@ you trust it with anything that matters.
   token it never sees; the den admits the device that token names.
 
 [THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
-cannot see. Read it before you run a den for people who depend on it.
+cannot see. Read it before you run a den for people who depend on it. What
+changed and why is in the [devlog](DEVLOG.md).
 
 ## Install
 
-On a Linux server (x86-64) with a domain pointing at it, TCP 80 and 443 open,
+On a Linux server (x86-64 or arm64) with a domain pointing at it, TCP 80 and 443 open,
 and UDP 50000–50199 open for voice:
 
 ```sh
@@ -219,7 +220,8 @@ bin/den rpc 'Den.Host.members()'              # how many, by the way they joined
 
 A device keeps its pass code and gets its next days' tokens itself, so a
 member enters once and stays in until the host removes the pass. Removing it
-ends entry at the end of that day.
+ends entry by the end of the next day (a device may already hold tomorrow's
+token).
 
 **Your own gate.** To decide membership another way (holders of a token on
 some chain, say), write a module implementing `Den.Gate` (`id/1` and

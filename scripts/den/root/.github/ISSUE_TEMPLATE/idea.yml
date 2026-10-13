@@ -1,0 +1,14 @@
+name: Idea
+description: Something a den should do.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like, and for whom
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: What the server would learn
+      description: If it changes what a den can see (see THREAT_MODEL.md), say how.

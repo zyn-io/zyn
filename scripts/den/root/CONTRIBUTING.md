@@ -1,7 +1,8 @@
 # Contributing
 
-Epeaky is developed inside the Zyn workspace and published here, so a pull
-request is applied there and comes back in the next sync.
+Epeaky is developed in a larger private workspace and published here. Issues
+and pull requests are welcome: a pull request we take is applied there and
+comes back in the next sync, with you credited in the devlog.
 
 ## Checks
 

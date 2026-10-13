@@ -4,7 +4,7 @@
 #   curl -fsSL https://epeaky.zyn-network.com/install.sh | sudo bash
 #   sudo bash install.sh --domain chat.example.org [--email you@example.org] [--yes]
 #
-# Needs: Linux (x86-64), a domain whose A/AAAA record points here, TCP 80 and
+# Needs: Linux (x86-64 or arm64), a domain whose A/AAAA record points here, TCP 80 and
 # 443 open, and UDP 50000-50199 for voice. Installs Docker if it is missing
 # (after asking). Everything lives in /opt/epeaky; run it again to update.
 set -euo pipefail
@@ -38,7 +38,7 @@ ask() {
 
 [ "$(id -u)" = 0 ] || fail "run it as root (sudo bash install.sh)"
 [ "$(uname -s)" = Linux ] || fail "this installer is for Linux servers"
-case "$(uname -m)" in x86_64|amd64) ;; *) fail "the image is built for x86-64 only so far; build it yourself with the repository's Dockerfile" ;; esac
+case "$(uname -m)" in x86_64|amd64|aarch64|arm64) ;; *) fail "the image is built for x86-64 and arm64; build it yourself with the repository's Dockerfile" ;; esac
 
 # ---- Docker -------------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
