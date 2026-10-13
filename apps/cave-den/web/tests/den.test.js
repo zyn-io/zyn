@@ -119,3 +119,20 @@ test('a file is sealed in pieces that open only whole and in order', async () =>
     await assert.rejects(den.sendFile('general', new File([new Uint8Array(2000)], 'big.bin')), /at most/);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('two devices are one person only when each says so of the other', async () => {
+  const { DenClient } = await import('../dist/den.js');
+  const den = Object.create(DenClient.prototype);
+  const [a, b, c] = ['a', 'b', 'c'].map((x) => x.repeat(64));
+  den.me = { key: a, nick: '' };
+  den.myLinks = [b];
+  den.claims = { [b]: [a], [c]: [a] };
+  den.nicks = { [b]: { name: 'Ada', at: 1 } };
+  assert.deepEqual(den.linkedTo(a), [b]);
+  assert.deepEqual(den.linkedTo(b), [a]);
+  assert.deepEqual(den.linkedTo(c), [], 'c says it is a, a never said so');
+  assert.equal(den.isMe(b), true);
+  assert.equal(den.isMe(c), false);
+  assert.equal(den.nickFor(a), 'Ada', "a device takes its linked device's name");
+  assert.equal(den.nickFor(c), '');
+});

@@ -87,8 +87,8 @@ export function mountDen(den, el, me) {
   /// on both sides.
   const title = (r) => {
     if (r?.kind !== 'private') return r?.title || r?.id || '';
-    const others = den.inRoom(r.id) ? den.members(r.id).filter((m) => m.key !== me.key) : [];
-    if (others.length === 1) return display(others[0].key);
+    const others = den.inRoom(r.id) ? den.members(r.id).filter((m) => !den.isMe(m.key)) : [];
+    if (others.length && others.every((m) => m.key === others[0].key || den.linkedTo(others[0].key).includes(m.key))) return display(others[0].key);
     return r.title || others.map((m) => display(m.key)).join(', ') || 'Private room';
   };
   const roomTitle = (id) => title(den.rooms.get(id) || { id });
@@ -334,7 +334,7 @@ export function mountDen(den, el, me) {
     }
     const cont = prev && !m.reply && prev.key === m.key && !prev.deleted && m.at - prev.at < GROUP_MS && !parts.length;
     const own = m.key === me.key;
-    const head = `<p class="msg-head">${whoHtml(m.key)}${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
+    const head = `<p class="msg-head">${whoHtml(m.key)}${den.isMe(m.key) ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
     const gutter = cont ? `<span class="side-time">${time(m.at)}</span>` : mark(m.key);
     if (m.deleted) {
       parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>Message deleted</em></p></div></li>`);
@@ -351,7 +351,7 @@ export function mountDen(den, el, me) {
     }
     // Reactions are kept by the reactor's key; shown by name.
     const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(display).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
-    const ping = !own && (m.text || '').includes(`@${me.name}`);
+    const ping = !den.isMe(m.key) && [me.key, ...den.linkedTo(me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`));
     parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
       ${gutter}
       <div class="msg-main">${cont ? '' : head}${q}${body}${reactions ? `<div class="chips">${reactions}</div>` : ''}</div>
@@ -665,7 +665,17 @@ export function mountDen(den, el, me) {
   // ---- Members ----------------------------------------------------------------
 
   function drawMembers() {
-    const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : display(a.key).localeCompare(display(b.key))));
+    const all = den.members(room);
+    // One row per person: devices linked to each other (each says so) are one.
+    const seenKeys = new Set();
+    const list = [];
+    for (const m of all) {
+      if (seenKeys.has(m.key)) continue;
+      const devices = [m.key, ...den.linkedTo(m.key).filter((k) => all.some((x) => x.key === k))];
+      devices.forEach((k) => seenKeys.add(k));
+      list.push({ ...m, devices });
+    }
+    list.sort((a, b) => (den.isMe(a.key) ? -1 : den.isMe(b.key) ? 1 : display(a.key).localeCompare(display(b.key))));
     const priv = den.rooms.get(room)?.kind === 'private';
     // Two names that start alike are how one member poses as another: say so.
     // So are two members who gave themselves the same name.
@@ -675,15 +685,18 @@ export function mountDen(den, el, me) {
     const alike = [...starts.values()].some((n) => n > 1);
     el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
       ${alike ? '<p class="alike" role="note">Two members here have names that look alike. Compare the device names (m- and digits) before you trust who is who.</p>' : ''}
-      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="member-name">${whoHtml(m.key)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(display(m.key))}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
+      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="member-name">${whoHtml(m.key)}${m.devices.length > 1 ? `<span class="id">${m.devices.length} devices</span>` : ''}</span>${den.isMe(m.key) ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.devices.join(','))}" data-name="${esc(display(m.key))}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
     el('members').querySelectorAll('[data-dm]').forEach((b) => {
       b.onclick = async () => {
-        // Already a room of just the two of you: that one.
-        const pair = rooms().find((r) => r.kind === 'private' && den.inRoom(r.id) && (() => { const ks = den.members(r.id).map((x) => x.key); return ks.length === 2 && ks.includes(b.dataset.dm); })());
+        // Already a room of just the two of you (and your devices): that one.
+        const theirs = b.dataset.dm.split(',');
+        const pair = rooms().find((r) => r.kind === 'private' && den.inRoom(r.id) && (() => { const ks = den.members(r.id).map((x) => x.key); return ks.includes(theirs[0]) && ks.every((k) => den.isMe(k) || theirs.includes(k)); })());
         if (pair) return go(pair.id);
         status(`Opening a private room with ${b.dataset.name}…`, true);
-        try { go(await den.startPrivate([b.dataset.dm], '')); status(''); } catch (e) { status(e.message); }
+        // Everyone's devices: theirs, and this member's other ones.
+        const keys = [...new Set([...theirs, ...den.linkedTo(me.key)])];
+        try { go(await den.startPrivate(keys, '')); status(''); } catch (e) { status(e.message); }
       };
     });
     el('members').querySelector('[data-close]').onclick = toggleMembers;
@@ -813,6 +826,7 @@ export function mountDen(den, el, me) {
       clearTimeout(nickTimer);
       nickTimer = setTimeout(() => { drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
     }
+    if (event === 'linked') status('Linked: members now see these devices as one person.');
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
@@ -831,6 +845,23 @@ export function mountDen(den, el, me) {
       w.textContent = `${display(d.key)} (${nameOf(d.key)}) reports a different door key for ${d.day} than this device was shown. Either the den is telling members apart, or that member's device is wrong. Tell the host, and keep private things off this den until it is explained.`;
     }
   };
+
+  // Linking another device of this member's: a code shown here, typed there.
+  const linkGo = el('link-device');
+  if (linkGo) {
+    linkGo.onclick = async () => {
+      const code = den.startLink();
+      await ask({ heading: 'Link another device', text: `On the other device, enter this den with its own invite, choose “Enter a link code” and type ${code} within ten minutes. Members then see both as you.`, yes: 'Done' });
+    };
+  }
+  const linkUse = el('link-code');
+  if (linkUse) {
+    linkUse.onclick = async () => {
+      const code = await ask({ heading: 'Enter a link code', text: 'The code your other device shows under “Link another device”.', field: 'Code', yes: 'Link' });
+      if (!code) return;
+      try { await den.useLink(code); status('Asked your other device…', true); } catch (e) { status(e.message); }
+    };
+  }
 
   // This device's own settings: keeping its pass, and forgetting it all.
   const keep = el('keep-pass');

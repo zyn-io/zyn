@@ -72,6 +72,7 @@ export function nickOf(s) {
   const n = plainText(s).slice(0, 32);
   return n && !/^m-[0-9a-f]/i.test(n) ? n : '';
 }
+const sha = async (s) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))));
 const unhex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
 const hex = (u8) => [...u8].map((x) => x.toString(16).padStart(2, '0')).join('');
 const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
@@ -136,6 +137,7 @@ export class DenClient {
     this.seq = {};
     this.read = {};
     this.nicks = {}; // device key → { name, at }: the names members gave themselves
+    this.claims = {}; // device key → the device keys it says are the same person's
     this.typingAt = 0;
   }
 
@@ -155,6 +157,8 @@ export class DenClient {
     this.read = (await this.kv.get('read')) || {};
     for (const r of (await this.kv.get('private')) || []) this.rooms.set(r.id, r);
     this.nicks = (await this.kv.get('nicks')) || {};
+    this.claims = (await this.kv.get('claims')) || {};
+    this.myLinks = (await this.kv.get('links')) || [];
     this.me = { name: this.den.name(), key: this.den.key(), nick: (await this.kv.get('nick')) || '' };
     return this.me;
   }
@@ -416,7 +420,7 @@ export class DenClient {
           await this.publishInfo(room);
         }
         await this.save();
-        if (this.me.nick) this.soonProfile(room);
+        if (this.me.nick || this.myLinks.length) this.soonProfile(room);
       } catch (e) {
         // Someone moved the room first: start again from where it is now.
         try { this.den.forget(room); } catch { /* not in it */ }
@@ -515,7 +519,7 @@ export class DenClient {
     for (const k of before) if (!now.has(k)) lines.push([k, 'left']);
     if (!lines.length) return;
     // Someone new does not know the names members gave themselves: tell them.
-    if (this.me.nick && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
+    if ((this.me.nick || this.myLinks.length) && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
     const log = await this.log(room);
     for (const [who, act] of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', who, act, text: `m-${who.slice(0, 20)} ${act}`, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
@@ -591,6 +595,8 @@ export class DenClient {
     // claim, sealed by MLS to the sender's key: shown beside that key's own
     // name, never instead of it where it matters.
     if (!mine && typeof m.key === 'string' && 'nick' in m) await this.learnNick(m.key, m.nick, m.at);
+    if (!mine && typeof m.key === 'string' && Array.isArray(m.links)) await this.learnClaims(m.key, m.links);
+    if (m.t === 'link-ask' || m.t === 'link') { if (!mine) await this.onLink(room, m); return; }
     if (m.t === 'profile') return;
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
@@ -642,7 +648,9 @@ export class DenClient {
       log.push(shown);
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
-    this.on('message', { room, message: shown, kind: m.t, mine, mention: !mine && (m.text || '').includes(`@${this.me.name}`) });
+    // A mention of this device, or of one linked to it, is a mention of its member.
+    const mention = !mine && [this.me.key, ...this.linkedTo(this.me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`));
+    this.on('message', { room, message: shown, kind: m.t, mine, mention });
   }
 
   /// A roommate's fingerprint of the door key it was shown for `day`: one
@@ -900,7 +908,7 @@ export class DenClient {
         if (!this.rooms.has(room)) this.rooms.set(room, { id: room, title: '', kind: 'private' });
         await this.keepPrivate();
         this.joinRoom(room);
-        if (this.me.nick) this.soonProfile(room);
+        if (this.me.nick || this.myLinks.length) this.soonProfile(room);
         this.on('rooms', [...this.rooms.values()]);
       } catch { /* already in it, or not for this device */ }
       await this.save();
@@ -992,9 +1000,118 @@ export class DenClient {
 
   // ---- Names members give themselves ---------------------------------------------
 
-  /// The name a device's member gave themselves, or ''.
+  /// The name a device's member gave themselves, or ''; for a device linked
+  /// to others (one person's), the newest name any of them gave.
   nickFor(key) {
-    return key === this.me?.key ? this.me.nick : this.nicks[key]?.name || '';
+    if (key === this.me?.key && this.me.nick) return this.me.nick;
+    let best = key === this.me?.key ? null : this.nicks[key] || null;
+    for (const k of this.linkedTo(key)) {
+      if (k === this.me?.key && this.me.nick) return this.me.nick;
+      const n = this.nicks[k];
+      if (n && (!best || n.at > best.at)) best = n;
+    }
+    return best?.name || '';
+  }
+
+  // ---- One person, several devices ---------------------------------------------
+
+  /// The devices `key` is linked to: each says the other is the same
+  /// person's (a claim one side alone makes links nothing).
+  linkedTo(key) {
+    const says = (k) => (k === this.me?.key ? this.myLinks : this.claims[k] || []);
+    return says(key).filter((k) => k !== key && says(k).includes(key));
+  }
+
+  /// This device's own, and those linked to it: "you".
+  isMe(key) {
+    return key === this.me?.key || this.linkedTo(this.me?.key).includes(key);
+  }
+
+  async learnClaims(key, links) {
+    const keys = [...new Set(links.filter((k) => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k) && k !== key))].slice(0, 10);
+    const had = this.claims[key] || [];
+    if (had.length === keys.length && had.every((k) => keys.includes(k))) return;
+    if (keys.length) this.claims[key] = keys; else delete this.claims[key];
+    await this.kv.put('claims', this.claims);
+    this.on('nicks', { key });
+    // A device of ours now says the same of us: bring it into our private rooms.
+    if (this.myLinks.includes(key) && keys.includes(this.me.key)) this.bringIn(key);
+  }
+
+  /// A code for linking another device to this one: shown here, typed there
+  /// within ten minutes. It never crosses the den in the clear.
+  startLink() {
+    const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const code = [...rand(10)].map((x) => abc[x % abc.length]).join('');
+    this.linkCode = { code, until: Date.now() + 10 * 60_000 };
+    return `${code.slice(0, 5)}-${code.slice(5)}`;
+  }
+
+  /// On the other device: the code from the first. The rooms hear a hash of
+  /// it with this device's key, which only the first device can check.
+  async useLink(typed) {
+    const code = String(typed || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (code.length !== 10) throw new Error('A link code is ten letters and digits, as the other device shows it.');
+    this.linkAsk = { code, until: Date.now() + 10 * 60_000 };
+    const tag = await sha(`den-link-ask|${code}|${this.me.key}`);
+    const rooms = this.den.rooms().filter((r) => this.rooms.get(r)?.kind !== 'private');
+    if (!rooms.length) throw new Error('Enter a room first.');
+    for (const room of rooms) await this.send(room, { t: 'link-ask', tag }).catch(() => {});
+  }
+
+  /// A link code's hash from another device (on the first), or the first
+  /// device's answer (on the other). Checked here, inside the room's lock;
+  /// what it leads to is sent after it, outside.
+  async onLink(room, m) {
+    const later = (f) => setTimeout(() => f().catch(() => {}), 0);
+    if (m.t === 'link-ask' && this.linkCode && Date.now() < this.linkCode.until && typeof m.tag === 'string') {
+      const { code } = this.linkCode;
+      if (m.tag !== await sha(`den-link-ask|${code}|${m.key}`)) return;
+      this.linkCode = null;
+      const tag = await sha(`den-link-ok|${code}|${this.me.key}|${m.key}`);
+      later(async () => {
+        await this.send(room, { t: 'link', to: m.key, tag });
+        await this.claim(m.key);
+        this.on('linked', { key: m.key });
+      });
+    }
+    if (m.t === 'link' && m.to === this.me.key && this.linkAsk && Date.now() < this.linkAsk.until && typeof m.tag === 'string') {
+      const { code } = this.linkAsk;
+      if (m.tag !== await sha(`den-link-ok|${code}|${m.key}|${this.me.key}`)) return;
+      this.linkAsk = null;
+      later(async () => {
+        await this.claim(m.key);
+        // One person, one name: the first device's.
+        if (!this.me.nick && this.nickFor(m.key)) await this.setNick(this.nickFor(m.key));
+        this.on('linked', { key: m.key });
+      });
+    }
+  }
+
+  /// Say, in every room, that `key` is this member's too.
+  async claim(key) {
+    if (!this.myLinks.includes(key)) this.myLinks = [...this.myLinks, key].slice(-10);
+    await this.kv.put('links', this.myLinks);
+    this.on('nicks', { key });
+    for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
+    if ((this.claims[key] || []).includes(this.me.key)) this.bringIn(key);
+  }
+
+  /// No longer this member's: said in every room.
+  async unlink(key) {
+    this.myLinks = this.myLinks.filter((k) => k !== key);
+    await this.kv.put('links', this.myLinks);
+    this.on('nicks', { key });
+    for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
+  }
+
+  /// Invite a device linked to this one into this device's private rooms it
+  /// is not in yet (its member then joins or declines each, there).
+  async bringIn(key) {
+    for (const r of [...this.rooms.values()]) {
+      if (r.kind !== 'private' || !this.inRoom(r.id) || this.members(r.id).some((m) => m.key === key)) continue;
+      await this.lock(() => this.invite(r.id, [key])).catch(() => {});
+    }
   }
 
   /// A member's name as sent from their key: the newest by their clock wins.
@@ -1016,7 +1133,13 @@ export class DenClient {
     this.me.nick = name;
     await this.kv.put('nick', name);
     this.on('nicks', { key: this.me.key, name });
-    for (const room of this.den.rooms()) await this.send(room, { t: 'profile', nick: name }).catch(() => {});
+    for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
+  }
+
+  /// What this device says of itself in a room: its member's name, and the
+  /// devices it says are the same member's.
+  profile() {
+    return { t: 'profile', nick: this.me.nick, links: this.myLinks };
   }
 
   /// A room's newcomers hear this device's name a little after they arrive,
@@ -1026,7 +1149,7 @@ export class DenClient {
     if (this.profileSoon[room]) return;
     this.profileSoon[room] = setTimeout(() => {
       delete this.profileSoon[room];
-      if (this.inRoom(room) && this.me.nick) this.send(room, { t: 'profile', nick: this.me.nick }).catch(() => {});
+      if (this.inRoom(room) && (this.me.nick || this.myLinks.length)) this.send(room, this.profile()).catch(() => {});
     }, 2000 + Math.random() * 8000);
   }
 

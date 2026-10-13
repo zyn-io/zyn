@@ -243,6 +243,25 @@ ok(await until(A.p, () => /Just us here\./.test(document.querySelector('#log')?.
 const listed = await A.p.evaluate(async () => (await fetch('/door/keys')).ok && (await window.__den.push(window.__den.lobby, 'claim', { key: window.__den.me.key }).then(() => 'claimed', (e) => e.reason)));
 ok(true, `(own invitations left check: ${listed})`);
 
+// Linked devices: E, A's second device (in by its own invite), takes A's
+// link code; each says the other is the same person, B sees one person, and
+// A brings E into its private room.
+const E = await person('E', `${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))')}`);
+ok(await inside(E.p) && await until(E.p, () => window.__den.inRoom('general'), null, 30000), 'E is in General');
+const eKey = (await meOf(E.p)).key;
+await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [eKey], 20000);
+await B.p.evaluate(() => window.__den.useLink('abcde-fghjk'));
+const code = await A.p.evaluate(() => window.__den.startLink());
+await E.p.evaluate(([c]) => window.__den.useLink(c), [code]);
+ok(await until(E.p, ([k]) => window.__den.isMe(k), [A.me.key], 20000) && await until(A.p, ([k]) => window.__den.isMe(k), [eKey], 20000), 'A and E are linked, each saying so of the other');
+ok(await until(B.p, ([a, e]) => window.__den.linkedTo(a).includes(e), [A.me.key, eKey], 20000), 'B sees A and E as one person');
+ok(!(await A.p.evaluate(([k]) => window.__den.isMe(k), [B.me.key])), 'a wrong code links nothing');
+ok(await until(E.p, () => window.__den.me.nick === 'Ada', null, 10000), "E takes A's name");
+await B.p.click('#room-meta');
+ok(await until(B.p, () => /2 devices/.test(document.querySelector('#members')?.textContent || ''), null, 10000), "B's members list shows Ada once, with 2 devices");
+await B.p.click('#room-meta');
+ok(await until(E.p, () => !!document.querySelector('[data-join]'), null, 30000), 'A brings E into its private room: an invitation waits on E');
+
 // Search.
 await A.p.fill('#search', 'watch');
 ok(await until(A.p, () => /Anyone on watch/.test(document.querySelector('#found')?.textContent || '')), 'search finds words across rooms');
