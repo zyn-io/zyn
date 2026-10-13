@@ -24,7 +24,10 @@ defmodule DenWeb.LobbyChannel do
   @impl true
   def join("lobby", _, socket) do
     DenWeb.Heap.channel()
-    {:ok, %{rooms: Rooms.listed(), mod: Den.Mod.for_device(socket.assigns.key)}, socket}
+
+    if Den.Mod.out?(socket.assigns.key),
+      do: {:error, %{reason: "removed"}},
+      else: {:ok, %{rooms: Rooms.listed(), mod: Den.Mod.for_device(socket.assigns.key)}, socket}
   end
 
   # Every event, at a rate the den can answer (DenWeb.Throttle).

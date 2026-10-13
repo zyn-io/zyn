@@ -27,6 +27,7 @@ defmodule Den.ModTest do
   end
 
   test "permissions are the union of a device's roles and @everyone's; Administrator is all", %{helper: helper} do
+    assert %{hoist: true, colour: "#e0a030"} = Mod.role(hd(Mod.roles_of(@mod)))
     assert Mod.can?(@mod, "kick")
     refute Mod.can?(@mod, "ban")
     refute Mod.can?(@member, "timeout")

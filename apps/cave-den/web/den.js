@@ -388,7 +388,9 @@ export class DenClient {
     this.lobby.on('room', (r) => this.addRoom(r));
     this.lobby.on('room_gone', ({ id }) => this.dropRoom(id));
     this.lobby.on('mod', (m) => this.setMod(m));
-    this.lobby.join().receive('ok', ({ rooms, mod }) => { if (mod) this.setMod(mod); rooms.forEach((r) => this.addRoom(r)); });
+    this.lobby.join()
+      .receive('ok', ({ rooms, mod }) => { if (mod) this.setMod(mod); rooms.forEach((r) => this.addRoom(r)); })
+      .receive('error', (e) => { if (e?.reason === 'removed') { this.lobby.leave(); this.on('removed', {}); } });
     for (const r of this.rooms.values()) if (r.kind === 'private') this.joinRoom(r.id);
 
     const inbox = this.socket.channel(`inbox:${this.den.key()}`);

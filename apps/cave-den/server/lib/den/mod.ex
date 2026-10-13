@@ -65,8 +65,8 @@ defmodule Den.Mod do
 
   defp load do
     roles =
-      Repo.all(from r in "roles", select: %{id: r.id, name: r.name, colour: r.colour, position: r.position, hoist: type(r.hoist, :boolean), perms: r.perms})
-      |> Enum.map(&%{&1 | perms: split(&1.perms)})
+      Repo.all(from r in "roles", select: %{id: r.id, name: r.name, colour: r.colour, position: r.position, hoist: r.hoist, perms: r.perms})
+      |> Enum.map(&%{&1 | perms: split(&1.perms), hoist: &1.hoist in [true, 1, "true", "1"]})
 
     everyone = Enum.find(roles, &(&1.id == @everyone)) || %{id: @everyone, name: "@everyone", colour: nil, position: 0, hoist: false, perms: []}
     roles = [%{everyone | position: 0, name: "@everyone"} | Enum.reject(roles, &(&1.id == @everyone))]
@@ -185,7 +185,7 @@ defmodule Den.Mod do
              true <- below?(actor, position) || {:error, :above},
              true <- (old != nil or map_size(state().roles) <= @max_roles) || {:error, :limit} do
           r = %{id: id || "r-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower), name: name, colour: colour, position: position, hoist: attrs["hoist"] == true, perms: perms}
-          log(actor, if(old, do: "role edited", else: "role made"), r.id, name)
+          log(actor, if(old, do: "role edited", else: "role made"), nil, name)
           save_role(r)
         end
       end
@@ -195,7 +195,7 @@ defmodule Den.Mod do
   def role_save(_, _), do: {:error, :role}
 
   defp save_role(r) do
-    row = %{id: r.id, name: r.name, colour: r.colour, position: r.position, hoist: r.hoist, perms: Enum.join(r.perms, ","), inserted_at: now()}
+    row = %{id: r.id, name: r.name, colour: r.colour, position: r.position, hoist: if(r.hoist, do: 1, else: 0), perms: Enum.join(r.perms, ","), inserted_at: now()}
     Repo.insert_all("roles", [row], on_conflict: {:replace, [:name, :colour, :position, :hoist, :perms]}, conflict_target: :id)
     changed()
     {:ok, role(r.id)}
@@ -224,7 +224,7 @@ defmodule Den.Mod do
          true <- below?(actor, r.position) || {:error, :above} do
       Repo.delete_all(from x in "roles", where: x.id == ^id)
       Repo.delete_all(from x in "role_keys", where: x.role == ^id)
-      log(actor, "role deleted", id, r.name)
+      log(actor, "role deleted", nil, r.name)
       changed()
     end
   end
@@ -431,7 +431,8 @@ defmodule Den.Mod do
          {:ok, set} <- room_in(attrs) do
       Repo.update_all(from(r in "rooms", where: r.id == ^id), set: Keyword.new(set))
       if Map.has_key?(set, :title), do: put_setting("named:" <> id, "1")
-      log(actor, "channel changed", id, set |> Map.keys() |> Enum.join(", "))
+      words = %{title: "name", topic: "topic", slow_seconds: "slow mode", post_roles: "who may post", position: "place"}
+      log(actor, "channel changed", id, set |> Map.keys() |> Enum.map_join(", ", &words[&1]))
       changed()
       {:ok, Den.Rooms.get(id)}
     else
@@ -506,7 +507,9 @@ defmodule Den.Mod do
       holders: s.holders,
       sanctions: for({k, _} <- s.sanctions, x = sanction(k), x != nil, do: %{key: k, kind: x.kind, until: x.until && DateTime.to_unix(x.until)}),
       den: %{name: s.settings["name"] || "", description: s.settings["description"] || "", icon: Map.has_key?(s.settings, "icon")},
-      limits: limits()
+      limits: limits(),
+      # The host's own limits: what Manage server may set them up to.
+      ceilings: Map.new(@limit_keys, &{&1, Den.Limits.host(String.to_existing_atom(&1))})
     }
   end
 

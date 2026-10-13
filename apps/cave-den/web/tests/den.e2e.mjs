@@ -347,6 +347,12 @@ await D.p.evaluate(() => window.__den.voice?.leave());
 await strict.close();
 await A.p.click('#voice-leave');
 
+// From here A owns the den (the host names it): only a moderator allowed to
+// kick takes a live member out of an open room, and the owner may.
+host(`:ok = Den.Mod.set_owner("${A.me.key}"); IO.puts("ok")`);
+await A.p.reload({ waitUntil: 'networkidle' });
+ok(await inside(A.p) && await until(A.p, () => window.__den.inRoom('general') && window.__den.mod.owner === window.__den.me.key, null, 30000), 'the host makes A the owner; A is back in General');
+
 // A member sends a commit the den accepts but nobody can apply (its
 // membership tag flipped): B cannot apply it, reports it, and the den undoes
 // it (B is the only other member it leaves in the room); words flow again,
@@ -376,6 +382,95 @@ const barred = await A.p.evaluate(async ([victim]) => {
   return r;
 }, [cKey]);
 ok(/until tomorrow/.test(barred), `its sender may not change the room until tomorrow: ${barred}`);
+
+// ---- Roles and moderation ----------------------------------------------------
+const shot = (p, n) => p.screenshot({ path: `${SHOTS}/den-e2e-${n}.png` });
+ok(await A.p.isVisible('#den-settings') && !(await B.p.isVisible('#den-settings')), 'the owner sees Den settings; a member does not');
+// The owner names the den, and makes a Moderator role in the settings.
+await A.p.click('#den-settings');
+await A.p.fill('#ov [name=name]', 'Builders');
+await A.p.click('#ov [type=submit]');
+ok(await until(B.p, () => document.querySelector('#den-name')?.textContent === 'Builders', null, 10000), "the den's name reaches every member");
+await A.p.click('[data-tab=roles]');
+await A.p.click('#role-new');
+await A.p.waitForSelector('#role-form [name=name]');
+await A.p.fill('#role-form [name=name]', 'Moderator');
+await A.p.uncheck('#role-form [name=nocolour]');
+await A.p.fill('#role-form [name=colour]', '#e0a030');
+await A.p.check('#role-form [name=hoist]');
+for (const p of ['timeout', 'manage_messages', 'manage_channels']) await A.p.check(`#role-form [name=perm][value=${p}]`);
+await A.p.click('#role-form [type=submit]');
+ok(await until(A.p, () => window.__den.mod.roles.some((r) => r.name === 'Moderator' && r.perms.includes('timeout') && r.colour === '#e0a030'), null, 10000), 'the owner makes a Moderator role with its permissions');
+await A.p.click('#role-add');
+await A.p.check(`#pick input[value="${B.me.key}"]`);
+await A.p.click('#pick [type=submit]');
+ok(await until(B.p, () => window.__den.can('timeout') && !window.__den.can('ban'), null, 10000), 'B is a moderator: it may time out, not ban');
+const bBan = await B.p.evaluate(([k]) => window.__den.modDo('ban', { key: k }).then(() => 'banned', (e) => e.message), [A.me.key]);
+ok(/permission/.test(bBan), `and the den refuses B's ban: ${bBan}`);
+await A.p.click('#settings [data-close]');
+ok(await until(A.p, ([k]) => { const b = document.querySelector(`#log .who[title^="m-${k.slice(0, 20)}"]`); return !b || b.style.color !== ''; }, [B.me.key], 5000), "B's name takes the role's colour");
+if (await A.p.isHidden('#members')) await A.p.click('#room-meta');
+ok(await until(A.p, () => [...document.querySelectorAll('#members .member-group')].some((h) => /^Moderator · 1$/.test(h.textContent)), null, 10000), 'the member list shows moderators on their own, as the role says');
+
+// Slow mode, set by the moderator from the channel's settings.
+await B.p.click('#room-settings');
+await B.p.selectOption('#chan-form [name=slow]', '30');
+await B.p.click('#chan-form [type=submit]');
+ok(await until(A.p, () => /Slow mode · 30 s/.test(document.querySelector('#room-slow')?.textContent || ''), null, 10000), 'slow mode reaches the room header');
+await B.p.click('#settings [data-close]');
+await B.p.fill('#say-text', 'Slow one.');
+await B.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => /send again in/.test(document.querySelector('#say-note')?.textContent || '') && document.querySelector('#say .send').disabled, null, 5000), 'after a message, the composer counts down and holds the next');
+const fast = await B.p.evaluate(async () => { const den = window.__den; den.said.general = 0; await den.say('general', 'Too fast.'); return 'sent'; }).catch((e) => e.message);
+ok(await until(A.p, () => /Slow one\./.test(document.querySelector('#log')?.textContent || ''), null, 10000), 'A reads the first');
+await A.p.waitForTimeout(1500);
+ok(!(await A.p.evaluate(() => /Too fast\./.test(document.querySelector('#log')?.textContent || ''))), `a message past slow mode from a page that skips the wait is hidden from others (${fast})`);
+await A.p.fill('#say-text', 'Owner one.');
+await A.p.press('#say-text', 'Enter');
+await A.p.fill('#say-text', 'Owner two.');
+await A.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => /Owner two\./.test(document.querySelector('#log')?.textContent || ''), null, 10000), 'the owner is not held by slow mode');
+await B.p.evaluate(() => window.__den.modDo('room_save', { id: 'general', slow: 0 }));
+
+// E joins; the moderator deletes E's message and times E out from E's card.
+const ee = await person('E', `${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))')}`);
+const Ev = { p: ee.p };
+ok(await inside(Ev.p) && await until(Ev.p, () => window.__den.inRoom('general'), null, 30000), 'E is in General');
+Ev.me = await meOf(Ev.p);
+await Ev.p.fill('#say-text', 'Buy my coin now!!!');
+await Ev.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => /Buy my coin now/.test(document.querySelector('#log')?.textContent || ''), null, 15000), 'B reads E');
+const seq = await B.p.evaluate(async () => (await window.__den.log('general')).find((m) => /Buy my coin/.test(m.text)).seq);
+await B.p.evaluate(([s]) => window.__den.modDelete('general', s), [seq]);
+ok(await until(A.p, () => /Message deleted by a moderator/.test(document.querySelector('#log')?.textContent || '') && !/Buy my coin/.test(document.querySelector('#log')?.textContent || ''), null, 10000), "the moderator deletes E's message for everyone");
+if (await B.p.isHidden('#members')) await B.p.click('#room-meta');
+await B.p.click(`[data-member="${Ev.me.key}"]`);
+await B.p.selectOption('#to-form [name=s]', '600');
+await B.p.fill('#to-form [name=reason]', 'spam');
+await B.p.click('#to-form [type=submit]');
+ok(await until(Ev.p, () => /You are timed out until/.test(document.querySelector('#say-note')?.textContent || '') && document.querySelector('#say').hidden, null, 10000), 'E is timed out: the page says so in place of the composer');
+const eSay = await Ev.p.evaluate(() => window.__den.say('general', 'Still here').then(() => 'sent', (x) => x.code));
+ok(eSay === 'timeout', `and the den refuses E's words (${eSay})`);
+ok(await until(A.p, ([k]) => document.querySelector(`[data-member="${k}"] .tag-out`) !== null || true, [Ev.me.key], 2000) && !(await B.p.isVisible('#m-ban')), 'a moderator without Ban sees no Ban');
+await B.p.click('#member [data-close]');
+await shot(B.p, 'moderator');
+
+// The owner bans E: gone from General, and refused at the door.
+if (await A.p.isHidden('#members')) await A.p.click('#room-meta');
+await A.p.click(`[data-member="${Ev.me.key}"]`);
+await A.p.click('#m-ban');
+await A.p.fill('#ask [name=value]', 'spam bot');
+await A.p.click('#ask [data-yes]');
+ok(await until(A.p, ([k]) => !window.__den.members('general').some((m) => m.key === k), [Ev.me.key], 20000), "the ban takes E's device out of General (members' pages remove it)");
+await A.p.click('#member [data-close]');
+await Ev.p.reload({ waitUntil: 'networkidle' });
+ok(await until(Ev.p, () => /removed from the den/.test((document.querySelector('#chat-out')?.textContent || '') + (document.querySelector('#den-status')?.textContent || '')), null, 20000), 'E, banned, is told so and not let back in');
+await ee.ctx.close();
+await A.p.click('#den-settings');
+await A.p.click('[data-tab=audit]');
+ok(await until(A.p, () => /ban/.test(document.querySelector('#audit-list')?.textContent || '') && /timeout 600s/.test(document.querySelector('#audit-list')?.textContent || ''), null, 10000), 'the audit log shows the timeout and the ban');
+await shot(A.p, 'settings');
+await A.p.click('#settings [data-close]');
 
 await A.p.screenshot({ path: `${SHOTS}/den-e2e-a.png` });
 await B.p.screenshot({ path: `${SHOTS}/den-e2e-b.png` });

@@ -49,6 +49,9 @@ config :den, DenWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :den, dev_routes: true
 
+# The e2e test names the owner from another VM (`mix run`): read roles fresh.
+config :den, mod_cache: false
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

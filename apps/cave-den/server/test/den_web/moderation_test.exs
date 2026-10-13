@@ -95,13 +95,16 @@ defmodule DenWeb.ModerationTest do
     assert [%{action: "message deleted", actor: ^ka} | _] = Mod.audit(1)
   end
 
-  test "a kicked or banned device is dropped, cannot connect or open a room, and members are told to take it out", %{kb: kb} do
+  test "a kicked or banned device is dropped, is told so on every channel, and members are told to take it out", %{kb: kb} do
     DenWeb.Endpoint.subscribe("device:" <> kb)
     :ok = Mod.ban(@owner, kb, "spam bot")
     :ok = Den.Rooms.expel(kb)
     assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     assert_broadcast "expired", %{keys: [^kb]}
-    assert connect(DenWeb.UserSocket, %{"session" => session(kb)}) == :error
+    {:ok, again} = connect(DenWeb.UserSocket, %{"session" => session(kb)})
+    assert {:error, %{reason: "removed"}} = subscribe_and_join(again, DenWeb.LobbyChannel, "lobby")
+    assert {:error, %{reason: "removed"}} = subscribe_and_join(again, DenWeb.RoomChannel, "room:general")
+    assert {:error, %{reason: "removed"}} = subscribe_and_join(again, DenWeb.InboxChannel, "inbox:" <> kb)
     refute kb in Den.Rooms.present("general")
   end
 end

@@ -94,6 +94,7 @@ if (process.env.DEN_LOAD_ROLE === 'listen') {
     if (m.report) { process.send({ delivered, lat }); delivered = 0; lat.length = 0; sentAt.clear(); }
     if (m.stop) { sockets.forEach((x) => x.disconnect()); process.exit(0); }
   });
+  process.on('disconnect', () => process.exit(0));
   process.send({ ready: to - from });
   await new Promise(() => {});
 }
@@ -172,7 +173,7 @@ for (const rate of RATES) {
   const got = await reports();
   delivered = got.reduce((n, r) => n + r.delivered, 0);
   lat.length = 0;
-  for (const r of got) lat.push(...r.lat);
+  for (const r of got) for (const x of r.lat) lat.push(x);
   const expected = sent * LISTENERS;
   rows.push({ rate, sent, refused, to_listeners: delivered, expected, per_s: Math.round(delivered / 20), p50_ms: pct(lat, 0.5), p95_ms: pct(lat, 0.95), p99_ms: pct(lat, 0.99), opened_by_one: opened, expected_by_one: sent - sentBy0 });
   console.log(JSON.stringify(rows.at(-1)));

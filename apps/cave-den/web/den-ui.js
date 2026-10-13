@@ -3,6 +3,7 @@
 // fetched in the clear but the den's ciphertext and the day keys.
 
 import { REACTIONS as EMOJI } from './den.js';
+import { mountAdmin, slowName } from './den-admin.js';
 const GROUP_MS = 5 * 60_000;
 // One line of text with nothing hidden in it: no bidirectional or zero-width
 // controls (which can make a name or a file name read backwards), and
@@ -99,8 +100,18 @@ export function mountDen(den, el, me) {
   const display = (key) => den.nickFor(key) || nameOf(key);
   const whoHtml = (key, cls = 'who') => {
     const nick = den.nickFor(key);
-    return `<b class="${cls}" title="${esc(`${nameOf(key)}\n${fingerprint(key)}`)}">${esc(nick || nameOf(key))}</b>${nick ? `<span class="id">${esc(short(key))}</span>` : ''}`;
+    const c = den.colourOf(key);
+    return `<b class="${cls}"${c ? ` data-c="${esc(c)}"` : ''} title="${esc(`${nameOf(key)}\n${fingerprint(key)}`)}">${esc(nick || nameOf(key))}</b>${nick ? `<span class="id">${esc(short(key))}</span>` : ''}`;
   };
+  // Role colours: the page's rules allow no style attributes in markup, so
+  // each [data-c] is painted here, once drawn (a colour is only ever #rrggbb).
+  const paint = (root) => {
+    for (const n of root.querySelectorAll?.('[data-c]') || []) {
+      const c = n.dataset.c;
+      if (/^#[0-9a-f]{6}$/i.test(c)) { if (n.classList.contains('dot')) n.style.background = c; else n.style.color = c; }
+    }
+  };
+  new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) { if (n.dataset?.c) paint(n.parentNode); else paint(n); } }).observe(document.body, { childList: true, subtree: true });
   let statusTimer;
   const status = (t, sticky = false) => {
     el('den-status').textContent = t || '';
@@ -156,14 +167,14 @@ export function mountDen(den, el, me) {
         const n = await den.unread(r.id);
         unreadHere += n;
         const voiceHere = den.voice?.room === r.id;
-        items.push(`<button type="button" class="room${n ? ' unread' : ''}" data-room="${esc(r.id)}" aria-current="${r.id === room}"><span class="room-name">${esc(title(r))}</span>${voiceHere ? '<span class="live-dot" title="You are in voice here"></span>' : ''}${n ? `<span class="badge" aria-label="${n} unread">${n > 99 ? '99+' : n}</span>` : ''}</button>`);
+        items.push(`<button type="button" class="room${n ? ' unread' : ''}" data-room="${esc(r.id)}" aria-current="${r.id === room}">${kind === 'open' ? '<span class="hash" aria-hidden="true">#</span>' : ''}<span class="room-name">${esc(title(r))}</span>${voiceHere ? '<span class="live-dot" title="You are in voice here"></span>' : ''}${n ? `<span class="badge" aria-label="${n} unread">${n > 99 ? '99+' : n}</span>` : ''}</button>`);
       }
       const collapsible = kind === 'proposal';
       const open = !collapsible || propsOpen || list.some((r) => r.id === room);
       parts.push(`<div class="group">
         ${collapsible
           ? `<button type="button" class="group-head" data-toggle="props" aria-expanded="${open}"><span>${label} · ${list.length}</span>${!open && unreadHere ? `<span class="badge">${unreadHere}</span>` : ''}<svg class="caret" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>`
-          : `<p class="group-head"><span>${label}</span>${add ? `<button type="button" class="add" data-new="${kind}" aria-label="${add}" title="${add}">+</button>` : ''}</p>`}
+          : `<p class="group-head"><span>${label}</span>${add && (kind !== 'open' || !den.mod.owner || den.can('manage_channels')) ? `<button type="button" class="add" data-new="${kind}" aria-label="${add}" title="${add}">+</button>` : ''}</p>`}
         ${open ? items.join('') || '<p class="none">None yet.</p>' : ''}
       </div>`);
     }
@@ -183,6 +194,13 @@ export function mountDen(den, el, me) {
     el('room-title').classList.toggle('plain', r?.kind === 'private');
     el('room-kind').textContent = r?.kind === 'private' ? 'Private' : r?.kind === 'proposal' ? 'Proposal' : '';
     el('room-meta').textContent = counts[room] ? `Members · ${counts[room]}` : 'Members';
+    el('room-topic').textContent = r?.kind === 'open' ? plain(r.topic || '') : '';
+    const slow = den.slowOf(room);
+    el('room-slow').hidden = !slow;
+    el('room-slow').textContent = slow ? `Slow mode · ${slowName(slow)}` : '';
+    el('room-slow').title = slow ? `Each member may send one message every ${slowName(slow)} here.` : '';
+    el('room-settings').hidden = !(r?.kind === 'open' && den.can('manage_channels'));
+    drawDenHead();
     el('voice-go').hidden = !den.inRoom(room) || !!den.voice;
     el('say-text').placeholder = den.inRoom(room) ? `Message ${title(r) || room}` : 'Joining the room…';
     document.title = `${title(r) || 'Chat'} · Members' chat`;
@@ -277,8 +295,8 @@ export function mountDen(den, el, me) {
   // A device's name is its key's first ten hex digits (as the core names it).
   const nameOf = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `m-${key.slice(0, 20)}` : 'a member');
 
-  function pickMembers(heading, yes, named, done) {
-    const already = named ? new Set() : new Set(den.members(room).map((m) => m.key));
+  function pickMembers(heading, yes, named, done, anyone = false) {
+    const already = named || anyone ? new Set() : new Set(den.members(room).map((m) => m.key));
     const list = known().filter((m) => !already.has(m.key));
     const d = el('pick');
     d.querySelector('h2').textContent = heading;
@@ -306,7 +324,7 @@ export function mountDen(den, el, me) {
 
   // One pass over the words: code, links, mentions and line breaks are each
   // found once, in order, so none can land inside another's markup.
-  const TOKENS = /`([^`\n]{1,200})`|(\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'])|@(m-[0-9a-f]{20})|(\n)/g;
+  const TOKENS = /`([^`\n]{1,200})`|(\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'])|@(m-[0-9a-f]{20})|(\n)|(@everyone\b)/g;
   function words(text) {
     let out = '';
     let last = 0;
@@ -315,6 +333,7 @@ export function mountDen(den, el, me) {
       if (t[1] !== undefined) out += `<code>${esc(t[1])}</code>`;
       else if (t[2] !== undefined) out += `<a href="${esc(t[2])}" target="_blank" rel="noopener noreferrer nofollow">${esc(t[2])}</a>`;
       else if (t[3] !== undefined) out += `<mark class="${t[3] === me.name ? 'me' : ''}" title="${esc(t[3])}">@${esc(mentioned(t[3]))}</mark>`;
+      else if (t[5] !== undefined) out += '<mark class="all">@everyone</mark>';
       else out += '<br>';
       last = t.index + t[0].length;
     }
@@ -337,7 +356,7 @@ export function mountDen(den, el, me) {
     const head = `<p class="msg-head">${whoHtml(m.key)}${den.isMe(m.key) ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
     const gutter = cont ? `<span class="side-time">${time(m.at)}</span>` : mark(m.key);
     if (m.deleted) {
-      parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>Message deleted</em></p></div></li>`);
+      parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>${m.byMod ? 'Message deleted by a moderator' : 'Message deleted'}</em></p></div></li>`);
       return parts.join('');
     }
     const quoted = m.reply && log.find((x) => x.id === m.reply);
@@ -351,7 +370,7 @@ export function mountDen(den, el, me) {
     }
     // Reactions are kept by the reactor's key; shown by name.
     const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(display).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
-    const ping = !den.isMe(m.key) && [me.key, ...den.linkedTo(me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`));
+    const ping = !den.isMe(m.key) && ([me.key, ...den.linkedTo(me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`)) || den.everyone(room, m));
     parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
       ${gutter}
       <div class="msg-main">${cont ? '' : head}${q}${body}${reactions ? `<div class="chips">${reactions}</div>` : ''}</div>
@@ -360,6 +379,7 @@ export function mountDen(den, el, me) {
         <button type="button" data-act="react" aria-label="React" title="React" aria-expanded="false">${ICON.react}</button>
         ${own && !m.file ? `<button type="button" data-act="edit" aria-label="Edit" title="Edit">${ICON.edit}</button>` : ''}
         ${own ? `<button type="button" data-act="del" aria-label="Delete" title="Delete">${ICON.del}</button>` : ''}
+        ${!own && den.can('manage_messages') && den.rooms.get(room)?.kind !== 'private' ? `<button type="button" data-act="moddel" aria-label="Delete (moderator)" title="Delete (moderator)">${ICON.del}</button>` : ''}
       </div>
     </li>`);
     return parts.join('');
@@ -506,6 +526,9 @@ export function mountDen(den, el, me) {
     if (!m || !t.dataset.act) return;
     if (t.dataset.act === 'reply') { reply = m; editing = null; drawComposer(); el('say-text').focus(); }
     if (t.dataset.act === 'edit') startEdit(m);
+    if (t.dataset.act === 'moddel') {
+      if (await ask({ heading: 'Delete message', text: `${display(m.key)}'s message is removed for everyone in the channel. Devices that already read it may keep their copy.`, yes: 'Delete', danger: true })) den.modDelete(room, m.seq).catch((err) => status(err.message));
+    }
     if (t.dataset.act === 'del') {
       if (await ask({ heading: 'Delete message', text: 'It is removed for everyone in the room. Devices that already read it may keep their copy.', yes: 'Delete', danger: true })) den.remove(room, m.id).catch((err) => status(err.message));
     }
@@ -558,9 +581,31 @@ export function mountDen(den, el, me) {
     const c = el('say-cancel');
     if (c) c.onclick = cancelCompose;
     const r = den.rooms.get(room);
-    el('say').hidden = !den.inRoom(room) && r?.kind === 'private';
+    // Why this device cannot write here now, in place of the composer.
+    const s = den.sanctionOf(me.key);
+    const blocked = s ? (s.kind === 'timeout' ? `You are timed out until ${time(s.until * 1000)}. You can read, but not write, react or talk.` : 'This device was removed from the den by its moderators.')
+      : !den.mayPost(room) ? 'You do not have permission to send messages in this channel.' : '';
+    el('say').hidden = (!den.inRoom(room) && r?.kind === 'private') || !!blocked;
     el('say').querySelector('[type=submit]').textContent = editing ? 'Save' : 'Send';
+    drawSlow(blocked);
     drawHead();
+  }
+
+  // Slow mode: how long until this device may write again here.
+  let slowTimer;
+  function drawSlow(blocked = '') {
+    clearTimeout(slowTimer);
+    const note = el('say-note');
+    const left = den.slowLeft(room);
+    const send = el('say').querySelector('[type=submit]');
+    send.disabled = left > 0 && !editing;
+    if (blocked) { note.hidden = false; note.textContent = blocked; note.classList.add('block'); return; }
+    note.classList.remove('block');
+    note.hidden = !left;
+    if (left) {
+      note.textContent = `Slow mode · you can send again in ${Math.ceil(left / 1000)} s`;
+      slowTimer = setTimeout(() => drawSlow(), Math.min(1000, left));
+    }
   }
 
   function cancelCompose() {
@@ -585,7 +630,9 @@ export function mountDen(den, el, me) {
     try {
       if (was.editing) await den.edit(room, was.editing.id, text);
       else await den.say(room, text, was.reply?.id || null);
+      drawSlow();
     } catch (err) {
+      if (err.code === 'slow') drawSlow();
       status(err.message);
       ({ reply, editing } = was);
       el('say-text').value = text;
@@ -619,9 +666,10 @@ export function mountDen(den, el, me) {
     mentionAt = before.length - m[2].length - 1;
     const q = m[2].toLowerCase();
     const list = known().filter((x) => x.name.toLowerCase().includes(q) || x.label.toLowerCase().includes(q)).slice(0, 6);
+    if (den.can('mention_everyone') && den.rooms.get(room)?.kind !== 'private' && 'everyone'.startsWith(q)) list.unshift({ key: 'everyone', name: 'everyone', label: '@everyone' });
     if (!list.length) return closeMentions();
     mentionPick = Math.min(mentionPick, list.length - 1);
-    el('mentions').innerHTML = list.map((x, i) => `<li><button type="button" role="option" data-pick="${esc(x.name)}" aria-selected="${i === mentionPick}">${mark(x.key, 20)}<span>${whoHtml(x.key, 'pick-who')}</span></button></li>`).join('');
+    el('mentions').innerHTML = list.map((x, i) => `<li><button type="button" role="option" data-pick="${esc(x.name)}" aria-selected="${i === mentionPick}">${x.key === 'everyone' ? '<span class="all-mark">@</span><span><b class="pick-who">@everyone</b><span class="id">notifies everyone here</span></span>' : `${mark(x.key, 20)}<span>${whoHtml(x.key, 'pick-who')}</span>`}</button></li>`).join('');
     el('mentions').hidden = false;
     el('mentions').querySelectorAll('[data-pick]').forEach((b) => {
       b.onmousedown = (ev) => ev.preventDefault();
@@ -683,10 +731,24 @@ export function mountDen(den, el, me) {
     const count = (k) => starts.set(k, (starts.get(k) || 0) + 1);
     for (const m of list) { count(m.name.slice(0, 8)); if (den.nickFor(m.key)) count(`nick:${den.nickFor(m.key).toLowerCase()}`); }
     const alike = [...starts.values()].some((n) => n > 1);
+    // Grouped as on Discord: each role shown on its own (highest first), then everyone else.
+    const groupOf = (m) => den.rolesOf(m.key).find((r) => r.hoist) || null;
+    const groups = new Map();
+    for (const m of list) {
+      const g = den.isOwner(m.key) && !groupOf(m) ? { id: 'owner', name: 'Owner', position: Infinity } : groupOf(m) || { id: '', name: 'Members', position: -1 };
+      if (!groups.has(g.id)) groups.set(g.id, { ...g, people: [] });
+      groups.get(g.id).people.push(m);
+    }
+    const row = (m) => {
+      const s = den.sanctionOf(m.key);
+      return `<li>${mark(m.key, 24)}<button type="button" class="member-name" data-member="${esc(m.key)}">${whoHtml(m.key)}${m.devices.length > 1 ? `<span class="id">${m.devices.length} devices</span>` : ''}${s ? `<span class="tag-out" title="${s.kind === 'timeout' ? `Timed out until ${time(s.until * 1000)}` : 'Removed'}">${s.kind === 'timeout' ? 'Timed out' : 'Removed'}</span>` : ''}</button>${den.isMe(m.key) ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.devices.join(','))}" data-name="${esc(display(m.key))}">Message</button>`}</li>`;
+    };
+    const drawnGroups = [...groups.values()].sort((a, b) => b.position - a.position);
     el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
       ${alike ? '<p class="alike" role="note">Two members here have names that look alike. Compare the device names (m- and digits) before you trust who is who.</p>' : ''}
-      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="member-name">${whoHtml(m.key)}${m.devices.length > 1 ? `<span class="id">${m.devices.length} devices</span>` : ''}</span>${den.isMe(m.key) ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.devices.join(','))}" data-name="${esc(display(m.key))}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
+      ${list.length ? drawnGroups.map((g) => `${drawnGroups.length > 1 || g.id ? `<h4 class="member-group">${esc(g.name)} · ${g.people.length}</h4>` : ''}<ul>${g.people.map(row).join('')}</ul>`).join('') : '<ul><li class="none">Joining…</li></ul>'}
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
+    el('members').querySelectorAll('[data-member]').forEach((b) => { b.onclick = () => admin.member(b.dataset.member); });
     el('members').querySelectorAll('[data-dm]').forEach((b) => {
       b.onclick = async () => {
         // Already a room of just the two of you (and your devices): that one.
@@ -809,6 +871,7 @@ export function mountDen(den, el, me) {
     return members.filter((m) => { if (seenKeys.has(m.key)) return false; seenKeys.add(m.key); den.linkedTo(m.key).forEach((k) => seenKeys.add(k)); return true; }).length;
   };
   let nickTimer;
+  let modTimer;
   den.on = (event, d) => {
     if (event === 'rooms' || event === 'invites') drawRooms();
     if (event === 'ready' || event === 'members') {
@@ -830,6 +893,14 @@ export function mountDen(den, el, me) {
     if (event === 'nicks') {
       clearTimeout(nickTimer);
       nickTimer = setTimeout(() => { for (const r of Object.keys(counts)) if (den.inRoom(r)) counts[r] = people(den.members(r)); drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
+    }
+    if (event === 'mod') {
+      clearTimeout(modTimer);
+      modTimer = setTimeout(() => { drawRooms(); drawComposer(); drawLog(); if (!el('members').hidden) drawMembers(); den.onMod?.(); }, 100);
+    }
+    if (event === 'removed') {
+      status('This device was removed from the den by its moderators.', true);
+      el('say').hidden = true;
     }
     if (event === 'linked') status('Linked: members now see these devices as one person.');
     if (event === 'offline') status('Reconnecting…', true);
@@ -883,6 +954,20 @@ export function mountDen(den, el, me) {
       location.reload();
     };
   }
+
+  // ---- The den itself: its name and icon, and its settings ------------------------------
+
+  const admin = mountAdmin(den, el, { display, whoHtml, mark, ask, status, known, pickMembers });
+  function drawDenHead() {
+    const d = den.mod.den || {};
+    const may = admin.sections().length > 0;
+    el('den-head').hidden = !d.name && !d.icon && !may;
+    el('den-name').textContent = plain(d.name) || 'Epeaky';
+    el('den-icon').innerHTML = d.icon ? `<img src="/door/icon?v=${encodeURIComponent(d.name || '')}" alt="" />` : esc((plain(d.name) || 'E').slice(0, 1));
+    el('den-settings').hidden = !may;
+  }
+  el('den-settings').onclick = () => admin.open();
+  el('room-settings').onclick = () => admin.open('channels', room);
 
   drawRooms();
   drawLog();

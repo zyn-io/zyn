@@ -92,7 +92,8 @@ defmodule Den.Rooms do
 
   @doc "An open room as members see it: its name and the settings moderators gave it."
   def public(%Room{} = r) do
-    %{id: r.id, title: r.title, kind: r.kind, topic: r.topic || "", slow: r.slow_seconds || 0, post_roles: String.split(r.post_roles || "", ",", trim: true), position: r.position}
+    fixed = Enum.any?(Application.fetch_env!(:den, :rooms), fn {id, _} -> id == r.id end)
+    %{id: r.id, title: r.title, kind: r.kind, topic: r.topic || "", slow: r.slow_seconds || 0, post_roles: String.split(r.post_roles || "", ",", trim: true), position: r.position, fixed: fixed}
   end
 
   @doc "A moderator deletes an open room the host did not name, its words with it."
