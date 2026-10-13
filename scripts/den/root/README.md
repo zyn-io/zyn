@@ -2,7 +2,7 @@
 
 A self-hosted chat server for closed communities, with end-to-end encrypted
 rooms, files and voice. Members get in with a pass, through a blind signature,
-and the server only relays ciphertext. It was built for ZCaveDAO's members'
+and the server relays ciphertext it cannot read. It was built for ZCaveDAO's members'
 chat at [cavebro.win/chat](https://cavebro.win/chat).
 
 - **Rooms** are MLS groups (RFC 9420, OpenMLS), held only on members'
@@ -24,12 +24,14 @@ cannot see. Read it before you run a den for people who depend on it.
 |---|---|
 | `mls/` | Rust → WebAssembly: MLS rooms, blind tokens, voice keys. `cargo test` |
 | `server/` | Elixir / Phoenix: the door, the relay, files and voice. `mix test` |
+| `server/native/` | Rust NIF: each room's public MLS state, so the server can check commits |
 
 ## Build
 
 You need Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli`
 0.2.128 exactly, Elixir 1.19 on OTP 28, and libsrtp2, OpenSSL and pkg-config
-for voice (`brew install srtp openssl pkg-config` on macOS).
+for voice (`brew install srtp openssl pkg-config` on macOS). The server's
+build compiles its Rust NIF, so it needs Rust too.
 
 ```sh
 rustup target add wasm32-unknown-unknown

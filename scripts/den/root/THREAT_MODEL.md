@@ -1,8 +1,8 @@
 # What the den sees
 
 The den is a chat server for a closed community: members enter with a pass,
-talk in rooms, share files and join voice. It relays and stores ciphertext and
-never holds a key. This page says what each party can and cannot see, so a
+talk in rooms, share files and join voice. It relays and stores ciphertext,
+checks membership changes, and never holds a key that decrypts anything. This page says what each party can and cannot see, so a
 community can decide whether that is enough for them.
 
 ## The parts
@@ -49,16 +49,21 @@ through a VPN or Tor for one of them.
   application messages, readable only by the room's members. A message's
   author is its MLS sender's signature key; a display name is derived from that
   key (`m-` and 10 hex characters), never chosen.
-- Commits (who is in a room) are MLS PrivateMessages too, so the den cannot
-  read or judge them. It takes the first commit for each epoch. A member that
-  cannot process a commit reports it; the den then rolls the room back to the
-  last good epoch and bans the author's key for the day. A member can
-  therefore still force a rollback. The den orders commits; it cannot tell a
-  good one from a bad one.
-- A room's GroupInfo, which new members join from, is accepted only from the
-  device whose commit made that epoch (or the room's creator at epoch 0).
+- Commits (who is in a room) are sent as MLS PublicMessages: signed, not
+  encrypted. The den keeps each room's public MLS state (OpenMLS's
+  PublicGroup, in `server/native/`) and accepts a commit only if it verifies
+  against that state and its signer is the device whose session sent it. A
+  member cannot freeze a room with a commit nobody can process, and nothing is
+  ever rolled back.
+- A room's GroupInfo, which new members join from, is accepted only if it
+  matches the den's state for that room (the same group context and a valid
+  signature), so nobody can send newcomers into a forked copy of a room.
+- Proposals sent on their own are ignored; changes to a room travel only as
+  commits.
 - Private rooms have a random 128-bit id that the den never lists, and are
-  joined by invitation: an invitation must carry the key that was asked for.
+  joined by invitation only: an invitation must carry the key that was asked
+  for, a private room refuses external joins, and a device accepts a Welcome
+  only for a private room it is not already in.
 - Forward secrecy: a device keeps what it has read. Nobody, the den
   included, can decrypt a room's past messages later.
 
@@ -79,7 +84,9 @@ member's frames; per-sender keys (SFrame) are not built yet.
 
 ## What the operator can see
 
-- device keys and which rooms each one is in, private rooms included;
+- device keys and which rooms each one is in, private rooms included, and
+  every change to a room's membership (which keys were added or removed, and
+  by whom), because commits are signed plaintext;
 - when each device writes, reacts, types or talks, and how much;
 - file sizes; the names of open rooms; the room each voice frame belongs to;
 - network addresses at the door and the den;
