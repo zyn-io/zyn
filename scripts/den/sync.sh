@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publishes the den to github.com/zyn-io/den: the MLS core (mls/), the server
-# (server/) and, once it is extracted from the Cave store, the page (web/).
+# (server/) and the page the server serves (web/).
 # Taken from this repository's HEAD only, so nothing uncommitted (another
 # session's work in progress) is ever published, and never with this
 # repository's history: the den's paths carry the Cave store and the §183
@@ -26,8 +26,9 @@ else
 fi
 cd "$OUT"
 
-# What the den is. The Cave's README, store, art and keys stay private.
-git -C "$ZYN" archive HEAD:apps/cave-den mls server | tar -x -C "$OUT"
+# What the den is. The Cave's add-on (apps/cave-den/cave), README, art and
+# keys stay private.
+git -C "$ZYN" archive HEAD:apps/cave-den mls server web | tar -x -C "$OUT"
 cp -R "$HERE/root/." "$OUT/"
 
 blocked=()
@@ -54,17 +55,16 @@ big=$(find . -path ./.git -prune -o -type f -size +20M -print)
 [ -z "$big" ] || { echo "refusing: files over 20 MB: $big" >&2; exit 1; }
 
 # Not ready to push while any of these remain (they are fine to look at).
-refs=$(grep -rIlE --exclude-dir=.git -e '§[0-9]|DECISIONS|Contabo|cavebro\.win|Collection Z|ZynScan' mls server || true)
+refs=$(grep -rIlE --exclude-dir=.git -e '§[0-9]|DECISIONS|Contabo|cavebro\.win|Collection Z|ZynScan' mls server web || true)
 [ -z "$refs" ] || blocked+=("internal references (§, DECISIONS, Contabo, Cave names) in: $(echo $refs)")
-[ -d web ] || blocked+=("the page (web/) is not extracted from the Cave store yet")
 grep -qE 'collection: "[0-9a-f]{64}"' server/config/config.exs \
   && blocked+=("server/config/config.exs hardcodes the Cave's collection")
 grep -rqE 'zyn-rpc\.cavebro\.win' server/config && blocked+=("dev config points at the Cave's own RPC")
 
 # It must build and pass on its own.
-(cd mls && cargo test --quiet 2>&1 | grep -E '^test result' | awk '{p+=$4; f+=$6} END {print "mls: " p " passed, " f " failed"; exit f > 0}')
-(cd server && mix deps.get >/dev/null && MIX_ENV=test mix test 2>&1 | grep -E '[0-9]+ tests?, [0-9]+ failures?' | sed 's/^/server: /' | tee /dev/stderr | grep -q ' 0 failures')
-rm -rf mls/target server/_build server/deps
+(cd mls && ./build.sh >/dev/null 2>&1 && cargo test --quiet 2>&1 | grep -E '^test result' | awk '{p+=$4; f+=$6} END {print "mls: " p " passed, " f " failed"; exit f > 0}')
+(cd server && mix deps.get >/dev/null && (cd ../web && ./build.sh dist >/dev/null && node --test tests/ 2>&1 | grep -E '^ℹ (pass|fail)' | sed 's/^/web: /') && MIX_ENV=test mix test 2>&1 | grep -E '[0-9]+ tests?, [0-9]+ failures?' | sed 's/^/server: /' | tee /dev/stderr | grep -q ' 0 failures')
+rm -rf mls/target mls/pkg server/_build server/deps web/dist web/node_modules
 
 git add -A
 git status --short | sed -n '1,60p'

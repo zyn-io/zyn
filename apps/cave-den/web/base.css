@@ -1,0 +1,28 @@
+/* A plain dark page for the den. A host restyles it by loading its own
+   stylesheet after this one (or instead of it) and before den.css. */
+:root {
+  color-scheme: dark;
+  --ink: #ecebe6;
+  --read: #b9bbb4;
+  --read-dim: #9a9d94;
+  --muted: #868980;
+  --black: #0b0c0b;
+  --deep: #101210;
+  --acid: #9fd4ff;
+  --zec: #f2c14e;
+  --line: rgba(236, 235, 230, 0.16);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: var(--sans);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { overflow-x: clip; }
+body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--black); font-family: var(--sans); font-size: 16px; line-height: 1.5; }
+button { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+a { color: var(--acid); }
+.act { display: inline-block; border: 1px solid var(--acid); background: var(--acid); color: var(--black); padding: 10px 18px; font-weight: 600; cursor: pointer; }
+.act:disabled { opacity: 0.5; cursor: progress; }
+.act.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.act.small { padding: 4px 10px; font-size: 12px; margin-left: 8px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -21,8 +21,8 @@ const CAVE_Z = '024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e
 const ZEC_ZY = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
 const WAD = 10n ** 18n;
 const PAGE = document.body.dataset.page;
-/// The members' chat: the den (Elixir, on Contabo). A local build may point at
-/// another den with ?chat=.
+/// The members' chat's own origin: /pass hands the member pass code to it
+/// alone. A local build may name another den with ?chat=.
 const CHAT = (LOCAL && initial.get('chat')) || 'https://chat.cavebro.win';
 
 
@@ -851,47 +851,37 @@ function wireTips() {
 }
 
 // ---------------------------------------------------------------------------
-// The members' chat: the den (DECISIONS §184). den.js holds this device's MLS
-// state and talks to the den; this page draws the rooms and asks Nap for the
-// member pass only when no token is kept for today.
+// The members' chat lives on its own origin: the den serves its page at
+// chat.cavebro.win, where no wallet or extension script runs beside its keys.
+// That page opens this window (/pass), which asks Nap for the member pass and
+// hands the code to that page alone, then closes.
 
-async function chatPage() {
+async function passPage() {
   const gen = generation;
   wireTips();
-  const out = el('chat-out');
+  const out = el('pass-out');
   const say = (t, bad = false) => { out.textContent = t; out.classList.toggle('bad', bad); };
-  const [{ DenClient }, { mountDen }] = await Promise.all([import('./den.js'), import('./den-ui.js')]);
-  const den = new DenClient({ base: CHAT, keysUrl: '/den-keys.json', prefix: NETWORK });
-  // Local builds only: the tests reach the client.
-  if (LOCAL) window.__den = den;
-  const me = await den.start();
-  const open = (session) => {
-    if (gen !== generation) return;
-    el('me').textContent = me.name;
-    document.querySelector('.ledger').hidden = true;
-    document.querySelector('.register h1').hidden = true;
-    el('den').hidden = false;
-    mountDen(den, el, me);
-    den.connect(session);
-  };
-  // A session or yesterday's token kept on this device: in without Nap.
-  const kept = await den.session().catch(() => null);
-  if (kept) return open(kept);
-  el('enter').onclick = async () => {
+  if (!window.opener) {
+    say("Open this from the members' chat at chat.cavebro.win.", true);
+    el('get').hidden = true;
+    return;
+  }
+  el('get').onclick = async () => {
     if (!current) return pick();
-    el('enter').disabled = true;
+    el('get').disabled = true;
     try {
       say("Approve the member pass in Nap's window.");
       const r = await ask('zyn_daoPass', {});
       if (gen !== generation) return;
       if (!isHex(r?.token)) throw new Error('Nap did not give a pass code. Update Nap and try again.');
-      say('The door is checking your pass…');
-      open(await den.fromPass(r.token));
-      say('');
+      // Delivered only if the opener is the chat's own origin.
+      window.opener?.postMessage({ den: 'pass', code: r.token }, new URL(CHAT).origin);
+      say('Done. This window closes now.');
+      setTimeout(() => window.close(), 400);
     } catch (e) {
       if (gen !== generation) return;
       say(/holds no item/i.test(e?.message || '') ? 'This wallet holds no Collection Z item, so it has no member pass.' : failText(e, 'Not entered. Nothing was registered.'), e?.code !== 4001);
-    } finally { if (el('enter')) el('enter').disabled = false; }
+    } finally { if (el('get')) el('get').disabled = false; }
   };
 }
 
@@ -1239,8 +1229,8 @@ async function daoPage() {
   }
 }
 
-const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage, dao: daoPage, chat: chatPage };
-const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint', '/dao/': 'dao', '/chat/': 'chat' };
+const PAGES = { shelf: shelfPage, item: itemPage, market: marketPage, mint: mintPage, dao: daoPage, pass: passPage };
+const ROUTES = { '/items/': 'shelf', '/item/': 'item', '/market/': 'market', '/mint/': 'mint', '/dao/': 'dao', '/pass/': 'pass' };
 let params = new URLSearchParams(location.search);
 
 function start(page) {

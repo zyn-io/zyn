@@ -1,0 +1,9 @@
+{
+  "name": "den-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./build.sh dist",
+    "test": "./build.sh dist >/dev/null && node --test tests/"
+  }
+}

@@ -35,14 +35,12 @@ if config_env() == :prod do
   config :den,
     node_url: System.get_env("DEN_NODE_URL", "http://127.0.0.1:8599"),
     keys_dir: System.get_env("DEN_KEYS_DIR", "/var/lib/den/keys"),
-    # The sites whose pages may use this den (comma-separated https origins).
-    origins:
-      String.split(
-        System.get_env("DEN_ORIGINS") ||
-          raise("environment variable DEN_ORIGINS is missing: the https origins of the pages that use this den, comma-separated"),
-        ",",
-        trim: true
-      ),
+    # Other sites whose pages may use this den (comma-separated https
+    # origins); the den's own page always may.
+    origins: String.split(System.get_env("DEN_ORIGINS", ""), ",", trim: true),
+    # Origins the den's own page may reach besides the den: where its day keys
+    # are published, if not on the den itself (comma-separated).
+    page_connect: String.split(System.get_env("DEN_PAGE_CONNECT", ""), ",", trim: true),
     voice_public_only: System.get_env("DEN_VOICE_PUBLIC_ONLY") in ["1", "true"]
 
   config :den, Den.Repo,

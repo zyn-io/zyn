@@ -25,6 +25,7 @@ cannot see. Read it before you run a den for people who depend on it.
 | `mls/` | Rust → WebAssembly: MLS rooms, blind tokens, voice keys. `cargo test` |
 | `server/` | Elixir / Phoenix: the door, the relay, files and voice. `mix test` |
 | `server/native/` | Rust NIF: each room's public MLS state, so the server can check commits |
+| `web/` | The page the server serves at `/`: rooms, messages, files, voice. `npm test` |
 
 ## Build
 
@@ -38,6 +39,8 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.128
 (cd mls && ./build.sh)                   # → mls/pkg/
 (cd server && mix setup && mix test)
+web/build.sh                             # the page → server/priv/page/
+(cd web && npm test)
 ```
 
 ## Run
@@ -54,7 +57,8 @@ redirects every request that arrives without it.
 | `DEN_IP` | the address it binds to (default 127.0.0.1) |
 | `DATABASE_PATH` | the SQLite file |
 | `DEN_KEYS_DIR` | where the day keys are kept (private; back it up) |
-| `DEN_ORIGINS` | the page origins allowed to talk to it, comma-separated |
+| `DEN_ORIGINS` | other sites' pages allowed to use it, comma-separated (its own page always may) |
+| `DEN_PAGE_CONNECT` | origins its page may fetch from besides the den, such as where the day keys are published |
 | `DEN_NODE_URL` | the pass checker's node (the Zyn adapter) |
 | `POOL_SIZE` | database connections |
 
@@ -83,11 +87,38 @@ halves to one JSON file. Publish that file from the page's own origin, the
 same for everyone, and publish new keys before the old ones run out, or
 nobody can enter after the last day.
 
+## The page
+
+The den serves its page at `/` from `server/priv/page`, built by
+`web/build.sh`. The page runs only its own scripts and WebAssembly, under a
+policy that allows no inline or browser-extension scripts, because it holds
+the device's keys. Serve nothing else from the den's origin.
+
+To make it yours, put an add-on directory on top: `web/build.sh OUT ADDON`
+runs `ADDON/build.sh OUT`, which can replace the page (`index.html`), add
+styles, and write `config.json`:
+
+| Key | |
+|---|---|
+| `keysUrl` | where the day keys are published (default `/den-keys.json`, on the den) |
+| `prefix` | the name this browser keeps the den's state under |
+| `issuer` | the page that lets members in (below) |
+
 ## Entry rules
 
-Today the door checks passes against a Zyn node: a pass is live while its
-holder holds an item of the configured collection. Other rules (invite links,
-token holders on other chains) are planned as adapters behind the same door.
+Members get in through an **issuer**: a page on the host's own site that
+checks whatever the host requires (a wallet, a sign-in, an invite) and hands
+the den's page a pass code. The den's page opens it in a window and accepts a
+code only from that window and the issuer's origin:
+
+```js
+opener.postMessage({ den: 'pass', code }, 'https://den.example.org');
+```
+
+The host's wallet or sign-in scripts run on the issuer's page, never next to
+the den's keys. The door then checks the pass. Today that check asks a Zyn
+node whether the pass is live; other checks (invite lists, token holders on
+other chains) are planned as adapters behind the same door.
 
 ## License
 

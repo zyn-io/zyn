@@ -149,15 +149,24 @@ async function tour(store, net) {
     const text = (await store.textContent('main').catch(() => '')) || '';
     ok(text.trim().length > 40 && errors.length === before && !/bound to your own key/.test(text), `${net} ${path}: renders, current copy`);
   }
-  // The members' chat: the door in its own panel, and the microphone allowed
-  // on /chat (voice rooms) while the rest of the store keeps it off.
+  // The members' chat is served by the den on its own origin: /chat sends
+  // people there, /pass is the window its page opens to get the member pass,
+  // and no page of the store may use the microphone.
   const before = errors.length;
-  await store.goto(`${SITE}/chat${q.replace('&', '?')}`, { waitUntil: 'networkidle' });
-  await store.waitForTimeout(1500);
-  ok(errors.length === before && await store.isVisible('#enter'), `${net} /chat: the door renders`);
-  ok(await store.evaluate(() => getComputedStyle(document.querySelector('.register')).maxWidth === '940px' && getComputedStyle(document.querySelector('.ledger')).borderTopStyle === 'solid'), `${net} /chat: keeps its own layout`);
-  const policy = async (p) => (await store.request.get(`${SITE}${p}`)).headers()['permissions-policy'] || '';
-  ok(/microphone=\(self\)/.test(await policy('/chat/')) && /microphone=\(\)/.test(await policy('/items/')), `${net} /chat: only it may use the microphone`);
+  const moved = await store.request.get(`${SITE}/chat`, { maxRedirects: 0 });
+  ok(moved.status() === 301 && moved.headers().location === 'https://chat.cavebro.win/', `${net} /chat: moved to chat.cavebro.win`);
+  // In a tab of its own, as it always is: /pass's opener policy differs from
+  // the store's, so the store's own tab would lose Nap's window by loading it.
+  const passTab = await store.context().newPage();
+  watch(passTab, `pass ${net}`);
+  await passTab.goto(`${SITE}/pass${q.replace('&', '?')}`, { waitUntil: 'networkidle' });
+  await passTab.waitForTimeout(1200);
+  ok(errors.length === before && /Open this from the members' chat/.test(await passTab.textContent('#pass-out')), `${net} /pass: opened on its own, it says where it belongs`);
+  await passTab.close();
+  const head = async (p) => (await store.request.get(`${SITE}${p}`)).headers();
+  ok((await head('/pass/'))['cross-origin-opener-policy'] === 'unsafe-none', `${net} /pass: stays its opener's window`);
+  ok(/microphone=\(\)/.test((await head('/pass/'))['permissions-policy'] || '') && /microphone=\(\)/.test((await head('/items/'))['permissions-policy'] || ''), `${net}: no store page may use the microphone`);
+  ok((await head('/den-keys.json'))['access-control-allow-origin'] === 'https://chat.cavebro.win', `${net}: the day keys can be read by the chat's page`);
 }
 
 async function webPath(browser, net) {

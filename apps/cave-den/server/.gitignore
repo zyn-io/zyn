@@ -39,3 +39,6 @@ den-keys.json
 priv/blobs/
 native/den_public/target/
 priv/native/
+
+# The page, built by ../web/build.sh
+/priv/page/

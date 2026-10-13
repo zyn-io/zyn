@@ -7,9 +7,13 @@ community can decide whether that is enough for them.
 
 ## The parts
 
-- **The client** (in the browser): holds every key. Rooms are MLS groups
-  (RFC 9420; OpenMLS, suite X25519 / AES-128-GCM / SHA-256 / Ed25519), built
-  to WebAssembly from `mls/`.
+- **The client** (the page the den serves, in the browser): holds every key.
+  Rooms are MLS groups (RFC 9420; OpenMLS, suite X25519 / AES-128-GCM /
+  SHA-256 / Ed25519), built to WebAssembly from `mls/`. The page runs only its
+  own scripts: no inline script and no browser extension's.
+- **The issuer** (on the host's own site): checks whatever the host requires
+  and hands the page a pass code through a window the page opens. Wallets and
+  sign-ins run there, not beside the keys.
 - **The door** (`/door/*`): checks a member pass and signs a blinded entry
   token (RFC 9474, RSABSSA-SHA384-PSS-Randomized).
 - **The den** (`/socket`, `/blob`): admits a device for the day its token
@@ -113,8 +117,9 @@ not within minutes. Backups, if the operator keeps any, should follow the same
 
 ## Not covered
 
-- A malicious client page. The page holds the keys, so whoever serves it can
-  take them. Serve it from a domain that hosts nothing else.
+- A malicious page. The den serves the page that holds the keys, so whoever
+  runs the den can change it and take them. Serve nothing else from the den's
+  origin, and check the page you are given if you cannot trust the host.
 - A compromised member device, or a member who shares what they read.
 - Traffic analysis beyond what is listed above.
 

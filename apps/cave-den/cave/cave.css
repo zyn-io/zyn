@@ -1,0 +1,5 @@
+/* The Cave's den: the cave behind the page. */
+.backdrop::before { content: ""; position: absolute; inset: 0; background: url("/assets/cave-background.png") center / cover no-repeat; image-rendering: pixelated; filter: brightness(1.35) saturate(1.1); }
+.backdrop::after { content: ""; position: absolute; inset: 0; background:
+  radial-gradient(ellipse 60% 80% at 50% 45%, rgba(5, 7, 6, 0.55), rgba(5, 7, 6, 0.2) 70%, transparent),
+  linear-gradient(180deg, rgba(5, 7, 6, 0.1), rgba(5, 7, 6, 0.45)); }

@@ -50,7 +50,7 @@ await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 // The second half of the journey. Everything above gets a buyer as far as
 // owning an item; these are what they do next — see it, price it, sell it,
 // buy another, and leave. Same directory shape, so every one is a clean URL.
-for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules', 'chat']) {
+for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules', 'pass']) {
   await mkdir(new URL(`${page}/`, output), { recursive: true });
   await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
 }
@@ -64,20 +64,11 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
 await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
 await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
-// The members' chat (the den, §184): its client module, the den's MLS and
-// blind-token library built to wasm (apps/cave-den/mls, `./build.sh`), the
-// Phoenix socket client (pinned to the den's version), and the day keys the
-// door publishes — the one file every holder's page uses.
-await cp(new URL('den.js', root), new URL('den.js', output));
-await cp(new URL('den-ui.js', root), new URL('den-ui.js', output));
-await mkdir(new URL('den/', output), { recursive: true });
-for (const f of ['den_mls.js', 'den_mls_bg.wasm']) {
-  await cp(new URL(`../cave-den/mls/pkg/${f}`, root), new URL(`den/${f}`, output)).catch(() => {
-    throw new Error(`apps/cave-den/mls/pkg/${f} is missing: build it with apps/cave-den/mls/build.sh`);
-  });
-}
-await cp(new URL('node_modules/phoenix/priv/static/phoenix.mjs', root), new URL('den/phoenix.mjs', output));
-await cp(new URL('den-voice-worker.js', root), new URL('den/voice-worker.js', output));
+// The members' chat (the den, §184) is served by the den itself at
+// chat.cavebro.win (apps/cave-den/web, with the Cave's add-on). This site keeps
+// two parts of it: /pass, the window that page opens to ask Nap for the member
+// pass, and the day keys the door publishes, the one file every holder's page
+// uses.
 await cp(new URL('den-keys.json', root), new URL('den-keys.json', output)).catch((e) => { if (e.code !== 'ENOENT') throw e; });
 // The tokens burnable for sale credit (§182): one file per network, a token
 // per key. Without it the page offers no burn.
@@ -129,7 +120,10 @@ await writeFile(
     + '<p class="lede">Nothing in the cave has that name. <a href="/">Back to the cave</a> · <a href="/mint">Mint</a> · <a href="/market">The market</a></p></main>\n',
 );
 
-// No `_redirects`. The site is one page with no client-side routes, so Pages
+// The members' chat moved to its own origin; old links follow it.
+await writeFile(new URL('_redirects', output), '/chat https://chat.cavebro.win/ 301\n/chat/ https://chat.cavebro.win/ 301\n');
+
+// No catch-all `_redirects` rule. The site is one page with no client-side routes, so Pages
 // serving `404.html` for anything it does not have is both correct and the
 // thing a content-addressed fetch needs: the previous catch-all answered every
 // missing path with 200 and a page of HTML, which is indistinguishable from a
@@ -150,7 +144,7 @@ await writeFile(
 // injected. Computed rather than written down, because a hash maintained by
 // hand is a hash that goes stale and takes the site down with it.
 const pages = ['index.html', 'whitelist.html', 'deposit.html', 'terms.html', 'mint.html',
-  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html', 'rules.html', 'dao-rules.html', 'chat.html'];
+  'items.html', 'item.html', 'market.html', 'exit.html', 'dao.html', 'rules.html', 'dao-rules.html', 'pass.html'];
 const scriptHashes = new Set();
 for (const page of pages) {
   const html = await readFile(new URL(page, root), 'utf8');
@@ -201,16 +195,8 @@ const csp = [
   "object-src 'none'",
 ].join('; ');
 
-// /chat alone talks to the den, runs its MLS library's wasm and may use the
-// microphone (voice rooms); the rest of the site keeps the policies above. Cloudflare applies every
-// matching rule, so /chat first detaches the site-wide policy ("!").
-const CHAT_ORIGIN = 'chat.cavebro.win';
-const chatCsp = csp
-  .replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
-  .replace("connect-src 'self'", `connect-src 'self' https://${CHAT_ORIGIN} wss://${CHAT_ORIGIN}`)
-  // Images opened from sealed files, and the voice worker.
-  .replace("img-src 'self' data:", "img-src 'self' data: blob:")
-  .replace("font-src 'self'", "font-src 'self'; worker-src 'self'; media-src 'self' blob:");
+// The chat's own page reads the day keys from here.
+const CHAT_ORIGIN = 'https://chat.cavebro.win';
 
 await writeFile(
   new URL('_headers', output),
@@ -231,17 +217,19 @@ await writeFile(
     // Nap in the browser answers from its own window; same-origin would cut it off.
     '  Cross-Origin-Opener-Policy: same-origin-allow-popups',
     '',
-    '/chat',
-    '  ! Content-Security-Policy',
-    `  Content-Security-Policy: ${chatCsp}`,
-    '  ! Permissions-Policy',
-    '  Permissions-Policy: geolocation=(), microphone=(self), camera=(), payment=()',
+    // The chat's page opens /pass and must stay its opener, so the window can
+    // hand the pass code back to it alone.
+    '/pass',
+    '  ! Cross-Origin-Opener-Policy',
+    '  Cross-Origin-Opener-Policy: unsafe-none',
     '',
-    '/chat/*',
-    '  ! Content-Security-Policy',
-    `  Content-Security-Policy: ${chatCsp}`,
-    '  ! Permissions-Policy',
-    '  Permissions-Policy: geolocation=(), microphone=(self), camera=(), payment=()',
+    '/pass/*',
+    '  ! Cross-Origin-Opener-Policy',
+    '  Cross-Origin-Opener-Policy: unsafe-none',
+    '',
+    '/den-keys.json',
+    `  Access-Control-Allow-Origin: ${CHAT_ORIGIN}`,
+    '  Cache-Control: no-cache',
     '',
   ].join('\n'),
 );

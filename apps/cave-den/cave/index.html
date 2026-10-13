@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070807" />
+    <meta name="description" content="ZCaveDAO members' chat: holders of a Cave item only, entered with Nap." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://chat.cavebro.win/" />
+    <meta property="og:title" content="Members' chat" />
+    <meta property="og:description" content="ZCaveDAO members' chat, entered with Nap." />
+    <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Members' chat" />
+    <meta name="twitter:description" content="ZCaveDAO members' chat, entered with Nap." />
+    <meta name="twitter:image" content="https://cavebro.win/assets/cave-social-card.png" />
+    <title>Members' chat</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/cave-mark.svg?v=2" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./den.css" />
+    <link rel="stylesheet" href="./cave.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="https://cavebro.win/" aria-label="Cave Collection Z home">
+        <span class="sigil" aria-hidden="true"><img src="./assets/cave-mark.svg?v=2" alt="" /></span>
+        <span>Cave Collection Z</span>
+      </a>
+      <nav class="topbar-nav" aria-label="The cave">
+        <a href="https://cavebro.win/dao">DAO</a>
+        <a href="./" aria-current="page">Chat</a>
+      </nav>
+    </header>
+    <main class="register">
+      <div class="backdrop" aria-hidden="true"></div>
+      <h1><span>Members'</span><span>chat</span></h1>
+
+      <section class="ledger" aria-labelledby="h-door">
+        <div class="ledger-index"><h2 id="h-door">Enter</h2><span>holders of a Cave item</span></div>
+        <div class="ledger-body door">
+          <p class="say">
+            For holders of a Collection Z item. A window on cavebro.win asks Nap for your member pass; the door signs a
+            day token it cannot read, and this device enters with it under a name of its own.
+            <button class="tip" type="button" aria-expanded="false" data-tip="Your chat name comes from a key made on this device, not from your wallet or item. The door checks your pass and signs a token without seeing which device it is for, and the den keeps passes and devices in separate records. Both run on one server, which sees your network address on each.">i</button>
+          </p>
+          <ul class="facts-list">
+            <li>Messages, files and voice are end-to-end encrypted (MLS). The den relays what it cannot read; only members' devices hold the keys.</li>
+            <li>The Cave team runs the den. It sees which device names are in which room, when they write or talk, file sizes, the names of open rooms, and who joins or leaves which room. The door and the den run on the same server, so the team could link your pass to this device by your network address and timing; a VPN or Tor keeps them apart.</li>
+            <li>Your words are kept on this device. Clearing the browser's data forgets them and your chat name.</li>
+            <li>Selling, moving or redeeming your item ends your entry at the end of the day.</li>
+          </ul>
+          <button class="act" id="enter" type="button">Enter with Nap</button>
+          <p class="out" id="chat-out" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div class="den" id="den" hidden>
+        <aside class="den-side" aria-label="Rooms">
+          <div class="side-head">
+            <span id="me-mark"></span>
+            <p><small>You are</small><b id="me">—</b></p>
+            <button class="tip" type="button" aria-expanded="false" data-tip="This name comes from a key made on this device. Members see it, never your wallet or item. Clearing the browser's data gives this device a new name.">i</button>
+          </div>
+          <div class="side-search">
+            <label class="visually-hidden" for="search">Search messages</label>
+            <input id="search" type="search" placeholder="Search messages" autocomplete="off" />
+          </div>
+          <div id="found" class="found" hidden></div>
+          <nav id="rooms" class="rooms" aria-label="Rooms"></nav>
+          <div class="side-foot">
+            <label>Notifications
+              <select id="notify">
+                <option value="mentions">Mentions and private</option>
+                <option value="all">Every message</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          </div>
+        </aside>
+        <div class="den-scrim" id="den-scrim"></div>
+        <section class="den-main" id="den-main" aria-label="Conversation">
+          <header class="room-head">
+            <button type="button" class="rooms-open" id="rooms-open" aria-label="Rooms"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5"/></svg></button>
+            <h2 id="room-title">General</h2>
+            <span class="room-kind" id="room-kind"></span>
+            <div class="head-acts">
+              <button type="button" class="pill go" id="voice-go" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="l">Join voice</span></button>
+              <button type="button" class="pill" id="room-meta" aria-expanded="false" aria-controls="members">Members</button>
+            </div>
+          </header>
+          <div class="voice" id="voice" hidden>
+            <span class="voice-label"><span class="live-dot"></span>Voice</span>
+            <button type="button" id="voice-room"></button>
+            <ul class="voice-who" id="voice-who" aria-label="In voice"></ul>
+            <span class="voice-acts"><button type="button" class="mini" id="voice-mute" aria-pressed="false">Mute</button><button type="button" class="mini leave" id="voice-leave">Leave</button></span>
+          </div>
+          <div class="den-body">
+            <div class="log-wrap">
+              <ol class="log" id="log" role="log" aria-label="Messages"></ol>
+              <button type="button" class="jump" id="jump" hidden>New messages ↓</button>
+            </div>
+            <aside class="members" id="members" aria-label="Members" hidden></aside>
+          </div>
+          <div class="compose">
+            <ul class="mentions" id="mentions" role="listbox" aria-label="Mention" hidden></ul>
+            <p class="typing" id="typing" aria-live="polite"></p>
+            <div class="banner" id="say-banner" hidden></div>
+            <form class="say-form" id="say">
+              <button type="button" id="attach" aria-label="Attach a file" title="Attach a file (up to 25 MB, sealed on this device)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7.5 8 12.5a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L10 4.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+              <input type="file" id="attach-file" multiple hidden />
+              <label class="visually-hidden" for="say-text">Message</label>
+              <textarea id="say-text" rows="1" maxlength="4000" placeholder="Message"></textarea>
+              <button class="send" type="submit">Send</button>
+            </form>
+            <p class="status" id="den-status" role="status" aria-live="polite"></p>
+          </div>
+          <div class="drop" id="drop" hidden>Drop to send · sealed on this device</div>
+        </section>
+      </div>
+
+      <dialog class="dlg" id="ask">
+        <form>
+          <h2>—</h2>
+          <p class="ask-text"></p>
+          <label class="field ask-field"><span>Name</span><input name="value" maxlength="60" autocomplete="off" /></label>
+          <div class="row"><button class="act ghost small" type="button" data-close>Cancel</button><button class="act small" type="submit" data-yes>OK</button></div>
+        </form>
+      </dialog>
+
+      <dialog class="dlg" id="pick">
+        <form>
+          <h2>Members</h2>
+          <div class="who who-list"></div>
+          <label class="field pick-name">Name (only members see it)<input name="title" maxlength="60" autocomplete="off" placeholder="Optional" /></label>
+          <div class="row"><button class="act ghost small" type="button" data-close>Cancel</button><button class="act small" type="submit">Make room</button></div>
+        </form>
+      </dialog>
+
+      <dialog class="lightbox" id="lightbox" aria-label="Image">
+        <img alt="" />
+        <div class="lb-bar"><span class="lb-name"></span><div><button type="button" class="mini" data-save>Download</button><button type="button" class="mini" data-close>Close</button></div></div>
+      </dialog>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

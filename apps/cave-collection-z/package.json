@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@noble/curves": "^1.9.7",
-    "@noble/hashes": "^1.8.0",
-    "phoenix": "1.8.15"
+    "@noble/hashes": "^1.8.0"
   }
 }
