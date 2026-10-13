@@ -1825,8 +1825,25 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             let (host, chain) = object_target(app);
             let c = sale_collection(input)?;
             let count = input.get("count").and_then(Value::as_u64).unwrap_or(1);
-            if !(1..=10).contains(&count) {
-                return Err("mint between 1 and 10 at a time".into());
+            if !(1..=20).contains(&count) {
+                return Err("mint between 1 and 20 at a time".into());
+            }
+            // §187: this wallet's price in the open mint, and its count of the
+            // cap, by its blinded key on the sale's list.
+            let me = object_session(app, &host)?.me;
+            let key = objectvm::sale::allow_key(&c, &me);
+            let terms = crate::object_client::call(&host, "zyn_saleAllow", json!({ "collection": hex(&c), "key": hex(&key) }))
+                .ok()
+                .and_then(|a| a.get("open").filter(|o| !o.is_null()).cloned());
+            let listed_price: Option<i128> = terms.as_ref().and_then(|o| o["price"].as_str()).and_then(|p| p.parse().ok());
+            if let Some(o) = &terms {
+                let (minted, cap) = (o["minted"].as_u64().unwrap_or(0), o["cap"].as_u64().unwrap_or(0));
+                if minted >= cap {
+                    return Err(format!("this wallet has minted {cap}, the most one wallet may"));
+                }
+                if count > cap - minted {
+                    return Err(format!("this wallet may mint {} more", cap - minted));
+                }
             }
             let mut minted = Vec::new();
             let mut spent: Vec<[u8; 32]> = Vec::new();
@@ -1848,7 +1865,11 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 }
                 let serial = open.order[pos];
                 let w = object_session(app, &host)?;
-                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(s.price("open_price")?))?;
+                let price = match listed_price {
+                    Some(p) => p,
+                    None => s.price("open_price")?,
+                };
+                let (inputs, change) = crate::object_client::fund(&w.wallet, &w.nk, w.me, &w.viewing, s.quote, zyn_vm::Fixed(price))?;
                 let item = crate::object_client::sealed_output(w.me, &w.viewing, objectvm::market::item_asset(&c, serial), objectvm::market::ITEM_UNIT)?;
                 let proof = zyn_vm::commit::merkle_proof(&open.leaves, pos);
                 match submit_fresh(app, &host, chain, |nonce| objectvm::Op::MintOpen {
@@ -1864,6 +1885,7 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                 }) {
                     // Someone else minted that place first; take the next one.
                     Err(e) if e.contains("not the next item") || e.contains("already minted") => continue,
+                    Err(e) if e.contains("as many as one account may") => break,
                     other => {
                         other?;
                     }
