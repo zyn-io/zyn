@@ -201,18 +201,40 @@ async function pick() {
       status.textContent = entry.provider.isNapWeb ? "Nap's window is open — finish there." : 'Approve the connection in Nap.';
       options.forEach((o) => { o.disabled = true; });
       try {
-        const got = await connect(entry, { network: NETWORK });
-        if (got.session?.network !== NETWORK) throw new Error(`Nap answered on ${got.session?.network || 'another network'}, and this page is on ${NETWORK}. Connect again.`);
-        current = got;
-        current.provider.on?.('disconnect', () => { current = null; renderWalletButtons(); walletListeners.forEach((f) => f()); });
-        renderWalletButtons();
+        adopt(await connect(entry, { network: NETWORK }));
         dialog.close();
-        walletListeners.forEach((f) => f());
       } catch (e) {
         status.textContent = failText(e, 'Not connected. Nothing was shared.');
         status.classList.toggle('bad', e?.code !== 4001);
       } finally { options.forEach((o) => { o.disabled = false; }); }
     };
+  });
+}
+
+/// A connection Nap answered: kept, if it is on this page's network.
+function adopt(got) {
+  if (got.session?.network !== NETWORK) throw new Error(`Nap answered on ${got.session?.network || 'another network'}, and this page is on ${NETWORK}. Connect again.`);
+  current = got;
+  current.provider.on?.('disconnect', () => { current = null; renderWalletButtons(); walletListeners.forEach((f) => f()); });
+  renderWalletButtons();
+  walletListeners.forEach((f) => f());
+}
+
+/// Connected to Nap now, for a page that needs it to go on: straight to Nap
+/// when it is the only wallet here, the chooser otherwise. True if connected.
+async function napNow() {
+  if (current && canAskQuietly()) return true;
+  current = null;
+  const list = await discover({ web: NAP });
+  if (list.length === 1) {
+    adopt(await connect(list[0], { network: NETWORK }));
+    return true;
+  }
+  pick();
+  return new Promise((resolve) => {
+    const done = () => { walletListeners.delete(done); resolve(!!current); };
+    walletListeners.add(done);
+    dialog.addEventListener('close', done, { once: true });
   });
 }
 
@@ -866,10 +888,13 @@ async function passPage() {
     el('get').hidden = true;
     return;
   }
+  // One click: connect Nap if needed, then ask it for the pass.
   el('get').onclick = async () => {
-    if (!current) return pick();
     el('get').disabled = true;
     try {
+      say('Connecting Nap…');
+      if (!(await napNow())) { say('Not connected. Nothing was shared.'); return; }
+      if (gen !== generation) return;
       say("Approve the member pass in Nap's window.");
       const r = await ask('zyn_daoPass', {});
       if (gen !== generation) return;
