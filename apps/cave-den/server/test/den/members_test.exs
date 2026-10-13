@@ -190,6 +190,24 @@ defmodule Den.MembersTest do
     assert %{} = Den.Host.members()
   end
 
+  test "the host names the den's owner by the start of its device's name" do
+    import ExUnit.CaptureIO
+    a = "abc123" <> String.duplicate("0", 58)
+    b = "abc1239" <> String.duplicate("0", 57)
+    later = DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second)
+    Den.Rooms.admit(a, later)
+    Den.Rooms.admit(b, later)
+    assert capture_io(fn -> Den.Host.owner() end) =~ "no owner"
+    assert capture_io(fn -> Den.Host.owner("m-abc123") end) =~ "Several devices"
+    assert capture_io(fn -> Den.Host.owner("m-ab") end) =~ "at least six"
+    assert capture_io(fn -> Den.Host.owner("m-ffffff") end) =~ "No device in the den today"
+    assert capture_io(fn -> Den.Host.owner("m-abc1230") end) =~ "owns the den now"
+    assert Den.Mod.owner() == a
+    :ok = Den.Mod.timeout(a, b, 600, "test")
+    assert capture_io(fn -> Den.Host.audit() end) =~ ~r/m-abc1230000  timeout 600s m-abc1239000  \(test\)/
+    assert capture_io(fn -> Den.Host.owner(:clear) end) =~ "no owner now"
+  end
+
   test "a pass hash is SHA-256 over a zero byte, the domain and the code, as the page makes it" do
     assert Base.encode16(Members.hash(:binary.copy(<<0x11>>, 32)), case: :lower) == "89fbbb8554656bd7bdd0f200b552b67d6cc3c8faabd86261531e1d49ce822833"
   end

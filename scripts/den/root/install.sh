@@ -166,6 +166,12 @@ case "${1:-help}" in
   approve)  rpc "IO.inspect(Den.Host.approve($(q "${2:?a request id}")))" ;;
   decline)  rpc "IO.inspect(Den.Host.decline($(q "${2:?a request id}")))" ;;
   members)  rpc "IO.inspect(Den.Host.members())" ;;
+  owner)    case "${2:-}" in
+              "") rpc "Den.Host.owner()" ;;
+              --clear) rpc "Den.Host.owner(:clear)" ;;
+              *) rpc "Den.Host.owner($(q "$2"))" ;;
+            esac ;;
+  audit)    rpc "Den.Host.audit(${2:-30})" ;;
   logs)     docker compose logs --tail "${2:-100}" den ;;
   update)   docker compose pull && docker compose up -d ;;
   *) cat <<HELP
@@ -175,6 +181,9 @@ epeaky withdraw ID         withdraw an invite, and the pass it let in
 epeaky requests            people asking to join (when approval is open)
 epeaky approve ID          let a request in; epeaky decline ID turns it down
 epeaky members             how many members, by the way they joined
+epeaky owner [m-xxxxxx]    the den's owner; or make the device with that name the owner
+                           (it must have entered today); --clear for none
+epeaky audit [N]           what moderators did, the last N entries (30)
 epeaky logs [N]            the den's last N log lines
 epeaky update              pull the latest image and restart
 Settings: /opt/epeaky/.env (then: cd /opt/epeaky && docker compose up -d)
