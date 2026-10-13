@@ -346,6 +346,114 @@ pub fn terms_v3(p: &AllocationPolicy) -> TermsV3 {
     }
 }
 
+/// Collection Z's terms, v4 (DECISIONS §187): no tickets and no lottery; the
+/// collection goes straight to its open mint. The user, 13 Oct 2026: "0.05
+/// zec is price. whitelist applicants we accept all of them and allow them to
+/// mint in 0.01 zec. every wallet max 20 mints". The sale's list is every
+/// whitelist applicant who links a Zyn account; they pay the listed price.
+/// No account mints more than the cap, listed or not. The order the items
+/// come in is the policy's concealed shuffle over no tickets, under the
+/// announced close's reveal, so nobody chooses it and anyone can replay it.
+/// The treasury split, the DAO's terms and the credit rule are v3's, except
+/// that credit pays only the open mint, the one thing left to pay for.
+pub const TERMS_V4_VERSION: &str = "cave-sale-terms/v4";
+const TERMS_V4_DOMAIN: &[u8] = b"cave.sale.terms.v4";
+
+/// v3's published terms digest (§182), which v4 replaces before any sale.
+const SUPERSEDES_V3: &str = "cd4cdc6ab086ed51aa318093d34972f9567bcd8d3b855d19bfdbfc857b44e315";
+
+/// §187: the open price, the price for accounts on the list, and the cap.
+pub const OPEN_V4: u64 = 5_000_000; // 0.05 ZEC
+pub const LISTED_V4: u64 = 1_000_000; // 0.01 ZEC
+pub const CAP_V4: u32 = 20;
+/// Who is on the list: 1, every whitelist applicant who links a Zyn account.
+pub const LIST_APPLICANTS: u8 = 1;
+/// How the order is fixed: 1, the policy's concealed shuffle over no tickets
+/// under the announced close's reveal (drand round and Zcash block).
+pub const ORDER_REVEALED: u8 = 1;
+/// What credit pays in v4: the open mint (4).
+pub const CREDIT_PAYS_V4: u8 = 0b100;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermsV4 {
+    pub v3: TermsV3,
+    pub supersedes: [u8; 32],
+    pub open_price_zatoshi: u64,
+    pub listed_price_zatoshi: u64,
+    pub cap_per_account: u32,
+    pub list_rule: u8,
+    pub order_rule: u8,
+}
+
+impl TermsV4 {
+    /// The version, what it replaces, the collection, the open mint's prices,
+    /// cap, list and order, then v3's treasury, DAO and credit terms (credit
+    /// paying the open mint only). Integers big-endian, strings
+    /// length-prefixed, as before.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let v3 = &self.v3;
+        let v2 = &v3.v2;
+        let t = &v2.v1;
+        let mut out = Vec::new();
+        let text = |out: &mut Vec<u8>, s: &str| {
+            out.extend_from_slice(&(s.len() as u32).to_be_bytes());
+            out.extend_from_slice(s.as_bytes());
+        };
+        text(&mut out, TERMS_V4_VERSION);
+        out.extend_from_slice(&self.supersedes);
+        out.extend_from_slice(&t.policy_digest);
+        out.extend_from_slice(&t.collection_id);
+        out.extend_from_slice(&t.manifest_root);
+        out.push(v2.treasury_kind);
+        out.push(t.network);
+        out.extend_from_slice(&self.open_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&self.listed_price_zatoshi.to_be_bytes());
+        out.extend_from_slice(&self.cap_per_account.to_be_bytes());
+        out.push(self.list_rule);
+        out.push(self.order_rule);
+        out.extend_from_slice(&(t.treasury_bps as u32).to_be_bytes());
+        out.extend_from_slice(&v2.dao_backers.to_be_bytes());
+        out.extend_from_slice(&v2.dao_window_blocks.to_be_bytes());
+        out.extend_from_slice(&v2.dao_quorum_bps.to_be_bytes());
+        out.push(v3.credit_pays);
+        out.push(v3.credit_priced);
+        out.extend_from_slice(&v3.credit_median_seconds.to_be_bytes());
+        out.extend_from_slice(&v3.credit_min_readings.to_be_bytes());
+        out.extend_from_slice(&(v3.credit_tokens.len() as u32).to_be_bytes());
+        for (chain, token) in &v3.credit_tokens {
+            text(&mut out, chain);
+            text(&mut out, token);
+        }
+        out
+    }
+
+    /// SHA-256 over the length-prefixed domain and payload, as before.
+    pub fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let payload = self.canonical_bytes();
+        let mut h = Sha256::new();
+        h.update((TERMS_V4_DOMAIN.len() as u32).to_be_bytes());
+        h.update(TERMS_V4_DOMAIN);
+        h.update((payload.len() as u32).to_be_bytes());
+        h.update(&payload);
+        h.finalize().into()
+    }
+}
+
+pub fn terms_v4(p: &AllocationPolicy) -> TermsV4 {
+    let mut v3 = terms_v3(p);
+    v3.credit_pays = CREDIT_PAYS_V4;
+    TermsV4 {
+        v3,
+        supersedes: unhex32(SUPERSEDES_V3),
+        open_price_zatoshi: OPEN_V4,
+        listed_price_zatoshi: LISTED_V4,
+        cap_per_account: CAP_V4,
+        list_rule: LIST_APPLICANTS,
+        order_rule: ORDER_REVEALED,
+    }
+}
+
 /// The manifest as the allocator needs it, from the builder's `content.json`.
 ///
 /// The item id is derived here rather than read, because it is a function of
@@ -398,6 +506,11 @@ mod tests {
         let v3 = terms_v3(&p);
         assert_eq!(hex(&v3.supersedes), hex(&v2.digest()), "v3 names the v2 it replaces");
         assert_eq!(hex(&v3.digest()), V3_DIGEST, "the credit terms (§182)");
+        let v4 = terms_v4(&p);
+        assert_eq!(hex(&v4.supersedes), V3_DIGEST, "v4 names the v3 it replaces");
+        assert_eq!((v4.open_price_zatoshi, v4.listed_price_zatoshi, v4.cap_per_account), (5_000_000, 1_000_000, 20), "§187");
+        assert_eq!(v4.v3.credit_pays, 0b100, "credit pays the open mint only");
+        assert_eq!(hex(&v4.digest()), "ec3b0c2ffc7ae98423479d71d788ed47f975549e66626dc6f9df1b221d5004e8", "the open-mint terms (§187)");
     }
 
     /// §168.2's prices, from the terms rather than from the ledger's code.

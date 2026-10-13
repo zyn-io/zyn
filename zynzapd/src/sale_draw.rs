@@ -107,6 +107,15 @@ pub fn run(
     Ok(Draw { root: merkle_root(&leaves), won, batch: run.batch })
 }
 
+/// The open mint's order for a sale that closed with no tickets (§187): the
+/// same allocator over an empty ticket list, so the same reveal shuffles every
+/// serial and nobody chooses what comes next. Anyone can replay it with
+/// cave-randomness, as they can a draw.
+pub fn order_without_tickets(policy: &AllocationPolicy, manifest: &[ManifestEntry], close: &ResolvedClose, reveal: &RevealEvidence) -> Result<Vec<u32>, String> {
+    let batch = cave_randomness::allocate_announced(policy, manifest, &[], Some(reveal), close).map_err(|e| e.to_string())?;
+    Ok(batch.unused_indices)
+}
+
 /// The order the rest sell in once claims end: what the draw handed nobody,
 /// in the engine's revealed order, then what winners left unclaimed, in draw
 /// order. Both are fixed by the reveal, so nobody chooses what comes next.
@@ -201,6 +210,30 @@ mod tests {
         }
         let order = open_order(&a, &BTreeSet::new());
         assert_eq!(order.len(), 20, "unclaimed wins go back into the open mint");
+    }
+
+    /// §187: a sale that closed with no tickets goes straight to its open
+    /// mint. Its order is the same reveal's shuffle of every serial: each one
+    /// once, not in serial order, and fixed by the reveal alone.
+    #[test]
+    fn no_tickets_puts_every_serial_in_the_revealed_order() {
+        let p = policy(20);
+        let m = manifest(20);
+        let close = ResolvedClose { deposit_close_zcash_height: 3_402_000, reveal_zcash_height: 3_402_100, reveal_drand_round: 5_002_400 };
+        let sig = "83559dd072b76a12aaf0b3f902f24a01c731307878d424fd095986f8de75f2687d0a1489aaa72432d74366ae31591e1f";
+        let signature: Vec<u8> = (0..sig.len() / 2).map(|i| u8::from_str_radix(&sig[i * 2..i * 2 + 2], 16).unwrap()).collect();
+        let reveal = |block: u8| RevealEvidence {
+            beacon: DrandBeacon { chain_hash: cave_randomness::QUICKNET_CHAIN_HASH, round: 5_002_400, signature: signature.clone() },
+            zcash_height: 3_402_100,
+            zcash_block_hash: [block; 32],
+        };
+        let order = order_without_tickets(&p, &m, &close, &reveal(0x5b)).unwrap();
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..20).collect::<Vec<u32>>(), "every serial once");
+        assert_ne!(order, sorted, "shuffled, not in serial order");
+        assert_eq!(order_without_tickets(&p, &m, &close, &reveal(0x5b)).unwrap(), order, "the same reveal, the same order");
+        assert_ne!(order_without_tickets(&p, &m, &close, &reveal(0x5c)).unwrap(), order, "another reveal, another order");
     }
 
     #[test]

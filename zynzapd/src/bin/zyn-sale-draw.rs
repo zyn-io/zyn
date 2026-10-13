@@ -21,7 +21,10 @@
 //!                             track has a proposal
 //!   zyn-sale-draw close       CloseSale, once Zcash reaches the announced close
 //!   zyn-sale-draw draw        run the draw over every ticket and post its root
-//!   zyn-sale-draw open-mint   end claims; post the order the rest sell in
+//!   zyn-sale-draw open-mint   end claims; post the order the rest sell in. A
+//!                             sale closed with no tickets (§187) goes straight
+//!                             here: the order is the reveal's shuffle of all
+//!   zyn-sale-draw open-terms  the listed price and the cap per account (terms v4)
 //! ```
 //!
 //! Everything it decides can be re-derived by anyone: the tickets are public
@@ -81,6 +84,8 @@ const QUICKNET_PERIOD: u64 = 3;
 struct Ctx {
     policy: cave_randomness::AllocationPolicy,
     terms: cave_randomness::SaleTerms,
+    /// The open-mint terms (§187): open and listed prices, the cap.
+    v4: zynzapd::cave_z::TermsV4,
     network: zyn_custody::zebra::Network,
     node: String,
     rehearsal: bool,
@@ -94,12 +99,13 @@ fn ctx() -> Result<Ctx, String> {
         other => return Err(format!("ZYN_SALE_POLICY is published or rehearsal, not {other}")),
     };
     let terms = zynzapd::cave_z::terms(&policy);
+    let v4 = zynzapd::cave_z::terms_v4(&policy);
     let network = match env("ZYN_SALE_NETWORK", "mainnet").as_str() {
         "mainnet" => zyn_custody::zebra::Network::Mainnet,
         "testnet" => zyn_custody::zebra::Network::Testnet,
         other => return Err(format!("ZYN_SALE_NETWORK is mainnet or testnet, not {other}")),
     };
-    Ok(Ctx { policy, terms, network, node: env("ZYN_SALE_NODE", "http://127.0.0.1:8599"), rehearsal })
+    Ok(Ctx { policy, terms, v4, network, node: env("ZYN_SALE_NODE", "http://127.0.0.1:8599"), rehearsal })
 }
 
 impl Ctx {
@@ -181,6 +187,7 @@ fn status(c: &Ctx) -> Result<(), String> {
             println!("tickets    {}", s["tickets"]);
             let next = match s["phase"].as_str() {
                 Some("open") => "close, once Zcash reaches the announced close height",
+                Some("closed") if s["tickets"].as_u64() == Some(0) => "open-terms, then open-mint once the reveal block and drand round exist (no tickets: straight to the open mint)",
                 Some("closed") => "draw, once the reveal block and drand round exist",
                 Some("drawn") => "winners claim; open-mint when the claim window ends",
                 Some("openmint") => "the open mint sells the rest in its posted order",
@@ -229,7 +236,8 @@ fn open(c: &Ctx) -> Result<(), String> {
         collection: c.collection(),
         ticket_price: Fixed(c.terms.entry_price_zatoshi as i128 * ZAT),
         claim_price: Fixed(c.terms.claim_price_zatoshi as i128 * ZAT),
-        open_price: Fixed(c.terms.open_mint_price_zatoshi as i128 * ZAT),
+        // Terms v4 (§187): the open mint is the sale, at its price.
+        open_price: Fixed(c.v4.open_price_zatoshi as i128 * ZAT),
         treasury_bps: c.terms.treasury_bps as u32,
     };
     c.submit("open", &op)
@@ -334,8 +342,77 @@ fn draw(c: &Ctx) -> Result<(), String> {
     c.submit("post draw", &Op::PostDraw { program: program::sale_draw(), collection: c.collection(), root: d.root })
 }
 
+/// The announced close's reveal, checked: the chain closed where the
+/// announcement says, and the reveal's Zcash block and drand round exist.
+fn reveal(c: &Ctx, sale: &Value) -> Result<(cave_randomness::CloseAnnouncement, cave_randomness::ResolvedClose, cave_randomness::RevealEvidence), String> {
+    let (announcement, resolved) = c.announcement()?;
+    if sale["close_zcash_height"].as_u64() != Some(resolved.deposit_close_zcash_height as u64) {
+        return Err("the chain closed at a different height than the announcement names".into());
+    }
+    let zebra = c.zebra()?;
+    let tip = zebra.block_count().map_err(|e| e.to_string())?;
+    if tip < resolved.reveal_zcash_height as u64 {
+        return Err(format!("the reveal block is {}; Zcash is at {tip}", resolved.reveal_zcash_height));
+    }
+    let block = zebra.block_hash(resolved.reveal_zcash_height as u64).map_err(|e| e.to_string())?;
+    let beacon = zynzapd::reveal::beacon(resolved.reveal_drand_round, c.policy.randomness.drand_chain_hash, &get)
+        .map_err(|e| format!("drand round {} is not available yet: {e}", resolved.reveal_drand_round))?;
+    let reveal = zynzapd::reveal::reveal(beacon, resolved.reveal_zcash_height, block)?;
+    Ok((announcement, resolved, reveal))
+}
+
+/// The manifest, checked against the root the policy commits to.
+fn manifest(c: &Ctx) -> Result<Vec<cave_randomness::ManifestEntry>, String> {
+    let content = load_manifest(&env("ZYN_SALE_MANIFEST", ""))?;
+    let manifest = zynzapd::cave_z::manifest_from(&content);
+    let root = cave_randomness::manifest_root(c.policy.collection_id, &manifest).map_err(|e| e.to_string())?;
+    if root != c.policy.manifest_root {
+        return Err(format!("the manifest rebuilds {} but the policy commits {}", hex(&root), hex(&c.policy.manifest_root)));
+    }
+    Ok(manifest)
+}
+
+/// Set the open-mint terms (§187, terms v4): what accounts on the sale's list
+/// pay, and how many one account mints at most. Before the first mint.
+fn open_terms(c: &Ctx) -> Result<(), String> {
+    c.submit(
+        "open-mint terms",
+        &Op::SetOpenTerms {
+            program: program::sale_open_mint(),
+            collection: c.collection(),
+            listed_price: Fixed(c.v4.listed_price_zatoshi as i128 * ZAT),
+            cap: c.v4.cap_per_account,
+        },
+    )
+}
+
+/// §187: a sale that closed with no tickets goes straight to its open mint.
+/// No claims to wait for; the order is the reveal's shuffle of every serial,
+/// as the terms say, written beside the draw's files for anyone to replay.
+fn open_mint_without_tickets(c: &Ctx, sale: &Value) -> Result<(), String> {
+    let (_, resolved, reveal) = reveal(c, sale)?;
+    let manifest = manifest(c)?;
+    let mut order = sale_draw::order_without_tickets(&c.policy, &manifest, &resolved, &reveal)?;
+    let taken = minted(c)?;
+    let before = order.len();
+    order.retain(|s| !taken.contains(s));
+    if order.len() != before {
+        println!("open mint: {} serial(s) already exist and are left out", before - order.len());
+    }
+    let out = c.data_file("open")?;
+    std::fs::write(&out, serde_json::to_vec_pretty(&sale_draw::open_json(&c.collection(), &order)).unwrap()).map_err(|e| format!("{}: {e}", out.display()))?;
+    println!("open mint: {} items in the revealed order; written to {}", order.len(), out.display());
+    c.submit(
+        "post open mint",
+        &Op::PostOpenMint { program: program::sale_open_mint(), collection: c.collection(), root: sale_draw::open_root(&order), count: order.len() as u32 },
+    )
+}
+
 fn open_mint(c: &Ctx) -> Result<(), String> {
     let sale = c.sale()?.ok_or("there is no sale")?;
+    if sale["phase"].as_str() == Some("closed") && sale["tickets"].as_u64() == Some(0) {
+        return open_mint_without_tickets(c, &sale);
+    }
     if sale["phase"].as_str() != Some("drawn") {
         return Err(format!("the open mint follows the draw; the sale is {}", sale["phase"]));
     }
@@ -454,6 +531,7 @@ fn main() {
         "close" => close(&c),
         "draw" => draw(&c),
         "open-mint" => open_mint(&c),
+        "open-terms" => open_terms(&c),
         "gate" => gate(&c),
         "allow" => allow(&c),
         "dao" => dao(&c),

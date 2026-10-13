@@ -9,15 +9,16 @@
 //! It prints. It does not broadcast, sign, or write to the chain: publishing is
 //! a deliberate act and this is the thing you read before taking it.
 //!
-//!   zyn-cave-terms                 print the policy and terms (v3), with digests
-//!   zyn-cave-terms bytes           v3's canonical bytes, as hex
+//!   zyn-cave-terms                 print the policy and terms (v4), with digests
+//!   zyn-cave-terms bytes           v4's canonical bytes, as hex
+//!   zyn-cave-terms bytes-v3        v3's (superseded, §187)
 //!   zyn-cave-terms bytes-v2        v2's (superseded, §182)
 //!   zyn-cave-terms bytes-v1        v1's (superseded, §175)
 //!   zyn-cave-terms announce <H>    the close announcement for close height H
 
 
 use cave_randomness::CloseAnnouncement;
-use zynzapd::cave_z::{policy, terms, terms_v2, terms_v3};
+use zynzapd::cave_z::{policy, terms, terms_v2, terms_v3, terms_v4};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
@@ -68,8 +69,10 @@ fn main() {
     // publishable, not only their hash.
     let v2 = terms_v2(&p);
     let v3 = terms_v3(&p);
+    let v4 = terms_v4(&p);
     match std::env::args().nth(1).as_deref() {
-        Some("bytes") => return println!("{}", hex(&v3.canonical_bytes())),
+        Some("bytes") => return println!("{}", hex(&v4.canonical_bytes())),
+        Some("bytes-v3") => return println!("{}", hex(&v3.canonical_bytes())),
         Some("bytes-v2") => return println!("{}", hex(&v2.canonical_bytes())),
         Some("bytes-v1") => return println!("{}", hex(&t.canonical_bytes())),
         _ => {}
@@ -80,38 +83,32 @@ fn main() {
     println!("collection CAVEZ   {}", hex(&p.collection_id));
     println!("supply                {}", p.supply);
     println!("manifest root         {}", hex(&p.manifest_root));
-    println!("quantity              weighted 1:80  2:19  3:1");
-    println!("identity              concealed shuffle");
-    println!("close                 announced, >= 1152 blocks' notice");
-    println!("reveal                close + 100 blocks, announced round + 2400");
+    println!("sale                  open mint only: no tickets, no draw (v4)");
+    println!("order                 the policy's concealed shuffle over no tickets, under the announced close's reveal");
+    println!("close                 announced, >= 1152 blocks' notice; reveal at close + 100 blocks, announced round + 2400");
     println!("treasury              10% to the collection's DAO treasury (no key spends it)");
     println!(
-        "prices (zatoshi)      entry {}  claim {}  open mint {}",
-        t.entry_price_zatoshi, t.claim_price_zatoshi, t.open_mint_price_zatoshi
+        "prices (zatoshi)      open mint {}  whitelist applicants {}",
+        v4.open_price_zatoshi, v4.listed_price_zatoshi
     );
-    println!(
-        "whitelist             listed accounts only; ticket n > {} costs {} more per ticket past it",
-        v2.gate_base, v2.gate_step_zatoshi
-    );
-    println!("confirmations         {}", t.min_confirmations);
-    println!("claim window          {} blocks", t.claim_window_blocks);
-    let (pool, treasury) = t.split(t.entry_price_zatoshi);
-    println!("split of one entry    {} to the pool, {} to the DAO treasury", pool, treasury);
+    println!("cap                   {} items per account", v4.cap_per_account);
+    println!("list                  every whitelist applicant who links a Zyn account");
+    let (pool, treasury) = t.split(v4.open_price_zatoshi);
+    println!("split of one mint     {} to the pool, {} to the DAO treasury", pool, treasury);
     println!(
         "DAO                   {} backers, {}-block windows, {} bps quorum",
         v2.dao_backers, v2.dao_window_blocks, v2.dao_quorum_bps
     );
     println!(
-        "sale credit           burns of {} valued in USD, lower median of {} s (>= {} readings); pays tickets, claims, open mint",
+        "sale credit           burns of {} valued in USD, lower median of {} s (>= {} readings); pays the open mint",
         v3.credit_tokens.iter().map(|(c, t)| format!("{t} on {c}")).collect::<Vec<_>>().join(" and "),
         v3.credit_median_seconds,
         v3.credit_min_readings
     );
-    println!("burn tickets          none (v2's are replaced by credit)");
     println!();
     println!("POLICY DIGEST  {}", hex(&t.policy_digest));
-    println!("TERMS DIGEST   {}  (cave-sale-terms/v3)", hex(&v3.digest()));
-    println!("SUPERSEDES     {}  (v2)", hex(&v3.supersedes));
+    println!("TERMS DIGEST   {}  (cave-sale-terms/v4)", hex(&v4.digest()));
+    println!("SUPERSEDES     {}  (v3)", hex(&v4.supersedes));
 }
 
 #[cfg(test)]
