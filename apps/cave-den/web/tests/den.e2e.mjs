@@ -169,6 +169,14 @@ await until(B.p, () => /This one will go/.test(document.querySelector('#log')?.t
 await A.p.evaluate(([id]) => window.__den.remove('general', id), [goneId]);
 ok(await until(B.p, ([id]) => document.querySelector(`#log li[data-id="${id}"]`)?.classList.contains('gone'), [goneId]), 'a deletion reaches B');
 
+// Fresh keys: A replaces its own MLS keys in General; the room moves on and B reads A after it.
+const epochBefore = await A.p.evaluate(() => Number(window.__den.den.epoch('general')));
+await A.p.evaluate(() => window.__den.refreshKeys('general'));
+ok(await A.p.evaluate(([e]) => Number(window.__den.den.epoch('general')) === e + 1, [epochBefore]), "A's fresh keys are a commit the den ordered");
+await A.p.fill('#say-text', 'Keys refreshed.');
+await A.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => /Keys refreshed\./.test(document.querySelector('#log')?.textContent || ''), null, 15000), 'B reads A after A refreshed its keys');
+
 // Typing.
 await B.p.type('#say-text', 'typ');
 ok(await until(A.p, () => /is writing/.test(document.querySelector('#typing')?.textContent || ''), null, 8000), 'A sees B writing');

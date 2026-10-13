@@ -417,6 +417,7 @@ export class DenClient {
     (this.seenMembers ||= {})[room] = new Set(this.members(room).map((m) => m.key));
     this.on('ready', { room, members: this.members(room) });
     this.tellSeen(room);
+    this.soonRefresh(room);
     const present = (await this.push(ch, 'state', {})).present || [];
     const stale = this.members(room).map((m) => m.key).filter((k) => k !== this.den.key() && !present.includes(k));
     if (stale.length) await this.removeStale(room, stale, false);
@@ -845,6 +846,40 @@ export class DenClient {
       await this.kv.del(`log:${room}`);
       await this.save();
       this.on('rooms', [...this.rooms.values()]);
+    });
+  }
+
+  // ---- Fresh keys ----------------------------------------------------------------
+
+  /// Once a day in each room, at a random moment, this device replaces its
+  /// own MLS keys (a self-update commit): whoever once copied its state reads
+  /// nothing sent after that.
+  async soonRefresh(room) {
+    (this.refreshSoon ||= {});
+    if (this.refreshSoon[room]) return;
+    const last = (await this.kv.get(`refresh:${room}`)) || 0;
+    const due = Math.max(last + 86_400_000, Date.now()) + Math.random() * 30 * 60_000;
+    this.refreshSoon[room] = setTimeout(() => {
+      delete this.refreshSoon[room];
+      this.refreshKeys(room).catch(() => {}).finally(() => this.soonRefresh(room));
+    }, Math.min(due - Date.now(), 2 ** 31 - 1));
+  }
+
+  refreshKeys(room) {
+    return this.lock(async () => {
+      if (!this.inRoom(room)) return;
+      const commit = this.den.refresh(room);
+      try {
+        const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(commit) });
+        this.den.confirm(room);
+        await this.advance(room, r.seq);
+        await this.publishInfo(room);
+        await this.kv.put(`refresh:${room}`, Date.now());
+      } catch (e) {
+        // Someone changed the room first: next time.
+        this.den.discard(room);
+      }
+      await this.save();
     });
   }
 

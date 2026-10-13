@@ -319,6 +319,17 @@ impl Member {
         Ok(Some(commit.tls_serialize_detached().map_err(err("commit bytes"))?))
     }
 
+    /// Fresh keys for this device's leaf in a room (an MLS self-update
+    /// commit, pending until the server orders it; then `confirm`, or
+    /// `discard`). Someone who once copied this device's state reads nothing
+    /// sent after it: post-compromise security, as RFC 9420 §16.6 describes.
+    pub fn refresh(&mut self, room: &str) -> Result<Vec<u8>, String> {
+        let (provider, signer) = (&self.provider, &self.signer);
+        let group = self.groups.get_mut(room).ok_or_else(|| format!("not in {room}"))?;
+        let bundle = group.self_update(provider, signer, LeafNodeParameters::default()).map_err(err("refresh"))?;
+        bundle.into_commit().tls_serialize_detached().map_err(err("commit bytes"))
+    }
+
     /// The server ordered this device's pending commit: apply it.
     pub fn confirm(&mut self, room: &str) -> Result<u64, String> {
         let provider = &self.provider;
@@ -608,6 +619,9 @@ mod wasm {
         pub fn export(&self, room: &str, label: &str, len: usize) -> Result<Vec<u8>, JsError> {
             self.0.export(room, label, len).map_err(js)
         }
+        pub fn refresh(&mut self, room: &str) -> Result<Vec<u8>, JsError> {
+            self.0.refresh(room).map_err(js)
+        }
         pub fn confirm(&mut self, room: &str) -> Result<u64, JsError> {
             self.0.confirm(room).map_err(js)
         }
@@ -871,6 +885,9 @@ mod tests {
         a.receive("general", &join).unwrap();
         w("general-1.info", &a.group_info("general").unwrap());
         w("text.bin", &b.send("general", "hello").unwrap());
+        // B's fresh keys, at the same epoch as A's removal of B below.
+        w("update.bin", &b.refresh("general").unwrap());
+        b.discard("general").unwrap();
         w("remove.bin", &a.remove("general", &[b.key()]).unwrap().unwrap());
         // X starts another group called "general": its GroupInfo is a fork.
         w("fork.info", &x.create("general").unwrap());
@@ -947,6 +964,37 @@ mod tests {
             Event::Text { key, .. } => assert_eq!(key, c.key(), "credited to its author at its own epoch"),
             e => panic!("{e:?}"),
         }
+    }
+
+    /// A device that refreshes its keys locks out whoever copied its state
+    /// before: the copy follows other members' changes (their path secrets
+    /// are sealed to the keys it copied) until the device itself refreshes.
+    #[test]
+    fn a_refresh_locks_out_a_copy_of_the_device() {
+        let (mut a, mut b) = (Member::new().unwrap(), Member::new().unwrap());
+        let info = a.create("general").unwrap();
+        let jb = b.join("general", &info).unwrap();
+        a.receive("general", &jb).unwrap();
+        // Someone copies B's whole state.
+        let mut thief = Member::restore(&b.save().unwrap()).unwrap();
+        // A refreshes: the copy, holding B's old keys, still follows.
+        let ua = a.refresh("general").unwrap();
+        assert!(envelope(&ua).unwrap().commit && !envelope(&ua).unwrap().external);
+        a.confirm("general").unwrap();
+        b.receive("general", &ua).unwrap();
+        thief.receive("general", &ua).unwrap();
+        let m = a.send("general", "before B refreshes").unwrap();
+        assert_eq!(text(thief.receive("general", &m).unwrap()), "before B refreshes", "why every device must refresh its own keys");
+        // B refreshes: the copy cannot follow, and reads nothing after.
+        let ub = b.refresh("general").unwrap();
+        b.confirm("general").unwrap();
+        a.receive("general", &ub).unwrap();
+        assert!(thief.receive("general", &ub).is_err());
+        let m2 = a.send("general", "after B refreshes").unwrap();
+        assert!(thief.receive("general", &m2).is_err(), "the copy reads nothing new");
+        assert_eq!(text(b.receive("general", &m2).unwrap()), "after B refreshes");
+        assert_eq!(a.members("general").unwrap().len(), 2, "still the same two members");
+        assert_ne!(a.export("general", "den voice", 32).unwrap(), thief.export("general", "den voice", 32).unwrap());
     }
 
     /// A Welcome to an open room is refused before anything is stored: the

@@ -97,6 +97,21 @@ defmodule DenWeb.RoomChannelTest do
     assert_reply ref, :ok, %{messages: [%{seq: 1, epoch: 0, commit: true}, %{seq: 2, epoch: 1, commit: false}, %{seq: 3, epoch: 1, commit: true}]}
   end
 
+  test "a device's fresh keys (an MLS self-update) are ordered like any commit, by that device only" do
+    %{"a" => ka, "b" => kb} = keys()
+    {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
+    {:ok, _, b} = subscribe_and_join(device(kb), DenWeb.RoomChannel, "room:general")
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :ok
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :ok, %{epoch: 1}
+    ref = push(a, "relay", %{"bytes" => mls("update.bin")})
+    assert_reply ref, :error, %{reason: "a commit is signed by the device that sends it"}
+    ref = push(b, "relay", %{"bytes" => mls("update.bin")})
+    assert_reply ref, :ok, %{epoch: 2}
+    assert Enum.sort(Den.Rooms.members(Den.Rooms.get("general"))) == Enum.sort([ka, kb]), "the same two members, with new keys"
+  end
+
   test "a commit most members report they cannot apply is undone, and its sender may not commit there for a day" do
     %{"a" => ka, "b" => kb, "c" => kc} = keys()
     {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
