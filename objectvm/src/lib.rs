@@ -529,6 +529,15 @@ pub enum Op {
         root: Hash,
         count: u32,
     },
+    /// Open-mint terms (§187): what an account on the sale's list pays, and
+    /// how many items one account mints at most. Operator only, before the
+    /// first mint.
+    SetOpenTerms {
+        program: ProgramId,
+        collection: Address,
+        listed_price: Fixed,
+        cap: u32,
+    },
     /// Mint the next item of the open-mint order at the open price.
     MintOpen {
         buyer: AccountId,
@@ -783,6 +792,7 @@ pub enum Receipt {
     DrawPosted { collection: Address },
     ItemsClaimed { created: Vec<Hash> },
     OpenMintPosted { collection: Address, count: u32 },
+    OpenTermsSet { collection: Address, listed_price: Fixed, cap: u32 },
     VoucherCapSet { collection: Address, cap: u32 },
     VoucherPosted { first: Hash, count: u32 },
     SaleCreditFunded { collection: Address, budget: Fixed },
@@ -2383,6 +2393,11 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_post_open_mint(collection, root, *count)
             }),
+            Op::SetOpenTerms { program, collection, listed_price, cap } => one(if *program != program::sale_open_mint() {
+                Err("wrong program for open-mint terms")
+            } else {
+                self.apply_set_open_terms(collection, *listed_price, *cap)
+            }),
             Op::MintOpen { buyer, program, collection, serial, proof, item, nonce, inputs, change } => {
                 one(if *program != program::sale_mint() {
                     Err("wrong program for a mint")
@@ -3082,6 +3097,9 @@ impl MicrochainVm for ObjectVm {
             Op::PostOpenMint { program, collection, root, count } => {
                 e.u8(31).bytes(&program.0).bytes(collection).bytes(root).u32(*count);
             }
+            Op::SetOpenTerms { program, collection, listed_price, cap } => {
+                e.u8(68).bytes(&program.0).bytes(collection).fixed(*listed_price).u32(*cap);
+            }
             Op::MintOpen { buyer, program, collection, serial, proof, item, nonce, inputs, change } => {
                 e.u8(32).bytes(buyer).bytes(&program.0).bytes(collection).u32(*serial);
                 wire::proof(&mut e, proof);
@@ -3621,6 +3639,7 @@ impl MicrochainVm for ObjectVm {
                 amount: d.fixed().ok()?,
             }),
             67 => Some(Op::RedeemCredit { buyer: d.account().ok()?, program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, secret: d.hash().ok()? }),
+            68 => Some(Op::SetOpenTerms { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, listed_price: d.fixed().ok()?, cap: d.u32().ok()? }),
             33 => Some(Op::SetVoucherCap { program: ProgramId(d.hash().ok()?), collection: d.hash().ok()?, cap: d.u32().ok()? }),
             34 => Some(Op::PostVoucher {
                 program: ProgramId(d.hash().ok()?),

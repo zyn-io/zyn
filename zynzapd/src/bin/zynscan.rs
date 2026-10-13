@@ -256,6 +256,7 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // Minted items are public (collection and serial); who claimed them is not.
         Op::ClaimItems { collection, serials, .. } => ("Items claimed", false, json!({ "collection": hex(collection), "serials": serials })),
         Op::PostOpenMint { collection, root, count, .. } => ("Open mint posted", true, json!({ "collection": hex(collection), "root": hex(root), "items": count })),
+        Op::SetOpenTerms { collection, listed_price, cap, .. } => ("Open-mint terms set", true, json!({ "collection": hex(collection), "listed_price": listed_price.0.to_string(), "cap": cap })),
         Op::MintOpen { collection, serial, .. } => ("Open mint", false, json!({ "collection": hex(collection), "serial": serial })),
         Op::SetVoucherCap { collection, cap, .. } => ("Burn tickets capped", true, json!({ "collection": hex(collection), "cap": cap })),
         // A burn is public on its own chain already; which Zyn account it

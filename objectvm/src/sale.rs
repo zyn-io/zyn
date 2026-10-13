@@ -24,6 +24,11 @@
 //!   commits the order the rest are sold in; anyone then mints the next one
 //!   at the open price, proved against that root.
 //!
+//! * **Open-mint terms** (`SetOpenTerms`, DECISIONS §187): accounts on the
+//!   sale's list (the gate's) mint at a lower price, and no account mints
+//!   more than a cap. Set before the first mint; the list may still grow
+//!   during the open mint.
+//!
 //! * **Burn tickets** (`SetVoucherCap`, `PostVoucher`, `ClaimVoucherItems`,
 //!   DECISIONS §145): the operator records a burn of a promotional token on
 //!   another chain, once, and it becomes tickets in the same list, under ids
@@ -880,9 +885,24 @@ impl ObjectVm {
         if self.market.claims.contains_key(&crate::market::claim_id(&treasury_source(collection, &payment), 0)) {
             return Err("that nonce was already used");
         }
-        self.take_sale_payment(buyer, collection, &payment, s.open_price, inputs, change)?;
+        // Open-mint terms (§187): the cap, and the listed price for accounts
+        // on the sale's list.
+        let key = allow_key(collection, buyer);
+        let price = match self.market.open_terms.get(collection) {
+            None => s.open_price,
+            Some(o) => {
+                if o.minted.get(&key).copied().unwrap_or(0) >= o.cap {
+                    return Err("this account has minted as many as one account may");
+                }
+                if self.market.sale_gates.get(collection).is_some_and(|g| g.allowed.contains_key(&key)) { o.listed_price } else { s.open_price }
+            }
+        };
+        self.take_sale_payment(buyer, collection, &payment, price, inputs, change)?;
         self.mint_checked(collection, serial, item, c)?;
         self.market.sales.get_mut(collection).expect("checked above").open_next = s.open_next + 1;
+        if let Some(o) = self.market.open_terms.get_mut(collection) {
+            *o.minted.entry(key).or_insert(0) += 1;
+        }
         Ok(Receipt::ItemsClaimed { created: vec![c] })
     }
 }
@@ -982,7 +1002,10 @@ impl ObjectVm {
     /// Add-only: an account already on it keeps its count.
     pub(crate) fn apply_allow_buyers(&mut self, collection: &Address, keys: &[Hash]) -> Result<Receipt, &'static str> {
         let (s, _) = self.sale(collection)?;
-        if s.phase != Phase::Open && s.phase != Phase::Closed && s.phase != Phase::Drawn {
+        // The list stays open through the open mint when it sets a price
+        // there (§187): someone listed late still mints at it.
+        let open_mint_list = s.phase == Phase::OpenMint && self.market.open_terms.contains_key(collection);
+        if s.phase != Phase::Open && s.phase != Phase::Closed && s.phase != Phase::Drawn && !open_mint_list {
             return Err("the sale's list is closed");
         }
         if keys.is_empty() || keys.len() > MAX_ALLOW_PER_OP {
@@ -1003,5 +1026,85 @@ impl ObjectVm {
     /// listed account in a gated one.
     pub(crate) fn sale_allows(&self, collection: &Address, who: &AccountId) -> bool {
         self.market.sale_gates.get(collection).is_none_or(|g| g.allowed.contains_key(&allow_key(collection, who)))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Open-mint terms (§187): a price for accounts on the sale's list (its gate),
+// and a cap on how many items one account mints, counted by the same blinded
+// key. Beside the sale, like the gate, so a sale without them hashes and
+// saves exactly as before.
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct OpenTerms {
+    /// What a listed account pays per item.
+    pub listed_price: Fixed,
+    /// Items one account mints at most.
+    pub cap: u32,
+    /// Items each account has minted, by `allow_key`.
+    pub minted: std::collections::BTreeMap<Hash, u32>,
+}
+
+fn open_terms_leaf(collection: &Address, o: &OpenTerms) -> Hash {
+    let leaves: Vec<Hash> = o.minted.iter().map(|(k, n)| {
+        let mut e = Encoder::new();
+        e.bytes(b"objectvm.open-minted-leaf.v1").bytes(k).u32(*n);
+        e.leaf()
+    }).collect();
+    let mut e = Encoder::new();
+    e.bytes(b"objectvm.open-terms-leaf.v1").bytes(collection).fixed(o.listed_price).u32(o.cap).u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
+    e.leaf()
+}
+
+/// The open-mint terms' part of the market's leaf, joined only once a sale has them.
+pub(crate) fn open_terms_section(e: &mut Encoder, terms: &std::collections::BTreeMap<Address, OpenTerms>) {
+    let leaves: Vec<Hash> = terms.iter().map(|(c, o)| open_terms_leaf(c, o)).collect();
+    e.bytes(b"objectvm.open-terms.v1").u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
+}
+
+pub(crate) fn encode_open_terms(e: &mut Encoder, terms: &std::collections::BTreeMap<Address, OpenTerms>) {
+    e.u32(terms.len() as u32);
+    for (c, o) in terms {
+        e.bytes(c).fixed(o.listed_price).u32(o.cap).u32(o.minted.len() as u32);
+        for (k, n) in &o.minted {
+            e.bytes(k).u32(*n);
+        }
+    }
+}
+
+pub(crate) fn decode_open_terms(d: &mut Decoder) -> Option<std::collections::BTreeMap<Address, OpenTerms>> {
+    let mut terms = std::collections::BTreeMap::new();
+    for _ in 0..d.u32().ok()? {
+        let c = d.hash().ok()?;
+        let listed_price = d.fixed().ok()?;
+        let cap = d.u32().ok()?;
+        let mut minted = std::collections::BTreeMap::new();
+        for _ in 0..d.u32().ok()? {
+            minted.insert(d.hash().ok()?, d.u32().ok()?);
+        }
+        terms.insert(c, OpenTerms { listed_price, cap, minted });
+    }
+    Some(terms)
+}
+
+impl ObjectVm {
+    /// Set a sale's open-mint terms (operator): before the first mint, so no
+    /// one minted under terms that then changed. The listed price is at most
+    /// the open price.
+    pub(crate) fn apply_set_open_terms(&mut self, collection: &Address, listed_price: Fixed, cap: u32) -> Result<Receipt, &'static str> {
+        let (s, _) = self.sale(collection)?;
+        if s.phase == Phase::OpenMint && s.open_next > 0 {
+            return Err("open-mint terms are set before the first mint");
+        }
+        if listed_price.0 <= 0 || listed_price.0 > s.open_price.0 {
+            return Err("the listed price is above zero and at most the open price");
+        }
+        if cap == 0 {
+            return Err("an account may mint at least one");
+        }
+        let o = self.market.open_terms.entry(*collection).or_default();
+        o.listed_price = listed_price;
+        o.cap = cap;
+        Ok(Receipt::OpenTermsSet { collection: *collection, listed_price, cap })
     }
 }

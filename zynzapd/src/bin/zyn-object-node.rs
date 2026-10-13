@@ -439,6 +439,8 @@ fn market_json(vm: &ObjectVm, epoch_seconds: u64) -> String {
                 // A gated sale (§168): who is on the list stays blinded; how
                 // many are, and the price rule, are public.
                 "gate": vm.market.sale_gates.get(&s.collection).map(|g| serde_json::json!({ "base": g.base, "listed": g.allowed.len() })),
+                // Open-mint terms (§187): the listed price and the cap per account.
+                "open_terms": vm.market.open_terms.get(&s.collection).map(|o| serde_json::json!({ "listed_price": o.listed_price.0.to_string(), "cap": o.cap })),
                 // Sale credit (§182): what the team's funding still covers.
                 "credit_budget": vm.market.credits.budgets.get(&s.collection).map_or(0, |b| b.0).to_string(),
             })
@@ -1187,12 +1189,25 @@ fn handle(
                 return err("zyn_saleAllow needs a collection and a key");
             };
             let n = node.lock().unwrap();
-            let gate = n.state().market.sale_gates.get(&collection);
+            let market = &n.state().market;
+            let gate = market.sale_gates.get(&collection);
+            let on_list = gate.is_some_and(|g| g.allowed.contains_key(&key));
+            // Open-mint terms (§187): this account's price there, and how many
+            // it has minted of the most one account may.
+            let open = market.open_terms.get(&collection).map(|o| {
+                let open_price = market.sales.get(&collection).map_or(0, |s| s.open_price.0);
+                serde_json::json!({
+                    "price": (if on_list { o.listed_price.0 } else { open_price }).to_string(),
+                    "minted": o.minted.get(&key).copied().unwrap_or(0),
+                    "cap": o.cap,
+                })
+            });
             let v = serde_json::json!({
                 "gated": gate.is_some(),
                 "listed": gate.is_none_or(|g| g.allowed.contains_key(&key)),
                 "bought": gate.and_then(|g| g.allowed.get(&key)).copied().unwrap_or(0),
                 "base": gate.map(|g| g.base),
+                "open": open,
             });
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{v}}}")
         }
