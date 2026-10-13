@@ -232,6 +232,12 @@ export class DenClient {
   async sync(room, state, tries = 0) {
     const ch = this.channels.get(room);
     const kind = state.kind || this.rooms.get(room)?.kind;
+    // An open room the den has no group for (started afresh): this device's
+    // old group is gone with it; start the room again.
+    if (kind !== 'private' && !state.group_info && this.den.rooms().includes(room)) {
+      try { this.den.forget(room); } catch { /* not in it */ }
+      this.seq[room] = 0;
+    }
     if (!this.den.rooms().includes(room)) {
       // A private room is entered by invitation only: wait for the Welcome.
       if (kind === 'private') return;
@@ -413,11 +419,14 @@ export class DenClient {
     return this.lock(async () => {
       const id = `p-${hex(rand(16))}`;
       await this.push(this.lobby, 'private_room', { id });
-      this.den.create(id);
+      const info = this.den.create(id);
       this.rooms.set(id, { id, title: String(title || '').slice(0, 60), kind: 'private' });
       await this.keepPrivate();
       this.joinRoom(id);
       if (!(await this.joined.get(id))) throw new Error('The den would not open the room.');
+      // The den tracks the room's public state from its first GroupInfo
+      // (it keeps none for joiners: a private room is joined by invitation).
+      await this.push(this.channels.get(id), 'create', { group_info: b64(info) });
       await this.invite(id, keys);
       if (title) await this.lockless_send(id, { t: 'title', text: title });
       this.on('rooms', [...this.rooms.values()]);

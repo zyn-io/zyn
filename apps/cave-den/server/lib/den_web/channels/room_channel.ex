@@ -64,13 +64,15 @@ defmodule DenWeb.RoomChannel do
 
   def handle_in("relay", %{"bytes" => b64}, socket) do
     with {:ok, bytes} <- decode(b64),
-         {:ok, m} <- Rooms.relay(socket.assigns.room, bytes) do
+         {:ok, m} <- Rooms.relay(socket.assigns.room, bytes, socket.assigns.key) do
       broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64})
       {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch)}}, socket}
     else
       {:error, {:epoch, e}} -> {:reply, {:error, %{reason: "epoch", epoch: e}}, socket}
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
+      {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
+      {:error, {:bad_commit, _}} -> {:reply, {:error, %{reason: "that commit does not check out against the room"}}, socket}
       {:error, why} -> {:reply, {:error, %{reason: inspect(why)}}, socket}
     end
   end

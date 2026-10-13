@@ -49,7 +49,9 @@ defmodule Den.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       # Voice rooms (§184): a selective forwarding unit in Elixir.
-      {:ex_webrtc, "~> 0.17.0"}
+      {:ex_webrtc, "~> 0.17.0"},
+      # The rooms' public MLS state (native/den_public): commits checked before ordering.
+      {:rustler, "~> 0.38.0", runtime: false}
     ]
   end
 

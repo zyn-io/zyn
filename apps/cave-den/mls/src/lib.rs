@@ -31,11 +31,12 @@ fn err<E: std::fmt::Debug>(what: &str) -> impl FnOnce(E) -> String + '_ {
     move |e| format!("{what}: {e:?}")
 }
 
-/// Commits a member makes are encrypted; incoming may be either, since an
-/// external join is always public.
+/// Commits a member makes are PublicMessages (signed, not encrypted), so the
+/// den can check each against the room's public state before ordering it;
+/// application messages are always PrivateMessages. Incoming may be either.
 fn join_config() -> MlsGroupJoinConfig {
     MlsGroupJoinConfig::builder()
-        .wire_format_policy(MIXED_CIPHERTEXT_WIRE_FORMAT_POLICY)
+        .wire_format_policy(MIXED_PLAINTEXT_WIRE_FORMAT_POLICY)
         .use_ratchet_tree_extension(true)
         .padding_size(64)
         .max_past_epochs(4)
@@ -150,7 +151,7 @@ impl Member {
         let group = MlsGroup::builder()
             .ciphersuite(SUITE)
             .with_group_id(GroupId::from_slice(room.as_bytes()))
-            .with_wire_format_policy(MIXED_CIPHERTEXT_WIRE_FORMAT_POLICY)
+            .with_wire_format_policy(MIXED_PLAINTEXT_WIRE_FORMAT_POLICY)
             .use_ratchet_tree_extension(true)
             .padding_size(64)
             .max_past_epochs(4)
@@ -765,6 +766,51 @@ mod tests {
         let other = Member::new().unwrap();
         let theirs = hex::decode(other.key()).unwrap();
         assert!(crypto.verify_signature(SignatureScheme::ED25519, &enter_payload(&msg), &theirs, &sig).is_err(), "not another key's");
+    }
+
+    /// Commits go out as PublicMessages (wire format 1) for the den to check;
+    /// words as PrivateMessages (wire format 2) it cannot read.
+    #[test]
+    fn commits_are_public_and_words_are_private() {
+        let (mut a, mut b) = (Member::new().unwrap(), Member::new().unwrap());
+        let _ = a.create("general").unwrap();
+        let join = b.join("general", &a.group_info("general").unwrap()).unwrap();
+        a.receive("general", &join).unwrap();
+        let words = a.send("general", "hello").unwrap();
+        assert_eq!(&words[2..4], &[0, 2], "words are PrivateMessages");
+        let commit = a.remove("general", &[b.key()]).unwrap().unwrap();
+        assert_eq!(&commit[2..4], &[0, 1], "a member's commit is a PublicMessage");
+    }
+
+    /// The den's tests use real MLS messages from this library:
+    /// `cargo test write_server_fixtures -- --ignored` (re)writes them.
+    #[test]
+    #[ignore]
+    fn write_server_fixtures() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../server/test/fixtures/mls");
+        std::fs::create_dir_all(&dir).unwrap();
+        let w = |n: &str, b: &[u8]| std::fs::write(dir.join(n), b).unwrap();
+        let (mut a, mut b, mut c, mut x) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
+        // An open room: A starts it, B joins by external commit, B writes, A removes B.
+        w("general.info", &a.create("general").unwrap());
+        let join = b.join("general", &a.group_info("general").unwrap()).unwrap();
+        w("join.bin", &join);
+        a.receive("general", &join).unwrap();
+        w("general-1.info", &a.group_info("general").unwrap());
+        w("text.bin", &b.send("general", "hello").unwrap());
+        w("remove.bin", &a.remove("general", &[b.key()]).unwrap().unwrap());
+        // X starts another group called "general": its GroupInfo is a fork.
+        w("fork.info", &x.create("general").unwrap());
+        // A private room: A starts it and adds C; B tries an external join.
+        const P: &str = "p-00112233445566778899aabbccddeeff";
+        w("private.info", &a.create(P).unwrap());
+        let (add, _welcome) = a.add(P, &c.key_packages(1).unwrap(), &[c.key()]).unwrap();
+        w("private-add.bin", &add);
+        a.confirm(P).unwrap();
+        w("private-join.bin", &b.join(P, &a.group_info(P).unwrap()).unwrap());
+        let keys = serde_json::json!({ "a": a.key(), "b": b.key(), "c": c.key(), "x": x.key() });
+        w("keys.json", keys.to_string().as_bytes());
+        let _ = &mut c;
     }
 
     /// The token round trip against a door key: what the door signs is the

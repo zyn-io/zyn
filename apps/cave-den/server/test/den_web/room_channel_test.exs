@@ -2,7 +2,6 @@ defmodule DenWeb.RoomChannelTest do
   use DenWeb.ChannelCase, async: false
 
   @f Path.expand("../fixtures", __DIR__)
-  defp b64(f), do: Base.encode64(File.read!(Path.join(@f, f)))
 
   setup do
     Den.Rooms.seed()
@@ -20,50 +19,75 @@ defmodule DenWeb.RoomChannelTest do
     assert connect(DenWeb.UserSocket, %{"session" => Phoenix.Token.sign(DenWeb.Endpoint, "den", %{key: key})}) == :error
   end
 
-  test "a room: made once, one commit per epoch, words in order, history", %{socket: socket, key: key} do
-    {:ok, reply, socket} = subscribe_and_join(socket, DenWeb.RoomChannel, "room:general")
-    assert %{epoch: 0, seq: 0, group_info: nil, title: "General"} = reply
-    assert reply.present == [key]
-    assert {:error, %{reason: "no such room"}} = join(socket, DenWeb.RoomChannel, "room:nowhere")
+  # Real MLS messages from the den's library (test/fixtures/mls, written by
+  # `cargo test write_server_fixtures -- --ignored`): A starts General, B joins
+  # by external commit and writes, A removes B; X's "general" is a fork.
+  @m Path.join(@f, "mls")
+  defp mls(f), do: Base.encode64(File.read!(Path.join(@m, f)))
+  defp keys, do: Jason.decode!(File.read!(Path.join(@m, "keys.json")))
 
-    # Words before any group are refused; the first create wins.
-    ref = push(socket, "relay", %{"bytes" => b64("text.bin")})
+  defp device(key) do
+    Den.Rooms.admit(key, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
+    {:ok, socket} = connect(DenWeb.UserSocket, %{"session" => Phoenix.Token.sign(DenWeb.Endpoint, "den", %{key: key})})
+    socket
+  end
+
+  test "a room: made once, each commit checked and signed by its sender, words in order, history" do
+    %{"a" => ka, "b" => kb} = keys()
+    {:ok, reply, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
+    assert %{epoch: 0, seq: 0, group_info: nil, title: "General"} = reply
+    {:ok, _, b} = subscribe_and_join(device(kb), DenWeb.RoomChannel, "room:general")
+
+    # Words before any group are refused; a GroupInfo must be a real one, for this room; the first wins.
+    ref = push(b, "relay", %{"bytes" => mls("text.bin")})
     assert_reply ref, :error, %{reason: "no group yet"}
-    ref = push(socket, "create", %{"group_info" => Base.encode64("info-0")})
+    ref = push(a, "create", %{"group_info" => Base.encode64("info-0")})
+    assert_reply ref, :error, %{reason: "group_info"}
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
     assert_reply ref, :ok
-    ref = push(socket, "create", %{"group_info" => Base.encode64("other")})
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
     assert_reply ref, :error, %{reason: "exists"}
 
-    # The external join at epoch 0 moves the room to 1; a second commit at 0 is refused.
-    ref = push(socket, "relay", %{"bytes" => b64("join.bin")})
+    # B's external join: refused when another device sends it, ordered when B does; not twice.
+    ref = push(a, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :error, %{reason: "a commit is signed by the device that sends it"}
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
     assert_reply ref, :ok, %{seq: 1, epoch: 1}
-    ref = push(socket, "relay", %{"bytes" => b64("join.bin")})
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
     assert_reply ref, :error, %{reason: "epoch", epoch: 1}
 
-    # Words at epoch 1; a commit for epoch 2 is early; GroupInfo for the right epoch only.
-    ref = push(socket, "relay", %{"bytes" => b64("text.bin")})
+    # Bytes shaped like a commit at the room's epoch no longer move it.
+    junk = <<1::16, 2::16, 7, "general", 1::64, 3>>
+    ref = push(a, "relay", %{"bytes" => Base.encode64(junk)})
+    assert_reply ref, :error, %{reason: "that commit does not check out against the room"}
+    assert Den.Rooms.get("general").epoch == 1
+
+    # Words at epoch 1; a GroupInfo only if it is the room's own state.
+    ref = push(b, "relay", %{"bytes" => mls("text.bin")})
     assert_reply ref, :ok, %{seq: 2, epoch: 1}
-    ref = push(socket, "relay", %{"bytes" => b64("remove.bin")})
-    assert_reply ref, :error, %{reason: "epoch", epoch: 1}
-    ref = push(socket, "info", %{"epoch" => 0, "group_info" => Base.encode64("stale")})
+    ref = push(a, "info", %{"epoch" => 1, "group_info" => mls("fork.info")})
+    assert_reply ref, :error, %{reason: "group_info"}
+    ref = push(a, "info", %{"epoch" => 0, "group_info" => mls("general.info")})
     assert_reply ref, :error, %{reason: "stale"}
-    ref = push(socket, "info", %{"epoch" => 1, "group_info" => Base.encode64("info-1")})
+    ref = push(b, "info", %{"epoch" => 1, "group_info" => mls("general-1.info")})
     assert_reply ref, :ok
-    assert Den.Rooms.get("general").group_info == "info-1"
+    assert Den.Rooms.get("general").group_info == File.read!(Path.join(@m, "general-1.info"))
 
-    # A message for another room is not relayed here.
-    {:ok, _, other} = subscribe_and_join(socket, DenWeb.RoomChannel, "room:lanterns")
-    ref = push(other, "create", %{"group_info" => Base.encode64("x")})
-    assert_reply ref, :ok
-    ref = push(other, "relay", %{"bytes" => b64("text.bin")})
+    # A's commit removing B: not B's to send; A's.
+    ref = push(b, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :error, %{reason: "a commit is signed by the device that sends it"}
+    ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :ok, %{seq: 3, epoch: 2}
+
+    # Another room's GroupInfo, or messages, are not this room's.
+    {:ok, _, other} = subscribe_and_join(a, DenWeb.RoomChannel, "room:lanterns")
+    ref = push(other, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :error, %{reason: "group_info"}
+    ref = push(other, "relay", %{"bytes" => mls("text.bin")})
     assert_reply ref, :error, %{reason: ":wrong_room"}
 
-    ref = push(socket, "state", %{})
-    assert_reply ref, :ok, %{epoch: 1, seq: 2, group_info: "aW5mby0x"}
-    ref = push(socket, "history", %{"after" => 0})
-    assert_reply ref, :ok, %{messages: [%{seq: 1, epoch: 0, commit: true}, %{seq: 2, epoch: 1, commit: false}]}
-    ref = push(socket, "history", %{"after" => 1})
-    assert_reply ref, :ok, %{messages: [%{seq: 2}]}
+    ref = push(a, "history", %{"after" => 0})
+    assert_reply ref, :ok, %{messages: [%{seq: 1, epoch: 0, commit: true}, %{seq: 2, epoch: 1, commit: false}, %{seq: 3, epoch: 1, commit: true}]}
   end
 
   test "when a device's day ends, its rooms are told and its connection closed", %{socket: socket} do

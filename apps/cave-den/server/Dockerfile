@@ -5,7 +5,10 @@ ARG DEBIAN=bookworm-20260824-slim
 
 FROM hexpm/elixir:${ELIXIR}-erlang-${OTP}-debian-${DEBIAN} AS build
 # ex_webrtc's native parts (voice): DTLS over OpenSSL, SRTP over libsrtp.
-RUN apt-get update -y && apt-get install -y build-essential git pkg-config libssl-dev libsrtp2-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get install -y build-essential git pkg-config libssl-dev libsrtp2-dev curl ca-certificates && rm -rf /var/lib/apt/lists/*
+# The rooms' public-state NIF (native/den_public) is Rust, built by rustler.
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.93.1
+ENV PATH=/root/.cargo/bin:$PATH
 WORKDIR /app
 ENV MIX_ENV=prod
 RUN mix local.hex --force && mix local.rebar --force
@@ -14,6 +17,7 @@ RUN mix deps.get --only prod && mkdir config
 COPY config/config.exs config/prod.exs config/
 RUN mix deps.compile
 COPY priv priv
+COPY native native
 COPY lib lib
 RUN mix compile
 COPY config/runtime.exs config/

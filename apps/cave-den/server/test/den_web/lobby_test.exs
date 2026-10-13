@@ -34,16 +34,25 @@ defmodule DenWeb.LobbyTest do
     assert length(Den.Rooms.listed()) == 7
   end
 
-  test "a private room refuses public joins and keeps no GroupInfo" do
-    {socket, _} = device(String.duplicate("a2", 32))
-    {:ok, _} = Den.Rooms.private_room("p-" <> String.duplicate("1e", 16))
-    {:ok, reply, room} = subscribe_and_join(socket, DenWeb.RoomChannel, "room:p-" <> String.duplicate("1e", 16))
+  test "a private room: tracked from its creator's GroupInfo, kept for nobody; no public joins; the add checked" do
+    m = Path.join(@f, "mls")
+    %{"a" => ka, "b" => kb} = Jason.decode!(File.read!(Path.join(m, "keys.json")))
+    room = "p-00112233445566778899aabbccddeeff"
+    {:ok, _} = Den.Rooms.private_room(room)
+    {sa, _} = device(ka)
+    {sb, _} = device(kb)
+    {:ok, reply, a} = subscribe_and_join(sa, DenWeb.RoomChannel, "room:" <> room)
     assert reply.kind == "private" and reply.group_info == nil
-    ref = push(room, "create", %{"group_info" => Base.encode64("info")})
-    assert_reply ref, :error, %{reason: "exists"}
-    # join.bin is an external commit (for "general"): refused here first for the room, and private rooms refuse any.
-    ref = push(room, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(@f, "join.bin")))})
-    assert_reply ref, :error, _
+    ref = push(a, "create", %{"group_info" => Base.encode64(File.read!(Path.join(m, "private.info")))})
+    assert_reply ref, :ok
+    assert Den.Rooms.get(room).group_info == nil and is_binary(Den.Rooms.get(room).public_state)
+    # B, who holds no invitation, tries an external join: refused.
+    {:ok, _, b} = subscribe_and_join(sb, DenWeb.RoomChannel, "room:" <> room)
+    ref = push(b, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(m, "private-join.bin")))})
+    assert_reply ref, :error, %{reason: "a private room is joined by invitation"}
+    # A's add of C: checked and ordered.
+    ref = push(a, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(m, "private-add.bin")))})
+    assert_reply ref, :ok, %{epoch: 1}
   end
 
   test "invitations: published by a device, claimed once each, Welcomes waiting in its inbox only" do

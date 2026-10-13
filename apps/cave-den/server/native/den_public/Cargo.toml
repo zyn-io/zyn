@@ -1,0 +1,23 @@
+[package]
+name = "den_public"
+version = "0.1.0"
+edition = "2021"
+description = "The den's view of each room's public MLS state: commits checked before they are ordered"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Its own workspace: a NIF for the den's server, built by rustler.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+rustler = "0.38"
+openmls = "=0.9.1"
+openmls_rust_crypto = "0.6.0"
+openmls_memory_storage = "0.6.0"
+openmls_traits = "0.6.0"
+serde_json = "1"
+hex = "0.4"

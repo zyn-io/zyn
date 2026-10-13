@@ -37,3 +37,5 @@ tmp/
 priv/keys/
 den-keys.json
 priv/blobs/
+native/den_public/target/
+priv/native/

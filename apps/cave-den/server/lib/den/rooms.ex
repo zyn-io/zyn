@@ -1,8 +1,10 @@
 defmodule Den.Rooms do
   @moduledoc """
   The den's state, and the only rules it applies to rooms: one commit per
-  epoch (the first to arrive), messages for the epoch a room is in (or a few
-  before), and ciphertext kept for `retention_days`. It never holds a key.
+  epoch (the first to arrive that checks out against the room's public MLS
+  state, signed by the device that sends it), messages for the epoch a room
+  is in (or a few before), and ciphertext kept for `retention_days`. It never
+  holds a key.
   """
   import Ecto.Query
   alias Den.Repo
@@ -18,6 +20,7 @@ defmodule Den.Rooms do
       field :group_info, :binary
       field :seq, :integer, default: 0
       field :kind, :string, default: "open"
+      field :public_state, :string
       timestamps(type: :utc_datetime)
     end
   end
@@ -122,23 +125,54 @@ defmodule Den.Rooms do
     Repo.all(from rd in RoomDevice, join: d in Device, on: d.key == rd.key, where: rd.room == ^room and d.until > ^now, select: rd.key)
   end
 
-  @doc "A room's first GroupInfo, from whoever makes the group first."
+  @doc """
+  A room's first GroupInfo, from the member who started it: the den tracks
+  the room's public state from it (every kind), and keeps the GroupInfo for
+  joiners (not for a private room, which is joined by invitation).
+  """
   def create(room, group_info) do
-    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and is_nil(r.group_info) and r.kind != "private"), set: [group_info: group_info, epoch: 0, updated_at: now()])
-    if n == 1, do: :ok, else: {:error, :exists}
+    with %Room{} = r <- get(room) || {:error, :no_room},
+         true <- is_nil(r.public_state) || {:error, :exists},
+         {:ok, {state, ^room, 0}} <- track(group_info) do
+      keep = if r.kind == "private", do: nil, else: group_info
+      {n, _} = Repo.update_all(from(x in Room, where: x.id == ^room and is_nil(x.public_state)), set: [public_state: state, group_info: keep, epoch: 0, updated_at: now()])
+      if n == 1, do: :ok, else: {:error, :exists}
+    else
+      {:ok, _} -> {:error, :group_info}
+      {:error, _} = e -> e
+    end
   end
 
-  @doc "The GroupInfo for the epoch the room is in, from a member who is in it. Never kept for a private room."
+  defp track(group_info) do
+    case Den.Public.track(group_info) do
+      {:ok, t} -> {:ok, t}
+      {:error, _} -> {:error, :group_info}
+    end
+  end
+
+  @doc """
+  The GroupInfo for the epoch the room is in, from any member: taken only if
+  it describes the state the den tracks, so newcomers cannot be sent into
+  another group. Never kept for a private room.
+  """
   def info(room, epoch, group_info) do
-    {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and r.epoch == ^epoch and r.kind != "private"), set: [group_info: group_info, updated_at: now()])
-    if n == 1, do: :ok, else: {:error, :stale}
+    with %Room{kind: kind, epoch: ^epoch, public_state: state} when kind != "private" and is_binary(state) <- get(room) || {:error, :stale},
+         {:ok, true} <- Den.Public.info_matches(state, group_info) do
+      {n, _} = Repo.update_all(from(r in Room, where: r.id == ^room and r.epoch == ^epoch), set: [group_info: group_info, updated_at: now()])
+      if n == 1, do: :ok, else: {:error, :stale}
+    else
+      {:ok, false} -> {:error, :group_info}
+      {:error, :stale} -> {:error, :stale}
+      {:error, _} -> {:error, :group_info}
+      _ -> {:error, :stale}
+    end
   end
 
   @doc """
   Relay `bytes` in `room`: a commit only at the room's epoch (it moves the room
   to the next), words at that epoch or a few before. Returns the message.
   """
-  def relay(room, bytes) do
+  def relay(room, bytes, sender) do
     with {:ok, env} <- Den.Mls.envelope(bytes),
          true <- env.room == room || {:error, :wrong_room} do
       Repo.transaction(fn ->
@@ -148,7 +182,7 @@ defmodule Den.Rooms do
           r.kind == "private" and env.external ->
             Repo.rollback(:private)
 
-          is_nil(r.group_info) and r.kind != "private" ->
+          is_nil(r.public_state) ->
             Repo.rollback({:no_group, r.epoch})
 
           env.commit and env.epoch != r.epoch ->
@@ -157,15 +191,28 @@ defmodule Den.Rooms do
           not env.commit and (env.epoch > r.epoch or env.epoch < r.epoch - @past_epochs) ->
             Repo.rollback({:epoch, r.epoch})
 
+          env.commit ->
+            # Checked against the room's public state, and signed by the
+            # device whose session sent it: no commit-shaped bytes, and no
+            # commits in another device's name.
+            case Den.Public.commit(r.public_state, bytes) do
+              {:ok, {state, epoch, ^sender}} when epoch == r.epoch + 1 -> order(r, env, bytes, epoch, state)
+              {:ok, {_, _, _}} -> Repo.rollback(:not_yours)
+              {:error, why} -> Repo.rollback({:bad_commit, why})
+            end
+
           true ->
-            seq = r.seq + 1
-            epoch = if env.commit, do: r.epoch + 1, else: r.epoch
-            # Optimistic: the room must still be where we read it.
-            {1, _} = Repo.update_all(from(x in Room, where: x.id == ^room and x.seq == ^r.seq), set: [seq: seq, epoch: epoch, updated_at: now()])
-            Repo.insert!(%Message{room: room, seq: seq, epoch: env.epoch, commit: env.commit, bytes: bytes})
+            order(r, env, bytes, r.epoch, r.public_state)
         end
       end)
     end
+  end
+
+  defp order(r, env, bytes, epoch, state) do
+    seq = r.seq + 1
+    # Optimistic: the room must still be where we read it.
+    {1, _} = Repo.update_all(from(x in Room, where: x.id == ^r.id and x.seq == ^r.seq), set: [seq: seq, epoch: epoch, public_state: state, updated_at: now()])
+    Repo.insert!(%Message{room: r.id, seq: seq, epoch: env.epoch, commit: env.commit, bytes: bytes})
   end
 
   @doc "Messages after `seq`, oldest first."
