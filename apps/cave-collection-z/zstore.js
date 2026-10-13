@@ -566,9 +566,7 @@ async function burnEvm(t, amount, memo, report) {
   return evm.send(t, account, amount, memo.slice(4));
 }
 
-const PHASE_LABEL = { open: 'open', closed: 'drawing', drawn: 'claims open', openmint: 'open mint' };
-/// §144.8: claims run for the terms' 16,128 Zcash blocks after the close.
-const CLAIM_BLOCKS = 16128;
+const PHASE_LABEL = { open: 'opening soon', closed: 'opening soon', drawn: 'opening soon', openmint: 'open' };
 
 async function mintPage() {
   const gen = generation;
@@ -578,22 +576,21 @@ async function mintPage() {
   let tokens = [];
   const prices = new Map();
   let credit = null;
-  // A gated sale (§168): this wallet's place on the list and its next prices,
-  // as Nap reads them from the chain. Null when the sale is not gated.
+  // This wallet on the sale's list and its open-mint terms (§187): its price,
+  // how many it has minted and the cap, as Nap reads them from the chain.
   let access = null;
-  const gated = () => !!sale?.gate;
-  const ticketsTotal = (n) => (gated() && access?.prices ? access.prices.slice(0, n).reduce((t, x) => t + BigInt(x), 0n) : BigInt(sale.ticket_price) * BigInt(n));
+  const listed = () => !!sale?.gate && !!access?.listed;
+  const myPrice = () => BigInt(access?.open?.price ?? sale?.open_price ?? '0');
+  const myLeft = () => {
+    const left = sale ? sale.open_count - sale.open_next : 0;
+    const cap = access?.open ? access.open.cap - access.open.minted : 20;
+    return Math.max(0, Math.min(20, left, cap));
+  };
   /// A total after this wallet's credit: what ZEC.zy it still takes.
   const afterCredit = (total) => {
     if (!credit) return `${exact(total)} ZEC.zy`;
     const used = credit < total ? credit : total;
     return `${exact(total - used)} ZEC.zy (${exact(used)} from credit)`;
-  };
-  const setTotal = () => {
-    if (!sale || !el('total')) return;
-    const n = whole('count-in', 20);
-    el('total').textContent = n ? afterCredit(ticketsTotal(n)) : 'a whole number from 1 to 20';
-    el('buy').disabled = !n || (gated() && !access?.listed);
   };
   const token = () => tokens.find((t) => t.key === el('burn-token')?.value) || tokens[0];
   const creditWanted = () => {
@@ -629,27 +626,16 @@ async function mintPage() {
   };
   const setMintTotal = () => {
     if (!sale || !el('mint')) return;
-    const left = sale.open_count - sale.open_next;
-    const n = whole('mint-in', Math.min(10, left));
+    const most = myLeft();
+    const n = whole('mint-in', most);
+    el('mint-in').max = String(Math.max(1, most));
     el('mint').disabled = !n;
-    el('mint').textContent = n ? `Mint ${n} for ${afterCredit(BigInt(sale.open_price) * BigInt(n))}` : `Mint 1 to ${Math.min(10, left)}`;
-  };
-  const mine = async () => {
-    const box = el('mine-box');
-    if (!current || !(await quietly())) { if (box) box.hidden = true; return null; }
-    const r = await ask('zyn_saleTickets', {});
-    if (gen !== generation) return null;
-    const tickets = (r?.tickets || []).filter((t) => isHex(t.ticket) && Number.isSafeInteger(t.index) && Array.isArray(t.serials));
-    box.hidden = !tickets.length;
-    const late = sale?.phase === 'openmint';
-    el('mine').innerHTML = tickets.map((t) => {
-      const text = t.result === 'claimed' ? 'claimed'
-        : t.result === 'won' ? (late ? 'not claimed in time — back in the open mint' : esc((t.names || []).join(', ')))
-          : t.result === 'no win' ? 'no item this time'
-            : sale?.phase === 'open' || sale?.phase === 'closed' ? 'waiting for the draw' : 'Nap could not check the draw yet';
-      return `<li class="${t.result === 'won' && !late ? 'won' : ''}"><span>Ticket ${esc(t.index + 1)}${t.burned ? ' · burned' : ''}</span><b>${text}</b></li>`;
-    }).join('');
-    return tickets;
+    el('mint').textContent = n ? `Mint ${n} for ${afterCredit(myPrice() * BigInt(n))}` : most ? `Mint 1 to ${most}` : 'Mint';
+    el('mint-total').textContent = n ? afterCredit(myPrice() * BigInt(n)) : most ? `a whole number from 1 to ${most}` : 'this wallet has minted all it may';
+    el('my-price').textContent = `${zec(myPrice())} ZEC.zy${listed() ? ' (whitelist)' : ''}`;
+    // .total sets display, which outranks [hidden]: say it in style.
+    el('my-count-row').style.display = access?.open ? '' : 'none';
+    if (access?.open) el('my-count').textContent = `${access.open.minted} of ${access.open.cap} minted`;
   };
   const read = async () => {
     if (gen !== generation) return;
@@ -657,47 +643,23 @@ async function mintPage() {
       sale = await chainSale();
       if (gen !== generation) return;
       el('phase').textContent = sale ? PHASE_LABEL[sale.phase] || sale.phase : 'not open';
-      // The lede sells tickets; once tickets are over it would be selling the past.
-      el('lede').hidden = !!sale && sale.phase !== 'open';
-      if (!sale) return show('none');
-      el('lede-price').textContent = `${zec(sale.ticket_price)} ZEC.zy`;
-      el('claim-price').textContent = `${zec(sale.claim_price)} ZEC.zy`;
-      el('open-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
-      await readAccess();
-      if (gen !== generation) return;
-      setTotal();
+      if (!sale) { show('none'); await readAccess(); return; }
+      el('lede-price').textContent = `${zec(sale.open_price)} ZEC.zy`;
+      if (sale.open_terms) {
+        el('lede-listed').textContent = `${zec(sale.open_terms.listed_price)} ZEC.zy`;
+        el('lede-cap').textContent = String(sale.open_terms.cap);
+      }
       if (sale.phase === 'openmint') {
         const open = sale.open_count - sale.open_next;
         el('left').textContent = String(open);
         show(open > 0 ? 'openmint' : 'soldout');
-        setMintTotal();
-      } else show(sale.phase === 'open' ? 'open' : sale.phase === 'closed' ? 'closed' : 'drawn');
-      // After show(), which hides every other section: credit sits beside each phase.
+      } else show('soon');
+      // After show(), which hides every other section: the whitelist and credit sit beside each phase.
+      await readAccess();
+      if (gen !== generation) return;
       await readCredit();
       if (gen !== generation) return;
-      setTotal();
       setMintTotal();
-      if (sale.phase === 'drawn' && Number.isSafeInteger(sale.close_zcash_height)) {
-        el('claim-deadline').textContent = `Claims close at Zcash block ${(sale.close_zcash_height + CLAIM_BLOCKS).toLocaleString('en-US')} — about two weeks after the door shut. A win not claimed by then goes to the open mint.`;
-      }
-      const tickets = await mine().catch(() => null);
-      if (gen !== generation || sale.phase !== 'drawn') return;
-      const wins = (tickets || []).filter((t) => t.result === 'won');
-      const unchecked = (tickets || []).some((t) => t.result === 'waiting');
-      const serials = wins.flatMap((t) => t.serials);
-      el('claim').disabled = !serials.length;
-      el('claim-total-row').hidden = !serials.length;
-      el('claim-total').textContent = afterCredit(BigInt(sale.claim_price) * BigInt(serials.length));
-      const cards = await Promise.all(serials.map(async (x) => { const d = await describe(CAVE_Z, x); return `<figure>${art(d)}<figcaption>${esc(d.name)} ${rarityTag(d)}</figcaption></figure>`; }));
-      if (gen !== generation) return;
-      el('won-art').innerHTML = cards.join('');
-      const out = el('out-claim');
-      out.classList.remove('bad');
-      if (!current) out.textContent = 'Connect Nap to see what your tickets drew.';
-      else if (!tickets) out.textContent = current.provider.isNapWeb ? "Nap's window is closed — connect again to see your tickets." : 'Open Nap to see your tickets.';
-      else if (unchecked) { out.textContent = 'Nap could not check the posted draw against the chain yet. Try again in a moment — nothing is lost.'; out.classList.add('bad'); }
-      else if (!serials.length) out.textContent = tickets.some((t) => t.result === 'claimed') ? 'Everything this wallet drew is claimed.' : (tickets.length ? 'None of this wallet’s tickets drew an item.' : 'This wallet has no tickets in this sale.');
-      else out.textContent = '';
     } catch (e) {
       if (gen !== generation) return;
       el('broke').textContent = e.message;
@@ -725,38 +687,28 @@ async function mintPage() {
     if (box.hidden) return;
     el('credit-held').textContent = credit != null ? `${zec(credit)} ZEC` : current ? 'open Nap to see it' : 'connect Nap to see it';
     el('credit-budget').textContent = `${zec(budget)} ZEC`;
-    // Listed wallets only, while tickets sell in a gated sale: credit would buy nothing else then.
-    el('burn-form').hidden = budget === 0n || (gated() && sale.phase === 'open' && !access?.listed);
+    el('burn-form').hidden = budget === 0n;
     const select = el('burn-token');
     if (select.options.length !== tokens.length) {
       select.innerHTML = tokens.map((t) => `<option value="${esc(t.key)}">${esc(t.symbol)} · ${esc(chainName(t))}</option>`).join('');
-      // A first guess at the credit wanted: one of whatever the sale sells now.
-      el('credit-in').value = zec(sale.phase === 'openmint' ? sale.open_price : sale.phase === 'drawn' ? sale.claim_price : sale.ticket_price);
+      // A first guess at the credit wanted: one item at this wallet's price.
+      el('credit-in').value = zec(myPrice());
     }
     wireTips();
     setBurnTotal();
   };
-  // Where this wallet stands in a gated sale, and what the box says about it.
+  // This wallet's place on the whitelist, and what the box says about it.
   const readAccess = async () => {
     const box = el('gate');
     if (!box) return;
-    box.hidden = !gated() || sale?.phase !== 'open';
-    if (!gated()) { access = null; el('buy-box').hidden = false; return; }
+    const over = sale?.phase === 'openmint' && sale.open_next >= sale.open_count;
     access = null;
-    if (current && (await quietly())) access = await ask('zyn_saleAccess', {}).catch(() => null);
-    const say = el('gate-say');
-    const listed = !!access?.listed;
-    el('gate-link').hidden = !current || listed;
-    el('buy-box').hidden = !listed;
-    if (!current) say.textContent = 'This sale is for the whitelist. Connect Nap to check your place.';
-    else if (!access) say.textContent = 'This sale is for the whitelist. Nap could not check this wallet\u2019s place yet \u2014 update Nap, or try again in a moment.';
-    else if (listed) {
-      const base = Number(access.base);
-      const bought = Number(access.bought);
-      say.textContent = bought < base
-        ? `On the list. ${zec(sale.ticket_price)} ZEC.zy per ticket for your first ${base} (${bought} bought), then ${zec(sale.ticket_price)} more for each ticket after.`
-        : `On the list. You have ${bought} tickets; your next one is ${zec(access.next)} ZEC.zy, and each after that ${zec(sale.ticket_price)} more.`;
-    } else say.textContent = 'This sale is for the whitelist, and this wallet is not on it yet. Enter the code you were sent to link it.';
+    if (sale && current && (await quietly())) access = await ask('zyn_saleAccess', {}).catch(() => null);
+    if (gen !== generation) return;
+    box.hidden = over || listed();
+    el('gate-link').hidden = !current;
+    if (!current) el('gate-say').textContent = 'On the whitelist? Connect Nap, then link your code to mint at the whitelist price.';
+    else el('gate-say').textContent = 'On the whitelist? Link your code to this wallet to mint at the whitelist price.';
   };
   el('gate-go').onclick = async () => {
     const out = el('out-gate');
@@ -769,7 +721,7 @@ async function mintPage() {
       const r = await fetch('/api/whitelist/bind', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, account: current.session.account }), credentials: 'omit' });
       const j = await r.json().catch(() => ({}));
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      out.textContent = 'Linked. This wallet goes on the sale\u2019s list when the next batch is posted on Zyn \u2014 this page shows it then.';
+      out.textContent = 'Linked. This wallet gets the whitelist price once the next batch is listed on Zyn \u2014 this page shows it then.';
       el('gate-code').value = '';
       for (const wait of [60000, 300000, 900000]) setTimeout(read, wait);
     } catch (e) {
@@ -796,7 +748,6 @@ async function mintPage() {
       el(out).classList.toggle('bad', e?.code !== 4001);
     } finally { if (el(button)) el(button).disabled = false; }
   };
-  el('count-in').oninput = setTotal;
   el('credit-in').oninput = setBurnTotal;
   el('burn-token').onchange = setBurnTotal;
   el('mint-in').oninput = setMintTotal;
@@ -828,18 +779,14 @@ async function mintPage() {
       fail(e.code === 4001 || /reject|declin|cancel|denied/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message);
     } finally { if (el('burn-go')) el('burn-go').disabled = false; }
   };
-  el('buy').onclick = act('buy', 'out', 'zyn_buyTickets', () => {
-    const count = whole('count-in', 20);
-    if (!count) { el('out').textContent = 'Enter a whole number of tickets, 1 to 20.'; el('out').classList.add('bad'); return null; }
-    return { count, pay: exact(ticketsTotal(count)) };
-  }, (r) => `${r?.tickets?.length || 0} ticket${r?.tickets?.length === 1 ? '' : 's'} bought. They are drawn once the door shuts.`, 'Not bought. Nothing was paid.');
-  el('claim').onclick = act('claim', 'out-claim', 'zyn_claimItems', () => ({}), (r) => `Claimed ${r?.claimed?.length || 0}. They are in your Nap wallet once the epoch seals — about a minute.`, 'Not claimed. Nothing was paid.');
   el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => {
-    const count = whole('mint-in', Math.min(10, sale.open_count - sale.open_next));
-    if (!count) { el('out-mint').textContent = 'Enter a whole number to mint, 1 to 10.'; el('out-mint').classList.add('bad'); return null; }
+    const most = myLeft();
+    const count = whole('mint-in', most);
+    if (!count) { el('out-mint').textContent = most ? `Enter a whole number to mint, 1 to ${most}.` : 'This wallet has minted all it may.'; el('out-mint').classList.add('bad'); return null; }
     return { count };
-  }, (r) => `Minted ${(r?.names || []).join(', ') || 'nothing'}.`, 'Not minted. Nothing was paid.');
+  }, (r) => `Minted ${(r?.names || []).join(', ') || 'nothing'}. They are in your Nap wallet once the epoch seals — about a minute.`, 'Not minted. Nothing was paid.');
   el('retry').onclick = read;
+  wireTips();
   walletListeners.add(read);
   await read();
 }

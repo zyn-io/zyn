@@ -14,7 +14,7 @@ const styles = await read('styles.css');
 test('a payment is sent in full, not cut to 8 decimals', () => {
   // A 1% fee on an 8-decimal price has 10: cut, Nap refused every buy of it.
   assert.doesNotMatch(zstore, /pay: zec\(/, 'no payment goes through the display rounding');
-  assert.equal((zstore.match(/pay: exact\(/g) || []).length, 3, 'item buy, market buy and tickets pay exactly');
+  assert.equal((zstore.match(/pay: exact\(/g) || []).length, 2, 'item buy and market buy pay exactly');
 });
 
 test('a burn asks for no more credit than the sale has left, and never shares a code', () => {
@@ -26,7 +26,7 @@ test('a burn asks for no more credit than the sale has left, and never shares a 
 });
 
 test('counts are whole numbers, checked before they reach BigInt or Nap', () => {
-  for (const id of ['count-in', 'mint-in']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
+  for (const id of ['mint-in']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
   // Credit is a decimal of ZEC, read to WAD without a float.
   assert.match(zstore, /if \(!\/\^\\d\*\\\.\?\\d\+\$\/\.test\(v \|\| ''\)\) return null;/);
   assert.doesNotMatch(zstore, /Math\.min\(20, Number\(el\('count-in'\)\.value\)\)/);

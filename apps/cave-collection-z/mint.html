@@ -4,19 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070807" />
-    <meta name="description" content="Take a place in Cave Collection Z. Tickets in ZEC.zy through Nap, drawn when the door closes." />
+    <meta name="description" content="Mint Cave Collection Z: 0.05 ZEC.zy each, 0.01 for the whitelist, at most 20 per wallet. Each item is a ZCaveDAO membership." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/mint" />
-    <meta property="og:title" content="Cave Collection Z — take a place" />
-    <meta property="og:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
+    <meta property="og:title" content="Cave Collection Z — Mint" />
+    <meta property="og:description" content="0.05 ZEC.zy each, 0.01 for the whitelist, at most 20 per wallet." />
     <meta property="og:image" content="https://cavebro.win/assets/cave-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Cave Collection Z — take a place" />
-    <meta name="twitter:description" content="Pay from Nap. The cave decides what you get, after the door shuts." />
-    <title>Cave Collection Z — take a place</title>
+    <meta name="twitter:title" content="Cave Collection Z — Mint" />
+    <meta name="twitter:description" content="0.05 ZEC.zy each, 0.01 for the whitelist, at most 20 per wallet." />
+    <title>Cave Collection Z — Mint</title>
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
     <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
     <style>    
+      /* Links in the whitelist box: the page's gold, not the browser's blue. */
+      .gate a { color: var(--zec); text-underline-offset: 3px; }
+      .gate a:hover { color: var(--ink); }
       /* Same cave, same torch. This is the mouth of the tunnel where money
          comes in, so it is lit a little warmer than the register. */
       .register {
@@ -331,13 +334,12 @@
       </nav>
     </header>
     <main class="register">
-      <h1><span>Take a place</span><span>in the cave</span></h1>
+      <h1><span>Mint</span><span>Collection Z</span></h1>
 
       <p class="lede" id="lede">
-        A ticket costs <strong id="lede-price">0.01 ZEC.zy</strong> and buys a place in the draw — not a
-        chosen creature. <strong>What you get is decided after the door shuts</strong>, by a
-        number nobody can see yet. That is the whole design: there is no early look and
-        no better ticket.
+        An item is your membership in ZCaveDAO. <strong id="lede-price">0.05 ZEC.zy</strong> each,
+        <strong id="lede-listed">0.01 ZEC.zy</strong> for the whitelist, at most <strong id="lede-cap">20</strong> per wallet.
+        <button class="tip" type="button" aria-expanded="false" aria-label="How the order is fixed" data-tip="Items come in an order fixed when the mint opens, from a public random number: a drand round and a Zcash block, both announced in advance. Nobody, the team included, picks which item comes next, and anyone can recompute the order from the same inputs.">i</button>
       </p>
 
       <div class="ledger">
@@ -352,106 +354,49 @@
           </section>
 
           <section class="state" id="s-none" hidden>
-            <p class="say">
-              <strong>The door is not open yet.</strong> Tickets are sold in one window, announced
-              before it starts and closed at a Zcash height fixed in advance. Nothing is sold outside
-              it, and nobody is let in early — including us.
-            </p>
-            <a class="act ghost" href="/whitelist">Hear when it opens</a>
+            <p class="say"><strong>Not open yet.</strong> The opening is announced ahead, with the Zcash block and drand round that fix the order.</p>
           </section>
 
-          <section class="state" id="s-open" hidden>
-            <p class="say">
-              Tickets are paid in <strong>ZEC.zy</strong> — ZEC you have brought into Nap. No address to
-              send to and no confirmations to wait for: the ticket is yours as soon as Nap signs it.
-            </p>
-            <div class="gate" id="gate" hidden>
-              <p class="say" id="gate-say">This sale is for the whitelist.</p>
-              <div class="gate-link" id="gate-link" hidden>
-                <label class="field">
-                  <span>Whitelist code</span>
-                  <input id="gate-code" type="text" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX" />
-                </label>
-                <button class="act ghost" id="gate-go" type="button">Link to this wallet</button>
-              </div>
-              <p class="out" id="out-gate" role="status" aria-live="polite"></p>
-            </div>
-            <div id="buy-box">
-            <label class="field">
-              <span>Tickets</span>
-              <input id="count-in" type="number" min="1" max="20" step="1" value="1" />
-            </label>
-
-            <div class="odds">
-              <div><b>80%</b><span>one item</span></div>
-              <div><b>19%</b><span>two items</span></div>
-              <div><b>1%</b><span>three items</span></div>
-            </div>
-            <p class="say">
-              Per ticket, by weights published before the sale opened. A winning ticket then
-              claims its items at <strong id="claim-price">—</strong> each.
-            </p>
-
-            <div class="total">
-              <span>To pay now</span>
-              <b id="total">—</b>
-            </div>
-            <div class="addr-row">
-              <button class="act" id="buy" type="button">Buy tickets</button>
-              <a class="act ghost" href="/deposit">Bring ZEC in</a>
-            </div>
-            <p class="out" id="out" role="status" aria-live="polite"></p>
-            </div>
-
-          </section>
-
-          <section class="state" id="s-closed" hidden>
-            <p class="say">
-              <strong>The door is shut.</strong> Every ticket is in. The draw waits for a Zcash block
-              and a drand round that did not exist when the sale closed; once both are public it runs
-              once, and anyone can run it again from the same inputs.
-            </p>
-          </section>
-
-          <section class="state" id="s-drawn" hidden>
-            <p class="say">
-              <strong>The draw has run.</strong> Your wallet proves which tickets are its own — the
-              cave cannot look them up, and nobody else can claim them. Each item is minted straight
-              into Nap.
-            </p>
-            <div class="won-art" id="won-art"></div>
-            <div class="total" id="claim-total-row">
-              <span>To claim</span>
-              <b id="claim-total">—</b>
-            </div>
-            <p class="say small" id="claim-deadline"></p>
-            <button class="act" id="claim" type="button">Claim what I drew</button>
-            <p class="out" id="out-claim" role="status" aria-live="polite"></p>
+          <section class="state" id="s-soon" hidden>
+            <p class="say"><strong>Opening soon.</strong> The order is being fixed by the announced reveal. Minting starts once it is posted.</p>
           </section>
 
           <section class="state" id="s-openmint" hidden>
-            <p class="say">
-              <strong>Claims are closed; the rest are on sale.</strong> What the draw handed nobody, and
-              what winners left, sell in an order posted after the draw — the next ones in line,
-              whichever they are.
-            </p>
+            <div class="total"><span>Your price</span><b id="my-price">—</b></div>
+            <div class="total" id="my-count-row" style="display: none"><span>This wallet</span><b id="my-count">—</b></div>
             <label class="field">
               <span>Items</span>
-              <input id="mint-in" type="number" min="1" max="10" step="1" value="1" />
+              <input id="mint-in" type="number" min="1" max="20" step="1" value="1" />
             </label>
             <div class="total">
-              <span><span id="left">—</span> left · each</span>
-              <b id="open-price">—</b>
+              <span><span id="left">—</span> left</span>
+              <b id="mint-total">—</b>
             </div>
-            <button class="act" id="mint" type="button">Mint</button>
+            <div class="addr-row">
+              <button class="act" id="mint" type="button">Mint</button>
+              <a class="act ghost" href="/deposit">Bring ZEC in</a>
+            </div>
             <p class="out" id="out-mint" role="status" aria-live="polite"></p>
           </section>
+
+          <div class="gate" id="gate" hidden>
+            <p class="say" id="gate-say">On the whitelist? Link your code to this wallet to mint at the whitelist price.</p>
+            <div class="gate-link" id="gate-link" hidden>
+              <label class="field">
+                <span>Whitelist code</span>
+                <input id="gate-code" type="text" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX" />
+              </label>
+              <button class="act ghost" id="gate-go" type="button">Link to this wallet</button>
+            </div>
+            <p class="say small">Hold REGI? Get your code on the <a href="/whitelist">whitelist page</a>.</p>
+            <p class="out" id="out-gate" role="status" aria-live="polite"></p>
+          </div>
 
           <section class="state credit" id="credit-box" hidden>
             <p class="say">
               <strong>Pay with ZCAVE or REGI</strong>
               Burn ZCAVE on Solana or REGI on Arc for credit in this sale, worth what you burn at its USD
-              price. Credit pays tickets, claims and the open mint before any ZEC.zy.
+              price. Credit pays for mints before any ZEC.zy.
               <button class="tip" type="button" aria-expanded="false" data-tip="The burn carries a code from your Nap, so the credit is yours and nobody else's, and your Solana or Arc wallet never names your Zyn account. The team paid ZEC into the sale for this credit, so items bought with it back the floor like any others.">i</button>
             </p>
             <div class="total"><span>Your credit</span><b id="credit-held">—</b></div>
@@ -485,11 +430,6 @@
             <a class="act" href="/market">The market</a>
           </section>
 
-          <section class="state" id="mine-box" hidden>
-            <p class="say"><strong>Your tickets</strong></p>
-            <ul class="mine" id="mine"></ul>
-          </section>
-
           <section class="state" id="s-broke" hidden>
             <p class="say">The chain did not answer.</p>
             <p class="out bad" id="broke"></p>
@@ -500,10 +440,10 @@
       </div>
 
       <p class="smallprint">
-        Tickets are paid in ZEC.zy on the Zyn object ledger; 90% funds the pool a redeemed item is
-        paid out of and 10% goes to the ZCaveDAO treasury. The allocation is drawn once, from a drand beacon and
-        a Zcash block chosen before either existed, over every ticket bought before the close. The
-        chain holds the result as a Merkle root and accepts a claim only with a proof against it.
+        Items are paid in ZEC.zy on the Zyn object ledger; 90% funds the pool a redeemed item is paid
+        out of and 10% goes to the ZCaveDAO treasury. The order is fixed once, from a drand beacon and a
+        Zcash block announced before either existed, and the chain accepts a mint only of the next item
+        in that order. The whitelist price and the cap per wallet are on the chain too.
       </p>
 
       <nav class="nav">
@@ -514,6 +454,6 @@
       </nav>
     </main>
 
-    <script type="module" src="/zstore.js?v=6"></script>
+    <script type="module" src="/zstore.js?v=12"></script>
   </body>
 </html>

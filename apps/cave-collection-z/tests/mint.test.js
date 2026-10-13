@@ -20,9 +20,10 @@ const WALLET = napOps && connectApp && extBuild && content
   ? false
   : 'apps/nap-web and apps/extension are not checked out — run in the monorepo to check the store against both Naps';
 
-// The sale runs on the object ledger (§144): tickets bought in ZEC.zy through
-// Nap, a draw posted as a root, claims proved against it, then an open mint.
-const SALE = ['zyn_saleTickets', 'zyn_buyTickets', 'zyn_claimItems', 'zyn_mintOpen', 'zyn_burnMemo'];
+// The sale runs on the object ledger (§187): straight to an open mint through
+// Nap, at this wallet's price (the whitelist's or the open one), paid in
+// ZEC.zy or with burn credit.
+const SALE = ['zyn_mintOpen', 'zyn_saleAccess', 'zyn_saleCredit', 'zyn_burnMemo'];
 
 test('the checkout is the store\'s mint page, on Nap', () => {
   assert.match(page, /<body data-page="mint">/);
@@ -44,24 +45,23 @@ test('the retired checkout is gone: no payment address, no relay, no reservation
   assert.doesNotMatch(page + zstore, /\/api\/sale|zyn_receiving|isZynZap|Invitation code/);
 });
 
-test('it states the odds where the money is asked for', () => {
-  // The weights were published before the sale; a buyer should not have to
-  // find them in a document to know what a ticket buys.
-  for (const s of ['80%', '19%', '1%', 'one item', 'three items']) assert.ok(page.includes(s), s);
+test('it states the prices and the cap where the money is asked for', () => {
+  // Terms v4 (§187): 0.05 each, 0.01 for the whitelist, at most 20 per wallet.
+  for (const s of ['0.05 ZEC.zy', '0.01 ZEC.zy', 'per wallet', 'membership in ZCaveDAO']) assert.ok(page.includes(s), s);
 });
 
-test('it does not promise an item at payment time', () => {
-  // The draw runs once, after the close (§104.1). A checkout that implied
-  // otherwise would be lying about the one thing the design is built around.
-  assert.match(page, /decided after the door shuts/i);
-  assert.match(page, /runs\s+once/i);
+test('it says nobody picks which item comes next', () => {
+  // The order is fixed once, from a reveal announced ahead (§187); the page
+  // must not suggest that anyone chooses it.
+  assert.match(page, /Nobody, the team included, picks which item comes next/);
+  assert.match(page, /fixed once/);
 });
 
-test('the price the holder approves is the price the page showed', () => {
-  // Nap refuses a buy whose `pay` differs from the chain's price, so a page
-  // that quietly showed a stale price cannot get it approved.
-  // Sent in full (exact), since Nap compares to the last digit.
-  assert.match(zstore, /zyn_buyTickets', \(\) => \{[\s\S]*?pay: exact\(/);
+test('the price shown is the chain\'s price for this wallet, which Nap pays', () => {
+  // The page reads this wallet's open-mint terms through Nap, and Nap funds
+  // exactly that price, so what the holder sees is what they approve.
+  assert.match(zstore, /access\?\.open\?\.price \?\? sale\?\.open_price/);
+  if (napOps) assert.match(napOps, /const price = BigInt\(a\.open\?\.price \?\? s\.sale\.open_price\)/);
 });
 
 test('the built site serves the checkout at /mint', async () => {
