@@ -118,4 +118,85 @@ defmodule DenWeb.LobbyTest do
     assert build_conn() |> get("/blob/" <> up["id"]) |> json_response(404)
   end
 
+
+  describe "moderation in the lobby" do
+    @owner String.duplicate("0a", 32)
+    @mod String.duplicate("1b", 32)
+    @member String.duplicate("3d", 32)
+
+    setup do
+      :ok = Den.Mod.set_owner(@owner)
+      {o, _} = device(@owner)
+      {m, _} = device(@mod)
+      {x, _} = device(@member)
+      {:ok, %{mod: %{mine: mine, owner: @owner}}, o} = subscribe_and_join(o, DenWeb.LobbyChannel, "lobby")
+      assert "ban" in mine
+      {:ok, %{mod: %{mine: []}}, m} = subscribe_and_join(m, DenWeb.LobbyChannel, "lobby")
+      {:ok, _, x} = subscribe_and_join(x, DenWeb.LobbyChannel, "lobby")
+      %{o: o, m: m, x: x}
+    end
+
+    test "the owner makes a role and gives it; everyone hears; the moderator then acts below it only", %{o: o, m: m, x: x} do
+      ref = push(o, "role_save", %{"name" => "Moderator", "colour" => "#e0a030", "position" => 5, "hoist" => true, "perms" => ["timeout", "kick", "manage_channels"]})
+      assert_reply ref, :ok
+      assert_broadcast "mod", %{roles: roles}
+      %{id: id} = Enum.find(roles, &(&1.name == "Moderator"))
+      ref = push(o, "role_give", %{"key" => @mod, "id" => id})
+      assert_reply ref, :ok
+      assert_broadcast "mod", %{holders: %{@mod => [^id]}}
+
+      ref = push(m, "timeout", %{"key" => @member, "seconds" => 600, "reason" => "flooding"})
+      assert_reply ref, :ok
+      assert_broadcast "mod", %{sanctions: [%{key: @member, kind: "timeout"}]}
+      ref = push(m, "timeout", %{"key" => @owner, "seconds" => 600})
+      assert_reply ref, :error, %{reason: "You can only do that to members and roles below your highest role."}
+      ref = push(m, "ban", %{"key" => @member})
+      assert_reply ref, :error, %{reason: "You do not have permission to do that."}
+      ref = push(x, "kick", %{"key" => @mod})
+      assert_reply ref, :error, %{reason: "You do not have permission to do that."}
+
+      # Channels: made by Manage channels only, set up, deleted (not the host's own).
+      ref = push(x, "open_room", %{"title" => "Mine"})
+      assert_reply ref, :error, %{reason: "You do not have permission to do that."}
+      ref = push(m, "open_room", %{"title" => "Announcements"})
+      assert_reply ref, :ok, %{id: rid}
+      ref = push(m, "room_save", %{"id" => rid, "slow" => 30, "topic" => "News from the team", "post_roles" => [id]})
+      assert_reply ref, :ok, %{slow: 30, post_roles: [^id]}
+      assert_broadcast "room", %{id: ^rid, slow: 30, topic: "News from the team"}
+      ref = push(m, "room_delete", %{"id" => "general"})
+      assert_reply ref, :error, %{reason: "This channel is set by the host; it can be renamed, not deleted."}
+      ref = push(m, "room_delete", %{"id" => rid})
+      assert_reply ref, :ok
+      assert_broadcast "room_gone", %{id: ^rid}
+
+      ref = push(m, "audit", %{})
+      assert_reply ref, :ok, %{entries: [%{action: "channel deleted"} | _]}
+      ref = push(x, "audit", %{})
+      assert_reply ref, :error, _
+    end
+
+    test "a ban drops the device and tells the rooms; the owner sees the bans; settings reach everyone", %{o: o} do
+      DenWeb.Endpoint.subscribe("device:" <> @member)
+      ref = push(o, "ban", %{"key" => @member, "reason" => "spam bot"})
+      assert_reply ref, :ok
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+      ref = push(o, "bans", %{})
+      assert_reply ref, :ok, %{bans: [%{key: @member, reason: "spam bot"}]}
+      ref = push(o, "settings_save", %{"name" => "Zyn community", "description" => "Builders on Zyn"})
+      assert_reply ref, :ok
+      assert_broadcast "mod", %{den: %{name: "Zyn community"}}
+    end
+
+    test "Manage invites makes invite links and sees requests", %{o: o, m: m} do
+      ref = push(m, "invite_make", %{"n" => 2, "days" => 7})
+      assert_reply ref, :error, _
+      ref = push(o, "invite_make", %{"n" => 2, "days" => 7})
+      assert_reply ref, :ok, %{links: [l1, _]}
+      assert l1 =~ ~r"/#invite=[0-9a-f]{64}$"
+      ref = push(o, "invites", %{})
+      assert_reply ref, :ok, %{invites: [_, _]}
+      ref = push(o, "requests", %{})
+      assert_reply ref, :ok, %{requests: []}
+    end
+  end
 end

@@ -88,7 +88,35 @@ defmodule Den.Rooms do
   def get(id), do: Repo.get(Room, id)
 
   @doc "The rooms any member sees: open and proposal rooms. Private ones are known only to their members."
-  def listed, do: Repo.all(from r in Room, where: r.kind != "private", order_by: [r.inserted_at, r.id], select: %{id: r.id, title: r.title, kind: r.kind})
+  def listed, do: Repo.all(from r in Room, where: r.kind != "private", order_by: [fragment("coalesce(?, 1000000)", r.position), r.inserted_at, r.id]) |> Enum.map(&public/1)
+
+  @doc "An open room as members see it: its name and the settings moderators gave it."
+  def public(%Room{} = r) do
+    %{id: r.id, title: r.title, kind: r.kind, topic: r.topic || "", slow: r.slow_seconds || 0, post_roles: String.split(r.post_roles || "", ",", trim: true), position: r.position}
+  end
+
+  @doc "A moderator deletes an open room the host did not name, its words with it."
+  def delete_room(id) do
+    seeded = for {rid, _} <- Application.fetch_env!(:den, :rooms), do: rid
+
+    case get(id) do
+      %Room{kind: "open"} ->
+        if id in seeded, do: {:error, :seeded}, else: drop_room(id)
+
+      _ ->
+        {:error, :room}
+    end
+  end
+
+  defp drop_room(id) do
+    Repo.transaction(fn ->
+      Repo.delete_all(from m in Message, where: m.room == ^id)
+      Repo.delete_all(from rd in RoomDevice, where: rd.room == ^id)
+      Repo.delete_all(from r in Room, where: r.id == ^id)
+    end)
+
+    :ok
+  end
 
   @doc "A room a member names, open to all members."
   def open_room(title) do
