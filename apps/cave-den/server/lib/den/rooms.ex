@@ -21,6 +21,10 @@ defmodule Den.Rooms do
       field :seq, :integer, default: 0
       field :kind, :string, default: "open"
       field :public_state, :string
+      # The member keys (hex, comma-separated) the public state names after
+      # its last commit, and who made a private room.
+      field :members, :string
+      field :creator, :string
       timestamps(type: :utc_datetime)
     end
   end
@@ -76,18 +80,57 @@ defmodule Den.Rooms do
     if title == "", do: {:error, :title}, else: insert(slug(title), title, "open")
   end
 
-  @doc "A private room: an unguessable id, no title, no GroupInfo ever kept."
-  def private_room(id) do
-    if id =~ ~r/\Ap-[0-9a-f]{32}\z/, do: insert(id, "", "private"), else: {:error, :id}
+  @doc """
+  A private room: an unguessable id, no title, no GroupInfo ever kept. Only
+  its creator may enter it until its group exists, and then only its members.
+  """
+  def private_room(id, creator \\ nil) do
+    if id =~ ~r/\Ap-[0-9a-f]{32}\z/, do: insert(id, "", "private", creator), else: {:error, :id}
+  end
+
+  @doc "The keys the room's public state names as members (none before its group exists)."
+  def members(%Room{members: m}) when is_binary(m), do: String.split(m, ",", trim: true)
+  def members(%Room{public_state: state, id: id} = r) when is_binary(state) do
+    keys = public_members(state, id)
+    Repo.update_all(from(x in Room, where: x.id == ^id and x.epoch == ^r.epoch), set: [members: Enum.join(keys, ",")])
+    keys
+  end
+  def members(_), do: []
+
+  defp public_members(state, id) do
+    case Den.Public.members(state, id) do
+      {:ok, keys} -> keys
+      _ -> []
+    end
+  end
+
+  @doc """
+  Whether a device may enter a room's channel and voice: any admitted device
+  an open room; a private room only its members, or its creator before its
+  group exists. Knowing a private room's id is not enough.
+  """
+  def may_enter?(%Room{kind: "private"} = r, key) do
+    case members(r) do
+      [] -> is_nil(r.public_state) and not is_nil(r.creator) and r.creator == key
+      keys -> key in keys
+    end
+  end
+  def may_enter?(%Room{}, _key), do: true
+
+  @doc "Tells the room's and its voice room's channels who the members are now: anyone else leaves."
+  def announce_members(room) do
+    keys = members(get(room))
+    DenWeb.Endpoint.broadcast("room:" <> room, "members", %{keys: keys})
+    DenWeb.Endpoint.broadcast("voice:" <> room, "members", %{keys: keys})
   end
 
   @doc "A proposal's room: an add-on (a DAO's) opens these, listed under Proposals."
   def proposal_room(n) when is_integer(n), do: insert("proposal-#{n}", "Proposal ##{n}", "proposal")
 
   # Two at once for one id: the second is told it exists, not a crash.
-  defp insert(id, title, kind) do
+  defp insert(id, title, kind, creator \\ nil) do
     now = now()
-    row = %{id: id, title: title, kind: kind, epoch: 0, seq: 0, inserted_at: now, updated_at: now}
+    row = %{id: id, title: title, kind: kind, epoch: 0, seq: 0, creator: creator, inserted_at: now, updated_at: now}
 
     case Repo.insert_all(Room, [row], on_conflict: :nothing, conflict_target: :id) do
       {1, _} -> {:ok, Repo.get(Room, id)}
@@ -138,7 +181,8 @@ defmodule Den.Rooms do
          true <- is_nil(r.public_state) || {:error, :exists},
          {:ok, {state, ^room, 0}} <- track(group_info) do
       keep = if r.kind == "private", do: nil, else: group_info
-      {n, _} = Repo.update_all(from(x in Room, where: x.id == ^room and is_nil(x.public_state)), set: [public_state: state, group_info: keep, epoch: 0, updated_at: now()])
+      keys = Enum.join(public_members(state, room), ",")
+      {n, _} = Repo.update_all(from(x in Room, where: x.id == ^room and is_nil(x.public_state)), set: [public_state: state, members: keys, group_info: keep, epoch: 0, updated_at: now()])
       if n == 1, do: :ok, else: {:error, :exists}
     else
       {:ok, _} -> {:error, :group_info}
@@ -204,6 +248,11 @@ defmodule Den.Rooms do
               {:error, why} -> Repo.rollback({:bad_commit, why})
             end
 
+          # Words only from a member: a device the last commit took out (or
+          # never let in) cannot write at an earlier epoch in a newcomer's seat.
+          sender not in members(r) ->
+            Repo.rollback(:not_member)
+
           true ->
             order(r, env, bytes, r.epoch, r.public_state)
         end
@@ -213,8 +262,9 @@ defmodule Den.Rooms do
 
   defp order(r, env, bytes, epoch, state) do
     seq = r.seq + 1
+    keys = if env.commit, do: Enum.join(public_members(state, r.id), ","), else: r.members
     # Optimistic: the room must still be where we read it.
-    {1, _} = Repo.update_all(from(x in Room, where: x.id == ^r.id and x.seq == ^r.seq), set: [seq: seq, epoch: epoch, public_state: state, updated_at: now()])
+    {1, _} = Repo.update_all(from(x in Room, where: x.id == ^r.id and x.seq == ^r.seq), set: [seq: seq, epoch: epoch, public_state: state, members: keys, updated_at: now()])
     Repo.insert!(%Message{room: r.id, seq: seq, epoch: env.epoch, commit: env.commit, bytes: bytes})
   end
 

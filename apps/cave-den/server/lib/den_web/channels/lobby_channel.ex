@@ -32,7 +32,7 @@ defmodule DenWeb.LobbyChannel do
 
   def handle_in("private_room", %{"id" => id}, socket) when is_binary(id) do
     with :ok <- Rooms.quota(socket.assigns.key, "private", 50),
-         {:ok, r} <- Rooms.private_room(id) do
+         {:ok, r} <- Rooms.private_room(id, socket.assigns.key) do
       {:reply, {:ok, %{id: r.id}}, socket}
     else
       {:error, why} -> {:reply, {:error, %{reason: said(why, "private")}}, socket}

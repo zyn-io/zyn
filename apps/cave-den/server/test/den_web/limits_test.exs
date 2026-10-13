@@ -56,8 +56,8 @@ defmodule DenWeb.LimitsTest do
 
   test "invitations are capped a day, and an inbox holds at most :inbox Welcomes" do
     room = "p-" <> String.duplicate("4d", 16)
-    {:ok, _} = Den.Rooms.private_room(room)
     sender = String.duplicate("e1", 32)
+    {:ok, _} = Den.Rooms.private_room(room, sender)
     {:ok, _, r} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:" <> room)
     victim = String.duplicate("e2", 32)
     Den.Rooms.admit(victim, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
@@ -73,8 +73,8 @@ defmodule DenWeb.LimitsTest do
 
   test "a Welcome goes only to devices the den knows, and every copy counts against the sender's bytes" do
     room = "p-" <> String.duplicate("5e", 16)
-    {:ok, _} = Den.Rooms.private_room(room)
     sender = String.duplicate("e3", 32)
+    {:ok, _} = Den.Rooms.private_room(room, sender)
     {:ok, _, r} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:" <> room)
     known = String.duplicate("e4", 32)
     Den.Rooms.admit(known, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))

@@ -27,10 +27,23 @@ defmodule DenWeb.RoomChannel do
         {:error, %{reason: "no such room"}}
 
       room ->
+        if Rooms.may_enter?(room, socket.assigns.key), do: enter(id, room, socket), else: {:error, %{reason: "no such room"}}
+    end
+  end
+
+  defp enter(id, room, socket) do
         Rooms.seat(id, socket.assigns.key)
         info = room.group_info && Base.encode64(room.group_info)
-        {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(id)}, assign(socket, :room, id)}
-    end
+        {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(id)}, socket |> assign(:room, id) |> assign(:kind, room.kind)}
+  end
+
+  # After a commit in a private room: a device it took out leaves the channel
+  # at once, with no more words, presence or history from it.
+  intercept ["members"]
+
+  @impl true
+  def handle_out("members", %{keys: keys}, socket) do
+    if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
   @impl true
@@ -82,12 +95,14 @@ defmodule DenWeb.RoomChannel do
          :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(bytes)),
          {:ok, m} <- Rooms.relay(socket.assigns.room, bytes, socket.assigns.key) do
       broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64})
+      if m.commit and socket.assigns.kind == "private", do: Rooms.announce_members(socket.assigns.room)
       {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch)}}, socket}
     else
       {:error, {:epoch, e}} -> {:reply, {:error, %{reason: "epoch", epoch: e}}, socket}
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
+      {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
       {:error, :quota} -> {:reply, {:error, %{reason: "this device has written enough for today"}}, socket}
       {:error, :disk} -> {:reply, {:error, %{reason: "the den is full for now; try again later"}}, socket}
       {:error, {:bad_commit, _}} -> {:reply, {:error, %{reason: "that commit does not check out against the room"}}, socket}

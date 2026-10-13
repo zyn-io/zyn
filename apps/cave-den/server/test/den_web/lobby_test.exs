@@ -38,21 +38,32 @@ defmodule DenWeb.LobbyTest do
     m = Path.join(@f, "mls")
     %{"a" => ka, "b" => kb} = Jason.decode!(File.read!(Path.join(m, "keys.json")))
     room = "p-00112233445566778899aabbccddeeff"
-    {:ok, _} = Den.Rooms.private_room(room)
+    {:ok, _} = Den.Rooms.private_room(room, ka)
     {sa, _} = device(ka)
     {sb, _} = device(kb)
+    # Before the group exists, only the creator gets in; knowing the id is not enough.
+    assert {:error, %{reason: "no such room"}} = join(sb, DenWeb.RoomChannel, "room:" <> room)
     {:ok, reply, a} = subscribe_and_join(sa, DenWeb.RoomChannel, "room:" <> room)
     assert reply.kind == "private" and reply.group_info == nil
     ref = push(a, "create", %{"group_info" => Base.encode64(File.read!(Path.join(m, "private.info")))})
     assert_reply ref, :ok
     assert Den.Rooms.get(room).group_info == nil and is_binary(Den.Rooms.get(room).public_state)
-    # B, who holds no invitation, tries an external join: refused.
-    {:ok, _, b} = subscribe_and_join(sb, DenWeb.RoomChannel, "room:" <> room)
-    ref = push(b, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(m, "private-join.bin")))})
+    assert Den.Rooms.members(Den.Rooms.get(room)) == [ka]
+    # B, who holds no invitation, is not let into the channel or its voice,
+    # and an external join (even from a member's socket) is refused.
+    assert {:error, %{reason: "no such room"}} = join(sb, DenWeb.RoomChannel, "room:" <> room)
+    assert {:error, %{reason: "no such room"}} = join(sb, DenWeb.VoiceChannel, "voice:" <> room)
+    ref = push(a, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(m, "private-join.bin")))})
     assert_reply ref, :error, %{reason: "a private room is joined by invitation"}
     # A's add of C: checked and ordered.
     ref = push(a, "relay", %{"bytes" => Base.encode64(File.read!(Path.join(m, "private-add.bin")))})
     assert_reply ref, :ok, %{epoch: 1}
+    assert length(Den.Rooms.members(Den.Rooms.get(room))) == 2, "the den's member list follows the commit"
+    # A member a commit takes out leaves the channel at once.
+    Process.flag(:trap_exit, true)
+    ref = Process.monitor(a.channel_pid)
+    DenWeb.Endpoint.broadcast("room:" <> room, "members", %{keys: [kb]})
+    assert_receive {:DOWN, ^ref, :process, _, {:shutdown, :removed}}, 2000
   end
 
   test "invitations: published by a device, claimed once each, Welcomes waiting in its inbox only" do
@@ -72,7 +83,7 @@ defmodule DenWeb.LobbyTest do
     ref = push(lobby, "claim", %{"key" => b})
     assert_reply ref, :error, %{reason: "That member's device has to come online once before it can be invited."}
     # A Welcome to B, through a room A is in.
-    {:ok, _} = Den.Rooms.private_room("p-" <> String.duplicate("2d", 16))
+    {:ok, _} = Den.Rooms.private_room("p-" <> String.duplicate("2d", 16), String.duplicate("a3", 32))
     {:ok, _, room} = subscribe_and_join(sa, DenWeb.RoomChannel, "room:p-" <> String.duplicate("2d", 16))
     ref = push(room, "invite", %{"to" => [b], "welcome" => Base.encode64("welcome")})
     assert_reply ref, :ok

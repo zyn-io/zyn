@@ -18,4 +18,7 @@ defmodule Den.Public do
 
   @doc "Whether a GroupInfo describes the tracked state: {:ok, boolean}."
   def info_matches(_state, _group_info), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "The members' signature keys (hex) in the tracked state: {:ok, [key]}."
+  def members(_state, _room), do: :erlang.nif_error(:nif_not_loaded)
 end

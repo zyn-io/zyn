@@ -722,8 +722,9 @@ class Voice {
     Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], sealed: 0, opened: 0, failed: 0 });
   }
 
-  /// Keys for us and everyone in a slot, for this epoch; the last three
-  /// epochs are kept for frames still in flight.
+  /// Keys for us and everyone in a slot, for this epoch. The previous
+  /// epoch's are kept a few seconds only, for frames still in flight: a member
+  /// the new epoch took out is not heard for long after.
   async refreshKey() {
     const index = Number(this.client.den.epoch(this.room)) % 256;
     const me = this.client.den.key();
@@ -734,8 +735,13 @@ class Voice {
     this.keys.delete(index);
     this.keys.set(index, ks);
     this.current = index;
-    while (this.keys.size > 3) this.keys.delete(this.keys.keys().next().value);
+    while (this.keys.size > 2) this.keys.delete(this.keys.keys().next().value);
     this.worker.postMessage({ keys: [...this.keys].map(([i, m]) => [i, [...m]]), current: index, me });
+    clearTimeout(this.dropOld);
+    this.dropOld = setTimeout(() => {
+      for (const i of [...this.keys.keys()]) if (i !== this.current) this.keys.delete(i);
+      this.worker.postMessage({ keys: [...this.keys].map(([i, m]) => [i, [...m]]), current: this.current, me });
+    }, 5000);
   }
 
   /// Which member speaks in which down slot, as the den names them.
@@ -836,6 +842,7 @@ class Voice {
 
   async leave() {
     clearInterval(this.offMembers);
+    clearTimeout(this.dropOld);
     try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
     this.ch.leave();
     this.pc.close();

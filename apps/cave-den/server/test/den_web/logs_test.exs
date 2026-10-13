@@ -10,7 +10,7 @@ defmodule DenWeb.LogsTest do
     Den.Rooms.admit(key, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
     session = Phoenix.Token.sign(DenWeb.Endpoint, "den", %{key: key})
     room = "p-" <> String.duplicate("5c", 16)
-    {:ok, _} = Den.Rooms.private_room(room)
+    {:ok, _} = Den.Rooms.private_room(room, key)
     previous = Logger.level()
     Logger.configure(level: :debug)
 

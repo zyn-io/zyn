@@ -79,6 +79,11 @@ defmodule DenWeb.RoomChannelTest do
     ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
     assert_reply ref, :ok, %{seq: 3, epoch: 2}
 
+    # B, removed, still writing at epoch 1 (within the den's window for late
+    # words): refused, so it cannot speak from a seat a newcomer will take.
+    ref = push(b, "relay", %{"bytes" => mls("text.bin")})
+    assert_reply ref, :error, %{reason: "this device is not a member of the room"}
+
     # Another room's GroupInfo, or messages, are not this room's.
     {:ok, _, other} = subscribe_and_join(a, DenWeb.RoomChannel, "room:news")
     ref = push(other, "create", %{"group_info" => mls("general.info")})

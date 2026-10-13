@@ -15,7 +15,7 @@
 //!
 //! The core here is plain Rust, tested natively; `wasm` wraps it for the page.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use openmls::prelude::tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use openmls::prelude::*;
@@ -79,6 +79,20 @@ pub struct Member {
     credential: CredentialWithKey,
     name: String,
     groups: HashMap<String, MlsGroup>,
+    /// Who sat in each leaf, for each room's last few epochs: a late message
+    /// is named after its author at its own epoch, not after whoever holds
+    /// that leaf now.
+    seats: HashMap<String, BTreeMap<u64, Vec<(u32, Vec<u8>)>>>,
+}
+
+/// Remember the room's tree at its current epoch (the last 5 epochs kept).
+fn remember(seats: &mut HashMap<String, BTreeMap<u64, Vec<(u32, Vec<u8>)>>>, room: &str, group: &MlsGroup) {
+    let by_epoch = seats.entry(room.to_string()).or_default();
+    by_epoch.insert(group.epoch().as_u64(), group.members().map(|m| (m.index.u32(), m.signature_key)).collect());
+    while by_epoch.len() > 5 {
+        let first = *by_epoch.keys().next().unwrap();
+        by_epoch.remove(&first);
+    }
 }
 
 impl Member {
@@ -93,7 +107,7 @@ impl Member {
             credential: BasicCredential::new(name.clone().into_bytes()).into(),
             signature_key: signer.to_public_vec().into(),
         };
-        Ok(Member { provider, signer, credential, name, groups: HashMap::new() })
+        Ok(Member { provider, signer, credential, name, groups: HashMap::new(), seats: HashMap::new() })
     }
 
     /// A device as it was saved.
@@ -119,7 +133,11 @@ impl Member {
                 groups.insert(g.clone(), group);
             }
         }
-        Ok(Member { provider, signer, credential, name: s.name, groups })
+        let mut seats = HashMap::new();
+        for (room, group) in &groups {
+            remember(&mut seats, room, group);
+        }
+        Ok(Member { provider, signer, credential, name: s.name, groups, seats })
     }
 
     pub fn save(&self) -> Result<String, String> {
@@ -157,6 +175,7 @@ impl Member {
             .max_past_epochs(4)
             .build(&self.provider, &self.signer, self.credential.clone())
             .map_err(err("create room"))?;
+        remember(&mut self.seats, room, &group);
         self.groups.insert(room.to_string(), group);
         self.group_info(room)
     }
@@ -188,12 +207,14 @@ impl Member {
         if group.group_id().as_slice() != room.as_bytes() {
             return Err("that GroupInfo is for another room".into());
         }
+        remember(&mut self.seats, room, &group);
         self.groups.insert(room.to_string(), group);
         bundle.into_commit().tls_serialize_detached().map_err(err("commit bytes"))
     }
 
     /// Drop a room this device is in (after a refused join, or on leaving).
     pub fn forget(&mut self, room: &str) -> Result<(), String> {
+        self.seats.remove(room);
         if let Some(mut g) = self.groups.remove(room) {
             g.delete(self.provider.storage()).map_err(err("forget"))?;
         }
@@ -240,19 +261,18 @@ impl Member {
     pub fn accept(&mut self, welcome: &[u8]) -> Result<String, String> {
         let msg = MlsMessageIn::tls_deserialize_exact(welcome).map_err(err("welcome"))?;
         let MlsMessageBodyIn::Welcome(w) = msg.extract() else { return Err("that is not a Welcome".into()) };
-        let group = StagedWelcome::new_from_welcome(&self.provider, &join_config(), w, None)
-            .map_err(err("welcome"))?
-            .into_group(&self.provider)
-            .map_err(err("join from welcome"))?;
-        let room = String::from_utf8(group.group_id().as_slice().to_vec()).map_err(err("room id"))?;
+        let staged = StagedWelcome::new_from_welcome(&self.provider, &join_config(), w, None).map_err(err("welcome"))?;
         // An invitation is only ever to a private room, and never replaces a
-        // room this device already holds.
+        // room this device already holds: checked before anything is stored.
+        let room = String::from_utf8(staged.group_context().group_id().as_slice().to_vec()).map_err(err("room id"))?;
         if !is_private(&room) {
             return Err("an invitation is only to a private room".into());
         }
         if self.groups.contains_key(&room) {
             return Err("already in that room".into());
         }
+        let group = staged.into_group(&self.provider).map_err(err("join from welcome"))?;
+        remember(&mut self.seats, &room, &group);
         self.groups.insert(room.clone(), group);
         Ok(room)
     }
@@ -295,6 +315,7 @@ impl Member {
         let group = self.groups.get_mut(room).ok_or_else(|| format!("not in {room}"))?;
         if group.pending_commit().is_some() {
             group.merge_pending_commit(provider).map_err(err("confirm"))?;
+            remember(&mut self.seats, room, group);
         }
         Ok(group.epoch().as_u64())
     }
@@ -330,7 +351,18 @@ impl Member {
                 // that), named after that leaf's key — never after the name
                 // in its credential, which its own client chose.
                 let Sender::Member(leaf) = sender else { return Err("not a member's message".into()) };
-                let key = group.member_at(leaf).map(|m| m.signature_key).ok_or("its author has left the room")?;
+                // At its own epoch's tree: a late message from an earlier
+                // epoch is not credited to whoever took that leaf since.
+                let key = if epoch == group.epoch().as_u64() {
+                    group.member_at(leaf).map(|m| m.signature_key)
+                } else {
+                    self.seats.get(room).and_then(|e| e.get(&epoch)).and_then(|s| s.iter().find(|(i, _)| *i == leaf.u32()).map(|(_, k)| k.clone()))
+                }
+                .ok_or("its author is not known at its epoch")?;
+                // And never from someone the room has since taken out.
+                if !group.members().any(|m| m.signature_key == key) {
+                    return Err("its author is no longer in the room".into());
+                }
                 Ok(Event::Text { from: name_of(&key), key: hex::encode(&key), text: String::from_utf8(app.into_bytes()).map_err(err("text"))?, epoch })
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
@@ -339,6 +371,7 @@ impl Member {
                     return Err("a private room is joined by invitation".into());
                 }
                 group.merge_staged_commit(provider, *staged).map_err(err("merge"))?;
+                remember(&mut self.seats, room, group);
                 Ok(Event::Commit { epoch: group.epoch().as_u64(), members: seats(group) })
             }
             // Standalone proposals are not kept: kept, the next honest commit
@@ -348,6 +381,7 @@ impl Member {
             // The server relayed this device's own commit: that is its order.
             ProcessedMessageContent::OwnPendingCommit => {
                 group.merge_pending_commit(provider).map_err(err("merge own"))?;
+                remember(&mut self.seats, room, group);
                 Ok(Event::Commit { epoch: group.epoch().as_u64(), members: seats(group) })
             }
             ProcessedMessageContent::OwnPrivateMessage => Ok(Event::Echo { epoch }),
@@ -860,5 +894,46 @@ mod tests {
         der.extend([0x02, 0x01, 0x03]);
         let err = token::blind(&der, "2026-10-12", "ab".repeat(32).as_str()).err().unwrap();
         assert!(err.contains("65537"), "{err}");
+    }
+
+    /// Audit A3: B is removed, D takes B's leaf, and B (which never applied
+    /// its removal) writes at its old epoch. A no longer credits it to D.
+    #[test]
+    fn a_removed_member_cannot_write_as_the_newcomer() {
+        let (mut a, mut b, mut c, mut d) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
+        let info = a.create("general").unwrap();
+        let jb = b.join("general", &info).unwrap();
+        a.receive("general", &jb).unwrap();
+        let jc = c.join("general", &a.group_info("general").unwrap()).unwrap();
+        a.receive("general", &jc).unwrap();
+        b.receive("general", &jc).unwrap();
+        let rm = a.remove("general", &[b.key()]).unwrap().unwrap();
+        a.confirm("general").unwrap();
+        c.receive("general", &rm).unwrap();
+        let jd = d.join("general", &a.group_info("general").unwrap()).unwrap();
+        a.receive("general", &jd).unwrap();
+        assert_eq!(a.epoch("general").unwrap(), 4);
+        let m = b.send("general", "I am D, send the funds here").unwrap();
+        assert_eq!(envelope(&m).unwrap().epoch, 2);
+        let e = a.receive("general", &m).map(|_| ()).unwrap_err();
+        assert!(e.contains("no longer in the room") || e.contains("not known at its epoch"), "{e}");
+        // A late message from a member still in the room is named rightly.
+        let late = c.send("general", "still here").unwrap();
+        assert_eq!(envelope(&late).unwrap().epoch, 3);
+        match a.receive("general", &late).unwrap() {
+            Event::Text { key, .. } => assert_eq!(key, c.key(), "credited to its author at its own epoch"),
+            e => panic!("{e:?}"),
+        }
+    }
+
+    /// A Welcome to an open room is refused before anything is stored: the
+    /// device can still make or join that room afterwards.
+    #[test]
+    fn a_refused_welcome_leaves_nothing_behind() {
+        let (mut a, mut c) = (Member::new().unwrap(), Member::new().unwrap());
+        let _ = a.create("general").unwrap();
+        let (_, w) = a.add("general", &c.key_packages(1).unwrap(), &[c.key()]).unwrap();
+        assert!(c.accept(&w).is_err());
+        assert!(c.create("general").is_ok(), "no group was left behind");
     }
 }

@@ -12,8 +12,16 @@ defmodule DenWeb.VoiceChannel do
     DenWeb.Heap.channel()
     case Den.Rooms.get(room) do
       nil -> {:error, %{reason: "no such room"}}
-      _ -> {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
+      r -> if Den.Rooms.may_enter?(r, socket.assigns.key), do: {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}, else: {:error, %{reason: "no such room"}}
     end
+  end
+
+  # A private room's commit took this device out: it leaves voice too.
+  intercept ["members"]
+
+  @impl true
+  def handle_out("members", %{keys: keys}, socket) do
+    if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
   @impl true

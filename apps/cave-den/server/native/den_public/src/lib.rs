@@ -89,6 +89,13 @@ fn commit(state: String, msg: Binary) -> Result<(String, u64, String), String> {
     let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() else {
         return Err("not a commit".into());
     };
+    // An open room is joined by each device's own external commit: nobody adds
+    // a device to it, which would take that device's seat (and its claimed
+    // invitation) without it, and lock it out.
+    let private = gid.as_slice().len() == 34 && gid.as_slice().starts_with(b"p-");
+    if !private && staged.add_proposals().next().is_some() {
+        return Err("members join an open room themselves; nobody adds them".into());
+    }
     let key = match sender {
         Sender::Member(idx) => pg.members().find(|m| m.index == idx).map(|m| m.signature_key).ok_or("its signer is not in the room")?,
         Sender::NewMemberCommit => staged.update_path_leaf_node().ok_or("an external commit without its new leaf")?.signature_key().as_slice().to_vec(),
@@ -109,6 +116,16 @@ fn info_matches(state: String, gi: Binary) -> Result<bool, String> {
     let pg = PublicGroup::load(&storage, &gid).map_err(e("state"))?.ok_or("the den does not track that room")?;
     let fresh = public_from(&crypto, &MemoryStorage::default(), vgi)?;
     Ok(context_bytes(&fresh)? == context_bytes(&pg)?)
+}
+
+/// The signature keys (hex) of the room's members in the tracked state: who
+/// may read and write it.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn members(state: String, room: String) -> Result<Vec<String>, String> {
+    let storage = load(&state)?;
+    let gid = GroupId::from_slice(room.as_bytes());
+    let pg = PublicGroup::load(&storage, &gid).map_err(e("state"))?.ok_or("the den does not track that room")?;
+    Ok(pg.members().map(|m| hex::encode(m.signature_key)).collect())
 }
 
 rustler::init!("Elixir.Den.Public");
