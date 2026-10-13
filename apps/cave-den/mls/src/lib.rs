@@ -192,6 +192,16 @@ impl Member {
     /// commit goes to the server; if it refuses (someone committed first),
     /// `forget` the room and join again from the newer GroupInfo.
     pub fn join(&mut self, room: &str, group_info: &[u8]) -> Result<Vec<u8>, String> {
+        // A private room is entered by invitation only, whatever the server says.
+        if is_private(room) {
+            return Err("a private room is joined by invitation".into());
+        }
+        self.external_join(room, group_info)
+    }
+
+    /// The external commit itself, unchecked: tests use it to play a device
+    /// that tries to walk into a private room anyway.
+    fn external_join(&mut self, room: &str, group_info: &[u8]) -> Result<Vec<u8>, String> {
         let msg = MlsMessageIn::tls_deserialize_exact(group_info).map_err(err("group info"))?;
         let MlsMessageBodyIn::GroupInfo(info) = msg.extract() else { return Err("that is not a GroupInfo".into()) };
         let (group, bundle) = MlsGroup::external_commit_builder()
@@ -775,7 +785,8 @@ mod tests {
         let _ = commit;
         // X, holding the room's GroupInfo (as the den would), joins by external commit: refused by members.
         let info = a.group_info(ROOM).unwrap();
-        let join = x.join(ROOM, &info).unwrap();
+        assert!(x.join(ROOM, &info).unwrap_err().contains("invitation"));
+        let join = x.external_join(ROOM, &info).unwrap();
         let e = b.receive(ROOM, &join).unwrap_err();
         assert!(e.contains("invitation"), "{e}");
         assert_eq!(b.members(ROOM).unwrap().len(), 2);
@@ -869,7 +880,7 @@ mod tests {
         let (add, _welcome) = a.add(P, &c.key_packages(1).unwrap(), &[c.key()]).unwrap();
         w("private-add.bin", &add);
         a.confirm(P).unwrap();
-        w("private-join.bin", &b.join(P, &a.group_info(P).unwrap()).unwrap());
+        w("private-join.bin", &b.external_join(P, &a.group_info(P).unwrap()).unwrap());
         // A's signed report that it cannot apply the room's first ordered commit (B's join, seq 1).
         w("report-a-general-1.hex", hex::encode(a.report("general", 1).unwrap()).as_bytes());
         let keys = serde_json::json!({ "a": a.key(), "b": b.key(), "c": c.key(), "x": x.key() });
@@ -947,5 +958,15 @@ mod tests {
         let (_, w) = a.add("general", &c.key_packages(1).unwrap(), &[c.key()]).unwrap();
         assert!(c.accept(&w).is_err());
         assert!(c.create("general").is_ok(), "no group was left behind");
+    }
+
+    /// The library never joins a private room by GroupInfo, even if a den
+    /// presents one as open.
+    #[test]
+    fn a_private_room_is_never_joined_by_group_info() {
+        let (mut a, mut b) = (Member::new().unwrap(), Member::new().unwrap());
+        const P: &str = "p-00112233445566778899aabbccddeeff";
+        let info = a.create(P).unwrap();
+        assert!(b.join(P, &info).unwrap_err().contains("invitation"));
     }
 }

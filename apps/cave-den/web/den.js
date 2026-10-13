@@ -327,7 +327,10 @@ export class DenClient {
   /// In the room's group, caught up, and with members whose day ended taken out.
   async sync(room, state, tries = 0) {
     const ch = this.channels.get(room);
-    const kind = state.kind || this.rooms.get(room)?.kind;
+    // A private room's id says so (p- and 32 hex digits): whatever the den
+    // answers, this device never joins it by GroupInfo nor forgets it because
+    // the den has no group for it.
+    const kind = /^p-[0-9a-f]{32}$/.test(room) ? 'private' : state.kind || this.rooms.get(room)?.kind;
     // An open room the den has no group for (started afresh): this device's
     // old group is gone with it; start the room again.
     if (kind !== 'private' && !state.group_info && this.den.rooms().includes(room)) {
