@@ -3,3 +3,7 @@
 .backdrop::after { content: ""; position: absolute; inset: 0; background:
   radial-gradient(ellipse 60% 80% at 50% 45%, rgba(5, 7, 6, 0.55), rgba(5, 7, 6, 0.2) 70%, transparent),
   linear-gradient(180deg, rgba(5, 7, 6, 0.1), rgba(5, 7, 6, 0.45)); }
+
+/* Links in the door's text: the store's acid, not the browser's blue. */
+.door .say a { color: var(--acid); text-underline-offset: 3px; }
+.door .say a:hover { color: var(--ink); }
