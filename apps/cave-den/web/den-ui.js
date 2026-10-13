@@ -88,10 +88,19 @@ export function mountDen(den, el, me) {
   const title = (r) => {
     if (r?.kind !== 'private') return r?.title || r?.id || '';
     const others = den.inRoom(r.id) ? den.members(r.id).filter((m) => m.key !== me.key) : [];
-    if (others.length === 1) return others[0].name;
-    return r.title || others.map((m) => m.name).join(', ') || 'Private room';
+    if (others.length === 1) return display(others[0].key);
+    return r.title || others.map((m) => display(m.key)).join(', ') || 'Private room';
   };
   const roomTitle = (id) => title(den.rooms.get(id) || { id });
+  /// The start of a device's own name, shown beside the name its member gave
+  /// themselves: two members may claim the same name, never the same key.
+  const short = (key) => `m-${String(key).slice(0, 6)}`;
+  /// A member as the page shows them: their chosen name, or their device's.
+  const display = (key) => den.nickFor(key) || nameOf(key);
+  const whoHtml = (key, cls = 'who') => {
+    const nick = den.nickFor(key);
+    return `<b class="${cls}" title="${esc(`${nameOf(key)}\n${fingerprint(key)}`)}">${esc(nick || nameOf(key))}</b>${nick ? `<span class="id">${esc(short(key))}</span>` : ''}`;
+  };
   let statusTimer;
   const status = (t, sticky = false) => {
     el('den-status').textContent = t || '';
@@ -99,8 +108,20 @@ export function mountDen(den, el, me) {
     if (t && !sticky) statusTimer = setTimeout(() => { el('den-status').textContent = ''; }, 6000);
   };
 
-  el('me').textContent = me.name;
+  const drawMe = () => {
+    el('me').textContent = me.nick || me.name;
+    el('me').title = me.nick ? me.name : '';
+  };
+  drawMe();
   el('me-mark').innerHTML = mark(me.key, 32);
+  const setName = el('set-name');
+  if (setName) {
+    setName.onclick = async () => {
+      const name = await ask({ heading: 'Your name', text: 'Members see it beside this device\'s own name. Leave it empty for none.', field: 'Name', yes: 'Save', value: me.nick, empty: true });
+      if (name === null) return;
+      try { await den.setNick(name); drawMe(); } catch (e) { status(e.message); }
+    };
+  }
 
   // The den fills the window below the site's bar; only the log scrolls.
   document.querySelector('main.register')?.classList.add('wide');
@@ -202,7 +223,7 @@ export function mountDen(den, el, me) {
 
   /// A small form in a dialog: a heading, a line, an optional field; resolves
   /// with the field's value (or true), or null when closed.
-  function ask({ heading, text = '', field = null, yes, danger = false }) {
+  function ask({ heading, text = '', field = null, yes, danger = false, value = '', empty = false }) {
     const d = el('ask');
     d.querySelector('h2').textContent = heading;
     d.querySelector('.ask-text').textContent = text;
@@ -210,7 +231,7 @@ export function mountDen(den, el, me) {
     const label = d.querySelector('.ask-field');
     label.hidden = !field;
     const input = label.querySelector('input');
-    if (field) { label.querySelector('span').textContent = field; input.value = ''; }
+    if (field) { label.querySelector('span').textContent = field; input.value = value; }
     const ok = d.querySelector('[data-yes]');
     ok.textContent = yes;
     ok.classList.toggle('danger', danger);
@@ -221,7 +242,7 @@ export function mountDen(den, el, me) {
       d.querySelector('form').onsubmit = (e) => {
         e.preventDefault();
         const v = field ? input.value.trim() : true;
-        if (field && !v) return;
+        if (field && !v && !empty) return;
         answer = v;
         d.close();
       };
@@ -244,8 +265,15 @@ export function mountDen(den, el, me) {
   function known() {
     const all = new Map();
     for (const r of rooms()) for (const m of den.members(r.id)) if (m.key !== me.key) all.set(m.key, m.name);
-    return [...all.entries()].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
+    return [...all.entries()].map(([key, name]) => ({ key, name, label: display(key) })).sort((a, b) => a.label.localeCompare(b.label));
   }
+  /// A mention names a device (@m- and 20 hex digits); shown by the name
+  /// that device's member chose, when this device knows it.
+  const mentioned = (name) => {
+    if (name === me.name) return display(me.key);
+    for (const r of rooms()) for (const m of den.members(r.id)) if (m.name === name) return display(m.key);
+    return name;
+  };
   // A device's name is its key's first ten hex digits (as the core names it).
   const nameOf = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `m-${key.slice(0, 20)}` : 'a member');
 
@@ -255,7 +283,7 @@ export function mountDen(den, el, me) {
     const d = el('pick');
     d.querySelector('h2').textContent = heading;
     d.querySelector('.who').innerHTML = list.length
-      ? list.map((m) => `<label class="pick-row"><input type="checkbox" value="${esc(m.key)}" data-name="${esc(m.name)}" />${mark(m.key, 24)}<span>${esc(m.name)}</span></label>`).join('')
+      ? list.map((m) => `<label class="pick-row"><input type="checkbox" value="${esc(m.key)}" data-name="${esc(m.name)}" />${mark(m.key, 24)}<span>${whoHtml(m.key, 'pick-who')}</span></label>`).join('')
       : '<p class="none">No one to add yet. Members appear here once you share a room.</p>';
     d.querySelector('.pick-name').hidden = !named;
     d.querySelector('[name=title]').value = '';
@@ -286,7 +314,7 @@ export function mountDen(den, el, me) {
       out += esc(text.slice(last, t.index));
       if (t[1] !== undefined) out += `<code>${esc(t[1])}</code>`;
       else if (t[2] !== undefined) out += `<a href="${esc(t[2])}" target="_blank" rel="noopener noreferrer nofollow">${esc(t[2])}</a>`;
-      else if (t[3] !== undefined) out += `<mark class="${t[3] === me.name ? 'me' : ''}">@${esc(t[3])}</mark>`;
+      else if (t[3] !== undefined) out += `<mark class="${t[3] === me.name ? 'me' : ''}" title="${esc(t[3])}">@${esc(mentioned(t[3]))}</mark>`;
       else out += '<br>';
       last = t.index + t[0].length;
     }
@@ -301,19 +329,19 @@ export function mountDen(den, el, me) {
     if (readFrom && !m.mine && m.seq > readFrom && (!prev || prev.mine || prev.seq <= readFrom)) parts.push('<li class="new-line" role="separator"><span>New</span></li>');
     // What happened to the room itself: who joined, who left, who named it.
     if (m.t === 'note') {
-      parts.push(`<li class="note" data-id="${esc(m.id)}"><span>${esc(m.text)}</span> <time datetime="${new Date(m.at).toISOString()}">${time(m.at)}</time></li>`);
+      parts.push(`<li class="note" data-id="${esc(m.id)}"><span>${esc(m.who ? `${display(m.who)} ${m.act}` : m.text)}</span> <time datetime="${new Date(m.at).toISOString()}">${time(m.at)}</time></li>`);
       return parts.join('');
     }
     const cont = prev && !m.reply && prev.key === m.key && !prev.deleted && m.at - prev.at < GROUP_MS && !parts.length;
     const own = m.key === me.key;
-    const head = `<p class="msg-head"><b class="who" title="${esc(fingerprint(m.key))}">${esc(m.from)}</b>${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
+    const head = `<p class="msg-head">${whoHtml(m.key)}${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
     const gutter = cont ? `<span class="side-time">${time(m.at)}</span>` : mark(m.key);
     if (m.deleted) {
       parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>Message deleted</em></p></div></li>`);
       return parts.join('');
     }
     const quoted = m.reply && log.find((x) => x.id === m.reply);
-    const q = m.reply ? `<button type="button" class="quote" data-jump="${esc(m.reply)}">${quoted ? `<b>${esc(quoted.from)}</b> ${esc(quoted.deleted ? 'Message deleted' : (quoted.text || quoted.file?.name || '').slice(0, 140))}` : 'An earlier message'}</button>` : '';
+    const q = m.reply ? `<button type="button" class="quote" data-jump="${esc(m.reply)}">${quoted ? `<b>${esc(display(quoted.key))}</b> ${esc(quoted.deleted ? 'Message deleted' : (quoted.text || quoted.file?.name || '').slice(0, 140))}` : 'An earlier message'}</button>` : '';
     let body = `<div class="body">${words(m.text)}${m.edited && cont ? ' <span class="edited">edited</span>' : ''}</div>`;
     if (m.file) {
       const img = inlineImage(m.file);
@@ -322,7 +350,7 @@ export function mountDen(den, el, me) {
         : `<button type="button" class="file" data-file="${esc(m.id)}">${ICON.file}<span><b>${esc(m.file.name)}</b><small>${size(m.file.size)} · Download</small></span></button>`;
     }
     // Reactions are kept by the reactor's key; shown by name.
-    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(nameOf).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
+    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(display).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
     const ping = !own && (m.text || '').includes(`@${me.name}`);
     parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
       ${gutter}
@@ -525,7 +553,7 @@ export function mountDen(den, el, me) {
     const banner = el('say-banner');
     banner.hidden = !reply && !editing;
     banner.innerHTML = reply
-      ? `<span>Replying to <b>${esc(reply.from)}</b> <q>${esc((reply.text || reply.file?.name || '').slice(0, 90))}</q></span><button type="button" class="x" id="say-cancel" aria-label="Cancel reply">×</button>`
+      ? `<span>Replying to <b>${esc(display(reply.key))}</b> <q>${esc((reply.text || reply.file?.name || '').slice(0, 90))}</q></span><button type="button" class="x" id="say-cancel" aria-label="Cancel reply">×</button>`
       : editing ? '<span>Editing your message · <kbd>Esc</kbd> to cancel</span><button type="button" class="x" id="say-cancel" aria-label="Cancel editing">×</button>' : '';
     const c = el('say-cancel');
     if (c) c.onclick = cancelCompose;
@@ -590,10 +618,10 @@ export function mountDen(den, el, me) {
     if (!m) return closeMentions();
     mentionAt = before.length - m[2].length - 1;
     const q = m[2].toLowerCase();
-    const list = known().filter((x) => x.name.toLowerCase().includes(q)).slice(0, 6);
+    const list = known().filter((x) => x.name.toLowerCase().includes(q) || x.label.toLowerCase().includes(q)).slice(0, 6);
     if (!list.length) return closeMentions();
     mentionPick = Math.min(mentionPick, list.length - 1);
-    el('mentions').innerHTML = list.map((x, i) => `<li><button type="button" role="option" data-pick="${esc(x.name)}" aria-selected="${i === mentionPick}">${mark(x.key, 20)}<span>${esc(x.name)}</span></button></li>`).join('');
+    el('mentions').innerHTML = list.map((x, i) => `<li><button type="button" role="option" data-pick="${esc(x.name)}" aria-selected="${i === mentionPick}">${mark(x.key, 20)}<span>${whoHtml(x.key, 'pick-who')}</span></button></li>`).join('');
     el('mentions').hidden = false;
     el('mentions').querySelectorAll('[data-pick]').forEach((b) => {
       b.onmousedown = (ev) => ev.preventDefault();
@@ -634,15 +662,17 @@ export function mountDen(den, el, me) {
   // ---- Members ----------------------------------------------------------------
 
   function drawMembers() {
-    const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : a.name.localeCompare(b.name)));
+    const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : display(a.key).localeCompare(display(b.key))));
     const priv = den.rooms.get(room)?.kind === 'private';
     // Two names that start alike are how one member poses as another: say so.
+    // So are two members who gave themselves the same name.
     const starts = new Map();
-    for (const m of list) starts.set(m.name.slice(0, 8), (starts.get(m.name.slice(0, 8)) || 0) + 1);
+    const count = (k) => starts.set(k, (starts.get(k) || 0) + 1);
+    for (const m of list) { count(m.name.slice(0, 8)); if (den.nickFor(m.key)) count(`nick:${den.nickFor(m.key).toLowerCase()}`); }
     const alike = [...starts.values()].some((n) => n > 1);
     el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
-      ${alike ? '<p class="alike" role="note">Two members here have names that start alike. Compare whole names before you trust who is who.</p>' : ''}
-      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="who" title="${esc(fingerprint(m.key))}">${esc(m.name)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
+      ${alike ? '<p class="alike" role="note">Two members here have names that look alike. Compare the device names (m- and digits) before you trust who is who.</p>' : ''}
+      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="member-name">${whoHtml(m.key)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(display(m.key))}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
     el('members').querySelectorAll('[data-dm]').forEach((b) => {
       b.onclick = async () => {
@@ -683,7 +713,7 @@ export function mountDen(den, el, me) {
       return i < 0 ? esc(s.slice(0, 90)) : `${i > 30 ? '…' : ''}${esc(s.slice(Math.max(0, i - 30), i))}<mark>${esc(s.slice(i, i + q.length))}</mark>${esc(s.slice(i + q.length, i + q.length + 60))}`;
     };
     found.innerHTML = hits.length
-      ? `<p class="found-count">${hits.length} on this device</p>${hits.slice(-30).reverse().map((h) => `<button type="button" data-room="${esc(h.room)}" data-id="${esc(h.message.id)}"><span class="found-where">${esc(roomTitle(h.room))} · ${esc(h.message.from)}</span><span>${hl(h.message.text || h.message.file?.name || '')}</span></button>`).join('')}`
+      ? `<p class="found-count">${hits.length} on this device</p>${hits.slice(-30).reverse().map((h) => `<button type="button" data-room="${esc(h.room)}" data-id="${esc(h.message.id)}"><span class="found-where">${esc(roomTitle(h.room))} · ${esc(display(h.message.key))}</span><span>${hl(h.message.text || h.message.file?.name || '')}</span></button>`).join('')}`
       : '<p class="none">No matches on this device.</p>';
     found.querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => { found.hidden = true; el('search').value = ''; go(b.dataset.room, b.dataset.id); }; });
   };
@@ -702,7 +732,7 @@ export function mountDen(den, el, me) {
     const priv = den.rooms.get(room_)?.kind === 'private';
     if (muted.has(room_)) return;
     if (notify === 'mentions' && !mention && !priv) return;
-    const n = new Notification(plain(roomTitle(room_)), { body: plain(`${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_ });
+    const n = new Notification(plain(roomTitle(room_)), { body: plain(`${display(m.key)}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_ });
     n.onclick = () => { window.focus(); go(room_); n.close(); };
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && nearBottom()) { den.markRead(room); drawRooms(); } });
@@ -719,7 +749,7 @@ export function mountDen(den, el, me) {
     el('voice-room').textContent = roomTitle(v.room);
     el('voice-room').onclick = () => go(v.room);
     const people = [{ mid: 'me', key: me.key }, ...(v.people || [])];
-    el('voice-who').innerHTML = people.map((p) => `<li data-mid="${esc(p.mid)}" title="${esc(nameOf(p.key))}">${mark(p.key, 22)}<span>${p.mid === 'me' ? 'You' : esc(nameOf(p.key))}</span></li>`).join('');
+    el('voice-who').innerHTML = people.map((p) => `<li data-mid="${esc(p.mid)}" title="${esc(nameOf(p.key))}">${mark(p.key, 22)}<span>${p.mid === 'me' ? 'You' : esc(display(p.key))}</span></li>`).join('');
     meterTimer = setInterval(() => {
       const lv = den.voice?.levels?.() || {};
       el('voice-who').querySelectorAll('li').forEach((li) => li.classList.toggle('speaking', (lv[li.dataset.mid] || 0) > 0.02));
@@ -747,10 +777,11 @@ export function mountDen(den, el, me) {
   // ---- Events from den.js ---------------------------------------------------
 
   function drawTyping() {
-    const who = Object.entries(typing).filter(([, t]) => Date.now() - t < 4000).map(([k]) => nameOf(k));
+    const who = Object.entries(typing).filter(([, t]) => Date.now() - t < 4000).map(([k]) => display(k));
     el('typing').innerHTML = who.length ? `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${esc(who.slice(0, 3).join(', '))}${who.length > 3 ? ` and ${who.length - 3} more` : ''} ${who.length > 1 ? 'are' : 'is'} writing` : '';
   }
 
+  let nickTimer;
   den.on = (event, d) => {
     if (event === 'rooms' || event === 'invites') drawRooms();
     if (event === 'ready' || event === 'members') {
@@ -769,6 +800,10 @@ export function mountDen(den, el, me) {
       drawTyping();
       setTimeout(drawTyping, 4100);
     }
+    if (event === 'nicks') {
+      clearTimeout(nickTimer);
+      nickTimer = setTimeout(() => { drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
+    }
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
@@ -784,7 +819,7 @@ export function mountDen(den, el, me) {
         w.setAttribute('role', 'alert');
         el('den-main').prepend(w);
       }
-      w.textContent = `${nameOf(d.key)} reports a different door key for ${d.day} than this device was shown. Either the den is telling members apart, or ${nameOf(d.key)}'s device is wrong. Tell the host, and keep private things off this den until it is explained.`;
+      w.textContent = `${display(d.key)} (${nameOf(d.key)}) reports a different door key for ${d.day} than this device was shown. Either the den is telling members apart, or that member's device is wrong. Tell the host, and keep private things off this den until it is explained.`;
     }
   };
 

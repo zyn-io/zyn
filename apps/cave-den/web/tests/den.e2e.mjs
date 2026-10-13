@@ -124,10 +124,25 @@ await A.p.evaluate(async () => {
 });
 ok(await until(B.p, () => /reports a different door key/.test(document.querySelector('#den-warn')?.textContent || ''), null, 15000), 'a roommate shown a different door key is flagged, by name');
 
+// Names members give themselves: sealed, and shown beside the device's own name.
+await A.p.evaluate(() => window.__den.setNick('Ada'));
+await B.p.evaluate(() => window.__den.setNick('Bo'));
+ok(await until(B.p, ([k]) => window.__den.nickFor(k) === 'Ada', [A.me.key], 15000) && await until(A.p, ([k]) => window.__den.nickFor(k) === 'Bo', [B.me.key], 15000), 'each sees the name the other gave themselves');
+ok(await until(A.p, () => document.querySelector('#me')?.textContent === 'Ada', null, 5000), 'A sees its own name');
+
 // Words, a mention, a reply, a reaction, an edit, a deletion.
 await A.p.fill('#say-text', `Hello @${B.me.name}, welcome to the den.`);
 await A.p.press('#say-text', 'Enter');
 ok(await until(B.p, () => document.querySelector('#log li.ping')), 'B sees the mention highlighted');
+ok(await until(B.p, ([s]) => [...document.querySelectorAll('#log .msg-head')].some((h) => h.querySelector('.who')?.textContent === 'Ada' && h.querySelector('.id')?.textContent === s), [`m-${A.me.key.slice(0, 6)}`]), 'B sees A as Ada, beside the start of its device name');
+ok(await until(A.p, () => [...document.querySelectorAll('#log mark')].some((m) => m.textContent === '@Bo')), 'a mention shows the name its member chose');
+// A member who takes another's name is flagged in the members list.
+await A.p.evaluate(() => window.__den.setNick('Bo'));
+await until(B.p, ([k]) => window.__den.nickFor(k) === 'Bo', [A.me.key], 15000);
+await B.p.click('#room-meta');
+ok(await until(B.p, () => !!document.querySelector('#members .alike'), null, 5000), 'two members with the same name are flagged');
+await B.p.click('#room-meta');
+await A.p.evaluate(() => window.__den.setNick('Ada'));
 await B.p.hover('#log li.ping');
 await B.p.click('#log li.ping [data-act="reply"]');
 await B.p.fill('#say-text', 'Glad to be here.');
@@ -215,7 +230,7 @@ await B.p.click('[data-room="general"]');
 await A.p.click('#voice-go');
 await B.p.click('#voice-go');
 ok(await until(A.p, () => !document.querySelector('#voice').hidden), 'A is in voice');
-ok(await until(A.p, ([n]) => (document.querySelector('#voice-who')?.textContent || '').includes(n), [B.me.name], 20000), 'A sees B in voice');
+ok(await until(A.p, () => (document.querySelector('#voice-who')?.textContent || '').includes('Bo'), null, 20000), 'A sees B in voice, by the name B chose');
 await A.p.waitForTimeout(6000);
 const va = await A.p.evaluate(async () => { const v = window.__den.voice; const st = await v.pc.getStats(); let rx = 0; st.forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') rx += r.bytesReceived || 0; }); return { sealed: v.sealed, opened: v.opened, failed: v.failed, rx, state: v.pc.connectionState }; });
 const vb = await B.p.evaluate(async () => { const v = window.__den.voice; return { sealed: v.sealed, opened: v.opened, failed: v.failed, state: v.pc.connectionState }; });

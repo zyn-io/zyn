@@ -67,3 +67,16 @@ test("a device's pass hash is the one the den's member list keeps", async () => 
     assert.equal(pass, '89fbbb8554656bd7bdd0f200b552b67d6cc3c8faabd86261531e1d49ce822833');
   } finally { crypto.getRandomValues = realRandom; }
 });
+
+test('a name a member gives themselves is one plain line that cannot pass for a device name', async () => {
+  const { nickOf } = await import('../dist/den.js');
+  assert.equal(nickOf('  Ada  Lovelace '), 'Ada Lovelace');
+  assert.equal(nickOf('Ada‮ecalevol'), 'Adaecalevol', 'no bidirectional controls');
+  assert.equal(nickOf('a\nb'), 'a b');
+  assert.equal(nickOf('x'.repeat(40)).length, 32);
+  assert.equal(nickOf('m-e0458d253595addd653e'), '', 'not a device name');
+  assert.equal(nickOf('M-0abc'), '');
+  assert.equal(nickOf('m-zed'), 'm-zed', 'only m- and hex is a device name');
+  assert.equal(nickOf(''), '');
+  assert.equal(nickOf(7), '7');
+});

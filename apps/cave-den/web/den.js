@@ -35,7 +35,7 @@ const FILE_MAX = 25 * 1024 * 1024;
 /// The reactions the page offers (den-ui.js), and the only ones taken.
 export const REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
 /// One line with nothing hidden in it (see den-ui.js plain()).
-const plainText = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim();
+const plainText = (s) => String(s ?? '').replace(/[\t\n\r]/g, ' ').replace(/[\u0000-\u001f\u007f\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim();
 // Shown in place only these; anything else (SVG, HTML, …) is a download.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 
@@ -51,6 +51,13 @@ export function fileMeta(f) {
   const name = (typeof f.name === 'string' ? f.name : '').replace(/[\u0000-\u001f\u007f/\\\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'file';
   const mime = typeof f.mime === 'string' && INLINE.has(f.mime.toLowerCase()) ? f.mime.toLowerCase() : 'application/octet-stream';
   return { blob: f.blob, name, mime, size: f.size, key: f.key, iv: f.iv };
+}
+/// A name a member gives themselves, as others take it: one plain line of 1
+/// to 32 characters that cannot pass for a device name (m- and hex). Empty
+/// when it is not one.
+export function nickOf(s) {
+  const n = plainText(s).slice(0, 32);
+  return n && !/^m-[0-9a-f]/i.test(n) ? n : '';
 }
 const unhex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
 const hex = (u8) => [...u8].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -115,6 +122,7 @@ export class DenClient {
     this.rooms = new Map(); // id → { id, title, kind }
     this.seq = {};
     this.read = {};
+    this.nicks = {}; // device key → { name, at }: the names members gave themselves
     this.typingAt = 0;
   }
 
@@ -133,7 +141,8 @@ export class DenClient {
     this.seq = (await this.kv.get('seq')) || {};
     this.read = (await this.kv.get('read')) || {};
     for (const r of (await this.kv.get('private')) || []) this.rooms.set(r.id, r);
-    this.me = { name: this.den.name(), key: this.den.key() };
+    this.nicks = (await this.kv.get('nicks')) || {};
+    this.me = { name: this.den.name(), key: this.den.key(), nick: (await this.kv.get('nick')) || '' };
     return this.me;
   }
 
@@ -361,6 +370,7 @@ export class DenClient {
           await this.publishInfo(room);
         }
         await this.save();
+        if (this.me.nick) this.soonProfile(room);
       } catch (e) {
         // Someone moved the room first: start again from where it is now.
         try { this.den.forget(room); } catch { /* not in it */ }
@@ -453,13 +463,14 @@ export class DenClient {
     const before = this.seenMembers?.[room];
     (this.seenMembers ||= {})[room] = now;
     if (!before) return;
-    const names = new Map(members.map((m) => [m.key, m.name]));
     const lines = [];
-    for (const k of now) if (!before.has(k) && k !== this.den.key()) lines.push(`${names.get(k)} joined`);
-    for (const k of before) if (!now.has(k)) lines.push(`m-${k.slice(0, 20)} left`);
+    for (const k of now) if (!before.has(k) && k !== this.den.key()) lines.push([k, 'joined']);
+    for (const k of before) if (!now.has(k)) lines.push([k, 'left']);
     if (!lines.length) return;
+    // Someone new does not know the names members gave themselves: tell them.
+    if (this.me.nick && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
     const log = await this.log(room);
-    for (const text of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', text, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
+    for (const [who, act] of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', who, act, text: `m-${who.slice(0, 20)} ${act}`, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
     this.on('message', { room, message: log.at(-1), kind: 'note', mine: false, mention: false });
   }
@@ -529,6 +540,11 @@ export class DenClient {
   /// edit or deletion applied to the message it names (edits and deletions
   /// only from that message's own author).
   async apply(room, m, mine = false) {
+    // Any document can carry the name its sender gave themselves. It is a
+    // claim, sealed by MLS to the sender's key: shown beside that key's own
+    // name, never instead of it where it matters.
+    if (!mine && typeof m.key === 'string' && 'nick' in m) await this.learnNick(m.key, m.nick, m.at);
+    if (m.t === 'profile') return;
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
@@ -575,7 +591,7 @@ export class DenClient {
       r.title = title;
       await this.keepPrivate();
       this.on('rooms', [...this.rooms.values()]);
-      shown = { id: `note-${m.id}`, t: 'note', text: `${m.from} named the room “${title}”`, at: m.at || Date.now(), seq: m.seq || 0, reactions: {} };
+      shown = { id: `note-${m.id}`, t: 'note', who: m.key, act: `named the room “${title}”`, text: `${m.from} named the room “${title}”`, at: m.at || Date.now(), seq: m.seq || 0, reactions: {} };
       log.push(shown);
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
@@ -615,7 +631,7 @@ export class DenClient {
   send(room, body) {
     return this.lock(async () => {
       const ch = this.channels.get(room);
-      const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
+      const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...(this.me.nick ? { nick: this.me.nick } : {}), ...body };
       if (body.t === 'msg' || body.t === 'file') {
         m.kh = await this.seenHash(day()).catch(() => null);
         if (!m.kh) delete m.kh;
@@ -729,7 +745,7 @@ export class DenClient {
 
   /// A send inside a lock already held.
   async lockless_send(room, body) {
-    const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
+    const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...(this.me.nick ? { nick: this.me.nick } : {}), ...body };
     const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
     await this.advance(room, r.seq);
     await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
@@ -769,6 +785,7 @@ export class DenClient {
         if (!this.rooms.has(room)) this.rooms.set(room, { id: room, title: '', kind: 'private' });
         await this.keepPrivate();
         this.joinRoom(room);
+        if (this.me.nick) this.soonProfile(room);
         this.on('rooms', [...this.rooms.values()]);
       } catch { /* already in it, or not for this device */ }
       await this.save();
@@ -822,6 +839,46 @@ export class DenClient {
       this.den.discard(room);
     }
     await this.save();
+  }
+
+  // ---- Names members give themselves ---------------------------------------------
+
+  /// The name a device's member gave themselves, or ''.
+  nickFor(key) {
+    return key === this.me?.key ? this.me.nick : this.nicks[key]?.name || '';
+  }
+
+  /// A member's name as sent from their key: the newest by their clock wins.
+  async learnNick(key, nick, at) {
+    const name = nickOf(nick);
+    const when = sent(at);
+    const had = this.nicks[key];
+    if (had && had.at >= when) return;
+    if ((had?.name || '') === name) { if (had) had.at = when; return; }
+    if (name) this.nicks[key] = { name, at: when }; else delete this.nicks[key];
+    await this.kv.put('nicks', this.nicks);
+    this.on('nicks', { key, name });
+  }
+
+  /// Give this device's member a name (or none), and tell every room it is in.
+  async setNick(nick) {
+    const name = nickOf(nick);
+    if (String(nick || '').trim() && !name) throw new Error('A name is one line of at most 32 characters, and not one that starts like a device name (m- and digits).');
+    this.me.nick = name;
+    await this.kv.put('nick', name);
+    this.on('nicks', { key: this.me.key, name });
+    for (const room of this.den.rooms()) await this.send(room, { t: 'profile', nick: name }).catch(() => {});
+  }
+
+  /// A room's newcomers hear this device's name a little after they arrive,
+  /// once however many arrive together.
+  soonProfile(room) {
+    (this.profileSoon ||= {});
+    if (this.profileSoon[room]) return;
+    this.profileSoon[room] = setTimeout(() => {
+      delete this.profileSoon[room];
+      if (this.inRoom(room) && this.me.nick) this.send(room, { t: 'profile', nick: this.me.nick }).catch(() => {});
+    }, 2000 + Math.random() * 8000);
   }
 
   // ---- Unread ----------------------------------------------------------------
