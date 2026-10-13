@@ -54,7 +54,16 @@ defmodule DenWeb.DoorController do
 
   def ways(conn, _) do
     members = Den.Gate.module() == Members
-    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval), tomorrow_from: Den.Door.tomorrow_from(), file_max: Den.Blobs.max()})
+    den = Den.Mod.public().den
+    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval), tomorrow_from: Den.Door.tomorrow_from(), file_max: Den.Blobs.max(), name: den.name, description: den.description, icon: den.icon})
+  end
+
+  @doc "The den's icon, set by Manage server (shown on the door page and in the header)."
+  def icon(conn, _) do
+    case Den.Mod.icon_bytes() do
+      {type, bytes} -> conn |> put_resp_content_type(type, nil) |> put_resp_header("cache-control", "public, max-age=300") |> put_resp_header("x-content-type-options", "nosniff") |> send_resp(200, bytes)
+      nil -> conn |> put_status(404) |> json(%{error: "this den has no icon"})
+    end
   end
 
   def join(conn, %{"invite" => invite, "pass" => pass}), do: done(conn, Members.join(invite, pass))
