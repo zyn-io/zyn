@@ -78,6 +78,11 @@ end
 
 if v = System.get_env("DEN_RETENTION_DAYS"), do: config(:den, retention_days: String.to_integer(v))
 
+# Requests to the door per address a minute (60), and asks to join an hour (5):
+# higher for a circle that shares one address (a school, an office).
+if v = System.get_env("DEN_DOOR_PER_MINUTE"), do: config(:den, door_per_minute: String.to_integer(v))
+if v = System.get_env("DEN_ASK_PER_HOUR"), do: config(:den, ask_per_hour: String.to_integer(v))
+
 # How many days of day keys the den keeps ahead itself (0: the host makes them).
 if v = System.get_env("DEN_KEYS_AHEAD"), do: config(:den, keys_ahead: String.to_integer(v))
 
