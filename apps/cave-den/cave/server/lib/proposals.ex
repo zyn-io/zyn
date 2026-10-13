@@ -1,8 +1,10 @@
-defmodule Den.Proposals do
+defmodule Den.Cave.Proposals do
   @moduledoc """
   Every ZCaveDAO proposal gets a room: the den reads the DAO's public
   proposal list from the ledger (`zyn_dao`) every minute and opens
   `proposal-<n>` for each one it has not seen, announcing it to the lobby.
+  Compiled into the den from `extra/`, started with
+  `DEN_EXTRA_CHILDREN=Den.Cave.Proposals`.
   """
   use GenServer
 
@@ -38,8 +40,8 @@ defmodule Den.Proposals do
   end
 
   defp ask do
-    node = Application.fetch_env!(:den, :node_url)
-    body = Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "zyn_dao", params: %{collection: Application.fetch_env!(:den, :collection)}})
+    node = Den.Gate.Zyn.node_url()
+    body = Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "zyn_dao", params: %{collection: Den.Gate.Zyn.collection()}})
 
     case :httpc.request(:post, {String.to_charlist(node), [], ~c"application/json", body}, [timeout: 10_000], body_format: :binary) do
       {:ok, {{_, 200, _}, _, resp}} ->

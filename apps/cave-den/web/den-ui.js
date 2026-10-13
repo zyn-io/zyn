@@ -1,4 +1,4 @@
-// The den's page: rooms, messages, files, private rooms, voice (§184).
+// The den's page: rooms, messages, files, private rooms, voice.
 // Everything here works on what den.js keeps on this device; nothing is
 // fetched in the clear but the den's ciphertext and the day keys.
 

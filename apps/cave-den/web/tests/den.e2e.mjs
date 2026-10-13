@@ -1,15 +1,15 @@
-// The den's page in a real browser, policy enforced: two members through the
-// door (A through the gate's issuer window, B with its code directly), words,
-// replies, reactions, edits, files, rooms, private rooms, search and voice.
+// Epeaky in a real browser, its policy enforced: three people in by the three
+// ways a den opens (an invite link, the host's approval, the host's issuer
+// window registering a pass), then words, replies, reactions, edits, files,
+// rooms, private rooms, search and voice between two of them.
 //
-//   (cd ../server && mix phx.server)       # the dev den, on testnet's ledger
-//   ./build.sh ../server/priv/page ../cave  # its page, then a local config:
-//   A_TOKEN=… B_TOKEN=… node tests/den.e2e.mjs
-//
-// A_TOKEN and B_TOKEN are files holding two testnet member pass codes. Each run
-// spends one of each pass's three daily tokens.
+//   (cd ../server && mix phx.server)   # the dev den: every way in open
+//   ./build.sh ../server/priv/page      # its page
+//   node tests/den.e2e.mjs
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -18,48 +18,79 @@ const { chromium } = require('playwright-core');
 const DEN = process.env.DEN || 'http://localhost:4000';
 const SHOTS = process.env.SHOTS || tmpdir();
 const CHROME = process.env.CHROMIUM || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const codeA = readFileSync(process.env.A_TOKEN, 'utf8').trim();
-const codeB = readFileSync(process.env.B_TOKEN, 'utf8').trim();
+const ISSUER_TOKEN = process.env.ISSUER_TOKEN || 'dev-issuer-token-not-for-any-real-den-0001';
+const SERVER = new URL('../../server/', import.meta.url).pathname;
 
-// A stand-in for the host's issuer: a page on another origin that hands the
-// opener A's pass code, addressed to the den's origin only.
-const issuer = createServer((req, res) => {
+// What the host runs on the den's server (Den.Gate.Members), against its database.
+const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
+
+// A stand-in for the host's issuer: its server makes a pass code, registers
+// the pass's hash with the den (the host's token), and its page hands the
+// opener the code, addressed to the den's origin only. A code sent to any
+// other origin never arrives.
+const passHash = (code) => createHash('sha256').update(Buffer.concat([Buffer.from([0]), Buffer.from('den.pass.v1'), code])).digest('hex');
+const issuer = createServer(async (req, res) => {
+  const code = randomBytes(32);
+  const r = await fetch(`${DEN}/door/passes`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ISSUER_TOKEN}` }, body: JSON.stringify({ pass: passHash(code) }) });
   res.setHeader('content-type', 'text/html');
   res.end(`<!doctype html><title>Issuer</title><script>
     opener.postMessage({ den: 'pass', code: 'f'.repeat(64) }, 'https://elsewhere.example');
-    opener.postMessage({ den: 'pass', code: ${JSON.stringify(codeA)} }, ${JSON.stringify(DEN)});
+    ${r.ok ? `opener.postMessage({ den: 'pass', code: ${JSON.stringify(code.toString('hex'))} }, ${JSON.stringify(DEN)});` : ''}
     setTimeout(() => close(), 200);
   </script>`);
 }).listen(4181);
 const pageConfig = new URL('../../server/priv/page/config.json', import.meta.url);
 const savedConfig = readFileSync(pageConfig, 'utf8');
-writeFileSync(pageConfig, JSON.stringify({ keysUrl: '/den-keys.json', prefix: 'testnet', issuer: 'http://localhost:4181/' }));
+writeFileSync(pageConfig, JSON.stringify({ keysUrl: '/den-keys.json', prefix: 'e2e', issuer: 'http://localhost:4181/' }));
 
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 const errs = [];
 const csp = [];
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const until = (p, f, arg, ms = 30000) => p.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);
-async function member(name, viaGate) {
+async function person(name, url) {
   const ctx = await b.newContext({ viewport: { width: 1300, height: 900 }, permissions: ['microphone'] });
   const p = await ctx.newPage();
   await p.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; }; });
   p.on('pageerror', (e) => errs.push(`${name}: ${e.message.slice(0, 200)}`));
   p.on('console', (m) => { if (/Content Security Policy|Refused to/.test(m.text())) csp.push(`${name}: ${m.text().slice(0, 200)}`); });
-  await p.goto(`${DEN}/`, { waitUntil: 'networkidle' });
-  if (viaGate) {
-    await p.click('#enter');
-  } else {
-    await p.evaluate(async (code) => { await window.__den.fromPass(code); }, codeB);
-    await p.reload({ waitUntil: 'networkidle' });
-  }
-  await p.waitForSelector('#den:not([hidden])', { timeout: 20000 });
-  const me = await p.evaluate(() => window.__den.me);
-  return { p, me };
+  await p.goto(url, { waitUntil: 'networkidle' });
+  return { ctx, p };
 }
-const A = await member('A', true);
-ok(true, 'A enters through the issuer window; a code sent to another origin never arrives');
-const B = await member('B', false);
+const inside = (p, ms = 20000) => p.waitForSelector('#den:not([hidden])', { timeout: ms }).then(() => true, () => false);
+const meOf = (p) => p.evaluate(() => window.__den.me);
+
+// A: an invite link.
+const invite = host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))');
+const a = await person('A', `${DEN}/#invite=${invite}`);
+ok(await inside(a.p), 'A is in through an invite link');
+ok(!(await a.p.evaluate(() => location.hash)), 'the invite code is taken off the address at once');
+const reuse = await person('A2', `${DEN}/#invite=${invite}`);
+ok(await until(reuse.p, () => /used, withdrawn or has expired/.test(document.querySelector('#chat-out')?.textContent || ''), null, 10000), 'a used invite lets nobody else in');
+await reuse.ctx.close();
+
+// B: the host's issuer window.
+const bb = await person('B', `${DEN}/`);
+ok(await bb.p.isVisible('#way-ask') && await bb.p.isVisible('#way-invite') && await bb.p.isVisible('#enter'), 'the door offers the ways this den opens');
+await bb.p.click('#enter');
+ok(await inside(bb.p), 'B is in through the issuer window; a code sent to another origin never arrives');
+
+// C: asks, and the host approves.
+const c = await person('C', `${DEN}/`);
+await c.p.fill('#ask-note', 'Hi, C from the reading group');
+await c.p.click('#way-ask button');
+ok(await until(c.p, () => /once the host approves/.test(document.querySelector('#chat-out')?.textContent || ''), null, 10000), 'C waits for the host');
+ok(!(await inside(c.p, 2000)), 'nobody is in before the host approves');
+const approved = host('for r <- Den.Gate.Members.pending(), r.note == "Hi, C from the reading group", do: :ok = Den.Gate.Members.approve(r.id); IO.puts("approved")');
+ok(approved === 'approved', 'the host approves C from the server');
+ok(await inside(c.p, 40000), 'C is let in by the approval, on the page it asked from');
+// The device keeps its own pass: with its session and tokens gone, a reload goes straight back in.
+await c.p.evaluate(async () => { const kv = window.__den.kv; await kv.del('session'); for (const d of [0, 1]) await kv.del(`token:${new Date(Date.now() + d * 86400000).toISOString().slice(0, 10)}`); });
+await c.p.reload({ waitUntil: 'networkidle' });
+ok(await inside(c.p), 'with no session or token left, the kept pass lets the device back in');
+await c.ctx.close();
+const A = { p: a.p, me: await meOf(a.p) };
+const B = { p: bb.p, me: await meOf(bb.p) };
 ok(await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [B.me.key], 40000) && await until(B.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [A.me.key], 40000), `A and B in General (${A.me.name}, ${B.me.name})`);
 
 // Words, a mention, a reply, a reaction, an edit, a deletion.
@@ -103,15 +134,11 @@ ok(await until(B.p, () => [...document.querySelectorAll('#log .att img')].some((
 const doc = await B.p.evaluate(async () => { const log = await window.__den.log('general'); const f = log.find((m) => m.file?.name === 'minutes.txt'); return (await window.__den.openFile(f.file)).text(); });
 ok(doc === 'the minutes of the first meeting', 'B opens the document');
 
-// A room a member makes; proposal rooms from the ledger.
+// A room a member makes.
 const nw = await B.p.evaluate(() => window.__den.push(window.__den.lobby, 'open_room', { title: 'Night watch' }));
 ok(await until(A.p, ([id]) => document.querySelector(`[data-room="${id}"]`), [nw.id]), 'A sees the room B made');
 await A.p.click(`[data-room="${nw.id}"]`);
 ok(await until(A.p, () => /Members · ([2-9]|\d\d)/.test(document.querySelector('#room-meta')?.textContent || ''), null, 30000), 'both are in it');
-await A.p.click('[data-toggle="props"]');
-await until(A.p, () => document.querySelector('[data-room^="proposal-"]'));
-const props = await A.p.$$eval('[data-room^="proposal-"]', (bs) => bs.map((b) => b.textContent.trim()));
-ok(props.length > 0, `proposal rooms from testnet's DAO: ${props.slice(0, 4).join(', ')}`);
 
 // Unread counts.
 await A.p.click('[data-room="general"]');

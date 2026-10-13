@@ -1,12 +1,11 @@
-// The den: ZCaveDAO's members' chat (DECISIONS §184), in the page.
+// The den's client, in the page.
 //
 // This device holds an MLS signature key, a pseudonym made from it, and its
-// rooms' state; the den (chat.cavebro.win, Elixir) relays and orders
-// ciphertext it cannot read. Entry is a day token the door signed blind: the
-// door checks a member pass and signs a token it cannot see; the den later
-// admits the device the token names, and cannot tell which pass it came
-// from. Day keys come from cavebro.win/den-keys.json — one file for
-// everyone — never from the den.
+// rooms' state; the den (Elixir) relays and orders ciphertext it cannot read.
+// Entry is a day token the door signed blind: the door checks a member pass
+// and signs a token it cannot see; the den later admits the device the token
+// names, and cannot tell which pass it came from. Day keys come from one
+// published file, the same for everyone (keysUrl).
 //
 // Inside a room every message is a small JSON document sealed by MLS: words
 // (with a reply), reactions, edits and deletions by their author, files
@@ -144,43 +143,107 @@ export class DenClient {
   }
 
   async post(path, body) {
-    const r = await fetch(`${this.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), credentials: 'omit' });
+    return this.answer(await fetch(`${this.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), credentials: 'omit' }));
+  }
+
+  async get(path) {
+    return this.answer(await fetch(`${this.base}${path}`, { credentials: 'omit' }));
+  }
+
+  async answer(r) {
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `The den answered ${r.status}`);
+    if (!r.ok) throw Object.assign(new Error(j.error || `The den answered ${r.status}`), { status: r.status });
     return j;
   }
 
   // ---- Entry ---------------------------------------------------------------
 
-  /// A session without asking for the pass: the one kept, or one from the
-  /// token kept since yesterday. Null when the pass is needed.
+  /// A session without the gate: the one kept, one from the token kept since
+  /// yesterday, or one from this device's own pass code. Null when the way in
+  /// is needed.
   async session() {
     const s = await this.kv.get('session');
     if (s && s.until * 1000 > Date.now() + 60_000) return (this.sessionToken = s);
     const held = await this.kv.get(`token:${day()}`);
     if (held) {
       await this.kv.del(`token:${day()}`);
-      try { return await this.enter(held); } catch { /* spent or stale: ask for the pass */ }
+      try { return await this.enter(held); } catch { /* spent or stale: the pass, then the gate */ }
+    }
+    const code = await this.kv.get('pass');
+    if (code) {
+      try { return await this.fromPass(code); } catch (e) { if (e.status === 403 && /not a member/.test(e.message)) await this.kv.del('pass'); }
     }
     return null;
   }
 
-  /// With a pass code from Nap: tokens for today and tomorrow, blinded; today's
-  /// used now, tomorrow's kept for tomorrow — when the door cannot see it.
+  /// A day token for `d`, blinded: the door sees the pass, never the token.
+  async tokenFor(code, d) {
+    const der = await this.dayKey(d);
+    if (!der) return null;
+    const pending = tokenBlind(der, d, this.den.key());
+    const { blind_sig: sig } = await this.post('/door/sign', { code, day: d, blinded: JSON.parse(pending).blinded });
+    const p = JSON.parse(pending);
+    return { msg: p.msg, randomizer: p.randomizer, sig: tokenFinalize(der, pending, unhex(sig)) };
+  }
+
+  /// With a pass code: tokens for today and tomorrow; today's used now,
+  /// tomorrow's kept for tomorrow, when the door cannot see it. The code is
+  /// kept on this device, so it can get the next days' tokens itself.
   async fromPass(code) {
-    const key = this.den.key();
-    let today = null;
-    for (const [i, d] of [day(), day(1)].entries()) {
-      const der = await this.dayKey(d);
-      if (!der) { if (i === 0) throw new Error('The door has published no key for today yet.'); continue; }
-      const pending = tokenBlind(der, d, key);
-      const { blind_sig: sig } = await this.post('/door/sign', { code, day: d, blinded: JSON.parse(pending).blinded });
-      const p = JSON.parse(pending);
-      const token = { msg: p.msg, randomizer: p.randomizer, sig: tokenFinalize(der, pending, unhex(sig)) };
-      if (i === 0) today = token;
-      else await this.kv.put(`token:${d}`, token);
-    }
+    const today = await this.tokenFor(code, day());
+    if (!today) throw new Error('The door has published no key for today yet.');
+    const tomorrow = await this.tokenFor(code, day(1));
+    if (tomorrow) await this.kv.put(`token:${day(1)}`, tomorrow);
+    await this.kv.put('pass', code);
     return this.enter(today);
+  }
+
+  /// Tomorrow's token, fetched at a random moment while connected rather than
+  /// at entry, so the door's and the den's records of this device do not line
+  /// up in time.
+  async refill() {
+    const d = day(1);
+    const code = await this.kv.get('pass');
+    if (!code || await this.kv.get(`token:${d}`)) return;
+    const t = await this.tokenFor(code, d).catch(() => null);
+    if (t) await this.kv.put(`token:${d}`, t);
+  }
+
+  // ---- The den's own member list (Den.Gate.Members) ---------------------------
+
+  /// The ways in the den opens: { invite, approval }.
+  ways() { return this.get('/door/ways'); }
+
+  /// A pass code made on this device, and the hash the den keeps of it.
+  static async newPass() {
+    const code = rand(32);
+    const msg = new Uint8Array([0, ...new TextEncoder().encode('den.pass.v1'), ...code]);
+    return { code: hex(code), pass: hex(new Uint8Array(await crypto.subtle.digest('SHA-256', msg))) };
+  }
+
+  /// In with an invite link's code: this device's pass joins the member list.
+  async join(invite) {
+    const { code, pass } = await DenClient.newPass();
+    await this.post('/door/join', { invite, pass });
+    return this.fromPass(code);
+  }
+
+  /// Asks the host to let this device in, with a note.
+  async ask(note) {
+    const { code, pass } = await DenClient.newPass();
+    const { id } = await this.post('/door/ask', { pass, note });
+    await this.kv.put('asking', { id, code });
+    return id;
+  }
+
+  /// Where this device's request stands: { status }, and a session once approved.
+  async asked() {
+    const a = await this.kv.get('asking');
+    if (!a) return null;
+    const { status } = await this.get(`/door/ask/${a.id}`);
+    if (status === 'pending') return { status };
+    await this.kv.del('asking');
+    return status === 'approved' ? { status, session: await this.fromPass(a.code) } : { status };
   }
 
   async enter(token) {
@@ -200,6 +263,7 @@ export class DenClient {
     this.socket.onError(() => this.on('offline'));
     this.socket.onOpen(() => this.on('online'));
     this.socket.connect();
+    setTimeout(() => this.refill(), 60_000 + Math.random() * 20 * 60_000);
 
     this.lobby = this.socket.channel('lobby');
     this.lobby.on('room', (r) => this.addRoom(r));

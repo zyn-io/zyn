@@ -8,11 +8,11 @@ defmodule Den.DoorTest do
     Application.put_env(:den, :today, fn -> ~D[2026-10-12] end)
     %{"code" => code} = Jason.decode!(File.read!(Path.join(@f, "pass.json")))
     blinded = String.trim(File.read!(Path.join(@f, "blinded.hex")))
-    on_exit(fn -> Application.delete_env(:den, :today) && Application.delete_env(:den, :ledger_check) end)
+    on_exit(fn -> Application.delete_env(:den, :today) && Application.delete_env(:den, :gate_check) end)
     %{code: code, blinded: blinded}
   end
 
-  defp ledger(answer), do: Application.put_env(:den, :ledger_check, fn _ -> answer end)
+  defp ledger(answer), do: Application.put_env(:den, :gate_check, fn _ -> answer end)
 
   test "a live pass gets three tokens a day, no more", %{code: code, blinded: b} do
     ledger({:ok, true})
@@ -22,15 +22,17 @@ defmodule Den.DoorTest do
     assert Den.Door.sign(code, "2026-10-13", b) == {:error, :no_key}
   end
 
-  test "a dead pass, a wrong day, a bad code, a silent ledger", %{code: code, blinded: b} do
+  test "a dead pass, a wrong day, a bad code, a silent gate", %{code: code, blinded: b} do
     ledger({:ok, false})
     assert Den.Door.sign(code, "2026-10-12", b) == {:error, :not_live}
     ledger({:ok, true})
     assert Den.Door.sign(code, "2026-10-14", b) == {:error, :day}
     assert Den.Door.sign(code, "2026-10-11", b) == {:error, :day}
     assert Den.Door.sign("zz", "2026-10-12", b) == {:error, :code}
+    assert Den.Door.sign(String.duplicate("AB", 32), "2026-10-12", b) == {:error, :code}, "lower-case hex only"
+    assert Den.Door.sign(code <> "\n", "2026-10-12", b) == {:error, :code}
     ledger({:error, :down})
-    assert Den.Door.sign(code, "2026-10-12", b) == {:error, :ledger}
+    assert Den.Door.sign(code, "2026-10-12", b) == {:error, :gate}
   end
 
   # A device and a token for it, signed with the test-only day key (as the

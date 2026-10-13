@@ -3,10 +3,10 @@ defmodule Den.Keys do
   The door's day keys (RFC 9474, RSABSSA-SHA384-PSS-Randomized). Each UTC day
   has its own RSA key: the door signs a blinded token for a day only on that
   day or the day before, and the den admits a token only on its day, so a
-  holder who sells their item cannot have saved tokens for later.
+  member who leaves cannot have saved tokens for later.
 
   Every key is published in advance, the same file for everyone
-  (`cavebro.win/den-keys.json`), and the page uses only those — so the door
+  (`den-keys.json`), and the page uses only those — so the door
   cannot hand each holder a different key to recognise them by.
 
   Private keys live in `keys_dir`, one PEM per day (`YYYY-MM-DD.pem`), made

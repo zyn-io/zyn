@@ -23,10 +23,14 @@ The door and the den are one server run by one operator.
 
 ## Entry
 
-1. The client asks the door for a token for today or tomorrow, blinded, with
-   the member's pass. The door checks the pass (the Zyn adapter asks a Zyn node
-   whether the pass is live), signs at most 3 tokens per pass per day, and
-   never sees the token itself.
+1. A member's device gets in once, by a way the host opened: an invite
+   link, the host's approval, or the host's own site registering its pass.
+   The device makes its pass code and the den's member list keeps only its
+   hash. The host therefore knows who it gave each invite to or approved, and
+   which pass that was; the member list does not say which device is whose.
+   Then, each day, the device asks the door for a token, blinded, with its
+   pass code. The door checks the pass is on the list, signs at most 3 tokens
+   per pass per day, and never sees the token itself.
 2. The client unblinds the token and presents it to the den together with its
    device key and an Ed25519 signature by that key over
    `cave-den-enter-v1|<token>`. The den checks the day's signature and the

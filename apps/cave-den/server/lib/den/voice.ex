@@ -1,6 +1,6 @@
 defmodule Den.Voice do
   @moduledoc """
-  Voice rooms (DECISIONS §184): a selective forwarding unit in Elixir
+  Voice rooms: a selective forwarding unit in Elixir
   (ex_webrtc). Every participant has one WebRTC connection to the den: one
   audio track up, and #{8} audio slots down. When someone joins, the den
   forwards their audio into a free slot on everyone else's connection and

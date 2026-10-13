@@ -81,7 +81,7 @@ defmodule Den.Rooms do
     if id =~ ~r/\Ap-[0-9a-f]{32}\z/, do: insert(id, "", "private"), else: {:error, :id}
   end
 
-  @doc "A ZCaveDAO proposal's room (the den makes these)."
+  @doc "A proposal's room: an add-on (a DAO's) opens these, listed under Proposals."
   def proposal_room(n) when is_integer(n), do: insert("proposal-#{n}", "Proposal ##{n}", "proposal")
 
   # Two at once for one id: the second is told it exists, not a crash.

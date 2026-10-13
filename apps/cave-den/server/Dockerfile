@@ -1,4 +1,6 @@
-# The den (DECISIONS §184): an Elixir release on Debian, built and run on Contabo.
+# The den: an Elixir release on Debian. A host's add-on modules in extra/ are
+# compiled in when the folder is there (mix.exs); the page in priv/page goes in
+# with priv.
 ARG ELIXIR=1.19.5
 ARG OTP=28.4.3
 ARG DEBIAN=bookworm-20260824-slim

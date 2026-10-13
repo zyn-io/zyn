@@ -46,15 +46,16 @@ config :phoenix, :json_library, Jason
 
 # Never in a log: a pass code, a token or its parts, a device's proof, a
 # session (the door's and the socket's parameters).
-config :phoenix, :filter_parameters, ["password", "token", "session", "code", "sig", "blinded", "msg", "randomizer", "proof", "blind_sig"]
+config :phoenix, :filter_parameters, ["password", "token", "session", "code", "sig", "blinded", "msg", "randomizer", "proof", "blind_sig", "invite", "pass", "note"]
 
-# The den (DECISIONS §184).
+# The den: its rooms, who may enter (Den.Gate.Members and the ways in it
+# opens), where its day keys are kept, and how long ciphertext stays.
 config :den,
-  rooms: [{"general", "General"}, {"diggers", "Diggers"}, {"lookouts", "Lookouts"}, {"lanterns", "Lanterns"}],
-  collection: "024277b607ce4edbf78fe2855aba562096d00264729168bd0ddea71bdf5b5f1e",
-  node_url: "http://127.0.0.1:8599",
+  rooms: [{"general", "General"}],
+  gate: Den.Gate.Members,
+  entry: [:invite],
   keys_dir: "priv/keys",
-  origins: ["https://cavebro.win"],
+  origins: [],
   retention_days: 30
 
 # Import environment specific config. This must remain at the bottom

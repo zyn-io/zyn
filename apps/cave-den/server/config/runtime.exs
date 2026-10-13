@@ -22,6 +22,27 @@ end
 
 config :den, DenWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Who may enter, and the rooms every member sees. Each is optional; unset, the
+# compiled config (config.exs) stands.
+list = fn v -> String.split(v, ",", trim: true) |> Enum.map(&String.trim/1) end
+module = fn name -> Module.concat([String.trim(name)]) end
+
+if v = System.get_env("DEN_GATE"), do: config(:den, gate: module.(v))
+
+if v = System.get_env("DEN_ENTRY") do
+  ways = for w <- list.(v), do: Map.fetch!(%{"invite" => :invite, "approval" => :approval, "external" => :external}, w)
+  config :den, entry: ways
+end
+
+if v = System.get_env("DEN_ISSUER_TOKEN"), do: config(:den, issuer_token: v)
+
+# "general:General,news:News"
+if v = System.get_env("DEN_ROOMS") do
+  config :den, rooms: for(r <- list.(v), [id, title] = String.split(r, ":", parts: 2), do: {id, title})
+end
+
+if v = System.get_env("DEN_EXTRA_CHILDREN"), do: config(:den, extra_children: Enum.map(list.(v), module))
+
 if config_env() == :prod do
   database_path =
     System.get_env("DATABASE_PATH") ||
@@ -30,10 +51,8 @@ if config_env() == :prod do
       For example: /etc/den/den.db
       """
 
-  # The den: whose passes open the door, which ledger answers, where the day
-  # keys are, and which pages may call it.
+  # Where the day keys are, and which pages may call the den.
   config :den,
-    node_url: System.get_env("DEN_NODE_URL", "http://127.0.0.1:8599"),
     keys_dir: System.get_env("DEN_KEYS_DIR", "/var/lib/den/keys"),
     # Other sites whose pages may use this den (comma-separated https
     # origins); the den's own page always may.
@@ -71,7 +90,7 @@ if config_env() == :prod do
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
       # The den listens on the host's loopback only: nginx is its door to
-      # the world (DEN_IP=0.0.0.0 to change that, never needed on Contabo).
+      # the world (DEN_IP=0.0.0.0 to change that).
       ip: System.get_env("DEN_IP", "127.0.0.1") |> String.to_charlist() |> :inet.parse_address() |> elem(1)
     ],
     secret_key_base: secret_key_base

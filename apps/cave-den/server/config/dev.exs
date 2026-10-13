@@ -59,4 +59,5 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
-config :den, origins: ["http://localhost:4180", "http://127.0.0.1:4180"], node_url: "https://zyn-rpc.cavebro.win/object"
+# Every way in, for trying them; the issuer token is for local use only.
+config :den, entry: [:invite, :approval, :external], issuer_token: "dev-issuer-token-not-for-any-real-den-0001"

@@ -1,4 +1,4 @@
-//! The Cave den's end-to-end encryption (DECISIONS §184).
+//! The den's end-to-end encryption.
 //!
 //! * **Rooms are MLS groups** (RFC 9420, OpenMLS). A member's device holds an
 //!   Ed25519 signature key and a pseudonym that names nothing; it creates a

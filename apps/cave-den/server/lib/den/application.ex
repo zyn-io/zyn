@@ -17,16 +17,17 @@ defmodule Den.Application do
       # The configured rooms, made once the database is there.
       {Task, &Den.Rooms.seed/0},
       Den.Sweeper,
-      Den.Proposals,
       {Registry, keys: :unique, name: Den.Voice.Registry},
       # Every voice connection, for the den-wide cap.
       {Registry, keys: :duplicate, name: Den.Voice.Peers},
-      {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one},
-      # Start a worker by calling: Den.Worker.start_link(arg)
-      # {Den.Worker, arg},
-      # Start to serve requests, typically the last entry
-      DenWeb.Endpoint
-    ]
+      {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one}
+    ] ++
+      # A host's add-on processes (`DEN_EXTRA_CHILDREN`), compiled in from extra/.
+      Application.get_env(:den, :extra_children, []) ++
+      [
+        # Start to serve requests, typically the last entry
+        DenWeb.Endpoint
+      ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

@@ -3,7 +3,7 @@ defmodule Den.Repo.Migrations.DenRoomsFiles do
 
   def change do
     # open: any member joins; private: by invitation, never by GroupInfo;
-    # proposal: open, made by the den for a ZCaveDAO proposal.
+    # proposal: open, made by an add-on for a DAO's proposal.
     alter table(:rooms) do
       add :kind, :string, null: false, default: "open"
     end

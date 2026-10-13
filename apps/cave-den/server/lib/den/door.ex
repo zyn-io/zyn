@@ -1,16 +1,17 @@
 defmodule Den.Door do
   @moduledoc """
-  The den's door (DECISIONS §184). Two steps, made from different moments so
-  the den cannot join them:
+  The den's door. Two steps, made from different moments so the den cannot
+  join them:
 
-  1. `sign/3`: a holder's page shows a member pass code and a *blinded* token
-     for today or tomorrow. The door checks the pass on the ledger, counts at
-     most #{3} tokens per pass per day, and signs the blinded token with the
-     day's key. It sees the pass, never the token.
-  2. `enter/3`: a device presents an unblinded token — which names its day,
-     the device's key and a nonce — on the token's day. The den checks the
-     signature against the day key, spends the token, and admits the device
-     key until the day ends. It sees the device, never the pass.
+  1. `sign/3`: a member's page shows its pass code and a *blinded* token for
+     today or tomorrow. The door asks the gate (`Den.Gate`) whether the pass
+     is live, counts at most #{3} tokens per pass per day, and signs the
+     blinded token with the day's key. It sees the pass, never the token.
+  2. `enter/4`: a device presents an unblinded token, which names its day,
+     the device's key and a nonce, on the token's day. The den checks the
+     signature against the day key and the device's proof that it holds the
+     key, spends the token, and admits the device until the day ends. It sees
+     the device, never the pass.
   """
   import Ecto.Query
   alias Den.Repo
@@ -25,11 +26,11 @@ defmodule Den.Door do
   def sign(code_hex, day, blinded_hex) do
     today = today()
 
-    with {:ok, code} <- Den.Pass.code(code_hex),
+    with {:ok, code} <- Den.Gate.code(code_hex),
          true <- day in [day_string(today), day_string(Date.add(today, 1))] || {:error, :day},
          {:ok, blinded} <- Base.decode16(blinded_hex || "", case: :lower) |> ok_or(:blinded),
-         pass = Den.Pass.of(code),
-         {:ok, true} <- live(pass),
+         pass = Den.Gate.id(code),
+         {:ok, true} <- live(code),
          :ok <- take_one(Base.encode16(pass, case: :lower), day) do
       Den.Keys.blind_sign(day, blinded)
     else
@@ -41,11 +42,11 @@ defmodule Den.Door do
   defp ok_or({:ok, v}, _), do: {:ok, v}
   defp ok_or(:error, what), do: {:error, what}
 
-  defp live(pass) do
-    case Den.Ledger.live?(pass) do
+  defp live(code) do
+    case Den.Gate.live?(code) do
       {:ok, true} -> {:ok, true}
       {:ok, false} -> {:error, :not_live}
-      {:error, _} -> {:error, :ledger}
+      {:error, _} -> {:error, :gate}
     end
   end
 

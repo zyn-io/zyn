@@ -1,8 +1,9 @@
-// The den's page: starts this device, enters through the host's gate
-// (gate.js), then draws the rooms (den-ui.js) over the client (den.js).
+// The den's page: starts this device, lets it in (an invite link, a request
+// to the host, or the host's issuer window in gate.js), then draws the rooms
+// (den-ui.js) over the client (den.js).
 import { DenClient } from './den.js';
 import { mountDen } from './den-ui.js';
-import { enter } from './gate.js';
+import { enter as gate } from './gate.js';
 
 const el = (id) => document.getElementById(id);
 const config = await fetch('./config.json', { credentials: 'omit' }).then((r) => r.json());
@@ -38,17 +39,60 @@ const open = (session) => {
   den.connect(session);
 };
 
-// A session or tomorrow's token kept on this device: in without the gate.
-const kept = await den.session().catch(() => null);
-if (kept) open(kept);
-else {
-  el('enter').onclick = async () => {
-    el('enter').disabled = true;
+// The ways in. An invite link carries its code after "#", so it never reaches
+// a server log; it is taken off the address at once.
+const ways = await den.ways().catch(() => ({}));
+const invite = new URLSearchParams(location.hash.slice(1)).get('invite');
+if (invite) history.replaceState(null, '', location.pathname + location.search);
+
+const show = (id) => { const e = el(id); if (e) e.hidden = false; };
+let waiting = null;
+function wait() {
+  say("Asked. This page lets you in once the host approves; you can close it and come back.");
+  for (const id of ['way-ask', 'way-invite']) if (el(id)) el(id).hidden = true;
+  waiting ??= setInterval(async () => {
+    const a = await den.asked().catch(() => null);
+    if (!a || a.status === 'pending') return;
+    clearInterval(waiting);
+    if (a.session) { say(''); open(a.session); } else { say('The host declined the request.', true); ways.approval && show('way-ask'); }
+  }, 15_000);
+}
+
+function door(asking) {
+  if (config.issuer) show('enter');
+  if (ways.invite) show('way-invite');
+  if (ways.approval) show('way-ask');
+  if (asking?.status === 'pending') return wait();
+  if (asking?.status === 'declined') say('The host declined the request.', true);
+  else if (!config.issuer && !ways.invite && !ways.approval) say('This den has no way in set up yet.', true);
+}
+
+const enter = el('enter');
+if (enter) {
+  enter.onclick = async () => {
+    enter.disabled = true;
     try {
-      open(await enter({ den, say, config }));
+      open(await gate({ den, say, config }));
       say('');
     } catch (e) {
       say(e?.message || String(e), !e?.quiet);
-    } finally { el('enter').disabled = false; }
+    } finally { enter.disabled = false; }
   };
 }
+const askForm = el('way-ask');
+if (askForm) {
+  askForm.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const note = el('ask-note').value.trim();
+    if (!note) return say('Write a short note for the host.', true);
+    try { await den.ask(note); wait(); } catch (e) { say(e.message, true); }
+  };
+}
+
+// A session, tomorrow's token or this device's pass kept here: in without the door.
+const kept = await den.session().catch(() => null);
+if (kept) open(kept);
+else if (invite) {
+  say('Joining with the invite…');
+  try { open(await den.join(invite)); say(''); } catch (e) { say(e.message, true); door(); }
+} else door(await den.asked().catch(() => null));

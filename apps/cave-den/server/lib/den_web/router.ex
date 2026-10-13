@@ -22,6 +22,13 @@ defmodule DenWeb.Router do
     get "/keys", DoorController, :keys
     post "/sign", DoorController, :sign
     post "/enter", DoorController, :enter
+    # The ways in this den opens (Den.Gate.Members).
+    get "/ways", DoorController, :ways
+    post "/join", DoorController, :join
+    post "/ask", DoorController, :ask
+    get "/ask/:id", DoorController, :asked
+    post "/passes", DoorController, :register
+    delete "/passes/:pass", DoorController, :remove
     options "/*any", DoorController, :keys
   end
 end

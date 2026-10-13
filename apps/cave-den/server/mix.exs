@@ -6,7 +6,8 @@ defmodule Den.MixProject do
       app: :den,
       version: "0.1.0",
       elixir: "~> 1.15",
-      elixirc_paths: elixirc_paths(Mix.env()),
+      elixirc_paths: elixirc_paths(Mix.env()) ++ extra("lib"),
+      test_paths: ["test"] ++ extra("test"),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
@@ -30,6 +31,11 @@ defmodule Den.MixProject do
     ]
   end
 
+  # A host's own modules (a gate, add-on processes) in extra/lib, and their
+  # tests in extra/test: compiled in when the folder is there, never part of
+  # the den itself.
+  defp extra(dir), do: if(File.dir?(Path.join("extra", dir)), do: [Path.join("extra", dir)], else: [])
+
   # Specifies which paths to compile per environment.
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
@@ -48,7 +54,7 @@ defmodule Den.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      # Voice rooms (§184): a selective forwarding unit in Elixir.
+      # Voice rooms: a selective forwarding unit in Elixir.
       {:ex_webrtc, "~> 0.17.0"},
       # The rooms' public MLS state (native/den_public): commits checked before ordering.
       {:rustler, "~> 0.38.0", runtime: false}

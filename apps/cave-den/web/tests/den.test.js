@@ -31,7 +31,7 @@ test("the client takes day keys from the host's one file, and keeps tomorrow's t
   assert.match(den, /fetch\(this\.keysUrl, \{ credentials: 'omit' \}\)/);
   // The door gets the pass code and a blinded token; the den gets the token, later.
   assert.match(den, /this\.post\('\/door\/sign', \{ code, day: d, blinded: JSON\.parse\(pending\)\.blinded \}\)/);
-  assert.match(den, /kv\.put\(`token:\$\{d\}`, token\)/, "tomorrow's token is kept for tomorrow");
+  assert.match(den, /kv\.put\(`token:\$\{day\(1\)\}`, tomorrow\)/, "tomorrow's token is kept for tomorrow");
 });
 
 test("the gate takes a pass code only from the issuer's own window and origin", async () => {
@@ -52,4 +52,18 @@ test('a file message from another device is checked before it is shown or fetche
   assert.equal(fileMeta({ ...good, mime: 'text/html' }).mime, 'application/octet-stream');
   assert.equal(fileMeta({ ...good, name: '../../etc/pass\u0000wd' }).name, '....etcpasswd');
   assert.equal(fileMeta({ ...good, name: 7 }).name, 'file');
+});
+
+test("a device's pass hash is the one the den's member list keeps", async () => {
+  const { webcrypto } = await import('node:crypto');
+  globalThis.crypto ??= webcrypto;
+  const { DenClient } = await import('../dist/den.js');
+  const realRandom = crypto.getRandomValues.bind(crypto);
+  crypto.getRandomValues = (a) => a.fill(0x11);
+  try {
+    const { code, pass } = await DenClient.newPass();
+    assert.equal(code, '11'.repeat(32));
+    // Den.Gate.Members.hash/1 of 32 × 0x11 (server/test/den/members_test.exs checks the same vector).
+    assert.equal(pass, '89fbbb8554656bd7bdd0f200b552b67d6cc3c8faabd86261531e1d49ce822833');
+  } finally { crypto.getRandomValues = realRandom; }
 });

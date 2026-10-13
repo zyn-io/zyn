@@ -3,14 +3,6 @@ defmodule Den.CoreTest do
 
   @f Path.expand("../fixtures", __DIR__)
 
-  test "a pass is the ledger's hash of its code, as Nap computes it" do
-    %{"code" => code, "pass" => pass} = Jason.decode!(File.read!(Path.join(@f, "pass.json")))
-    {:ok, c} = Den.Pass.code(code)
-    assert Base.encode16(Den.Pass.of(c), case: :lower) == pass
-    assert Den.Pass.code("zz") == :error
-    assert Den.Pass.code(String.duplicate("A", 64)) == :error, "lower-case hex only"
-  end
-
   test "the envelope of real MLS messages: room, epoch, commit, external" do
     env = fn f -> Den.Mls.envelope(File.read!(Path.join(@f, f))) end
     assert env.("join.bin") == {:ok, %{room: "general", epoch: 0, commit: true, external: true}}

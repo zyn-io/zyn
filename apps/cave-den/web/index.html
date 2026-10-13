@@ -26,7 +26,13 @@
             <li>Whoever runs this den sees which device names are in which room, when they write or talk, file sizes, the names of open rooms, and who joins or leaves which room. The door and the den run on the same server, so they could link your pass to this device by your network address and timing; a VPN or Tor keeps them apart.</li>
             <li>Your words are kept on this device. Clearing the browser's data forgets them and your chat name.</li>
           </ul>
-          <button class="act" id="enter" type="button">Enter</button>
+          <p class="say" id="way-invite" hidden>Have an invite link? Open it on this device.</p>
+          <form class="ask-form" id="way-ask" hidden>
+            <label for="ask-note">Ask the host to let you in</label>
+            <textarea id="ask-note" rows="2" maxlength="280" placeholder="A note for the host: who you are, how you know the circle"></textarea>
+            <button class="act" type="submit">Ask to join</button>
+          </form>
+          <button class="act" id="enter" type="button" hidden>Enter</button>
           <p class="out" id="chat-out" role="status" aria-live="polite"></p>
         </div>
       </section>

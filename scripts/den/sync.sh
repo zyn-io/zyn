@@ -55,7 +55,9 @@ big=$(find . -path ./.git -prune -o -type f -size +20M -print)
 [ -z "$big" ] || { echo "refusing: files over 20 MB: $big" >&2; exit 1; }
 
 # Not ready to push while any of these remain (they are fine to look at).
-refs=$(grep -rIlE --exclude-dir=.git -e '§[0-9]|DECISIONS|Contabo|cavebro\.win|Collection Z|ZynScan' mls server web || true)
+# (§1xx are this workspace's decisions; an RFC's §4.3 is fine. The page test
+# names these words to forbid them.)
+refs=$(grep -rIlE --exclude-dir=.git --exclude=den.test.js -e '§1[0-9]{2}|DECISIONS|Contabo|cavebro\.win|Collection Z|ZynScan|ZCave' mls server web || true)
 [ -z "$refs" ] || blocked+=("internal references (§, DECISIONS, Contabo, Cave names) in: $(echo $refs)")
 grep -qE 'collection: "[0-9a-f]{64}"' server/config/config.exs \
   && blocked+=("server/config/config.exs hardcodes the Cave's collection")

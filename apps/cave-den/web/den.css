@@ -242,3 +242,7 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
   .mentions { left: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { .live-dot, .dots i, .msg.flash { animation: none; } .den-side { transition: none; } }
+.ask-form { display: grid; gap: 10px; max-width: 60ch; }
+.ask-form label { font-family: var(--sans); font-size: 14px; color: var(--read); }
+.ask-form textarea { font: inherit; font-size: 15px; color: var(--ink); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); padding: 10px 12px; resize: vertical; }
+.ask-form .act { justify-self: start; }
