@@ -19,7 +19,7 @@ defmodule DenWeb.LobbyTest do
   test "the lobby lists open rooms, takes new ones (3 a day), never lists private ones" do
     {socket, _} = device(String.duplicate("a1", 32))
     {:ok, %{rooms: rooms}, socket} = subscribe_and_join(socket, DenWeb.LobbyChannel, "lobby")
-    assert Enum.map(rooms, & &1.id) |> Enum.sort() == ~w(diggers general lanterns lookouts)
+    assert Enum.map(rooms, & &1.id) |> Enum.sort() == ~w(general news)
     ref = push(socket, "open_room", %{"title" => "  Night watch!  "})
     assert_reply ref, :ok, %{id: "r-night-watch-" <> _, title: "Night watch!"}
     assert_broadcast "room", %{title: "Night watch!", kind: "open"}

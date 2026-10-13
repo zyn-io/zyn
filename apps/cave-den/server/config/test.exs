@@ -28,5 +28,6 @@ config :phoenix,
   sort_verified_routes_query_params: true
 
 config :den, keys_dir: Path.expand("../tmp/test-keys", __DIR__), origins: ["http://localhost:4180"], sweep_ms: 3_600_000,
-  entry: [:invite, :approval, :external], issuer_token: String.duplicate("t", 40)
+  entry: [:invite, :approval, :external], issuer_token: String.duplicate("t", 40),
+  rooms: [{"general", "General"}, {"news", "News"}]
 

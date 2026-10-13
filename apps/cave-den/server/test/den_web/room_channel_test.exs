@@ -80,7 +80,7 @@ defmodule DenWeb.RoomChannelTest do
     assert_reply ref, :ok, %{seq: 3, epoch: 2}
 
     # Another room's GroupInfo, or messages, are not this room's.
-    {:ok, _, other} = subscribe_and_join(a, DenWeb.RoomChannel, "room:lanterns")
+    {:ok, _, other} = subscribe_and_join(a, DenWeb.RoomChannel, "room:news")
     ref = push(other, "create", %{"group_info" => mls("general.info")})
     assert_reply ref, :error, %{reason: "group_info"}
     ref = push(other, "relay", %{"bytes" => mls("text.bin")})
