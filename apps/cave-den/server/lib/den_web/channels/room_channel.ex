@@ -33,6 +33,7 @@ defmodule DenWeb.RoomChannel do
 
   defp enter(id, room, socket) do
         Rooms.seat(id, socket.assigns.key)
+        Registry.register(Den.Online, id, socket.assigns.key)
         info = room.group_info && Base.encode64(room.group_info)
         {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, info_epoch: room.info_epoch, present: Rooms.present(id)}, socket |> assign(:room, id) |> assign(:kind, room.kind)}
   end

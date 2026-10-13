@@ -240,14 +240,14 @@ defmodule Den.Rooms do
           is_nil(r.public_state) ->
             Repo.rollback({:no_group, r.epoch})
 
+          env.commit and barred?(r.id, sender) ->
+            Repo.rollback(:barred)
+
           env.commit and env.epoch != r.epoch ->
             Repo.rollback({:epoch, r.epoch})
 
           not env.commit and (env.epoch > r.epoch or env.epoch < r.epoch - @past_epochs) ->
             Repo.rollback({:epoch, r.epoch})
-
-          env.commit and barred?(r.id, sender) ->
-            Repo.rollback(:barred)
 
           env.commit ->
             # Checked against the room's public state, and signed by the
@@ -289,7 +289,8 @@ defmodule Den.Rooms do
   signature over `"den-report-v1|" <> room <> "|" <> seq` by its own key. The
   den cannot check a commit's secrets, so it takes the members' word, from
   members in the room both before and after that commit other than its
-  sender. When most of those members report it, the commit is undone: the
+  sender, connected to the room now (one who is away can neither stop nor
+  be needed for an undo). When most of those report it, the commit is undone: the
   room goes back to the state before it (and the messages after it go), and
   its sender may not commit in the room for a day.
 
@@ -304,7 +305,8 @@ defmodule Den.Rooms do
          true <- (key in before and key in now_in and key != r.last_committer) || {:error, :not_member},
          true <- signed?(key, "den-report-v1|#{room}|#{seq}", sig_hex) || {:error, :signature} do
       Repo.insert_all("reports", [%{room: room, seq: seq, key: key, inserted_at: now()}], on_conflict: :nothing)
-      voters = Enum.filter(before, &(&1 in now_in and &1 != r.last_committer))
+      online = for {_, k} <- Registry.lookup(Den.Online, room), do: k
+      voters = Enum.filter(before, &(&1 in now_in and &1 != r.last_committer and &1 in online))
       n = Repo.aggregate(from(x in "reports", where: x.room == ^room and x.seq == ^seq), :count)
       if n * 2 > length(voters), do: roll_back(r, true), else: {:ok, :noted}
     end
