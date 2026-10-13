@@ -104,9 +104,11 @@ token: entry ends by the end of the next day, not at once.
   carry the key that was asked for, a private room refuses external joins
   (at the den and in every device), and a device accepts a Welcome only for a
   private room it is not already in.
-- Any member can remove any other member, and the den tells devices whose
-  day has ended (`expired`) and who is present: members' devices take its
-  word for both. A den could therefore get honest devices to remove someone.
+- Any member can remove any other member. In open rooms the den tells
+  devices whose day has ended (`expired`) and who is present, and members'
+  devices take its word, so a den could get them to remove someone from an
+  open room (who can join it again). In private rooms devices never remove
+  anyone on the den's word.
 - A Welcome to a private room can come from any member, under any title.
 - Forward secrecy: a device keeps what it has read; nobody, the den
   included, can decrypt a room's past messages later. There is no

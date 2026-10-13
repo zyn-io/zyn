@@ -804,6 +804,10 @@ export class DenClient {
   /// keeps the first commit, the others step back.
   async removeStale(room, keys, wait) {
     if (!this.inRoom(room)) return;
+    // In a private room the den's word that someone's day ended is not enough
+    // to take them out: there, only a member decides. (A device whose day
+    // ended cannot reach the room's messages without a new token anyway.)
+    if (this.rooms.get(room)?.kind === 'private' || /^p-[0-9a-f]{32}$/.test(room)) return;
     if (wait) await new Promise((r) => setTimeout(r, Math.random() * 3000));
     const ours = keys.filter((k) => k !== this.den.key());
     const commit = this.den.remove(room, JSON.stringify(ours));
