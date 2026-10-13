@@ -125,6 +125,8 @@ defmodule Den.MembersTest do
 
   test "the den keeps its own day keys: ahead, and none from before yesterday" do
     dir = Path.join(System.tmp_dir!(), "den-keep-#{System.unique_integer([:positive])}")
+    was = Application.get_env(:den, :keys_dir)
+    on_exit(fn -> Application.put_env(:den, :keys_dir, was) end)
     Application.put_env(:den, :keys_dir, dir)
     File.mkdir_p!(dir)
     for d <- ["2026-10-01", "2026-10-10"], do: File.write!(Path.join(dir, d <> ".pem"), "old")

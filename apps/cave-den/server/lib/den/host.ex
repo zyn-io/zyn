@@ -47,13 +47,14 @@ defmodule Den.Host do
   def decline(id), do: Members.decline(id)
   def members, do: Members.count()
 
-  @doc "At boot: a new den prints its first invite link, once, for the host."
-  def first_run do
-    require Logger
-
-    case Application.get_env(:den, :first_run, true) && Members.first_invite() do
-      x when x in [nil, false] -> :ok
-      code -> Logger.notice("Epeaky: this den has no members yet. Your first invite (one use, 30 days): #{DenWeb.Endpoint.url()}/#invite=#{code}")
+  @doc """
+  A new den's first invite link, printed for the installer: only while the den
+  has nobody and no invite, so running the installer again makes no more.
+  """
+  def first_invite do
+    case Members.first_invite() do
+      nil -> IO.puts("(no first invite: this den already has members or invites; make one with Den.Host.invite/2)")
+      code -> IO.puts("#{DenWeb.Endpoint.url()}/#invite=#{code}")
     end
   end
 end

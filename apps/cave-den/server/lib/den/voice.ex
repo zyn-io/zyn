@@ -35,8 +35,18 @@ defmodule Den.Voice do
   def ip_ok?({a, _, _, _, _, _, _, _}) when a in 0xFE80..0xFEBF, do: false
 
   def ip_ok?(ip) do
-    not (Application.get_env(:den, :voice_public_only, false) and private?(ip))
+    not (Application.get_env(:den, :voice_public_only, false) and private?(ip) and is_nil(public_ip()))
   end
+
+  @doc """
+  The den's public address when the server sits behind 1:1 NAT (AWS, GCP and
+  the like put the public address outside the machine): `DEN_PUBLIC_IP`.
+  Each private host address then also goes out as that public address, a
+  server-reflexive candidate devices can reach.
+  """
+  def public_ip, do: Application.get_env(:den, :public_ip)
+
+  def srflx(ip), do: if(public_ip() && private?(ip), do: public_ip(), else: nil)
 
   defp private?({10, _, _, _}), do: true
   defp private?({172, b, _, _}) when b in 16..31, do: true
@@ -110,7 +120,7 @@ defmodule Den.Voice.Room do
   defp answer(channel, key, offer, s) do
     ports = Application.get_env(:den, :voice_ports, 50_000..50_199)
 
-    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, audio_codecs: [:opus], video_codecs: [], controlling_process: self()) do
+    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, host_to_srflx_ip_mapper: &Den.Voice.srflx/1, audio_codecs: [:opus], video_codecs: [], controlling_process: self()) do
       {:ok, pc} ->
         try do
           :ok = PeerConnection.set_remote_description(pc, SessionDescription.from_json(offer))

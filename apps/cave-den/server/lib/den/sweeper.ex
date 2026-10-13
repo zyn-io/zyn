@@ -14,10 +14,9 @@ defmodule Den.Sweeper do
     {:ok, nil, {:continue, :keys}}
   end
 
-  # The den's own day keys, made before anyone asks for them; then checked.
+  # The day keys (made in Den.Application before the den starts), checked.
   @impl true
   def handle_continue(:keys, s) do
-    Den.Keys.keep()
     Den.Keys.check()
     {:noreply, s}
   end

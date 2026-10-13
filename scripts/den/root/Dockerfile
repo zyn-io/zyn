@@ -42,7 +42,7 @@ FROM debian:${DEBIAN}
 RUN apt-get update -y && apt-get install -y libstdc++6 openssl libssl3 libsrtp2-1 libncurses6 locales ca-certificates && rm -rf /var/lib/apt/lists/* \
   && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 MIX_ENV=prod PHX_SERVER=true \
-  DATABASE_PATH=/var/lib/den/den.db DEN_KEYS_DIR=/var/lib/den/keys
+  DATABASE_PATH=/var/lib/den/den.db DEN_KEYS_DIR=/var/lib/den/keys DEN_VOICE_PUBLIC_ONLY=1
 WORKDIR /app
 RUN useradd --uid 9100 --system den && mkdir -p /var/lib/den && chown den /var/lib/den
 COPY --from=build --chown=den /src/server/_build/prod/rel/den ./

@@ -32,7 +32,11 @@ jobs:
           test "$(curl -fsS http://127.0.0.1:4000/door/keys | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["keys"]))')" -ge 31
           curl -fsS http://127.0.0.1:4000/ | grep -q '<title>Epeaky</title>'
           curl -fsSI http://127.0.0.1:4000/den/den_mls_bg.wasm | grep -qi 'application/wasm'
-          docker logs den 2>&1 | grep -q 'Your first invite'
+          docker exec den /app/bin/den rpc 'Den.Host.first_invite()' | grep -Eq 'https://localhost/#invite=[0-9a-f]{64}'
+          # Erlang distribution on loopback only, with this den's own cookie.
+          ! ss -ltnH | awk '{print $4}' | grep -E ':4369$' | grep -Ev '^(127\.0\.0\.1|\[::1\]):'
+          ss -ltnH | awk '{print $4}' | grep -q '^127.0.0.1:4369$'
+          test -s data/cookie && test "$(stat -c %a data/cookie)" = 600
           docker logs den 2>&1 | tail -20
           docker rm -f den
       # The installer, as a host runs it: Caddy in front (its own certificate

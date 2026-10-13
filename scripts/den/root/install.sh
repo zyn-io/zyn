@@ -59,11 +59,22 @@ if [ -z "$DOMAIN" ]; then
 fi
 printf '%s' "$DOMAIN" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$' || fail "that is not a domain name: $DOMAIN"
 
-# Does the domain point here? A warning, not a stop: DNS may still be on its way.
-here=$(curl -fsS -4 --max-time 5 https://api.ipify.org 2>/dev/null || true)
+# Does the domain point here? Compared with this machine's own addresses,
+# asking nobody outside. A server behind 1:1 NAT (AWS, GCP) has only a private
+# address on the machine: then the domain's address is its public one, which
+# voice must announce (DEN_PUBLIC_IP).
 there=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}' || true)
-if [ -n "$here" ] && [ "$there" != "$here" ]; then
-  say "Note: $DOMAIN resolves to '${there:-nothing}', and this server is $here. Caddy cannot get a certificate until it points here."
+mine=$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+public_ip=""
+if [ -z "$there" ]; then
+  say "Note: $DOMAIN does not resolve yet. Caddy gets its certificate once it points at this server."
+elif ! printf '%s\n' $mine | grep -qx "$there"; then
+  if printf '%s\n' $mine | grep -Eqv '^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)'; then
+    say "Note: $DOMAIN resolves to $there, which is not an address of this server. Caddy cannot get a certificate until it points here."
+  else
+    public_ip=$there
+    say "This server has only private addresses, so it is behind NAT: voice will announce $there."
+  fi
 fi
 
 # ---- /opt/epeaky ------------------------------------------------------------------
@@ -85,6 +96,7 @@ DEN_ROOMS=general:General
 # Voice offers devices only this server's public addresses.
 DEN_VOICE_PUBLIC_ONLY=1
 ENV
+  [ -z "$public_ip" ] || echo "DEN_PUBLIC_IP=$public_ip" >> "$DIR/.env"
   umask 022
 else
   sed -i "s/^PHX_HOST=.*/PHX_HOST=$DOMAIN/" "$DIR/.env"
@@ -178,7 +190,17 @@ for _ in $(seq 1 60); do
 done
 curl -fsS -o /dev/null -H 'X-Forwarded-Proto: https' http://127.0.0.1:4000/door/ways || fail "the den did not start; see: epeaky logs"
 
-invite=$(docker compose logs den 2>/dev/null | grep -o 'https://[^ ]*#invite=[0-9a-f]\{64\}' | tail -1 || true)
+# The den's Erlang distribution (how `epeaky` reaches it) must listen on
+# loopback only: anything else would let the internet try its cookie.
+if command -v ss >/dev/null 2>&1; then
+  open=$(ss -ltnpH 2>/dev/null | awk '/"(beam\.smp|epmd)"/ {print $4}' | grep -Ev '^(127\.0\.0\.1|\[::1\]|::1):' || true)
+  if [ -n "$open" ]; then
+    docker compose stop den >/dev/null
+    fail "the den listened beyond loopback ($open); stopped it. Report this: https://github.com/zyn-io/epeaky/security"
+  fi
+fi
+
+invite=$(docker compose exec -T den /app/bin/den rpc 'Den.Host.first_invite()' 2>/dev/null | grep -o 'https://[^ ]*#invite=[0-9a-f]\{64\}' | tail -1 || true)
 say ""
 say "Epeaky is running at https://$DOMAIN"
 if [ -n "$invite" ]; then

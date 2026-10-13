@@ -89,4 +89,16 @@ defmodule Den.VoiceTest do
     send(other, :stop)
     PeerConnection.stop(pc_a)
   end
+
+  test "behind 1:1 NAT the den offers its public address for its private one, and only then" do
+    on_exit(fn -> Application.delete_env(:den, :public_ip) && Application.delete_env(:den, :voice_public_only) end)
+    Application.put_env(:den, :voice_public_only, true)
+    refute Den.Voice.ip_ok?({10, 0, 0, 5}), "a private address alone reaches nobody outside"
+    assert Den.Voice.srflx({10, 0, 0, 5}) == nil
+    Application.put_env(:den, :public_ip, {203, 0, 113, 7})
+    assert Den.Voice.ip_ok?({10, 0, 0, 5}), "kept, to carry the public one"
+    assert Den.Voice.srflx({10, 0, 0, 5}) == {203, 0, 113, 7}
+    assert Den.Voice.srflx({198, 51, 100, 9}) == nil, "a public address needs no stand-in"
+    refute Den.Voice.ip_ok?({127, 0, 0, 1})
+  end
 end

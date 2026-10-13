@@ -7,6 +7,9 @@ defmodule Den.Application do
 
   @impl true
   def start(_type, _args) do
+    # The door's day keys, made before the den answers anyone.
+    Den.Keys.keep()
+
     children = [
       DenWeb.Telemetry,
       Den.Repo,
@@ -26,9 +29,7 @@ defmodule Den.Application do
       Application.get_env(:den, :extra_children, []) ++
       [
         # Start to serve requests, typically the last entry
-        DenWeb.Endpoint,
-        # A new den's first invite, printed once for the host.
-        Supervisor.child_spec({Task, &Den.Host.first_run/0}, id: :first_run)
+        DenWeb.Endpoint
       ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

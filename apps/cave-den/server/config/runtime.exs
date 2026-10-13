@@ -30,11 +30,28 @@ module = fn name -> Module.concat([String.trim(name)]) end
 if v = System.get_env("DEN_GATE"), do: config(:den, gate: module.(v))
 
 if v = System.get_env("DEN_ENTRY") do
-  ways = for w <- list.(v), do: Map.fetch!(%{"invite" => :invite, "approval" => :approval, "external" => :external}, w)
+  known = %{"invite" => :invite, "approval" => :approval, "external" => :external}
+
+  ways =
+    for w <- list.(v) do
+      Map.get(known, w) || raise("DEN_ENTRY: #{inspect(w)} is not a way in; use invite, approval or external, comma-separated")
+    end
+
   config :den, entry: ways
 end
 
-if v = System.get_env("DEN_ISSUER_TOKEN"), do: config(:den, issuer_token: v)
+if v = System.get_env("DEN_ISSUER_TOKEN") do
+  byte_size(v) >= 32 || raise "DEN_ISSUER_TOKEN must be at least 32 characters (openssl rand -hex 32)"
+  config :den, issuer_token: v
+end
+
+# The public address of a den behind 1:1 NAT, for voice (Den.Voice.public_ip/0).
+if v = System.get_env("DEN_PUBLIC_IP") do
+  case :inet.parse_address(String.to_charlist(String.trim(v))) do
+    {:ok, ip} -> config :den, public_ip: ip
+    _ -> raise "DEN_PUBLIC_IP: #{inspect(v)} is not an IP address"
+  end
+end
 
 # "general:General,news:News"
 if v = System.get_env("DEN_ROOMS") do
@@ -47,12 +64,7 @@ if v = System.get_env("DEN_EXTRA_CHILDREN"), do: config(:den, extra_children: En
 if v = System.get_env("DEN_KEYS_AHEAD"), do: config(:den, keys_ahead: String.to_integer(v))
 
 if config_env() == :prod do
-  database_path =
-    System.get_env("DATABASE_PATH") ||
-      raise """
-      environment variable DATABASE_PATH is missing.
-      For example: /etc/den/den.db
-      """
+  database_path = System.get_env("DATABASE_PATH", "/var/lib/den/den.db")
 
   # Where the day keys are, and which pages may call the den.
   config :den,
@@ -81,7 +93,11 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  # The den's page checks its socket's origin against this: a wrong host
+  # would shut its own page out, so there is no default.
+  host =
+    System.get_env("PHX_HOST") ||
+      raise "environment variable PHX_HOST is missing: the den's public host name, e.g. chat.example.org"
 
   config :den, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

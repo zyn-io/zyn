@@ -52,8 +52,9 @@ defmodule Den.Keys do
     case :persistent_term.get(cache, nil) do
       nil ->
         keys = for d <- 0..(days - 1), day = Date.to_iso8601(Date.add(from, d)), {:ok, der} <- [public_der(day)], into: %{}, do: {day, Base.encode64(der)}
-        # A new day gives a new cache key; an empty answer is not kept.
-        if map_size(keys) > 0, do: :persistent_term.put(cache, keys)
+        # A new day gives a new cache key. Only a full set is kept: one read
+        # while the den is still making its keys would be short all day.
+        if map_size(keys) == days, do: :persistent_term.put(cache, keys)
         keys
 
       keys ->
