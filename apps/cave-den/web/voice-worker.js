@@ -2,7 +2,10 @@
 // the sender's own voice key for the epoch (the MLS exporter, labelled with the
 // sender's key), so a slot opens only under the key of the member the slot map
 // names. Frame: [ciphertext ‖ tag][iv 12][counter 8][key index 1]; the last
-// nine bytes are authenticated, and a counter already seen is refused.
+// nine bytes are authenticated, and a counter already seen is refused. The
+// counter is the send time in microseconds (kept rising), so a listener also
+// refuses a frame more than a minute old: the den cannot replay what a member
+// said earlier to someone who joins voice later.
 //
 // Streams arrive by transfer (Chrome) or through RTCRtpScriptTransform
 // (Safari, Firefox).
@@ -16,7 +19,8 @@ let current = -1;
 let me = '';
 let slots = new Map(); // slot → sender key hex
 const seen = new Map(); // sender key hex → { max, mask }
-let counter = Date.now() * 1000; // above any counter this device sent before
+let counter = Date.now() * 1000; // the send time in µs, and above any counter this device sent before
+const STALE_MS = 60_000;
 let sealed = 0;
 let opened = 0;
 let failed = 0;
@@ -46,7 +50,7 @@ function pipe(readable, writable, mode, slot) {
 async function seal(frame) {
   const key = keys.get(current)?.get(me);
   if (!key) throw new Error('no key');
-  counter++;
+  counter = Math.max(counter + 1, Date.now() * 1000);
   const head = new Uint8Array(9);
   const v = new DataView(head.buffer);
   v.setUint32(0, Math.floor(counter / 2 ** 32));
@@ -74,6 +78,7 @@ async function open(frame, slot) {
   const n = BigInt(v.getUint32(0)) * 2n ** 32n + BigInt(v.getUint32(4));
   const iv = d.subarray(d.length - TAIL, d.length - 9);
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: head }, key, d.subarray(0, d.length - TAIL));
+  if (Math.abs(Number(n / 1000n) - Date.now()) > STALE_MS) throw new Error('stale');
   if (!fresh(sender, n)) throw new Error('replay');
   frame.data = plain;
   opened++;

@@ -132,9 +132,12 @@ of the member the den names for it, so a den that relabels who is speaking
 is caught. A member the room takes out is heard for at most 5 seconds more.
 Voice is refused in a browser that cannot encrypt frames.
 
-The den sees who is in a voice room, when they talk and how much. It can
-replay a member's earlier frames (from the same epoch) to someone who joined
-voice later. Any member can derive every other member's voice key, because
+The den sees who is in a voice room, when they talk and how much. A frame's
+counter is its send time, authenticated, and a listener refuses frames more
+than a minute old, so the den can replay what a member said to a later
+listener only within that minute (devices whose clocks are more than a minute
+apart cannot hear each other). A slot is played only for a member of the room
+as this device's own group has it. Any member can derive every other member's voice key, because
 frames are not signed, so one member can impersonate another member's voice.
 Outsiders cannot.
 

@@ -826,7 +826,10 @@ class Voice {
 
   /// Which member speaks in which down slot, as the den names them.
   postSlots() {
-    const byMid = new Map(this.people.map((p) => [p.mid, p.key]));
+    // Only the room's members, as this device's own MLS group has them: a
+    // slot the den names for anyone else stays silent.
+    const members = new Set(this.client.members(this.room).map((m) => m.key));
+    const byMid = new Map(this.people.filter((p) => members.has(p.key)).map((p) => [p.mid, p.key]));
     this.worker.postMessage({ slots: this.downs.map((t, i) => [i, byMid.get(t.mid)]).filter(([, k]) => k) });
   }
 
