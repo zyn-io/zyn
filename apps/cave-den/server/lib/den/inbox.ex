@@ -36,6 +36,9 @@ defmodule Den.Inbox do
     end)
   end
 
+  @doc "Of these device keys, the ones the den has admitted."
+  def known(keys), do: Repo.all(from d in "devices", where: d.key in ^Enum.uniq(keys), select: d.key)
+
   @doc "A Welcome for each device with room in its inbox (`:inbox` waiting at most), kept until it takes it."
   def deliver(keys, room, welcome) do
     now = Den.Rooms.now()

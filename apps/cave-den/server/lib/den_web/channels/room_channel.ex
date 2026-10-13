@@ -105,8 +105,13 @@ defmodule DenWeb.RoomChannel do
   def handle_in("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 do
     with {:ok, welcome} <- decode(b64),
          true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/\A[0-9a-f]{64}\z/)) || {:error, :keys},
-         :ok <- Rooms.quota(socket.assigns.key, "invite", Den.Limits.get(:invites)) do
-      Den.Inbox.deliver(keys, socket.assigns.room, welcome)
+         true <- Den.Limits.disk_ok?() || {:error, :disk},
+         # Only devices the den has admitted get a Welcome; each copy is
+         # counted against the sender's daily bytes.
+         to = Den.Inbox.known(keys),
+         :ok <- Rooms.quota(socket.assigns.key, "invite", Den.Limits.get(:invites)),
+         :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(welcome) * length(to)) do
+      Den.Inbox.deliver(to, socket.assigns.room, welcome)
       {:reply, :ok, socket}
     else
       {:error, why} -> {:reply, {:error, %{reason: to_string(why)}}, socket}

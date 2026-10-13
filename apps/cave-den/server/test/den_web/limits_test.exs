@@ -60,6 +60,7 @@ defmodule DenWeb.LimitsTest do
     sender = String.duplicate("e1", 32)
     {:ok, _, r} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:" <> room)
     victim = String.duplicate("e2", 32)
+    Den.Rooms.admit(victim, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
     Application.put_env(:den, :limits, %{inbox: 2, invites: 3})
     for _ <- 1..3 do
       ref = push(r, "invite", %{"to" => [victim], "welcome" => Base.encode64("w")})
@@ -67,6 +68,27 @@ defmodule DenWeb.LimitsTest do
     end
     assert length(Den.Inbox.waiting(victim)) == 2, "the inbox keeps no more than its cap"
     ref = push(r, "invite", %{"to" => [victim], "welcome" => Base.encode64("w")})
+    assert_reply ref, :error, %{reason: "quota"}
+  end
+
+  test "a Welcome goes only to devices the den knows, and every copy counts against the sender's bytes" do
+    room = "p-" <> String.duplicate("5e", 16)
+    {:ok, _} = Den.Rooms.private_room(room)
+    sender = String.duplicate("e3", 32)
+    {:ok, _, r} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:" <> room)
+    known = String.duplicate("e4", 32)
+    Den.Rooms.admit(known, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
+    strangers = for i <- 1..40, do: :crypto.hash(:sha256, <<i>>) |> Base.encode16(case: :lower)
+    Application.put_env(:den, :limits, %{message_bytes: 25_000})
+    big = Base.encode64(:binary.copy(<<7>>, 12_000))
+    ref = push(r, "invite", %{"to" => [known | strangers], "welcome" => big})
+    assert_reply ref, :ok
+    assert length(Den.Inbox.waiting(known)) == 1
+    assert Enum.all?(strangers, &(Den.Inbox.waiting(&1) == [])), "nothing is stored for keys the den never admitted"
+    ref = push(r, "invite", %{"to" => [known, known], "welcome" => big})
+    assert_reply ref, :ok
+    ref = push(r, "invite", %{"to" => [known], "welcome" => big})
+    # 12 KB a copy, the same device once: the third copy is past 25 KB.
     assert_reply ref, :error, %{reason: "quota"}
   end
 
