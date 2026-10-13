@@ -56,7 +56,8 @@ jobs:
       # for a .localhost name), the page over HTTPS, the first invite printed.
       - name: Install test
         run: |
-          sudo EPEAKY_IMAGE=epeaky:test EPEAKY_NO_PULL=1 bash install.sh --domain den.localhost --yes | tee install.log
+          # Piped, as `curl … | sudo bash` runs it: the script on standard input.
+          cat install.sh | sudo EPEAKY_IMAGE=epeaky:test EPEAKY_NO_PULL=1 bash -s -- --domain den.localhost --yes | tee install.log
           grep -Eq 'https://den\.localhost/#invite=[0-9a-f]{64}' install.log
           for i in $(seq 1 30); do curl -ksf -o /dev/null --resolve den.localhost:443:127.0.0.1 https://den.localhost/ && break; sleep 2; done
           curl -ksf --resolve den.localhost:443:127.0.0.1 https://den.localhost/ | grep -q '<title>Epeaky</title>'

@@ -9,6 +9,10 @@
 # (after asking). Everything lives in /opt/epeaky; run it again to update.
 set -euo pipefail
 
+# All of it inside main, run on the last line: under `curl … | bash` the
+# script arrives on standard input, and bash then reads all of it before any
+# command can read from that input in its place.
+main() {
 DIR=/opt/epeaky
 IMAGE=${EPEAKY_IMAGE:-ghcr.io/zyn-io/epeaky:latest}
 DOMAIN=${EPEAKY_DOMAIN:-}
@@ -20,7 +24,7 @@ while [ $# -gt 0 ]; do
     --domain) DOMAIN=${2:-}; shift 2 ;;
     --email) EMAIL=${2:-}; shift 2 ;;
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) printf '%s\n' "Epeaky: a den on this server, behind Caddy." "  sudo bash install.sh --domain chat.example.org [--email you@example.org] [--yes]"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -47,7 +51,7 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   else
     answer=$(ask "Docker (with compose) is not installed. Install it now with Docker's own script from get.docker.com? [y/N] ") || answer=n
   fi
-  case "$answer" in y|Y|yes) curl -fsSL https://get.docker.com | sh ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
+  case "$answer" in y|Y|yes) curl -fsSL https://get.docker.com | sh </dev/null ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
 fi
 
 # ---- The domain -----------------------------------------------------------------
@@ -181,8 +185,8 @@ chmod 755 /usr/local/bin/epeaky
 # ---- Start ------------------------------------------------------------------------------
 cd "$DIR"
 # EPEAKY_NO_PULL: an image already on this machine (tests, your own build).
-[ -n "${EPEAKY_NO_PULL:-}" ] || docker compose pull -q
-docker compose up -d
+[ -n "${EPEAKY_NO_PULL:-}" ] || docker compose pull -q </dev/null
+docker compose up -d </dev/null
 say "Starting the den…"
 for _ in $(seq 1 60); do
   curl -fsS -o /dev/null -H 'X-Forwarded-Proto: https' http://127.0.0.1:4000/door/ways 2>/dev/null && break
@@ -195,12 +199,12 @@ curl -fsS -o /dev/null -H 'X-Forwarded-Proto: https' http://127.0.0.1:4000/door/
 if command -v ss >/dev/null 2>&1; then
   open=$(ss -ltnpH 2>/dev/null | awk '/"(beam\.smp|epmd)"/ {print $4}' | grep -Ev '^(127\.0\.0\.1|\[::1\]|::1):' || true)
   if [ -n "$open" ]; then
-    docker compose stop den >/dev/null
+    docker compose stop den </dev/null >/dev/null
     fail "the den listened beyond loopback ($open); stopped it. Report this: https://github.com/zyn-io/epeaky/security"
   fi
 fi
 
-invite=$(docker compose exec -T den /app/bin/den rpc 'Den.Host.first_invite()' 2>/dev/null | grep -o 'https://[^ ]*#invite=[0-9a-f]\{64\}' | tail -1 || true)
+invite=$(docker compose exec -T den /app/bin/den rpc 'Den.Host.first_invite()' </dev/null 2>/dev/null | grep -o 'https://[^ ]*#invite=[0-9a-f]\{64\}' | tail -1 || true)
 say ""
 say "Epeaky is running at https://$DOMAIN"
 if [ -n "$invite" ]; then
@@ -210,3 +214,6 @@ else
   say "Make an invite with: epeaky invite"
 fi
 say "More: epeaky help"
+}
+
+main "$@"
