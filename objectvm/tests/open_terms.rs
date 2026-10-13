@@ -146,14 +146,14 @@ fn listed_accounts_mint_for_less_and_nobody_mints_past_the_cap() {
     c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 10, zcash_hash: [7; 32] });
 
     // Terms: operator-only, on the open-mint program, listed price ≤ open price, cap ≥ 1.
-    let terms = |listed: Fixed, cap: u32| Op::SetOpenTerms { program: program::sale_open_mint(), collection: CAVE, listed_price: listed, cap };
+    let terms = |listed: Fixed, cap: u32| Op::SetOpenTerms { program: program::sale_open_mint(), collection: CAVE, listed_price: listed, cap, unbacked_credit: false };
     assert_eq!(ObjectVm::intent_authorities(&terms(LISTED, 2)), Vec::<AccountId>::new());
-    assert!(c.refused(Op::SetOpenTerms { program: program::sale_open(), collection: CAVE, listed_price: LISTED, cap: 2 }).contains("wrong program"));
+    assert!(c.refused(Op::SetOpenTerms { program: program::sale_open(), collection: CAVE, listed_price: LISTED, cap: 2, unbacked_credit: false }).contains("wrong program"));
     assert!(c.refused(terms(Fixed(OPEN.0 + 1), 2)).contains("at most the open price"));
     assert!(c.refused(terms(LISTED, 0)).contains("at least one"));
     let (state, saved) = (c.vm.state_root(), c.vm.encode());
     assert!(!saved.windows(8).any(|w| w == b"MARKET18"), "no terms, no MARKET18");
-    assert_eq!(c.ok(terms(LISTED, 2)), Receipt::OpenTermsSet { collection: CAVE, listed_price: LISTED, cap: 2 });
+    assert_eq!(c.ok(terms(LISTED, 2)), Receipt::OpenTermsSet { collection: CAVE, listed_price: LISTED, cap: 2, unbacked_credit: false });
     assert_ne!(c.vm.state_root(), state, "the terms are in the root");
     assert!(c.vm.encode().windows(8).any(|w| w == b"MARKET18"));
 
@@ -216,4 +216,56 @@ fn without_terms_the_open_mint_is_unchanged() {
         c.ok(Op::MintOpen { buyer: ALICE, program: program::sale_mint(), collection: CAVE, serial, proof: merkle_proof(&open, position), item, nonce, inputs, change });
     }
     assert!(!c.vm.encode().windows(8).any(|w| w == b"MARKET18"));
+}
+
+/// §187.10: no team budget. A burn's credit is posted at what it was worth,
+/// a mint it pays adds an item and no ZEC, and a mint paid partly in ZEC.zy
+/// puts only that part into the floor. Without the flag, a budget is needed.
+#[test]
+fn unbacked_credit_mints_without_a_budget_and_the_floor_takes_only_zec() {
+    use objectvm::sale::{credit_key, voucher_commitment};
+    let mut c = Chain::new();
+    for who in [ALICE, BOB] {
+        c.mint(who, 5);
+    }
+    c.ok(Op::RegisterCollection { program: program::register_collection(), asset: CAVE, creator: TREASURY, quote: ZEC, fee_bps: 100, cap: 12 });
+    c.ok(Op::SetSale { program: program::sale_open(), collection: CAVE, ticket_price: TICKET, claim_price: CLAIM, open_price: OPEN, treasury_bps: 1_000 });
+    c.ok(Op::GateSale { program: program::sale_open(), collection: CAVE, base: 10 });
+    c.ok(Op::CloseSale { program: program::sale_close(), collection: CAVE, zcash_height: 10, zcash_hash: [7; 32] });
+    let post = |burn: u8, who: AccountId, secret: Hash, amount: Fixed| Op::PostCredit { program: program::sale_vouchers(), collection: CAVE, burn: [burn; 32], commitment: voucher_commitment(&who, &secret), amount };
+    let (sa, sb) = ([0x5a; 32], [0x5b; 32]);
+    // Backed terms: no budget, no credit.
+    c.ok(Op::SetOpenTerms { program: program::sale_open_mint(), collection: CAVE, listed_price: LISTED, cap: 20, unbacked_credit: false });
+    assert!(c.refused(post(1, ALICE, sa, OPEN)).contains("budget does not cover"));
+    // Unbacked: the burn's whole worth, with nothing behind it.
+    c.ok(Op::SetOpenTerms { program: program::sale_open_mint(), collection: CAVE, listed_price: LISTED, cap: 20, unbacked_credit: true });
+    c.ok(post(1, ALICE, sa, Fixed(2 * OPEN.0)));
+    c.ok(post(2, BOB, sb, Fixed(OPEN.0 / 2)));
+    assert!(c.refused(post(1, ALICE, sa, OPEN)).contains("already posted"), "one burn, once");
+    assert!(c.vm.market.credits.budgets.is_empty(), "no budget was ever needed");
+    c.ok(Op::RedeemCredit { buyer: ALICE, program: program::sale_claim(), collection: CAVE, secret: sa });
+    c.ok(Op::RedeemCredit { buyer: BOB, program: program::sale_claim(), collection: CAVE, secret: sb });
+
+    let order = [6u32, 1, 9];
+    let open: Vec<Hash> = order.iter().enumerate().map(|(i, s)| open_leaf(i as u32, *s)).collect();
+    c.ok(Op::PostOpenMint { program: program::sale_open_mint(), collection: CAVE, root: merkle_root(&open), count: 3 });
+    let mint = |c: &mut Chain, who: AccountId, pay_notes: Fixed| {
+        let position = c.vm.market.sales[&CAVE].open_next as usize;
+        let serial = order[position];
+        let item = c.note(who, item_asset(&CAVE, serial), ITEM_UNIT);
+        let nonce = c.fresh();
+        let (inputs, change) = if pay_notes.0 > 0 { c.fund(who, pay_notes) } else { (Vec::new(), Vec::new()) };
+        c.apply(Op::MintOpen { buyer: who, program: program::sale_mint(), collection: CAVE, serial, proof: merkle_proof(&open, position), item, nonce, inputs, change })
+    };
+    // Alice's credit pays a whole item: an item more, the floor the same.
+    let floor = c.floor();
+    assert!(matches!(mint(&mut c, ALICE, Fixed(0)), Receipt::ItemsClaimed { .. }));
+    assert_eq!(c.floor(), floor, "a credit-paid mint adds no ZEC to the floor");
+    assert_eq!(c.vm.market.credits.held[&credit_key(&CAVE, &ALICE)], OPEN, "one item's worth is left");
+    // Bob's credit pays half: the other half, in ZEC.zy, splits into the floor.
+    let floor = c.floor();
+    assert!(matches!(mint(&mut c, BOB, Fixed(OPEN.0 - OPEN.0 / 2)), Receipt::ItemsClaimed { .. }));
+    assert_eq!(c.floor().0 - floor.0, floor_share(Fixed(OPEN.0 - OPEN.0 / 2)));
+    assert!(!c.vm.market.credits.held.contains_key(&credit_key(&CAVE, &BOB)));
+    assert_eq!(c.vm.market.collections[&CAVE].minted, 2);
 }

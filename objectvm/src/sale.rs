@@ -697,14 +697,18 @@ impl ObjectVm {
         if self.market.burns.contains_key(burn) {
             return Err("that burn is already posted");
         }
+        // Unbacked credit (§187.10) needs no budget: the burn is the payment.
+        let unbacked = self.market.open_terms.get(collection).is_some_and(|o| o.unbacked_credit);
         let budget = self.market.credits.budgets.get(collection).map_or(0, |b| b.0);
-        if amount.0 > budget {
+        if !unbacked && amount.0 > budget {
             return Err("the sale's credit budget does not cover that burn");
         }
         let key = credit_pending_key(collection, commitment);
         let pending = self.market.credits.pending.get(&key).map_or(0, |p| p.0).checked_add(amount.0).ok_or("credit overflow")?;
         self.market.burns.insert(*burn, *collection);
-        if budget == amount.0 {
+        if unbacked {
+            // Nothing is drawn from a budget.
+        } else if budget == amount.0 {
             self.market.credits.budgets.remove(collection);
         } else {
             self.market.credits.budgets.insert(*collection, Fixed(budget - amount.0));
@@ -1041,6 +1045,10 @@ pub struct OpenTerms {
     pub listed_price: Fixed,
     /// Items one account mints at most.
     pub cap: u32,
+    /// Burn credit stands on its own (§187.10): posted at what the burn was
+    /// worth with no team budget behind it. A mint it pays adds an item and
+    /// no ZEC; what the floor holds is what was paid in ZEC.zy.
+    pub unbacked_credit: bool,
     /// Items each account has minted, by `allow_key`.
     pub minted: std::collections::BTreeMap<Hash, u32>,
 }
@@ -1052,7 +1060,7 @@ fn open_terms_leaf(collection: &Address, o: &OpenTerms) -> Hash {
         e.leaf()
     }).collect();
     let mut e = Encoder::new();
-    e.bytes(b"objectvm.open-terms-leaf.v1").bytes(collection).fixed(o.listed_price).u32(o.cap).u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
+    e.bytes(b"objectvm.open-terms-leaf.v1").bytes(collection).fixed(o.listed_price).u32(o.cap).bool(o.unbacked_credit).u32(leaves.len() as u32).bytes(&merkle_root(&leaves));
     e.leaf()
 }
 
@@ -1065,7 +1073,7 @@ pub(crate) fn open_terms_section(e: &mut Encoder, terms: &std::collections::BTre
 pub(crate) fn encode_open_terms(e: &mut Encoder, terms: &std::collections::BTreeMap<Address, OpenTerms>) {
     e.u32(terms.len() as u32);
     for (c, o) in terms {
-        e.bytes(c).fixed(o.listed_price).u32(o.cap).u32(o.minted.len() as u32);
+        e.bytes(c).fixed(o.listed_price).u32(o.cap).bool(o.unbacked_credit).u32(o.minted.len() as u32);
         for (k, n) in &o.minted {
             e.bytes(k).u32(*n);
         }
@@ -1078,11 +1086,12 @@ pub(crate) fn decode_open_terms(d: &mut Decoder) -> Option<std::collections::BTr
         let c = d.hash().ok()?;
         let listed_price = d.fixed().ok()?;
         let cap = d.u32().ok()?;
+        let unbacked_credit = match d.u8().ok()? { 0 => false, 1 => true, _ => return None };
         let mut minted = std::collections::BTreeMap::new();
         for _ in 0..d.u32().ok()? {
             minted.insert(d.hash().ok()?, d.u32().ok()?);
         }
-        terms.insert(c, OpenTerms { listed_price, cap, minted });
+        terms.insert(c, OpenTerms { listed_price, cap, unbacked_credit, minted });
     }
     Some(terms)
 }
@@ -1091,7 +1100,7 @@ impl ObjectVm {
     /// Set a sale's open-mint terms (operator): before the first mint, so no
     /// one minted under terms that then changed. The listed price is at most
     /// the open price.
-    pub(crate) fn apply_set_open_terms(&mut self, collection: &Address, listed_price: Fixed, cap: u32) -> Result<Receipt, &'static str> {
+    pub(crate) fn apply_set_open_terms(&mut self, collection: &Address, listed_price: Fixed, cap: u32, unbacked_credit: bool) -> Result<Receipt, &'static str> {
         let (s, _) = self.sale(collection)?;
         if s.phase == Phase::OpenMint && s.open_next > 0 {
             return Err("open-mint terms are set before the first mint");
@@ -1105,6 +1114,7 @@ impl ObjectVm {
         let o = self.market.open_terms.entry(*collection).or_default();
         o.listed_price = listed_price;
         o.cap = cap;
-        Ok(Receipt::OpenTermsSet { collection: *collection, listed_price, cap })
+        o.unbacked_credit = unbacked_credit;
+        Ok(Receipt::OpenTermsSet { collection: *collection, listed_price, cap, unbacked_credit })
     }
 }

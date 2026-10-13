@@ -382,6 +382,8 @@ fn open_terms(c: &Ctx) -> Result<(), String> {
             collection: c.collection(),
             listed_price: Fixed(c.v4.listed_price_zatoshi as i128 * ZAT),
             cap: c.v4.cap_per_account,
+            // Terms v5 (§187.10): the team funds no credit; a burn is the payment.
+            unbacked_credit: zynzapd::cave_z::CREDIT_UNBACKED,
         },
     )
 }

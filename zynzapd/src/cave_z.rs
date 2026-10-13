@@ -454,6 +454,63 @@ pub fn terms_v4(p: &AllocationPolicy) -> TermsV4 {
     }
 }
 
+/// Collection Z's terms, v5 (DECISIONS §187.10): v4's, except that the team
+/// funds no sale credit. The user, 13 Oct 2026: "team doesn't fund anything.
+/// the mint should be triggered by either receive zec.zy or valid transaction
+/// on arc or sol" — burns of ZCAVE or REGI — and "floor will be just as much as
+/// how the sale goes". A burn's credit is posted at what it was worth, with no
+/// budget; a mint it pays adds an item and no ZEC, so the floor is what was
+/// paid in ZEC.zy. v5's bytes are v4's, whole, then the backing rule.
+pub const TERMS_V5_VERSION: &str = "cave-sale-terms/v5";
+const TERMS_V5_DOMAIN: &[u8] = b"cave.sale.terms.v5";
+
+/// v4's published terms digest (§187), which v5 replaces before any sale.
+const SUPERSEDES_V4: &str = "ec3b0c2ffc7ae98423479d71d788ed47f975549e66626dc6f9df1b221d5004e8";
+
+/// Credit's backing: 0, none — a burn is the payment and adds no ZEC.
+pub const CREDIT_BACKING_NONE: u8 = 0;
+/// What the open-mint terms set on the ledger (`SetOpenTerms.unbacked_credit`).
+pub const CREDIT_UNBACKED: bool = true;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermsV5 {
+    pub v4: TermsV4,
+    pub supersedes: [u8; 32],
+    pub credit_backing: u8,
+}
+
+impl TermsV5 {
+    /// The version, what it replaces, v4's bytes whole (length-prefixed), then
+    /// the backing rule.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(TERMS_V5_VERSION.len() as u32).to_be_bytes());
+        out.extend_from_slice(TERMS_V5_VERSION.as_bytes());
+        out.extend_from_slice(&self.supersedes);
+        let v4 = self.v4.canonical_bytes();
+        out.extend_from_slice(&(v4.len() as u32).to_be_bytes());
+        out.extend_from_slice(&v4);
+        out.push(self.credit_backing);
+        out
+    }
+
+    /// SHA-256 over the length-prefixed domain and payload, as before.
+    pub fn digest(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let payload = self.canonical_bytes();
+        let mut h = Sha256::new();
+        h.update((TERMS_V5_DOMAIN.len() as u32).to_be_bytes());
+        h.update(TERMS_V5_DOMAIN);
+        h.update((payload.len() as u32).to_be_bytes());
+        h.update(&payload);
+        h.finalize().into()
+    }
+}
+
+pub fn terms_v5(p: &AllocationPolicy) -> TermsV5 {
+    TermsV5 { v4: terms_v4(p), supersedes: unhex32(SUPERSEDES_V4), credit_backing: CREDIT_BACKING_NONE }
+}
+
 /// The manifest as the allocator needs it, from the builder's `content.json`.
 ///
 /// The item id is derived here rather than read, because it is a function of
@@ -511,6 +568,10 @@ mod tests {
         assert_eq!((v4.open_price_zatoshi, v4.listed_price_zatoshi, v4.cap_per_account), (5_000_000, 1_000_000, 20), "§187");
         assert_eq!(v4.v3.credit_pays, 0b100, "credit pays the open mint only");
         assert_eq!(hex(&v4.digest()), "ec3b0c2ffc7ae98423479d71d788ed47f975549e66626dc6f9df1b221d5004e8", "the open-mint terms (§187)");
+        let v5 = terms_v5(&p);
+        assert_eq!(hex(&v5.supersedes), hex(&v4.digest()), "v5 names the v4 it replaces");
+        assert_eq!(v5.credit_backing, 0, "the team funds no credit (§187.10)");
+        assert_eq!(hex(&v5.digest()), "25163fef565e4c47cce207bd3b8b0e854acb4df24dab07caa0c142aa38d0dd27", "no team-funded credit (§187.10)");
     }
 
     /// §168.2's prices, from the terms rather than from the ledger's code.

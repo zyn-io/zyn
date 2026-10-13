@@ -227,7 +227,9 @@ impl Watch {
         };
         let head = self.finalized()?;
         let over = sale["phase"].as_str() == Some("openmint") && sale["open_next"].as_u64() >= sale["open_count"].as_u64();
-        let mut budget: i128 = sale["credit_budget"].as_str().and_then(|b| b.parse().ok()).unwrap_or(0);
+        // Unbacked credit (§187.10): no budget, a burn is credited what it was worth.
+        let unbacked = sale["open_terms"]["unbacked_credit"].as_bool() == Some(true);
+        let mut budget: i128 = if unbacked { i128::MAX } else { sale["credit_budget"].as_str().and_then(|b| b.parse().ok()).unwrap_or(0) };
         let dead_topic = format!("0x{}{EVM_DEAD}", "0".repeat(24));
         let mut a = start;
         while a <= head {

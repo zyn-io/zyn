@@ -9,8 +9,9 @@
 //! It prints. It does not broadcast, sign, or write to the chain: publishing is
 //! a deliberate act and this is the thing you read before taking it.
 //!
-//!   zyn-cave-terms                 print the policy and terms (v4), with digests
-//!   zyn-cave-terms bytes           v4's canonical bytes, as hex
+//!   zyn-cave-terms                 print the policy and terms (v5), with digests
+//!   zyn-cave-terms bytes           v5's canonical bytes, as hex
+//!   zyn-cave-terms bytes-v4        v4's (superseded, §187.10)
 //!   zyn-cave-terms bytes-v3        v3's (superseded, §187)
 //!   zyn-cave-terms bytes-v2        v2's (superseded, §182)
 //!   zyn-cave-terms bytes-v1        v1's (superseded, §175)
@@ -18,7 +19,7 @@
 
 
 use cave_randomness::CloseAnnouncement;
-use zynzapd::cave_z::{policy, terms, terms_v2, terms_v3, terms_v4};
+use zynzapd::cave_z::{policy, terms, terms_v2, terms_v3, terms_v4, terms_v5};
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
@@ -70,8 +71,10 @@ fn main() {
     let v2 = terms_v2(&p);
     let v3 = terms_v3(&p);
     let v4 = terms_v4(&p);
+    let v5 = terms_v5(&p);
     match std::env::args().nth(1).as_deref() {
-        Some("bytes") => return println!("{}", hex(&v4.canonical_bytes())),
+        Some("bytes") => return println!("{}", hex(&v5.canonical_bytes())),
+        Some("bytes-v4") => return println!("{}", hex(&v4.canonical_bytes())),
         Some("bytes-v3") => return println!("{}", hex(&v3.canonical_bytes())),
         Some("bytes-v2") => return println!("{}", hex(&v2.canonical_bytes())),
         Some("bytes-v1") => return println!("{}", hex(&t.canonical_bytes())),
@@ -100,15 +103,15 @@ fn main() {
         v2.dao_backers, v2.dao_window_blocks, v2.dao_quorum_bps
     );
     println!(
-        "sale credit           burns of {} valued in USD, lower median of {} s (>= {} readings); pays the open mint",
+        "sale credit           burns of {} valued in USD, lower median of {} s (>= {} readings); pays the open mint; nothing behind it (the team funds none), so a mint it pays adds no ZEC to the floor",
         v3.credit_tokens.iter().map(|(c, t)| format!("{t} on {c}")).collect::<Vec<_>>().join(" and "),
         v3.credit_median_seconds,
         v3.credit_min_readings
     );
     println!();
     println!("POLICY DIGEST  {}", hex(&t.policy_digest));
-    println!("TERMS DIGEST   {}  (cave-sale-terms/v4)", hex(&v4.digest()));
-    println!("SUPERSEDES     {}  (v3)", hex(&v4.supersedes));
+    println!("TERMS DIGEST   {}  (cave-sale-terms/v5)", hex(&v5.digest()));
+    println!("SUPERSEDES     {}  (v4)", hex(&v5.supersedes));
 }
 
 #[cfg(test)]
