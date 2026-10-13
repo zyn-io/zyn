@@ -176,6 +176,16 @@ defmodule Den.MembersTest do
     assert :ets.lookup(DenWeb.RateLimit, {{:door, {9, 9, 9, 9}}, 0}) == [], "ended windows are swept"
   end
 
+  test "the host's commands print what they say, with real dates" do
+    import ExUnit.CaptureIO
+    [_] = Members.invite(1, 3)
+    {:ok, _} = Members.ask(elem(device_pass(), 1), "hello there")
+    assert capture_io(fn -> Den.Host.invites() end) =~ ~r/made 20\d\d-.* open until 20\d\d-/
+    assert capture_io(fn -> Den.Host.requests() end) =~ "hello there"
+    assert capture_io(fn -> Den.Host.invite(2, 1) end) |> String.split("\n", trim: true) |> length() == 2
+    assert %{} = Den.Host.members()
+  end
+
   test "a pass hash is SHA-256 over a zero byte, the domain and the code, as the page makes it" do
     assert Base.encode16(Members.hash(:binary.copy(<<0x11>>, 32)), case: :lower) == "89fbbb8554656bd7bdd0f200b552b67d6cc3c8faabd86261531e1d49ce822833"
   end

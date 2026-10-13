@@ -110,11 +110,16 @@ defmodule Den.VoiceTest do
     refute Den.Voice.candidate?(c.("0.0.0.0"))
     refute Den.Voice.candidate?(c.("::1"))
     assert Den.Voice.candidate?(c.("198.51.100.4"))
-    assert Den.Voice.candidate?(c.("2c0f9a3e-7a1b-4d1e-9f00-1b2c3d4e5f60.local"))
+    refute Den.Voice.candidate?(c.("2c0f9a3e-7a1b-4d1e-9f00-1b2c3d4e5f60.local")), "no mDNS names"
     assert Den.Voice.candidate?(%{"candidate" => ""})
     assert Den.Voice.candidate?(c.("192.168.50.10"))
     Application.put_env(:den, :voice_public_only, true)
     refute Den.Voice.candidate?(c.("192.168.50.10"))
     refute Den.Voice.candidate?(%{"candidate" => "garbage"})
+  end
+
+  test "the den does not listen for mDNS (ex_ice's resolver is stopped at start)" do
+    {:ok, sup} = :application.get_supervisor(:ex_ice)
+    refute Enum.any?(Supervisor.which_children(sup), fn {id, pid, _, _} -> id == ExICE.Priv.MDNS.Resolver and is_pid(pid) end)
   end
 end

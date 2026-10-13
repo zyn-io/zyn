@@ -70,8 +70,8 @@ defmodule Den.Voice do
   # A device's candidate names an address the den would send to: never
   # loopback, link-local or unspecified, nor (with :voice_public_only) a
   # private one, so a device cannot point the den at its own network. An
-  # mDNS name (.local) or an empty end-of-candidates line passes; the den
-  # cannot resolve or send to those.
+  # empty end-of-candidates line passes; an mDNS name (.local) does not: the
+  # den resolves no mDNS on the open internet.
   defp reachable?(""), do: true
 
   defp reachable?(c) do
@@ -81,7 +81,7 @@ defmodule Den.Voice do
           {:ok, {0, 0, 0, 0}} -> false
           {:ok, {0, 0, 0, 0, 0, 0, 0, 0}} -> false
           {:ok, ip} -> ip_ok?(ip)
-          _ -> String.ends_with?(addr, ".local")
+          _ -> false
         end
 
       _ ->

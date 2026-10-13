@@ -12,6 +12,10 @@ defmodule Den.Application do
     # The door's day keys, made before the den answers anyone.
     Den.Keys.keep()
     DenWeb.RateLimit.setup()
+    # ex_ice listens for mDNS answers on 0.0.0.0:5353 and caches whatever
+    # arrives. A den on the open internet resolves no .local names (it refuses
+    # those candidates), so that listener goes.
+    with {:ok, sup} <- :application.get_supervisor(:ex_ice), do: Supervisor.terminate_child(sup, ExICE.Priv.MDNS.Resolver)
 
     children = [
       DenWeb.Telemetry,

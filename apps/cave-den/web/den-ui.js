@@ -424,10 +424,10 @@ export function mountDen(den, el, me) {
       if (!urls.has(m.id)) {
         const blob = await den.openFile(m.file);
         const bmp = await createImageBitmap(blob).catch(() => null);
-        if (!bmp) return refuse('This image could not be opened.');
+        if (!bmp) return refuse(`${m.file.name}: this image could not be opened.`);
         const pixels = bmp.width * bmp.height;
         bmp.close();
-        if (pixels > MAX_PIXELS) return refuse('This image is too large to show here. Download it instead.');
+        if (pixels > MAX_PIXELS) return refuse(`${m.file.name} is too large to show here.`);
         urls.set(m.id, URL.createObjectURL(blob));
       }
       const stay = nearBottom();

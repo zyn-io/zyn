@@ -106,7 +106,7 @@ defmodule Den.Gate.Members do
   end
 
   @doc "Requests waiting for the host, oldest first."
-  def pending, do: Repo.all(from r in "requests", where: is_nil(r.decided), order_by: r.asked_at, select: %{id: r.id, note: r.note, asked_at: r.asked_at})
+  def pending, do: Repo.all(from r in "requests", where: is_nil(r.decided), order_by: r.asked_at, select: %{id: r.id, note: r.note, asked_at: type(r.asked_at, :utc_datetime)})
 
   @doc "The host lets a request in. Its note is forgotten."
   def approve(id), do: decide(id, "approved")
@@ -168,7 +168,19 @@ defmodule Den.Gate.Members do
   # ---- The host's view ----------------------------------------------------------
 
   @doc "Invites: id prefix, when made, until when, whether used or withdrawn."
-  def invites, do: Repo.all(from i in "invites", order_by: i.made_at, select: %{id: i.id, made_at: i.made_at, expires_at: i.expires_at, used_at: i.used_at, revoked_at: i.revoked_at})
+  def invites do
+    Repo.all(
+      from i in "invites",
+        order_by: i.made_at,
+        select: %{
+          id: i.id,
+          made_at: type(i.made_at, :utc_datetime),
+          expires_at: type(i.expires_at, :utc_datetime),
+          used_at: type(i.used_at, :utc_datetime),
+          revoked_at: type(i.revoked_at, :utc_datetime)
+        }
+    )
+  end
 
   @doc "Withdraws an invite (by its id or a unique prefix of it), and the pass it let in, if any."
   def withdraw(prefix) when is_binary(prefix) and byte_size(prefix) >= 8 do
