@@ -380,10 +380,13 @@
           </section>
 
           <div class="gate" id="gate" hidden>
-            <p class="say" id="gate-say">On the whitelist? Link your code to this wallet to mint at the whitelist price.</p>
+            <p class="say" id="gate-say">Applied for the whitelist? Sign in with X to link this wallet and mint at the whitelist price.</p>
+            <div class="addr-row" id="x-row" hidden>
+              <button class="act" id="x-go" type="button">Sign in with X</button>
+            </div>
             <div class="gate-link" id="gate-link" hidden>
               <label class="field">
-                <span>Whitelist code</span>
+                <span>Or a whitelist code</span>
                 <input id="gate-code" type="text" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX" />
               </label>
               <button class="act ghost" id="gate-go" type="button">Link to this wallet</button>

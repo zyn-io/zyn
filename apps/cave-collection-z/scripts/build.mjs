@@ -50,7 +50,7 @@ await cp(new URL('mint.html', root), new URL('mint/index.html', output));
 // The second half of the journey. Everything above gets a buyer as far as
 // owning an item; these are what they do next — see it, price it, sell it,
 // buy another, and leave. Same directory shape, so every one is a clean URL.
-for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules', 'pass']) {
+for (const page of ['items', 'item', 'market', 'exit', 'dao', 'rules', 'dao-rules', 'pass', 'x-done']) {
   await mkdir(new URL(`${page}/`, output), { recursive: true });
   await cp(new URL(`${page}.html`, root), new URL(`${page}/index.html`, output));
 }
@@ -62,6 +62,8 @@ await cp(new URL('../shared/qr.js', root), new URL('qr.js', output));
 // The shelf, item and market pages speak to Nap through Nap Connect — the same
 // file Nap ships — and share one module for it.
 await cp(new URL('zstore.js', root), new URL('zstore.js', output));
+// The X sign-in popup's last page reports back with this (§187.8).
+await cp(new URL('x-done.js', root), new URL('x-done.js', output));
 await cp(new URL('solana-burn.js', root), new URL('solana-burn.js', output));
 await cp(new URL('evm-burn.js', root), new URL('evm-burn.js', output));
 // The members' chat (the den, §184) is served by the den itself at
