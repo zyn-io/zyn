@@ -26,3 +26,24 @@ jobs:
           elixir-version: '1.19'
       - run: mix deps.get && mix test
         working-directory: server
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
+      - run: ./build.sh
+        working-directory: mls
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.19'
+      - run: mix deps.get
+        working-directory: server
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+        working-directory: web
