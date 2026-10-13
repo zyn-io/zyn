@@ -4,7 +4,8 @@ defmodule DenWeb.VoiceChannel do
   den's answer, candidates and slot map ({mid → speaker's device key}) out.
   The media itself goes over WebRTC, sealed end to end by the devices.
   """
-  use Phoenix.Channel
+  # Joins and messages are not logged: a topic names a device or a private room.
+  use Phoenix.Channel, log_join: false, log_handle_in: false
 
   @impl true
   def join("voice:" <> room, _, socket) do

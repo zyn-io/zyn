@@ -9,7 +9,8 @@ defmodule DenWeb.LobbyChannel do
   * "private_room" {id} → reserve an unguessable private room id.
   * "claim" {key} → one of that device's invitations (KeyPackages).
   """
-  use Phoenix.Channel
+  # Joins and messages are not logged: a topic names a device or a private room.
+  use Phoenix.Channel, log_join: false, log_handle_in: false
   alias Den.Rooms
 
   @impl true

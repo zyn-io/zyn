@@ -1,6 +1,7 @@
 defmodule DenWeb.UserSocket do
   @moduledoc "A device's connection: its session from the door, and nothing else."
-  use Phoenix.Socket
+  # Connects are not logged: the params carry the session.
+  use Phoenix.Socket, log: false
 
   channel "room:*", DenWeb.RoomChannel
   channel "lobby", DenWeb.LobbyChannel

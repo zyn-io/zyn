@@ -14,6 +14,8 @@ config :den,
 # SQLite has one writer. A transaction takes the write lock when it begins,
 # and waits for it, instead of failing with "Database busy" half way through.
 config :den, Den.Repo,
+  # Queries are not logged: their parameters are device keys and room ids.
+  log: false,
   default_transaction_mode: :immediate,
   busy_timeout: 5_000,
   journal_mode: :wal
@@ -36,6 +38,10 @@ config :logger, :default_formatter,
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
+
+# Never in a log: a pass code, a token or its parts, a device's proof, a
+# session (the door's and the socket's parameters).
+config :phoenix, :filter_parameters, ["password", "token", "session", "code", "sig", "blinded", "msg", "randomizer", "proof", "blind_sig"]
 
 # The den (DECISIONS §184).
 config :den,

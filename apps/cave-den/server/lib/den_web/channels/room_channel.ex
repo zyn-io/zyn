@@ -13,7 +13,8 @@ defmodule DenWeb.RoomChannel do
     words; relayed to the others, stored for `retention_days`.
   * "info" {epoch, group_info} → the GroupInfo for the epoch the room is in.
   """
-  use Phoenix.Channel
+  # Joins and messages are not logged: a topic names a device or a private room.
+  use Phoenix.Channel, log_join: false, log_handle_in: false
   alias Den.Rooms
 
   @max 65_536

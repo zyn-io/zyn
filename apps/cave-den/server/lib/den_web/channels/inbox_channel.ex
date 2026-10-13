@@ -7,7 +7,8 @@ defmodule DenWeb.InboxChannel do
   * "publish" {key_packages} → add invitations (the latest 10 are kept).
   * "taken" {ids} → Welcomes the device has joined from.
   """
-  use Phoenix.Channel
+  # Joins and messages are not logged: a topic names a device or a private room.
+  use Phoenix.Channel, log_join: false, log_handle_in: false
 
   @impl true
   def join("inbox:" <> key, _, socket) do
