@@ -21,6 +21,7 @@ defmodule DenWeb.RoomChannel do
 
   @impl true
   def join("room:" <> id, _params, socket) do
+    DenWeb.Heap.channel()
     case Rooms.get(id) do
       nil ->
         {:error, %{reason: "no such room"}}

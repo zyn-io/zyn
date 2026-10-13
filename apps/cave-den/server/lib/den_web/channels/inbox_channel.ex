@@ -12,6 +12,7 @@ defmodule DenWeb.InboxChannel do
 
   @impl true
   def join("inbox:" <> key, _, socket) do
+    DenWeb.Heap.channel()
     if key == socket.assigns.key do
       welcomes = for w <- Den.Inbox.waiting(key), do: %{id: w.id, room: w.room, welcome: Base.encode64(w.bytes)}
       {:ok, %{welcomes: welcomes, key_packages: Den.Inbox.left(key)}, socket}

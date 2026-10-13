@@ -14,7 +14,10 @@ defmodule DenWeb.LobbyChannel do
   alias Den.Rooms
 
   @impl true
-  def join("lobby", _, socket), do: {:ok, %{rooms: Rooms.listed()}, socket}
+  def join("lobby", _, socket) do
+    DenWeb.Heap.channel()
+    {:ok, %{rooms: Rooms.listed()}, socket}
+  end
 
   @impl true
   def handle_in("open_room", %{"title" => title}, socket) when is_binary(title) do

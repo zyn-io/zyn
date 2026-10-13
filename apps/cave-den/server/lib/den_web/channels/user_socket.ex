@@ -10,6 +10,8 @@ defmodule DenWeb.UserSocket do
 
   @impl true
   def connect(%{"session" => session}, socket, _info) do
+    DenWeb.Heap.socket()
+
     with {:ok, %{key: key}} <- Phoenix.Token.verify(DenWeb.Endpoint, "den", session, max_age: 3 * 86_400),
          %DateTime{} = until <- Den.Rooms.device_until(key),
          :gt <- DateTime.compare(until, DateTime.utc_now()) do

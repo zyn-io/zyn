@@ -9,6 +9,7 @@ defmodule DenWeb.VoiceChannel do
 
   @impl true
   def join("voice:" <> room, _, socket) do
+    DenWeb.Heap.channel()
     case Den.Rooms.get(room) do
       nil -> {:error, %{reason: "no such room"}}
       _ -> {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
