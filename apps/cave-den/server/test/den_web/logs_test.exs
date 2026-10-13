@@ -34,4 +34,17 @@ defmodule DenWeb.LogsTest do
     filtered = Phoenix.Logger.filter_values(%{"code" => "c", "msg" => "m", "sig" => "s", "randomizer" => "r", "proof" => "p", "blinded" => "b", "session" => "x", "day" => "2026-10-13"})
     assert filtered == %{"code" => "[FILTERED]", "msg" => "[FILTERED]", "sig" => "[FILTERED]", "randomizer" => "[FILTERED]", "proof" => "[FILTERED]", "blinded" => "[FILTERED]", "session" => "[FILTERED]", "day" => "2026-10-13"}
   end
+
+  test "no line the den logs, crash reports included, carries a key, a private room or a payload" do
+    import ExUnit.CaptureLog
+    key = String.duplicate("ab", 32)
+    log = capture_log(fn ->
+      require Logger
+      Logger.error("crashed in room:p-#{String.duplicate("3c", 16)} for device #{key} with " <> String.duplicate("QUJD", 60))
+    end)
+    refute log =~ key
+    refute log =~ String.duplicate("3c", 16)
+    refute log =~ String.duplicate("QUJD", 60)
+    assert log =~ "p-<private>" and log =~ "<hex>" and log =~ "<bytes>"
+  end
 end

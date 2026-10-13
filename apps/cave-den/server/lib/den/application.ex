@@ -7,6 +7,8 @@ defmodule Den.Application do
 
   @impl true
   def start(_type, _args) do
+    # No key, private room or payload in any log line.
+    Den.LogRedact.install()
     # The door's day keys, made before the den answers anyone.
     Den.Keys.keep()
     DenWeb.RateLimit.setup()

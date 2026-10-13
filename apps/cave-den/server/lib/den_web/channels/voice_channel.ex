@@ -24,8 +24,17 @@ defmodule DenWeb.VoiceChannel do
     if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
+  # Every event, at a rate the den can answer (DenWeb.Throttle).
   @impl true
-  def handle_in("offer", %{"type" => "offer"} = offer, socket) do
+  def handle_in(event, payload, socket) do
+    cond do
+      DenWeb.Throttle.allow?(event) -> handle(event, payload, socket)
+      event == "typing" -> {:noreply, socket}
+      true -> {:reply, DenWeb.Throttle.refused(), socket}
+    end
+  end
+
+  defp handle("offer", %{"type" => "offer"} = offer, socket) do
     with {:ok, pid} <- Den.Voice.ensure(socket.assigns.voice),
          {:ok, answer} <- Den.Voice.Room.join(pid, self(), socket.assigns.key, offer) do
       {:reply, {:ok, answer}, assign(socket, :room_pid, pid)}
@@ -38,19 +47,19 @@ defmodule DenWeb.VoiceChannel do
     end
   end
 
-  def handle_in("offer", _, socket), do: {:reply, {:error, %{reason: "that is not a voice offer this den can answer"}}, socket}
+  defp handle("offer", _, socket), do: {:reply, {:error, %{reason: "that is not a voice offer this den can answer"}}, socket}
 
-  def handle_in("ice", candidate, socket) when is_map(candidate) do
+  defp handle("ice", candidate, socket) when is_map(candidate) do
     if pid = socket.assigns[:room_pid], do: Den.Voice.Room.ice(pid, self(), candidate)
     {:noreply, socket}
   end
 
-  def handle_in("leave", _, socket) do
+  defp handle("leave", _, socket) do
     if pid = socket.assigns[:room_pid], do: Den.Voice.Room.leave(pid, self())
     {:reply, :ok, assign(socket, :room_pid, nil)}
   end
 
-  def handle_in(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
+  defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
   @impl true
   def handle_info({:voice, event, payload}, socket) do

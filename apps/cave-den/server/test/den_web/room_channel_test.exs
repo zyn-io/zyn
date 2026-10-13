@@ -14,6 +14,7 @@ defmodule DenWeb.RoomChannelTest do
   end
 
   test "a device without a session, or whose day ended, cannot connect", %{key: key} do
+    assert {:ok, _} = connect(DenWeb.UserSocket, %{}, connect_info: %{auth_token: Phoenix.Token.sign(DenWeb.Endpoint, "den", %{key: key})}), "the session in the protocol header"
     assert connect(DenWeb.UserSocket, %{}) == :error
     assert connect(DenWeb.UserSocket, %{"session" => "forged"}) == :error
     Den.Rooms.admit(key, DateTime.add(DateTime.utc_now(), -1, :second) |> DateTime.truncate(:second))

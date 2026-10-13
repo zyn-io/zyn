@@ -47,10 +47,19 @@ defmodule DenWeb.RoomChannel do
     if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
+  # Every event, at a rate the den can answer (DenWeb.Throttle).
   @impl true
+  def handle_in(event, payload, socket) do
+    cond do
+      DenWeb.Throttle.allow?(event) -> handle(event, payload, socket)
+      event == "typing" -> {:noreply, socket}
+      true -> {:reply, DenWeb.Throttle.refused(), socket}
+    end
+  end
+
   # At most `:history_bytes` of ciphertext a reply (and always one message);
   # `more` says to ask again after the last.
-  def handle_in("history", %{"after" => n}, socket) when is_integer(n) do
+  defp handle("history", %{"after" => n}, socket) when is_integer(n) and n >= 0 and n <= 9_223_372_036_854_775_807 do
     rows = Rooms.since(socket.assigns.room, n)
     cap = Den.Limits.get(:history_bytes)
 
@@ -65,13 +74,13 @@ defmodule DenWeb.RoomChannel do
     {:reply, {:ok, %{messages: msgs, more: length(kept) < length(rows) or length(rows) == 500}}, socket}
   end
 
-  def handle_in("state", _, socket) do
+  defp handle("state", _, socket) do
     room = Rooms.get(socket.assigns.room)
     info = room.group_info && Base.encode64(room.group_info)
     {:reply, {:ok, %{epoch: room.epoch, seq: room.seq, group_info: info, info_epoch: room.info_epoch, present: Rooms.present(room.id)}}, socket}
   end
 
-  def handle_in("create", %{"group_info" => b64}, socket) do
+  defp handle("create", %{"group_info" => b64}, socket) when is_binary(b64) do
     with {:ok, info} <- decode(b64),
          :ok <- Rooms.create(socket.assigns.room, info) do
       broadcast_from!(socket, "info", %{epoch: 0, group_info: b64})
@@ -81,7 +90,7 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  def handle_in("info", %{"epoch" => epoch, "group_info" => b64}, socket) when is_integer(epoch) do
+  defp handle("info", %{"epoch" => epoch, "group_info" => b64}, socket) when is_integer(epoch) and epoch >= 0 and is_binary(b64) do
     with {:ok, info} <- decode(b64),
          :ok <- Rooms.info(socket.assigns.room, epoch, info) do
       {:reply, :ok, socket}
@@ -92,7 +101,7 @@ defmodule DenWeb.RoomChannel do
 
   # This device cannot apply the room's last commit: its signed report. When
   # most members report it, the den undoes the commit and tells the room.
-  def handle_in("report", %{"seq" => seq, "sig" => sig}, socket) when is_integer(seq) do
+  defp handle("report", %{"seq" => seq, "sig" => sig}, socket) when is_integer(seq) and is_binary(sig) do
     case Rooms.report(socket.assigns.room, seq, socket.assigns.key, sig) do
       {:ok, :rolled_back, epoch, to} ->
         broadcast!(socket, "rolled_back", %{epoch: epoch, seq: to})
@@ -106,7 +115,7 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  def handle_in("relay", %{"bytes" => b64}, socket) do
+  defp handle("relay", %{"bytes" => b64}, socket) when is_binary(b64) do
     with {:ok, bytes} <- decode(b64),
          true <- Den.Limits.disk_ok?() || {:error, :disk},
          :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(bytes)),
@@ -129,13 +138,13 @@ defmodule DenWeb.RoomChannel do
   end
 
   # Someone is writing: their device name only, not stored.
-  def handle_in("typing", _, socket) do
+  defp handle("typing", _, socket) do
     broadcast_from!(socket, "typing", %{key: socket.assigns.key})
     {:noreply, socket}
   end
 
   # After an Add the den ordered: the Welcome for the devices added.
-  def handle_in("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 do
+  defp handle("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 and is_binary(b64) do
     with {:ok, welcome} <- decode(b64),
          true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/\A[0-9a-f]{64}\z/)) || {:error, :keys},
          true <- Den.Limits.disk_ok?() || {:error, :disk},
@@ -151,7 +160,7 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  def handle_in(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
+  defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
   defp decode(b64) when is_binary(b64) and byte_size(b64) <= @max * 2 do
     case Base.decode64(b64) do

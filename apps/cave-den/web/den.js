@@ -272,7 +272,8 @@ export class DenClient {
   /// Connect with a session: the lobby, this device's inbox, every room.
   connect(session) {
     this.sessionToken = session;
-    this.socket = new Socket(`${this.base.replace(/^http/, 'ws')}/socket`, { params: { session: session.session } });
+    // The session goes in the WebSocket's protocol header, never in its URL.
+    this.socket = new Socket(`${this.base.replace(/^http/, 'ws')}/socket`, { authToken: session.session });
     this.socket.onError(() => this.on('offline'));
     this.socket.onOpen(() => this.on('online'));
     this.socket.connect();

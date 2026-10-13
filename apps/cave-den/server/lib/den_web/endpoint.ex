@@ -12,7 +12,10 @@ defmodule DenWeb.Endpoint do
   ]
 
   # Devices: a session from the door, then rooms of ciphertext.
+  # The session rides in the WebSocket's protocol header (auth_token), not in
+  # its URL, which proxies write to their logs.
   socket "/socket", DenWeb.UserSocket,
+    auth_token: true,
     websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 262_144],
     longpoll: false
 

@@ -21,16 +21,25 @@ defmodule DenWeb.InboxChannel do
     end
   end
 
+  # Every event, at a rate the den can answer (DenWeb.Throttle).
   @impl true
-  def handle_in("publish", %{"key_packages" => kps}, socket) when is_list(kps) and length(kps) <= 10 do
-    bytes = for k <- kps, {:ok, b} <- [Base.decode64(k)], byte_size(b) < 4096, do: b
+  def handle_in(event, payload, socket) do
+    cond do
+      DenWeb.Throttle.allow?(event) -> handle(event, payload, socket)
+      event == "typing" -> {:noreply, socket}
+      true -> {:reply, DenWeb.Throttle.refused(), socket}
+    end
+  end
+
+  defp handle("publish", %{"key_packages" => kps}, socket) when is_list(kps) and length(kps) <= 10 do
+    bytes = for k <- kps, is_binary(k), byte_size(k) < 6000, {:ok, b} <- [Base.decode64(k)], byte_size(b) < 4096, do: b
     {:reply, {:ok, %{left: Den.Inbox.publish(socket.assigns.key, bytes)}}, socket}
   end
 
-  def handle_in("taken", %{"ids" => ids}, socket) when is_list(ids) do
+  defp handle("taken", %{"ids" => ids}, socket) when is_list(ids) and length(ids) <= 100 do
     Den.Inbox.taken(socket.assigns.key, Enum.filter(ids, &is_integer/1))
     {:reply, :ok, socket}
   end
 
-  def handle_in(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
+  defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 end

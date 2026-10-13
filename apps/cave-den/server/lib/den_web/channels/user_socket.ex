@@ -9,7 +9,14 @@ defmodule DenWeb.UserSocket do
   channel "voice:*", DenWeb.VoiceChannel
 
   @impl true
-  def connect(%{"session" => session}, socket, _info) do
+  def connect(params, socket, info) do
+    case info[:auth_token] || params["session"] do
+      session when is_binary(session) -> session(session, socket)
+      _ -> :error
+    end
+  end
+
+  defp session(session, socket) do
     DenWeb.Heap.socket()
 
     with {:ok, %{key: key}} <- Phoenix.Token.verify(DenWeb.Endpoint, "den", session, max_age: 3 * 86_400),
@@ -20,8 +27,6 @@ defmodule DenWeb.UserSocket do
       _ -> :error
     end
   end
-
-  def connect(_, _, _), do: :error
 
   @impl true
   def id(socket), do: "device:" <> socket.assigns.key
