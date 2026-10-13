@@ -319,14 +319,16 @@ export class DenClient {
     } else if (m.t === 'react') {
       const i = at(m.to);
       if (i < 0 || typeof m.emoji !== 'string' || !m.emoji || [...m.emoji].length > 4) return;
+      // Counted by the reactor's key (the MLS sender's), not by its name.
+      if (!m.key) return;
       const r = (log[i].reactions[m.emoji] ||= []);
-      const k = r.indexOf(m.from);
-      if (k >= 0) r.splice(k, 1); else r.push(m.from);
+      const k = r.indexOf(m.key);
+      if (k >= 0) r.splice(k, 1); else r.push(m.key);
       if (!r.length) delete log[i].reactions[m.emoji];
       shown = log[i];
     } else if (m.t === 'edit' || m.t === 'del') {
       const i = at(m.to);
-      if (i < 0 || log[i].key !== m.key) return;
+      if (i < 0 || !m.key || log[i].key !== m.key) return;
       if (m.t === 'edit') Object.assign(log[i], { text: String(m.text || '').slice(0, 4000), edited: true });
       else Object.assign(log[i], { text: '', file: null, deleted: true });
       shown = log[i];

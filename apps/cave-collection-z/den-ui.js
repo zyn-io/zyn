@@ -36,6 +36,10 @@ export function mark(key, px = 28) {
   return `<svg class="mark" width="${px}" height="${px}" viewBox="-1 -1 7 7" aria-hidden="true" shape-rendering="crispEdges"><rect x="-1" y="-1" width="7" height="7" fill="rgba(0,0,0,.55)"/><g fill="${ink}">${rects}</g></svg>`;
 }
 
+/// A longer look at a key than its name: 80 bits, in groups, for telling
+/// apart two devices whose short names happen to match.
+const fingerprint = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `Key ${key.slice(0, 20).match(/.{4}/g).join(' ')}` : '');
+
 const ICON = {
   reply: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h7a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   react: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 9.5c1.3 1.6 3.7 1.6 5 0" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 6h.01M10 6h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -195,7 +199,8 @@ export function mountDen(den, el, me) {
     for (const r of rooms()) for (const m of den.members(r.id)) if (m.key !== me.key) all.set(m.key, m.name);
     return [...all.entries()].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
   }
-  const nameOf = (key) => (key === me.key ? me.name : known().find((m) => m.key === key)?.name || 'a member');
+  // A device's name is its key's first ten hex digits (as the core names it).
+  const nameOf = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `m-${key.slice(0, 10)}` : 'a member');
 
   function pickMembers(heading, yes, named, done) {
     const already = named ? new Set() : new Set(den.members(room).map((m) => m.key));
@@ -240,7 +245,7 @@ export function mountDen(den, el, me) {
     if (readFrom && !m.mine && m.seq > readFrom && (!prev || prev.mine || prev.seq <= readFrom)) parts.push('<li class="new-line" role="separator"><span>New</span></li>');
     const cont = prev && !m.reply && prev.key === m.key && !prev.deleted && m.at - prev.at < GROUP_MS && !parts.length;
     const own = m.key === me.key;
-    const head = `<p class="msg-head"><b class="who">${esc(m.from)}</b>${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
+    const head = `<p class="msg-head"><b class="who" title="${esc(fingerprint(m.key))}">${esc(m.from)}</b>${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
     const gutter = cont ? `<span class="side-time">${time(m.at)}</span>` : mark(m.key);
     if (m.deleted) {
       parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>Message deleted</em></p></div></li>`);
@@ -255,7 +260,8 @@ export function mountDen(den, el, me) {
         ? `<button type="button" class="att" data-view="${esc(m.id)}" aria-label="Open ${esc(m.file.name)}"><img data-blob="${esc(m.id)}" alt="${esc(m.file.name)}" /></button>`
         : `<button type="button" class="file" data-file="${esc(m.id)}">${ICON.file}<span><b>${esc(m.file.name)}</b><small>${size(m.file.size)} · Download</small></span></button>`;
     }
-    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.name) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.join(', '))}" aria-pressed="${who.includes(me.name)}">${esc(e)} <span>${who.length}</span></button>`).join('');
+    // Reactions are kept by the reactor's key; shown by name.
+    const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(nameOf).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
     const ping = !own && (m.text || '').includes(`@${me.name}`);
     parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
       ${gutter}
@@ -531,7 +537,7 @@ export function mountDen(den, el, me) {
     const list = den.members(room).sort((a, b) => (a.key === me.key ? -1 : b.key === me.key ? 1 : a.name.localeCompare(b.name)));
     const priv = den.rooms.get(room)?.kind === 'private';
     el('members').innerHTML = `<div class="members-head"><h3>Members · ${list.length}</h3><button type="button" class="x" data-close aria-label="Close members">×</button></div>
-      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="who">${esc(m.name)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
+      <ul>${list.map((m) => `<li>${mark(m.key, 24)}<span class="who" title="${esc(fingerprint(m.key))}">${esc(m.name)}</span>${m.key === me.key ? '<span class="you">you</span>' : `<button type="button" class="mini" data-dm="${esc(m.key)}" data-name="${esc(m.name)}">Message</button>`}</li>`).join('') || '<li class="none">Joining…</li>'}</ul>
       ${priv && den.inRoom(room) ? '<button type="button" class="act ghost small" id="invite">Invite</button>' : ''}`;
     el('members').querySelectorAll('[data-dm]').forEach((b) => {
       b.onclick = async () => {

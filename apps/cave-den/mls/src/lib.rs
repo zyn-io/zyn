@@ -87,7 +87,7 @@ impl Member {
         let provider = OpenMlsRustCrypto::default();
         let signer = SignatureKeyPair::new(SUITE.signature_algorithm()).map_err(err("key"))?;
         signer.store(provider.storage()).map_err(err("store key"))?;
-        let name = format!("m-{}", &hex::encode(signer.to_public_vec())[..10]);
+        let name = name_of(&signer.to_public_vec());
         let credential = CredentialWithKey {
             credential: BasicCredential::new(name.clone().into_bytes()).into(),
             signature_key: signer.to_public_vec().into(),
@@ -244,6 +244,14 @@ impl Member {
             .into_group(&self.provider)
             .map_err(err("join from welcome"))?;
         let room = String::from_utf8(group.group_id().as_slice().to_vec()).map_err(err("room id"))?;
+        // An invitation is only ever to a private room, and never replaces a
+        // room this device already holds.
+        if !is_private(&room) {
+            return Err("an invitation is only to a private room".into());
+        }
+        if self.groups.contains_key(&room) {
+            return Err("already in that room".into());
+        }
         self.groups.insert(room.clone(), group);
         Ok(room)
     }
@@ -313,30 +321,29 @@ impl Member {
         let msg = MlsMessageIn::tls_deserialize_exact(bytes).map_err(err("message"))?;
         let protocol = msg.try_into_protocol_message().map_err(err("not a room message"))?;
         let processed = group.process_message(provider, protocol).map_err(err("read"))?;
-        let sender = processed.credential().clone();
+        let sender = processed.sender().clone();
         let epoch = processed.epoch().as_u64();
         match processed.into_content() {
             ProcessedMessageContent::ApplicationMessage(app) => {
-                let from = BasicCredential::try_from(sender).map(|c| String::from_utf8_lossy(c.identity()).to_string()).unwrap_or_default();
-                let key = group
-                    .members()
-                    .find(|m| BasicCredential::try_from(m.credential.clone()).map(|c| String::from_utf8_lossy(c.identity()) == from).unwrap_or(false))
-                    .map(|m| hex::encode(&m.signature_key))
-                    .unwrap_or_default();
-                Ok(Event::Text { from, key, text: String::from_utf8(app.into_bytes()).map_err(err("text"))?, epoch })
+                // The author is the member whose leaf signed it (MLS checks
+                // that), named after that leaf's key — never after the name
+                // in its credential, which its own client chose.
+                let Sender::Member(leaf) = sender else { return Err("not a member's message".into()) };
+                let key = group.member_at(leaf).map(|m| m.signature_key).ok_or("its author has left the room")?;
+                Ok(Event::Text { from: name_of(&key), key: hex::encode(&key), text: String::from_utf8(app.into_bytes()).map_err(err("text"))?, epoch })
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
+                // A private room is joined by invitation, never by an external commit.
+                if matches!(sender, Sender::NewMemberCommit) && is_private(room) {
+                    return Err("a private room is joined by invitation".into());
+                }
                 group.merge_staged_commit(provider, *staged).map_err(err("merge"))?;
                 Ok(Event::Commit { epoch: group.epoch().as_u64(), members: seats(group) })
             }
-            ProcessedMessageContent::ProposalMessage(p) => {
-                group.store_pending_proposal(provider.storage(), *p).map_err(err("proposal"))?;
-                Ok(Event::Proposal { epoch })
-            }
-            ProcessedMessageContent::ExternalJoinProposalMessage(p) => {
-                group.store_pending_proposal(provider.storage(), *p).map_err(err("proposal"))?;
-                Ok(Event::Proposal { epoch })
-            }
+            // Standalone proposals are not kept: kept, the next honest commit
+            // would sweep them in (an Add for the den's own KeyPackage, say).
+            // Every change here is a full commit by the member making it.
+            ProcessedMessageContent::ProposalMessage(_) | ProcessedMessageContent::ExternalJoinProposalMessage(_) => Ok(Event::Proposal { epoch }),
             // The server relayed this device's own commit: that is its order.
             ProcessedMessageContent::OwnPendingCommit => {
                 group.merge_pending_commit(provider).map_err(err("merge own"))?;
@@ -356,13 +363,17 @@ impl Member {
 }
 
 fn seats(group: &MlsGroup) -> Vec<Seat> {
-    group
-        .members()
-        .map(|m| Seat {
-            name: BasicCredential::try_from(m.credential.clone()).map(|c| String::from_utf8_lossy(c.identity()).to_string()).unwrap_or_default(),
-            key: hex::encode(&m.signature_key),
-        })
-        .collect()
+    group.members().map(|m| Seat { name: name_of(&m.signature_key), key: hex::encode(&m.signature_key) }).collect()
+}
+
+/// A private room's id: `p-` and 32 hex digits, made by its first member.
+fn is_private(room: &str) -> bool {
+    room.len() == 34 && room.starts_with("p-") && room[2..].bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
+/// A device's name: from its signature key, so no client can choose it.
+pub fn name_of(key: &[u8]) -> String {
+    format!("m-{}", &hex::encode(key)[..10])
 }
 
 /// What the server can read from a relayed message without any key: the
@@ -657,34 +668,87 @@ mod tests {
     fn a_private_room_by_invitation() {
         let (mut a, mut b, mut c) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
         let kps_b = b.key_packages(2).unwrap();
-        let _ = a.create("dm-7f3a").unwrap();
-        let (commit, welcome) = a.add("dm-7f3a", &kps_b[..1], &[b.key()]).unwrap();
+        let _ = a.create("p-7f3a00000000000000000000000000aa").unwrap();
+        let (commit, welcome) = a.add("p-7f3a00000000000000000000000000aa", &kps_b[..1], &[b.key()]).unwrap();
         assert!(envelope(&commit).unwrap().commit && !envelope(&commit).unwrap().external);
-        a.confirm("dm-7f3a").unwrap();
-        assert_eq!(b.accept(&welcome).unwrap(), "dm-7f3a");
-        assert_eq!(a.members("dm-7f3a").unwrap().len(), 2);
-        let m = b.send("dm-7f3a", "just us").unwrap();
-        assert_eq!(text(a.receive("dm-7f3a", &m).unwrap()), "just us");
+        a.confirm("p-7f3a00000000000000000000000000aa").unwrap();
+        assert_eq!(b.accept(&welcome).unwrap(), "p-7f3a00000000000000000000000000aa");
+        assert_eq!(a.members("p-7f3a00000000000000000000000000aa").unwrap().len(), 2);
+        let m = b.send("p-7f3a00000000000000000000000000aa", "just us").unwrap();
+        assert_eq!(text(a.receive("p-7f3a00000000000000000000000000aa", &m).unwrap()), "just us");
         // The voice key: alike for members, unknowable to others, new each epoch.
-        let ka = a.export("dm-7f3a", "cave-den voice", 32).unwrap();
-        assert_eq!(ka, b.export("dm-7f3a", "cave-den voice", 32).unwrap());
-        assert!(c.export("dm-7f3a", "cave-den voice", 32).is_err());
+        let ka = a.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap();
+        assert_eq!(ka, b.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap());
+        assert!(c.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).is_err());
         let kps_c = c.key_packages(1).unwrap();
-        let (commit2, welcome2) = a.add("dm-7f3a", &kps_c, &[c.key()]).unwrap();
-        a.confirm("dm-7f3a").unwrap();
-        b.receive("dm-7f3a", &commit2).unwrap();
+        let (commit2, welcome2) = a.add("p-7f3a00000000000000000000000000aa", &kps_c, &[c.key()]).unwrap();
+        a.confirm("p-7f3a00000000000000000000000000aa").unwrap();
+        b.receive("p-7f3a00000000000000000000000000aa", &commit2).unwrap();
         c.accept(&welcome2).unwrap();
-        let k2 = a.export("dm-7f3a", "cave-den voice", 32).unwrap();
+        let k2 = a.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap();
         assert_ne!(k2, ka, "a new epoch, a new key");
-        assert_eq!(k2, c.export("dm-7f3a", "cave-den voice", 32).unwrap());
+        assert_eq!(k2, c.export("p-7f3a00000000000000000000000000aa", "cave-den voice", 32).unwrap());
         // A device already in the room cannot be added a second time.
-        assert!(a.add("dm-7f3a", &kps_b[1..], &[b.key()]).is_err(), "B's key is already a member");
+        assert!(a.add("p-7f3a00000000000000000000000000aa", &kps_b[1..], &[b.key()]).is_err(), "B's key is already a member");
         // An invitation that is not the device asked for is refused: here C's,
         // handed over as if it were D's.
         let d = Member::new().unwrap();
         let kps_c2 = c.key_packages(1).unwrap();
-        let e = a.add("dm-7f3a", &kps_c2, &[d.key()]).unwrap_err();
+        let e = a.add("p-7f3a00000000000000000000000000aa", &kps_c2, &[d.key()]).unwrap_err();
         assert!(e.contains("another device"), "{e}");
+    }
+
+    /// A proposal on its own is not kept, so no commit sweeps it in; a
+    /// private room takes no external commit; an invitation is only ever to a
+    /// private room the device is not already in.
+    #[test]
+    fn nothing_rides_into_a_private_room() {
+        const ROOM: &str = "p-0123456789abcdef0123456789abcdef";
+        let (mut a, mut b, mut x) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
+        let _ = a.create(ROOM).unwrap();
+        let (commit, welcome) = a.add(ROOM, &b.key_packages(1).unwrap(), &[b.key()]).unwrap();
+        a.confirm(ROOM).unwrap();
+        b.accept(&welcome).unwrap();
+        let _ = commit;
+        // X, holding the room's GroupInfo (as the den would), joins by external commit: refused by members.
+        let info = a.group_info(ROOM).unwrap();
+        let join = x.join(ROOM, &info).unwrap();
+        let e = b.receive(ROOM, &join).unwrap_err();
+        assert!(e.contains("invitation"), "{e}");
+        assert_eq!(b.members(ROOM).unwrap().len(), 2);
+        // The same Welcome a second time does not replace the room (its
+        // one-time invitation key is already used up).
+        assert!(b.accept(&welcome).is_err());
+        assert_eq!(b.members(ROOM).unwrap().len(), 2);
+        // An invitation to an open room is refused.
+        let mut c = Member::new().unwrap();
+        let _ = a.create("general").unwrap();
+        let (_, w2) = a.add("general", &c.key_packages(1).unwrap(), &[c.key()]).unwrap();
+        assert!(c.accept(&w2).unwrap_err().contains("private room"));
+    }
+
+    /// A member whose client puts another's name in its credential is still
+    /// named, and keyed, after its own signature key.
+    #[test]
+    fn an_author_is_its_key_not_the_name_it_claims() {
+        let mut a = Member::new().unwrap();
+        let mut b = Member::new().unwrap();
+        // B's client lies: its credential carries A's name.
+        b.credential = CredentialWithKey { credential: BasicCredential::new(a.name().into_bytes()).into(), signature_key: b.signer.to_public_vec().into() };
+        let _ = a.create("lie").unwrap();
+        let info = a.group_info("lie").unwrap();
+        let join = b.join("lie", &info).unwrap();
+        a.receive("lie", &join).unwrap();
+        let m = b.send("lie", "I am A").unwrap();
+        match a.receive("lie", &m).unwrap() {
+            Event::Text { from, key, .. } => {
+                assert_eq!(key, b.key(), "the signer's key");
+                assert_eq!(from, name_of(&hex::decode(b.key()).unwrap()));
+                assert_ne!(from, a.name(), "not the name it claimed");
+            }
+            e => panic!("{e:?}"),
+        }
+        assert!(a.members("lie").unwrap().iter().all(|s| s.name == name_of(&hex::decode(&s.key).unwrap())));
     }
 
     /// A device proves it holds its key: an Ed25519 signature over the label
