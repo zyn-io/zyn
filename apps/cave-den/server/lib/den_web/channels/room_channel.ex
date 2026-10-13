@@ -17,7 +17,11 @@ defmodule DenWeb.RoomChannel do
   use Phoenix.Channel, log_join: false, log_handle_in: false
   alias Den.Rooms
 
-  @max 65_536
+  # A message or commit (a commit's path grows with the room: about 40 KB at
+  # a thousand members), and a GroupInfo with the room's whole tree (about
+  # 190 KB at a thousand).
+  @max 131_072
+  @info_max 786_432
 
   @impl true
   def join("room:" <> id, _params, socket) do
@@ -81,7 +85,7 @@ defmodule DenWeb.RoomChannel do
   end
 
   defp handle("create", %{"group_info" => b64}, socket) when is_binary(b64) do
-    with {:ok, info} <- decode(b64),
+    with {:ok, info} <- decode(b64, @info_max),
          :ok <- Rooms.create(socket.assigns.room, info) do
       broadcast_from!(socket, "info", %{epoch: 0, group_info: b64})
       {:reply, :ok, socket}
@@ -91,7 +95,7 @@ defmodule DenWeb.RoomChannel do
   end
 
   defp handle("info", %{"epoch" => epoch, "group_info" => b64}, socket) when is_integer(epoch) and epoch >= 0 and is_binary(b64) do
-    with {:ok, info} <- decode(b64),
+    with {:ok, info} <- decode(b64, @info_max),
          :ok <- Rooms.info(socket.assigns.room, epoch, info) do
       {:reply, :ok, socket}
     else
@@ -129,7 +133,7 @@ defmodule DenWeb.RoomChannel do
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
       {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
-      {:error, :too_big} -> {:reply, {:error, %{reason: "a room holds at most 200 members"}}, socket}
+      {:error, :too_big} -> {:reply, {:error, %{reason: "a room holds at most #{Rooms.members_max()} members"}}, socket}
       {:error, :barred} -> {:reply, {:error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}}, socket}
       {:error, :quota} -> {:reply, {:error, %{reason: "this device has written enough for today"}}, socket}
       {:error, :disk} -> {:reply, {:error, %{reason: "the den is full for now; try again later"}}, socket}
@@ -163,12 +167,14 @@ defmodule DenWeb.RoomChannel do
 
   defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
-  defp decode(b64) when is_binary(b64) and byte_size(b64) <= @max * 2 do
+  defp decode(b64, max \\ @max)
+
+  defp decode(b64, max) when is_binary(b64) and byte_size(b64) <= max * 2 do
     case Base.decode64(b64) do
-      {:ok, b} when byte_size(b) <= @max -> {:ok, b}
+      {:ok, b} when byte_size(b) <= max -> {:ok, b}
       _ -> {:error, :bytes}
     end
   end
 
-  defp decode(_), do: {:error, :bytes}
+  defp decode(_, _), do: {:error, :bytes}
 end

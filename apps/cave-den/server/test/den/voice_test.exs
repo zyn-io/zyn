@@ -145,10 +145,10 @@ defmodule Den.VoiceTest do
     end)
   end
 
-  # The newest slot map the test has been told for `key`, from its mailbox.
-  defp last_slots(key, acc) do
+  # The newest `event` the test has been told for `key`, from its mailbox.
+  defp last_of(key, event, acc) do
     receive do
-      {^key, "slots", m} -> last_slots(key, m)
+      {^key, ^event, m} -> last_of(key, event, m)
     after
       0 -> acc
     end
@@ -199,13 +199,13 @@ defmodule Den.VoiceTest do
     keys = for i <- 0..10, do: "key-#{i}"
     devices = Map.new(keys, fn k -> {k, live_device(room, k, self())} end)
     for k <- keys, do: assert_receive({^k, :connected}, 15_000)
-    assert_receive {"key-0", "roster", %{keys: roster}}, 5_000
     on_exit(fn -> for {_, d} <- devices, do: send(d, :stop) end)
 
     # Ten others, eight slots: key-0 starts out carrying the first eight to join.
-    Process.sleep(200)
-    slots0 = last_slots("key-0", %{})
-    assert length(Enum.uniq(roster)) >= 2
+    Process.sleep(300)
+    %{keys: roster} = last_of("key-0", "roster", nil)
+    slots0 = last_of("key-0", "slots", %{})
+    assert Enum.sort(roster) == Enum.sort(keys), "everyone is on the roster"
     assert map_size(slots0) == Den.Voice.slots()
     [outside, _] = (keys -- ["key-0"]) -- Map.values(slots0)
     inside = hd(Map.values(slots0))

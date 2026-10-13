@@ -232,9 +232,10 @@ defmodule Den.Rooms do
   end
 
   # A room's public state, and its members, kept within bounds: a member
-  # cannot grow it without limit with mass Adds.
-  @state_max 2_000_000
-  @members_max 200
+  # cannot grow it without limit with mass Adds. The state takes about 2 KB
+  # a member (web/tests/bench.exs); a room holds `:room_members`, at most 1000.
+  def members_max, do: min(Den.Limits.get(:room_members), 1000)
+  defp state_max, do: 2_500 * members_max() + 200_000
 
   @doc """
   Relay `bytes` in `room`: a commit only at the room's epoch (it moves the room
@@ -267,9 +268,8 @@ defmodule Den.Rooms do
             # device whose session sent it: no commit-shaped bytes, and no
             # commits in another device's name.
             case Den.Public.commit(r.public_state, bytes) do
-              {:ok, {state, _, ^sender}} when byte_size(state) > @state_max -> Repo.rollback(:too_big)
               {:ok, {state, epoch, ^sender}} when epoch == r.epoch + 1 ->
-                if length(public_members(state, r.id)) > @members_max, do: Repo.rollback(:too_big), else: order(r, env, bytes, epoch, state, sender)
+                if byte_size(state) > state_max() or length(public_members(state, r.id)) > members_max(), do: Repo.rollback(:too_big), else: order(r, env, bytes, epoch, state, sender)
               {:ok, {_, _, _}} -> Repo.rollback(:not_yours)
               {:error, why} -> Repo.rollback({:bad_commit, why})
             end

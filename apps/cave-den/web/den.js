@@ -160,12 +160,26 @@ export class DenClient {
     this.claims = (await this.kv.get('claims')) || {};
     this.myLinks = (await this.kv.get('links')) || [];
     this.me = { name: this.den.name(), key: this.den.key(), nick: (await this.kv.get('nick')) || '' };
+    // Leaving the page: what was read since the last write, written.
+    if (typeof addEventListener === 'function') addEventListener('pagehide', () => { if (this.saveTimer) this.save().catch(() => {}); });
     return this.me;
   }
 
+  /// What this device keeps of its rooms, written now: after anything it
+  /// sends and every change of a room's members, so a reload can never reuse
+  /// a key it already used.
   async save() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     await this.kv.put('device', this.den.save());
     await this.kv.put('seq', this.seq);
+  }
+
+  /// After words it reads, within a second: the state grows with the room
+  /// (several MB at a thousand members), and a busy room should not write it
+  /// for every message. Lost on a crash, it is read again from the den.
+  saveSoon() {
+    this.saveTimer ??= setTimeout(() => { this.saveTimer = null; this.save().catch(() => {}); }, 1000);
   }
 
   async keepPrivate() {
@@ -488,7 +502,7 @@ export class DenClient {
       // A commit at this device's own epoch that it cannot apply: never
       // skipped quietly, or the room would go on without this device.
       if (m.commit && m.epoch === at) return this.cannotApply(room, m);
-      await this.save();
+      this.saveSoon();
       return; // before this device joined, or its own
     }
     if (ev.kind === 'text') {
@@ -504,8 +518,10 @@ export class DenClient {
       }
       await this.noteMembers(room, ev.members);
       this.on('members', { room, members: ev.members });
+      await this.save();
+      return;
     }
-    await this.save();
+    this.saveSoon();
   }
 
   /// A line in the room's log for each device a commit added or took out.
