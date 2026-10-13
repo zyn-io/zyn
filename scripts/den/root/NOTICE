@@ -10,7 +10,12 @@ Third-party code with terms other than MIT or Apache-2.0:
   OpenMLS) are under the Mozilla Public License 2.0. They are compiled,
   unmodified, into mls/'s WebAssembly. Their source:
   https://github.com/cryspen/hpke-rs
-- curve25519-dalek and ed25519-dalek are under the BSD 3-Clause license.
+  The same three crates are compiled, unmodified, into the server's native
+  library (server/native/den_public, which also uses rustler, OpenMLS 0.9.1,
+  serde_json and hex, all MIT or Apache-2.0).
+- curve25519-dalek, ed25519-dalek, x25519-dalek and subtle are under the BSD
+  3-Clause license; libloading is under the ISC license.
 
-Every other dependency of mls/ and server/ is under MIT, Apache-2.0 or a
-compatible permissive license; see Cargo.lock and server/mix.lock.
+Every other dependency of mls/, server/ and server/native/ is under MIT,
+Apache-2.0 or a compatible permissive license; see the Cargo.lock files and
+server/mix.lock.

@@ -58,6 +58,21 @@ redirects every request that arrives without it.
 | `DEN_NODE_URL` | the pass checker's node (the Zyn adapter) |
 | `POOL_SIZE` | database connections |
 
+**Limits** go under `config :den, :limits`, each key optional. They are per
+device per day unless noted:
+
+| Key | Default | |
+|---|---|---|
+| `message_bytes` | 20 MB | bytes of messages relayed |
+| `file_bytes` | 250 MB | bytes of files stored |
+| `files` | 200 | files stored |
+| `invites` | 200 | invitations sent |
+| `inbox` | 100 | invitations waiting for one device at once |
+| `history_bytes` | 4 MB | ciphertext in one history reply |
+| `min_free_bytes` | 2 GB | free disk below which nothing more is taken |
+
+Ciphertext and files are kept `retention_days` (30) days.
+
 Voice needs UDP ports 50000–50199 open to the internet. There is no TURN
 server option yet, so a member behind a strict NAT may not get audio.
 
