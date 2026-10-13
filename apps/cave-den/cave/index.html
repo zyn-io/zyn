@@ -46,7 +46,7 @@
           <ul class="facts-list">
             <li>Messages, files and voice are end-to-end encrypted. The Cave team runs the server and cannot read them.</li>
             <li>The server sees which chat names are in which rooms, who joins or leaves, when they write or talk, and file sizes. It sees your network address at the door and in the chat, so the team could link your pass to this device; a VPN or Tor prevents that.</li>
-            <li>This device keeps your messages and your member pass, so next time it enters without Nap. Clearing the browser's data forgets both, and your chat name.</li>
+            <li>This device keeps your messages and your member pass, so next time it enters without Nap. You can turn that off, or forget the device, inside.</li>
             <li>Selling, moving or redeeming your item ends your entry by the end of the next day.</li>
           </ul>
           <button class="act" id="enter" type="button">Enter with Nap</button>
@@ -69,6 +69,10 @@
           <div id="found" class="found" hidden></div>
           <nav id="rooms" class="rooms" aria-label="Rooms"></nav>
           <div class="side-foot">
+            <label class="keep"><input type="checkbox" id="keep-pass" checked /> Keep this device's pass
+              <button class="tip" type="button" aria-expanded="false" aria-label="About keeping the pass" data-tip="With the pass kept, this device gets its own day tokens and comes back without Nap. Turned off, Nap is asked again after tomorrow. Anyone with this browser profile can use a kept pass while you hold the item.">i</button>
+            </label>
+            <button type="button" class="mini ghost" id="forget">Forget this device</button>
             <label>Notifications
               <select id="notify">
                 <option value="mentions">Mentions and private</option>
