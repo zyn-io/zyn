@@ -2,6 +2,46 @@
 
 Newest first. What changed, why, and what we found along the way.
 
+## 14 October 2026: moderation
+
+A den run as a community needs what a Discord server has. It has it now, and
+the den still reads nothing.
+
+- **An owner.** The host names one device the owner (`epeaky owner m-…`).
+  It holds every permission and nobody can act on it.
+- **Roles.** The owner makes roles with a name, a colour, a place in the
+  list and any of eleven permissions (Administrator, Manage den, Manage
+  channels, Manage roles, Manage messages, Timeout, Kick, Ban, Manage
+  invites, Bypass slow mode, Mention @everyone). Members act only on those
+  whose highest role is below theirs, and give out only roles below their
+  own and permissions they hold. Roles can list their members on their own
+  in the member list.
+- **Channels.** Manage channels creates, renames and deletes them, and sets
+  a topic, slow mode (5 seconds to 6 hours) and who may post.
+- **Slow mode, three ways.** The page holds a message until the window has
+  passed and counts down. The den refuses more than a few messages a window
+  from one device (a message and some reactions, since it cannot tell them
+  apart). And every page hides a second message from one device inside the
+  window by the den's own time on each message, so a page that skips the
+  wait gains nothing.
+- **Timeouts, kicks and bans** by device key. The den refuses the device's
+  messages, reactions, typing and voice; a kick or ban also drops its
+  connections, and members' pages take it out of every open room. A removed
+  device is told so on every channel.
+- **Deleting anyone's message**, by its number: the den drops the
+  ciphertext and tells the room, without knowing whose it was.
+- **One hole closed.** Any member could remove any other from an open room.
+  Now the den orders that only from a device allowed to kick, or for a
+  device whose day ended or that was kicked or banned. The den's MLS check
+  (PublicGroup) now reports whom a commit removes.
+- **Den settings** in the page: overview (name, icon, file limits under the
+  host's), roles, channels, timeouts and bans, invite links and requests,
+  the audit log, ownership.
+
+What a ban cannot do: follow a person to a new device. The den cannot link a
+device to its pass, which is what keeps who-said-what apart from who-holds-
+which-pass. A banned person can come back on a new device under a new name.
+
 ## 13 October 2026: past the first limits
 
 The first public version listed its limits. Most of them moved:

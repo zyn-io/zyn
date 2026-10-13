@@ -117,11 +117,29 @@ once in either case.
   carry the key that was asked for, a private room refuses external joins
   (at the den and in every device), and a device accepts a Welcome only for a
   private room it is not already in.
-- Any member can remove any other member. In open rooms the den tells
-  devices whose day has ended (`expired`) and who is present, and members'
-  devices take its word, so a den could get them to remove someone from an
-  open room (who can join it again). In private rooms devices never remove
-  anyone on the den's word.
+- In an open room the den orders a commit that takes a live member out only
+  from a device whose roles allow Kick (and are above that member's), or for
+  a device whose day ended or that moderators kicked or banned. The den tells
+  members about those (`expired`) and who is present, and members' devices
+  take its word, so a den could get them to remove someone from an open room
+  (who can join it again unless banned). In a private room any member can
+  remove any other, and devices never remove anyone on the den's word.
+- Moderation is enforced by the den on what it already knows: which device
+  sends what, where, when. A device timed out, kicked or banned has its
+  messages, reactions, typing and voice refused (its own commits still pass,
+  so its state stays in step); a channel's slow mode lets each device send a
+  few messages a window, and pages hide a second message or file from one
+  device inside the window by the den's own time on each message; "who may
+  post" refuses the rest. Moderators delete a message by its number: the den
+  drops its ciphertext and tells the room. The den keeps no record of who
+  sent which stored message.
+- Roles, who holds them, timeouts, kicks and bans are by device key, and
+  public to members (as on Discord). Bans cannot follow a person: the den
+  cannot link a device to the pass it came in with, by design, so someone
+  banned can return on a new device under a new device name (at most three a
+  day per pass). A malicious den could invent roles, bans or deletions; it
+  could always refuse service. It still cannot read, forge or change a
+  message.
 - A Welcome to a private room can come from any member, under any title.
 - Forward secrecy: a device keeps what it has read; nobody, the den
   included, can decrypt a room's past messages later.
@@ -180,7 +198,9 @@ Outsiders cannot.
 - file sizes, and who downloads which file; the names of open rooms; the room
   each voice frame belongs to;
 - network addresses at the door and the den;
-- at the door: each pass code, every day, and when it asked for tokens.
+- at the door: each pass code, every day, and when it asked for tokens;
+- roles and who holds them, timeouts, kicks and bans, and the audit log of
+  what moderators did (90 days; never what anyone wrote).
 
 ## What nobody but members can see
 

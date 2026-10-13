@@ -28,6 +28,10 @@ you trust it with anything that matters.
   connection.
 - **Entry** is a blind token (RFC 9474): the door checks a pass and signs a
   token it never sees; the den admits the device that token names.
+- **Moderation**, the way Discord does it: an owner with every power, roles
+  with permissions the owner gives out, slow mode and posting rights per
+  channel, timeouts, kicks, bans, deleting anyone's message, and an audit
+  log. The den enforces all of it without reading a word.
 
 [THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
 cannot see. Read it before you run a den for people who depend on it. What
@@ -52,8 +56,17 @@ epeaky invite 5 7      # 5 one-use invite links, good for 7 days
 epeaky requests        # people asking to join, once approval is open
 epeaky approve <id>    # or: epeaky decline <id>
 epeaky members         # how many, by the way they joined
+epeaky owner m-1a2b3c  # make your device the den's owner (its name in the page)
+epeaky audit           # what moderators did
 epeaky update          # the latest image
 ```
+
+Once your device owns the den, everything else is in its page: the gear
+beside the den's name opens Den settings (name and icon, roles, channels,
+slow mode, who may post, timeouts and bans, invite links and requests, the
+audit log). Click a member to time them out, kick or ban them, or give them
+a role. Without an owner the den works as before roles: every member may
+open up to three channels a day, and nobody moderates.
 
 Settings are in `/opt/epeaky/.env` (the ways in, the rooms; then
 `docker compose up -d` there). Voice offers devices the server's own public
