@@ -11,7 +11,8 @@ defmodule DenWeb.DoorController do
     no_key: {503, "the door has no key for that day yet"},
     token: {400, "that is not a den token"},
     signature: {403, "that token was not signed by the door for its day"},
-    spent: {403, "that token was already used"}
+    spent: {403, "that token was already used"},
+    proof: {403, "this device did not prove it holds the key its token names"}
   }
 
   defp fail(conn, why) do
@@ -30,8 +31,8 @@ defmodule DenWeb.DoorController do
 
   def sign(conn, _), do: fail(conn, :code)
 
-  def enter(conn, %{"msg" => msg, "randomizer" => r, "sig" => s}) do
-    case Den.Door.enter(msg, r, s) do
+  def enter(conn, %{"msg" => msg, "randomizer" => r, "sig" => s} = params) do
+    case Den.Door.enter(msg, r, s, params["proof"]) do
       {:ok, session} -> json(conn, session)
       {:error, why} -> fail(conn, why)
     end

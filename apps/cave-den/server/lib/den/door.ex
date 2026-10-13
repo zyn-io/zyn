@@ -62,16 +62,23 @@ defmodule Den.Door do
     end
   end
 
-  @doc "Admit the device a token names, on the token's day. Returns its session."
-  def enter(msg, randomizer_hex, sig_hex) do
+  @doc """
+  Admit the device a token names, on the token's day, if the device proves it
+  holds that key: `proof_hex` is its Ed25519 signature over
+  `"cave-den-enter-v1|" <> msg`. A token only names a key, and keys are seen
+  by every member, so without the proof a member could enter as another
+  device and take its inbox. Returns its session.
+  """
+  def enter(msg, randomizer_hex, sig_hex, proof_hex) do
     today = day_string(today())
 
     with ["cave-den-token-v1", day, key, nonce] <- String.split(msg || "", "|"),
-         true <- (key =~ ~r/^[0-9a-f]{64}$/ and nonce =~ ~r/^[0-9a-f]{32}$/) || {:error, :token},
+         true <- (key =~ ~r/\A[0-9a-f]{64}\z/ and nonce =~ ~r/\A[0-9a-f]{32}\z/) || {:error, :token},
          true <- day == today || {:error, :day},
          {:ok, randomizer} <- Base.decode16(randomizer_hex || "", case: :lower) |> ok_or(:token),
          {:ok, sig} <- Base.decode16(sig_hex || "", case: :lower) |> ok_or(:token),
          true <- Den.Keys.valid?(day, msg, randomizer, sig) || {:error, :signature},
+         true <- holds_key?(key, msg, proof_hex) || {:error, :proof},
          :ok <- spend(msg, day) do
       until = Date.from_iso8601!(day) |> Date.add(1) |> DateTime.new!(~T[00:00:00]) |> DateTime.add(@grace, :second)
       Den.Rooms.admit(key, until)
@@ -79,6 +86,15 @@ defmodule Den.Door do
     else
       {:error, _} = e -> e
       _ -> {:error, :token}
+    end
+  end
+
+  defp holds_key?(key, msg, proof_hex) do
+    with {:ok, proof} when byte_size(proof) == 64 <- Base.decode16(proof_hex || "", case: :lower),
+         {:ok, pk} <- Base.decode16(key, case: :lower) do
+      :crypto.verify(:eddsa, :none, "cave-den-enter-v1|" <> msg, proof, [pk, :ed25519])
+    else
+      _ -> false
     end
   end
 

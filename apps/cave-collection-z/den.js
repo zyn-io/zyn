@@ -166,7 +166,8 @@ export class DenClient {
   }
 
   async enter(token) {
-    const s = await this.post('/door/enter', token);
+    // The token names this device's key; the proof shows the device holds it.
+    const s = await this.post('/door/enter', { ...token, proof: this.den.prove(token.msg) });
     await this.kv.put('session', s);
     this.sessionToken = s;
     return s;
@@ -428,7 +429,8 @@ export class DenClient {
     const run = async () => {
       const kps = [];
       for (const k of keys) kps.push((await this.push(this.lobby, 'claim', { key: k })).key_package);
-      const { commit, welcome } = JSON.parse(this.den.add(room, JSON.stringify(kps)));
+      // Each invitation must be the device asked for (checked in the core).
+      const { commit, welcome } = JSON.parse(this.den.add(room, JSON.stringify(kps), JSON.stringify(keys)));
       try {
         const r = await this.push(this.channels.get(room), 'relay', { bytes: commit });
         this.seq[room] = r.seq;

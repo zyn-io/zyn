@@ -212,12 +212,22 @@ impl Member {
 
     /// Add devices to a private room by their KeyPackages: a commit for the
     /// room (pending until the den orders it) and a Welcome for the new ones.
-    pub fn add(&mut self, room: &str, key_packages: &[Vec<u8>]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    /// Each KeyPackage must be the device asked for: its leaf's signature key
+    /// is `keys[i]`, or the den (or anyone who published under that key)
+    /// could have itself invited in the device's place.
+    pub fn add(&mut self, room: &str, key_packages: &[Vec<u8>], keys: &[String]) -> Result<(Vec<u8>, Vec<u8>), String> {
         let (provider, signer) = (&self.provider, &self.signer);
+        if key_packages.len() != keys.len() {
+            return Err("one invitation per device asked for".into());
+        }
         let mut kps = Vec::new();
-        for b in key_packages {
+        for (b, want) in key_packages.iter().zip(keys) {
             let kp = KeyPackageIn::tls_deserialize_exact(b).map_err(err("key package"))?;
-            kps.push(kp.validate(provider.crypto(), ProtocolVersion::Mls10).map_err(err("key package check"))?);
+            let kp = kp.validate(provider.crypto(), ProtocolVersion::Mls10).map_err(err("key package check"))?;
+            if hex::encode(kp.leaf_node().signature_key().as_slice()) != want.to_lowercase() {
+                return Err(format!("the invitation for {} is another device's", &want[..want.len().min(10)]));
+            }
+            kps.push(kp);
         }
         let group = self.groups.get_mut(room).ok_or_else(|| format!("not in {room}"))?;
         let (commit, welcome, _info) = group.add_members(provider, signer, &kps).map_err(err("add"))?;
@@ -287,6 +297,15 @@ impl Member {
         group.clear_pending_commit(provider.storage()).map_err(err("discard"))
     }
 
+    /// This device's proof that it holds its key, for entering the den with
+    /// `token`: an Ed25519 signature over a domain label and the token's
+    /// message. Without it, a member could enter under another device's key
+    /// (the token only names a key) and take its inbox and invitations.
+    pub fn prove(&self, token_msg: &str) -> Result<Vec<u8>, String> {
+        use openmls_traits::signatures::Signer;
+        self.signer.sign(&enter_payload(token_msg)).map_err(err("sign"))
+    }
+
     /// One message the server relayed, read.
     pub fn receive(&mut self, room: &str, bytes: &[u8]) -> Result<Event, String> {
         let provider = &self.provider;
@@ -354,6 +373,11 @@ pub struct Envelope {
     pub epoch: u64,
     pub commit: bool,
     pub external: bool,
+}
+
+/// What `prove` signs: a label, then the token's message.
+pub fn enter_payload(token_msg: &str) -> Vec<u8> {
+    [b"cave-den-enter-v1|".as_slice(), token_msg.as_bytes()].concat()
 }
 
 pub fn envelope(bytes: &[u8]) -> Result<Envelope, String> {
@@ -479,17 +503,23 @@ mod wasm {
             let enc: Vec<String> = kps.iter().map(|k| base64::engine::general_purpose::STANDARD.encode(k)).collect();
             serde_json::to_string(&enc).map_err(|e| JsError::new(&e.to_string()))
         }
-        /// Key packages as a JSON array of base64; `{commit, welcome}` (base64) as JSON.
-        pub fn add(&mut self, room: &str, key_packages: &str) -> Result<String, JsError> {
+        /// Key packages as a JSON array of base64, and the device keys they
+        /// must be (JSON array of hex, same order); `{commit, welcome}` (base64) as JSON.
+        pub fn add(&mut self, room: &str, key_packages: &str, keys: &str) -> Result<String, JsError> {
             use base64::Engine;
             let b64 = base64::engine::general_purpose::STANDARD;
             let kps: Vec<String> = serde_json::from_str(key_packages).map_err(|e| JsError::new(&e.to_string()))?;
+            let keys: Vec<String> = serde_json::from_str(keys).map_err(|e| JsError::new(&e.to_string()))?;
             let kps: Result<Vec<Vec<u8>>, _> = kps.iter().map(|k| b64.decode(k)).collect();
-            let (commit, welcome) = self.0.add(room, &kps.map_err(|e| JsError::new(&e.to_string()))?).map_err(js)?;
+            let (commit, welcome) = self.0.add(room, &kps.map_err(|e| JsError::new(&e.to_string()))?, &keys).map_err(js)?;
             Ok(serde_json::json!({ "commit": b64.encode(commit), "welcome": b64.encode(welcome) }).to_string())
         }
         pub fn accept(&mut self, welcome: &[u8]) -> Result<String, JsError> {
             self.0.accept(welcome).map_err(js)
+        }
+        /// The proof of key for entering with a token (hex).
+        pub fn prove(&self, token_msg: &str) -> Result<String, JsError> {
+            self.0.prove(token_msg).map(hex::encode).map_err(js)
         }
         pub fn export(&self, room: &str, label: &str, len: usize) -> Result<Vec<u8>, JsError> {
             self.0.export(room, label, len).map_err(js)
@@ -628,7 +658,7 @@ mod tests {
         let (mut a, mut b, mut c) = (Member::new().unwrap(), Member::new().unwrap(), Member::new().unwrap());
         let kps_b = b.key_packages(2).unwrap();
         let _ = a.create("dm-7f3a").unwrap();
-        let (commit, welcome) = a.add("dm-7f3a", &kps_b[..1]).unwrap();
+        let (commit, welcome) = a.add("dm-7f3a", &kps_b[..1], &[b.key()]).unwrap();
         assert!(envelope(&commit).unwrap().commit && !envelope(&commit).unwrap().external);
         a.confirm("dm-7f3a").unwrap();
         assert_eq!(b.accept(&welcome).unwrap(), "dm-7f3a");
@@ -640,7 +670,7 @@ mod tests {
         assert_eq!(ka, b.export("dm-7f3a", "cave-den voice", 32).unwrap());
         assert!(c.export("dm-7f3a", "cave-den voice", 32).is_err());
         let kps_c = c.key_packages(1).unwrap();
-        let (commit2, welcome2) = a.add("dm-7f3a", &kps_c).unwrap();
+        let (commit2, welcome2) = a.add("dm-7f3a", &kps_c, &[c.key()]).unwrap();
         a.confirm("dm-7f3a").unwrap();
         b.receive("dm-7f3a", &commit2).unwrap();
         c.accept(&welcome2).unwrap();
@@ -648,7 +678,29 @@ mod tests {
         assert_ne!(k2, ka, "a new epoch, a new key");
         assert_eq!(k2, c.export("dm-7f3a", "cave-den voice", 32).unwrap());
         // A device already in the room cannot be added a second time.
-        assert!(a.add("dm-7f3a", &kps_b[1..]).is_err(), "B's key is already a member");
+        assert!(a.add("dm-7f3a", &kps_b[1..], &[b.key()]).is_err(), "B's key is already a member");
+        // An invitation that is not the device asked for is refused: here C's,
+        // handed over as if it were D's.
+        let d = Member::new().unwrap();
+        let kps_c2 = c.key_packages(1).unwrap();
+        let e = a.add("dm-7f3a", &kps_c2, &[d.key()]).unwrap_err();
+        assert!(e.contains("another device"), "{e}");
+    }
+
+    /// A device proves it holds its key: an Ed25519 signature over the label
+    /// and the token's message, by the key the token names.
+    #[test]
+    fn a_device_proves_its_key() {
+        let a = Member::new().unwrap();
+        let msg = format!("cave-den-token-v1|2026-10-13|{}|{}", a.key(), "00".repeat(16));
+        let sig = a.prove(&msg).unwrap();
+        assert_eq!(sig.len(), 64);
+        let crypto = a.provider.crypto();
+        let pk = hex::decode(a.key()).unwrap();
+        assert!(crypto.verify_signature(SignatureScheme::ED25519, &enter_payload(&msg), &pk, &sig).is_ok());
+        let other = Member::new().unwrap();
+        let theirs = hex::decode(other.key()).unwrap();
+        assert!(crypto.verify_signature(SignatureScheme::ED25519, &enter_payload(&msg), &theirs, &sig).is_err(), "not another key's");
     }
 
     /// The token round trip against a door key: what the door signs is the
