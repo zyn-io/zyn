@@ -19,7 +19,7 @@ test('a payment is sent in full, not cut to 8 decimals', () => {
 
 test('a burn asks for no more credit than the sale has left, and never shares a code', () => {
   // Past the budget a burn gets only what is left, and the tokens are gone either way.
-  assert.match(zstore, /if \(want > budget\) return fail\(/);
+  assert.match(zstore, /if \(!unbacked && want > budget\) return fail\(/, 'past a budget, when there is one');
   assert.match(zstore, /try \{ sale = await chainSale\(\); \}/, 'the sale is read again right before a burn');
   // A reused memo is refused by the chain; the second burn earned nothing.
   assert.match(zstore, /ask\('zyn_burnMemo', \{ fresh: true \}\)/);

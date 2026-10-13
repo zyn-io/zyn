@@ -400,10 +400,11 @@
               <strong>Pay with ZCAVE or REGI</strong>
               Burn ZCAVE on Solana or REGI on Arc for credit in this sale, worth what you burn at its USD
               price. Credit pays for mints before any ZEC.zy.
-              <button class="tip" type="button" aria-expanded="false" data-tip="The burn carries a code from your Nap, so the credit is yours and nobody else's, and your Solana or Arc wallet never names your Zyn account. The team paid ZEC into the sale for this credit, so items bought with it back the floor like any others.">i</button>
+              <button class="tip" type="button" aria-expanded="false" data-tip="The burn carries a code from your Nap, so the credit is yours and nobody else's, and your Solana or Arc wallet never names your Zyn account.">i</button>
             </p>
+            <p class="say small">Credit has nothing behind it: an item it pays for adds no ZEC to the floor. The floor is what is paid in ZEC.zy.</p>
             <div class="total"><span>Your credit</span><b id="credit-held">—</b></div>
-            <div class="total"><span>Credit left in the sale</span><b id="credit-budget">—</b></div>
+            <div class="total" id="credit-budget-row" style="display: none"><span>Credit left in the sale</span><b id="credit-budget">—</b></div>
             <div id="burn-form">
               <label class="field">
                 <span>Token</span>
@@ -420,8 +421,8 @@
               <button class="act ghost" id="burn-go" type="button">Burn</button>
               <p class="say small">
                 A burn cannot be undone. It is valued at the lower of the last hour's prices, so this page
-                burns 5% more than the credit asked for. A burn past the credit left in the sale gets only what
-                is left. Credit is spent only in this sale and is never paid out; what is unspent when the sale
+                burns 5% more than the credit asked for.
+                Credit is spent only in this sale and is never paid out; what is unspent when the sale
                 ends is gone.
               </p>
             </div>

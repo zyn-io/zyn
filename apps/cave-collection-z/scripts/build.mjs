@@ -37,8 +37,9 @@ await cp(new URL('terms.html', root), new URL('terms/index.html', output));
 
 // The canonical bytes on their own, so a verifier can curl them rather than
 // scrape them out of a web page.
-await cp(new URL('terms.hex', root), new URL('cave-sale-terms-v4.hex', output));
-// The terms v4 replaced (§187), kept so its digest can still be checked.
+await cp(new URL('terms.hex', root), new URL('cave-sale-terms-v5.hex', output));
+// The terms v5 and v4 replaced (§187.10, §187), kept so their digests can still be checked.
+await cp(new URL('terms-v4.hex', root), new URL('cave-sale-terms-v4.hex', output));
 await cp(new URL('terms-v3.hex', root), new URL('cave-sale-terms-v3.hex', output));
 await cp(new URL('terms-v2.hex', root), new URL('cave-sale-terms-v2.hex', output));
 // The terms v2 replaced (§175), kept so its digest can still be checked.

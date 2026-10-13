@@ -673,6 +673,8 @@ async function mintPage() {
     if (!box) return;
     tokens = await burnTokens();
     const budget = BigInt(sale?.credit_budget || '0');
+    // Unbacked credit (§187.10): no budget; every burn is credited what it was worth.
+    const unbacked = !!sale?.open_terms?.unbacked_credit;
     credit = null;
     if (current && (await quietly())) {
       let c = await ask('zyn_saleCredit', {}).catch(() => null);
@@ -683,11 +685,13 @@ async function mintPage() {
       if (c) credit = BigInt(c.held || '0') + BigInt(c.waiting || '0');
     }
     const over = sale?.phase === 'openmint' && sale.open_next >= sale.open_count;
-    box.hidden = !(tokens.length && sale && !over && (budget > 0n || (credit ?? 0n) > 0n));
+    box.hidden = !(tokens.length && sale && !over && (unbacked || budget > 0n || (credit ?? 0n) > 0n));
     if (box.hidden) return;
     el('credit-held').textContent = credit != null ? `${zec(credit)} ZEC` : current ? 'open Nap to see it' : 'connect Nap to see it';
     el('credit-budget').textContent = `${zec(budget)} ZEC`;
-    el('burn-form').hidden = budget === 0n;
+    // .total sets display, which outranks [hidden]: say it in style.
+    el('credit-budget-row').style.display = unbacked ? 'none' : '';
+    el('burn-form').hidden = !unbacked && budget === 0n;
     const select = el('burn-token');
     if (select.options.length !== tokens.length) {
       select.innerHTML = tokens.map((t) => `<option value="${esc(t.key)}">${esc(t.symbol)} · ${esc(chainName(t))}</option>`).join('');
@@ -795,8 +799,9 @@ async function mintPage() {
     const budget = BigInt(sale?.credit_budget || '0');
     if (gen !== generation || !t || !sale) return fail('Burning is closed.');
     if (!want) return fail('Enter the credit you want, in ZEC.');
-    if (budget === 0n) return fail("The sale's credit is all taken.");
-    if (want > budget) return fail(`Only ${exact(budget)} ZEC of credit is left in the sale. Ask for that much or less.`);
+    const unbacked = !!sale?.open_terms?.unbacked_credit;
+    if (!unbacked && budget === 0n) return fail("The sale's credit is all taken.");
+    if (!unbacked && want > budget) return fail(`Only ${exact(budget)} ZEC of credit is left in the sale. Ask for that much or less.`);
     el('burn-go').disabled = true;
     try {
       prices.delete(t.key);
