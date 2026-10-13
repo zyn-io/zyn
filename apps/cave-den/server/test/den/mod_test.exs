@@ -73,6 +73,29 @@ defmodule Den.ModTest do
     assert Mod.role_save(@owner, %{"name" => "x", "perms" => ["root"]}) == {:error, :perm}
   end
 
+  test "a role is given only by one who holds all its permissions, even to oneself", %{mod: mod} do
+    {:ok, banners} = Mod.role_save(@owner, %{"name" => "Banners", "position" => 5, "perms" => ["ban"]})
+    assert Mod.role_give(@mod, @mod, banners.id) == {:error, :perm}
+    assert Mod.role_give(@mod, @member, banners.id) == {:error, :perm}
+    refute Mod.can?(@mod, "ban")
+    _ = mod
+  end
+
+  test "bad input is refused, not a crash" do
+    assert Mod.role_save(@owner, %{"id" => false, "name" => "x"}) == {:error, :role}
+    assert Mod.role_save(@owner, %{"id" => 12}) == {:error, :role}
+    assert Mod.room_save(@owner, "general", %{}) == {:error, :room}
+    assert Mod.room_save(@owner, "nowhere", %{"slow" => 5}) == {:error, :room}
+  end
+
+  test "slow mode at the den is per device and room, whatever the connection" do
+    assert Mod.slow_take("general", @member, 30, 2)
+    assert Mod.slow_take("general", @member, 30, 2)
+    refute Mod.slow_take("general", @member, 30, 2)
+    assert Mod.slow_take("news", @member, 30, 2), "another room"
+    assert Mod.slow_take("general", @mod, 30, 2), "another device"
+  end
+
   test "timeouts end by themselves; kicks and bans; a weaker sanction never replaces a stronger one" do
     assert Mod.timeout(@mod, @member, 30) == {:error, :duration}
     assert Mod.timeout(@mod, @member, 60) == :ok
@@ -103,7 +126,8 @@ defmodule Den.ModTest do
     assert Mod.owner?(@mod)
     :ok = Mod.set_owner(nil)
     refute Mod.governed?()
-    assert Mod.perms(@mod) == MapSet.new(["timeout", "kick", "manage_messages", "manage_roles"])
+    assert Mod.perms(@mod) == MapSet.new(), "with no owner, nobody moderates"
+    assert Mod.timeout(@mod, @member, 600) == {:error, :forbidden}
   end
 
   test "settings: name, description, an icon that is an image, limits under the host's" do

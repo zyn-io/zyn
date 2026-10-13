@@ -197,6 +197,12 @@ defmodule DenWeb.LobbyTest do
       assert_reply ref, :ok, %{invites: [_, _]}
       ref = push(o, "requests", %{})
       assert_reply ref, :ok, %{requests: []}
+      ref = push(o, "invite_withdraw", %{"id" => "%%%%%%%%"})
+      assert_reply ref, :error, %{reason: "There is no such invite."}
+      ref = push(o, "invite_withdraw", %{"id" => "ab"})
+      assert_reply ref, :error, _
+      ref = push(o, "audit", ["n"])
+      assert_reply ref, :ok, %{entries: _}
     end
   end
 end

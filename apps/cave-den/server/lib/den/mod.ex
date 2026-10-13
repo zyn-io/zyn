@@ -46,11 +46,34 @@ defmodule Den.Mod do
 
   # ---- What the den holds, read once and kept until it changes ----------------
 
+  @doc "At the den's start: the change counter the cache is checked against, and the slow mode windows."
+  def init do
+    :persistent_term.put({__MODULE__, :version}, :atomics.new(1, []))
+    if :ets.whereis(__MODULE__.Slow) == :undefined, do: :ets.new(__MODULE__.Slow, [:named_table, :public, :set, write_concurrency: true])
+    :ok
+  end
+
+  defp version do
+    case :persistent_term.get({__MODULE__, :version}, nil) do
+      nil -> 0
+      ref -> :atomics.get(ref, 1)
+    end
+  end
+
+  # A snapshot is kept only if nothing changed while it was read: a reader
+  # that loaded before a ban was written never stores the state without it.
   defp state do
     if Application.get_env(:den, :mod_cache, true) do
+      v = version()
+
       case :persistent_term.get({__MODULE__, :state}, nil) do
-        nil -> tap(load(), &:persistent_term.put({__MODULE__, :state}, &1))
-        s -> s
+        {^v, s} ->
+          s
+
+        _ ->
+          s = load()
+          if version() == v, do: :persistent_term.put({__MODULE__, :state}, {v, s})
+          s
       end
     else
       load()
@@ -58,8 +81,43 @@ defmodule Den.Mod do
   end
 
   defp changed do
-    :persistent_term.erase({__MODULE__, :state})
+    case :persistent_term.get({__MODULE__, :version}, nil) do
+      nil -> :ok
+      ref -> :atomics.add(ref, 1, 1)
+    end
+
     Den.Limits.forget()
+    :ok
+  end
+
+  @doc """
+  Slow mode at the den: whether `key` may send one more message in `room`,
+  whose window is `secs`, keeping at most `burst` in a window. Kept per
+  device and room for the whole den (not per connection).
+  """
+  def slow_take(room, key, secs, burst) do
+    now = System.monotonic_time(:millisecond)
+    recent = case :ets.lookup(__MODULE__.Slow, {room, key}) do
+      [{_, list}] -> Enum.filter(list, &(now - &1 < secs * 1000))
+      [] -> []
+    end
+
+    if length(recent) >= burst do
+      :ets.insert(__MODULE__.Slow, {{room, key}, recent})
+      false
+    else
+      :ets.insert(__MODULE__.Slow, {{room, key}, [now | recent]})
+      true
+    end
+  end
+
+  @doc "Forget slow mode windows that ended (an hour is past any but the longest)."
+  def slow_sweep do
+    if :ets.whereis(__MODULE__.Slow) != :undefined do
+      old = System.monotonic_time(:millisecond) - 6 * 3_600_000
+      for {k, list} <- :ets.tab2list(__MODULE__.Slow), Enum.all?(list, &(&1 < old)), do: :ets.delete(__MODULE__.Slow, k)
+    end
+
     :ok
   end
 
@@ -126,11 +184,13 @@ defmodule Den.Mod do
   def perms(key) do
     s = state()
 
-    if owner?(key) do
-      MapSet.new(@perms)
-    else
-      ps = [@everyone | Map.get(s.holders, key, [])] |> Enum.flat_map(&Map.get(s.roles, &1, %{perms: []}).perms) |> MapSet.new()
-      if "administrator" in ps, do: MapSet.new(@perms), else: ps
+    cond do
+      # No owner: nobody moderates (roles wait for one).
+      is_nil(s.settings["owner"]) -> MapSet.new()
+      owner?(key) -> MapSet.new(@perms)
+      true ->
+        ps = [@everyone | Map.get(s.holders, key, [])] |> Enum.flat_map(&Map.get(s.roles, &1, %{perms: []}).perms) |> MapSet.new()
+        if "administrator" in ps, do: MapSet.new(@perms), else: ps
     end
   end
 
@@ -165,6 +225,8 @@ defmodule Den.Mod do
   ("#rrggbb" or nil), "hoist" (shown apart in the member list), "perms",
   "position"}`. @everyone takes only permissions.
   """
+  def role_save(actor, %{"id" => id}) when not is_nil(id) and not is_binary(id), do: (_ = actor; {:error, :role})
+
   def role_save(actor, attrs) when is_map(attrs) do
     id = attrs["id"]
     old = id && role(id)
@@ -237,7 +299,8 @@ defmodule Den.Mod do
          %{} = r <- (id != @everyone && role(id)) || {:error, :role},
          true <- below?(actor, r.position) || {:error, :above},
          true <- key?(key) || {:error, :key},
-         true <- (key == actor or above?(actor, key)) || {:error, :above} do
+         true <- (key == actor or above?(actor, key)) || {:error, :above},
+         true <- (how == :take or owner?(actor) or Enum.all?(r.perms, &can?(actor, &1))) || {:error, :perm} do
       case how do
         :give -> Repo.insert_all("role_keys", [%{role: id, key: key}], on_conflict: :nothing)
         :take -> Repo.delete_all(from x in "role_keys", where: x.role == ^id and x.key == ^key)
@@ -428,7 +491,8 @@ defmodule Den.Mod do
   def room_save(actor, id, attrs) when is_map(attrs) do
     with :ok <- may(actor, "manage_channels"),
          %{kind: "open"} <- Den.Rooms.get(id) || {:error, :room},
-         {:ok, set} <- room_in(attrs) do
+         {:ok, set} <- room_in(attrs),
+         true <- map_size(set) > 0 || {:error, :room} do
       Repo.update_all(from(r in "rooms", where: r.id == ^id), set: Keyword.new(set))
       if Map.has_key?(set, :title), do: put_setting("named:" <> id, "1")
       words = %{title: "name", topic: "topic", slow_seconds: "slow mode", post_roles: "who may post", position: "place"}

@@ -88,7 +88,7 @@ defmodule DenWeb.LobbyChannel do
   defp handle("role_delete", %{"id" => id}, socket), do: changed(Den.Mod.role_delete(me(socket), id), socket)
   defp handle("role_give", %{"key" => k, "id" => id}, socket), do: changed(Den.Mod.role_give(me(socket), k, id), socket)
   defp handle("role_take", %{"key" => k, "id" => id}, socket), do: changed(Den.Mod.role_take(me(socket), k, id), socket)
-  defp handle("timeout", %{"key" => k, "seconds" => s} = p, socket), do: changed(Den.Mod.timeout(me(socket), k, s, p["reason"]), socket)
+  defp handle("timeout", %{"key" => k, "seconds" => s} = p, socket), do: changed(Den.Mod.timeout(me(socket), k, s, p["reason"]), socket, fn -> Rooms.unvoice(k) end)
   defp handle("untimeout", %{"key" => k}, socket), do: changed(Den.Mod.untimeout(me(socket), k), socket)
   defp handle("kick", %{"key" => k} = p, socket), do: changed(Den.Mod.kick(me(socket), k, p["reason"]), socket, fn -> Rooms.expel(k) end)
   defp handle("ban", %{"key" => k} = p, socket), do: changed(Den.Mod.ban(me(socket), k, p["reason"]), socket, fn -> Rooms.expel(k) end)
@@ -101,6 +101,8 @@ defmodule DenWeb.LobbyChannel do
       do: {:reply, {:ok, %{bans: for(b <- Den.Mod.bans(), do: %{b | at: DateTime.to_unix(b.at)})}}, socket},
       else: no(:forbidden, socket)
   end
+
+  defp handle(e, p, socket) when e in ["audit", "invite_make"] and not is_map(p), do: handle(e, %{}, socket)
 
   defp handle("audit", p, socket) do
     n = if is_integer(p["n"]) and p["n"] in 1..500, do: p["n"], else: 100
@@ -164,6 +166,7 @@ defmodule DenWeb.LobbyChannel do
 
   defp handle("invite_withdraw", %{"id" => id}, socket) when is_binary(id) do
     with true <- Den.Mod.can?(me(socket), "manage_invites") || {:error, :forbidden},
+         true <- id =~ ~r/\A[0-9a-f]{8,64}\z/ || {:error, :invite},
          {:ok, _} <- Den.Gate.Members.withdraw(id) do
       Den.Mod.log(me(socket), "invite withdrawn", id, nil)
       {:reply, :ok, socket}

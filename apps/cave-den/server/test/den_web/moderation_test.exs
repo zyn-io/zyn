@@ -46,6 +46,28 @@ defmodule DenWeb.ModerationTest do
     _ = a
   end
 
+  test "a timeout reaches a device already in voice, and it cannot talk", %{kb: kb} do
+    {:ok, _, v} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")
+    Process.unlink(v.channel_pid)
+    ref = Process.monitor(v.channel_pid)
+    :ok = Mod.timeout(@owner, kb, 600)
+    Den.Rooms.unvoice(kb)
+    assert_receive {:DOWN, ^ref, :process, _, {:shutdown, :timed_out}}, 2000
+  end
+
+  test "moderators do not delete in private rooms; files refuse a banned device", %{kb: kb, ka: ka} do
+    {:ok, mods} = Mod.role_save(@owner, %{"name" => "Moderator", "position" => 5, "perms" => ["manage_messages"]})
+    :ok = Mod.role_give(@owner, ka, mods.id)
+    pid = "p-" <> String.duplicate("ab", 16)
+    {:ok, _} = Den.Rooms.private_room(pid, ka)
+    {:ok, _, p} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:" <> pid)
+    ref = push(p, "delete", %{"seq" => 1})
+    assert_reply ref, :error, %{reason: "Moderators do not delete messages in private rooms."}
+    :ok = Mod.ban(@owner, kb, "spam")
+    conn = Phoenix.ConnTest.build_conn() |> Plug.Conn.put_req_header("authorization", "Bearer " <> session(kb)) |> Plug.Conn.put_req_header("content-length", "4") |> Plug.Conn.put_req_header("content-type", "application/octet-stream") |> Phoenix.ConnTest.dispatch(DenWeb.Endpoint, :post, "/blob/", "abcd")
+    assert conn.status == 401, "a banned device sends no files"
+  end
+
   test "who may post: a room for some roles only", %{b: b, kb: kb} do
     {:ok, team} = Mod.role_save(@owner, %{"name" => "Team", "position" => 2, "perms" => []})
     {:ok, _} = Mod.room_save(@owner, "general", %{"post_roles" => [team.id]})

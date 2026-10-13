@@ -17,6 +17,8 @@ defmodule Den.Application do
     # those candidates), so that listener goes.
     with {:ok, sup} <- :application.get_supervisor(:ex_ice), do: Supervisor.terminate_child(sup, ExICE.Priv.MDNS.Resolver)
 
+    Den.Mod.init()
+
     children = [
       DenWeb.Telemetry,
       Den.Repo,

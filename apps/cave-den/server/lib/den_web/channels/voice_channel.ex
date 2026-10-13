@@ -19,7 +19,10 @@ defmodule DenWeb.VoiceChannel do
         cond do
           not Den.Rooms.may_enter?(r, socket.assigns.key) -> {:error, %{reason: "no such room"}}
           Den.Mod.muted?(socket.assigns.key) -> {:error, %{reason: "You are timed out and cannot join voice for now."}}
-          true -> {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
+          true ->
+            # A timeout reaches a device already in voice: it is stopped here.
+            DenWeb.Endpoint.subscribe("voice-device:" <> socket.assigns.key)
+            {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
         end
     end
   end
@@ -32,10 +35,12 @@ defmodule DenWeb.VoiceChannel do
     if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
-  # Every event, at a rate the den can answer (DenWeb.Throttle).
+  # Every event, at a rate the den can answer (DenWeb.Throttle); nothing from
+  # a device that is timed out.
   @impl true
   def handle_in(event, payload, socket) do
     cond do
+      event != "leave" and Den.Mod.muted?(socket.assigns.key) -> {:reply, {:error, %{reason: "You are timed out and cannot talk for now."}}, socket}
       DenWeb.Throttle.allow?(event) -> handle(event, payload, socket)
       event == "typing" -> {:noreply, socket}
       true -> {:reply, DenWeb.Throttle.refused(), socket}
@@ -90,6 +95,9 @@ defmodule DenWeb.VoiceChannel do
   defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
   @impl true
+  # A timeout reached this device while it was in voice.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "stop"}, socket), do: {:stop, {:shutdown, :timed_out}, socket}
+
   def handle_info({:voice_frame, slot, frame}, socket) do
     push(socket, "f", {:binary, <<slot, frame::binary>>})
     {:noreply, socket}

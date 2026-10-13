@@ -166,7 +166,8 @@ defmodule DenWeb.RoomChannel do
   end
 
   defp handle("delete", %{"seq" => seq}, socket) when is_integer(seq) do
-    with true <- Den.Mod.can?(socket.assigns.key, "manage_messages") || {:error, :forbidden},
+    with true <- socket.assigns.kind != "private" || {:error, :private_room},
+         true <- Den.Mod.can?(socket.assigns.key, "manage_messages") || {:error, :forbidden},
          :ok <- Rooms.delete_message(socket.assigns.room, seq) do
       Den.Mod.log(socket.assigns.key, "message deleted", socket.assigns.room, "##{seq}")
       broadcast!(socket, "deleted", %{seq: seq})
@@ -174,6 +175,7 @@ defmodule DenWeb.RoomChannel do
     else
       {:error, :forbidden} -> {:reply, {:error, %{reason: "You do not have permission to delete others' messages."}}, socket}
       {:error, :no_message} -> {:reply, {:error, %{reason: "That message is not in this room any more."}}, socket}
+      {:error, :private_room} -> {:reply, {:error, %{reason: "Moderators do not delete messages in private rooms."}}, socket}
     end
   end
 
@@ -222,21 +224,8 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  defp slow_ok?(%{slow_seconds: secs}, key) when is_integer(secs) and secs > 0 do
-    if Den.Mod.can?(key, "bypass_slow") do
-      true
-    else
-      now = System.monotonic_time(:millisecond)
-      recent = Enum.filter(Process.get(:den_slow, []), &(now - &1 < secs * 1000))
-
-      if length(recent) >= @burst do
-        Process.put(:den_slow, recent)
-        false
-      else
-        Process.put(:den_slow, [now | recent])
-        true
-      end
-    end
+  defp slow_ok?(%{slow_seconds: secs, id: room}, key) when is_integer(secs) and secs > 0 do
+    Den.Mod.can?(key, "bypass_slow") or Den.Mod.slow_take(room, key, secs, @burst)
   end
 
   defp slow_ok?(_, _), do: true

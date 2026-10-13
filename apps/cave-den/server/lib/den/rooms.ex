@@ -110,6 +110,10 @@ defmodule Den.Rooms do
   end
 
   defp drop_room(id) do
+    # Its channels and voice close: nobody in it keeps writing to nothing.
+    DenWeb.Endpoint.broadcast("room:" <> id, "members", %{keys: []})
+    DenWeb.Endpoint.broadcast("voice:" <> id, "members", %{keys: []})
+
     Repo.transaction(fn ->
       Repo.delete_all(from m in Message, where: m.room == ^id)
       Repo.delete_all(from rd in RoomDevice, where: rd.room == ^id)
@@ -283,7 +287,7 @@ defmodule Den.Rooms do
     with {:ok, env} <- Den.Mls.envelope(bytes),
          true <- env.room == room || {:error, :wrong_room} do
       Repo.transaction(fn ->
-        r = Repo.get!(Room, room)
+        r = Repo.get(Room, room) || Repo.rollback(:no_room)
 
         cond do
           r.kind == "private" and env.external ->
@@ -442,6 +446,7 @@ defmodule Den.Rooms do
   """
   def expel(key) do
     DenWeb.Endpoint.broadcast("device:" <> key, "disconnect", %{})
+    unvoice(key)
 
     for r <- Repo.all(from r in Room, where: r.kind != "private" and not is_nil(r.public_state)), key in members(r) do
       DenWeb.Endpoint.broadcast("room:" <> r.id, "expired", %{keys: [key]})
@@ -449,6 +454,9 @@ defmodule Den.Rooms do
 
     :ok
   end
+
+  @doc "A timed-out (or removed) device leaves every voice room it is in."
+  def unvoice(key), do: DenWeb.Endpoint.broadcast("voice-device:" <> key, "stop", %{})
 
   @doc "A moderator deletes one message (never a commit) by its number."
   def delete_message(room, seq) when is_integer(seq) do

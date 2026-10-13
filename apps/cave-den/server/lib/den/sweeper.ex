@@ -35,6 +35,7 @@ defmodule Den.Sweeper do
     for {room, epoch, seq} <- Den.Rooms.undo_unannounced(), do: DenWeb.Endpoint.broadcast("room:" <> room, "rolled_back", %{epoch: epoch, seq: seq})
     {by_room, ended} = Den.Rooms.sweep()
     Den.Mod.sweep()
+    Den.Mod.slow_sweep()
 
     for {room, keys} <- by_room do
       DenWeb.Endpoint.broadcast("room:" <> room, "expired", %{keys: keys})

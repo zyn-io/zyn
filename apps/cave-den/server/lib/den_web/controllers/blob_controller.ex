@@ -10,7 +10,8 @@ defmodule DenWeb.BlobController do
     with ["Bearer " <> s] <- get_req_header(conn, "authorization"),
          {:ok, %{key: key}} <- Phoenix.Token.verify(DenWeb.Endpoint, "den", s, max_age: 3 * 86_400),
          %DateTime{} = until <- Den.Rooms.device_until(key),
-         :gt <- DateTime.compare(until, DateTime.utc_now()) do
+         :gt <- DateTime.compare(until, DateTime.utc_now()),
+         false <- Den.Mod.out?(key) do
       {:ok, key}
     else
       _ -> :error
