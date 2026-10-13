@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Epeaky · Self-hosted encrypted group chat</title>
+<meta name="description" content="Epeaky is open-source, end-to-end encrypted chat for small groups: rooms, files and voice on a server you run. MLS rooms, blind-token entry, one install script.">
+<meta name="theme-color" content="#0f0c0a">
+<meta property="og:title" content="Epeaky">
+<meta property="og:description" content="End-to-end encrypted chat for small circles, on a server you run.">
+<meta property="og:type" content="website">
+<link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+<link rel="preload" href="/assets/fonts/gloock.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script src="/main.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#features">Skip to content</a>
+
+<header class="bar">
+  <a class="brand" href="/" aria-label="Epeaky home">
+    <svg class="brand-mark" viewBox="0 0 32 40" aria-hidden="true"><rect x="1.5" y="1.5" width="29" height="37" rx="14.5"/><rect class="slot" x="8" y="13" width="16" height="4" rx="2"/></svg>
+    <span>Epeaky</span>
+  </a>
+  <nav aria-label="Sections">
+    <a href="#features">Features</a>
+    <a href="#privacy">Privacy</a>
+    <a href="#entry">Entry</a>
+    <a href="#install">Install</a>
+    <a class="gh" href="https://github.com/zyn-io/epeaky">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="door" aria-labelledby="hero-title">
+    <div class="panel" aria-hidden="true"></div>
+    <div class="peep" aria-hidden="true">
+      <div class="peep-frame">
+        <div class="peep-view"><span class="cipher" id="peep-cipher"></span><div class="peep-cover"></div></div>
+      </div>
+      <p class="peep-note">What the server sees</p>
+    </div>
+    <h1 id="hero-title">End-to-end encrypted chat for small circles, on a server you run.</h1>
+    <p class="lede">Rooms, files and voice for a group that knows each other. Open source, MIT or Apache-2.0.</p>
+    <div class="ctas">
+      <a class="btn brass" href="#install">Install</a>
+      <a class="btn line" href="https://github.com/zyn-io/epeaky">Read the code</a>
+    </div>
+    <ul class="specs" aria-label="Built on">
+      <li>MLS <span>RFC 9420</span></li>
+      <li>Blind tokens <span>RFC 9474</span></li>
+      <li>Elixir <span>+ Rust / WebAssembly</span></li>
+    </ul>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span></span></div>
+
+  <section id="features" class="features" aria-labelledby="features-title">
+    <p class="kicker">Behind the door, only ciphertext.</p>
+    <h2 id="features-title">Features</h2>
+    <ol class="grid">
+      <li>
+        <span class="num">I</span>
+        <h3>Rooms <button type="button" class="info" aria-label="About MLS" data-tip="tip-mls">i</button></h3>
+        <p>MLS groups, held only on members' devices. Replies, reactions, edits, deletions, mentions and typing travel inside the encryption.</p>
+        <div class="tip" id="tip-mls" role="tooltip" hidden>Messaging Layer Security (RFC 9420) is the IETF standard for group end-to-end encryption. Epeaky uses OpenMLS with X25519, AES-128-GCM, SHA-256 and Ed25519. Every membership change rotates the group's keys.</div>
+      </li>
+      <li>
+        <span class="num">II</span>
+        <h3>Private rooms</h3>
+        <p>A random 128-bit id the server never lists. Joined by invitation only, and an invitation must carry the device key that was asked for.</p>
+      </li>
+      <li>
+        <span class="num">III</span>
+        <h3>Files and images</h3>
+        <p>Encrypted in the browser under a fresh key per file. The server stores an opaque blob of up to 25 MB for 30 days.</p>
+      </li>
+      <li>
+        <span class="num">IV</span>
+        <h3>Voice</h3>
+        <p>A voice room in every room, up to nine people. Each audio frame is encrypted in the browser under its speaker's own key, with a counter that refuses replays.</p>
+      </li>
+      <li>
+        <span class="num">V</span>
+        <h3>Entry <button type="button" class="info" aria-label="About blind tokens" data-tip="tip-blind">i</button></h3>
+        <p>The door checks a member's pass and signs a day token it never sees. The server admits the device the token names, and its records never put a pass next to a device.</p>
+        <div class="tip" id="tip-blind" role="tooltip" hidden>Blind RSA signatures (RFC 9474, RSABSSA-SHA384-PSS-Randomized). The device blinds the token before the door signs it and unblinds it after, so the door cannot recognise the token when it is spent. One signing key per day, published ahead for everyone.</div>
+      </li>
+      <li>
+        <span class="num">VI</span>
+        <h3>Search</h3>
+        <p>Runs on the device, across everything it has read. The server has nothing to search.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section id="privacy" class="views" aria-labelledby="privacy-title">
+    <p class="kicker">One message, two views.</p>
+    <h2 id="privacy-title">What the server sees</h2>
+    <div class="split">
+      <figure class="device">
+        <figcaption>A member's device</figcaption>
+        <div class="chat" aria-live="off">
+          <p class="who" id="v-who">m-4e7827479f</p>
+          <p class="said"><span id="v-text"></span><span class="caret" aria-hidden="true"></span></p>
+        </div>
+      </figure>
+      <figure class="den">
+        <figcaption>The server</figcaption>
+        <dl class="meta">
+          <div><dt>room</dt><dd id="v-room">general</dd></div>
+          <div><dt>from device</dt><dd id="v-dev">m-4e7827479f</dd></div>
+          <div><dt>size</dt><dd id="v-size">0 bytes</dd></div>
+          <div><dt>at</dt><dd id="v-at">--:--:--</dd></div>
+        </dl>
+        <p class="blob" id="v-blob" aria-label="Ciphertext"></p>
+      </figure>
+    </div>
+
+    <div class="ledger">
+      <div>
+        <h3>The server sees</h3>
+        <ul>
+          <li>Device keys, the rooms each is in (private rooms included) and every change to a room's membership</li>
+          <li>When each device writes, reacts, types or talks, and how much</li>
+          <li>File sizes, the names of open rooms, and who is in a voice room</li>
+          <li>Network addresses, and which passes asked the door for tokens</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Only members see</h3>
+        <ul>
+          <li>The words of every message, edit and reaction</li>
+          <li>File contents and file names</li>
+          <li>Voice audio</li>
+          <li>Which member holds which pass</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="disclose" role="note">
+      <p><strong>The door and the server share one machine.</strong> An operator who correlates network addresses or timing can link a pass to a device. A member who needs to prevent that can reach one of them through a VPN or Tor.</p>
+      <p><strong>The server serves the page that holds the keys.</strong> Whoever runs it could change that page. Join a den whose host you trust, or run your own.</p>
+      <p><strong>Epeaky has not had an independent security audit.</strong> <a href="https://github.com/zyn-io/epeaky/blob/main/THREAT_MODEL.md">Threat model</a></p>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span></span></div>
+
+  <section id="entry" class="entry" aria-labelledby="entry-title">
+    <p class="kicker">The host keeps the door.</p>
+    <h2 id="entry-title">Entry</h2>
+    <p class="sub">The host opens one or more ways in. The member list keeps only a hash of each member's pass.</p>
+    <div class="ways">
+      <article>
+        <h3>Invite links</h3>
+        <p>The host makes single-use links that expire. Whoever opens one is in.</p>
+      </article>
+      <article>
+        <h3>Approval</h3>
+        <p>Anyone with the address can ask, with a note. The host approves or declines.</p>
+      </article>
+      <article>
+        <h3>Your own site <button type="button" class="info" aria-label="About the issuer" data-tip="tip-issuer">i</button></h3>
+        <p>Your site checks whatever you require — a login, a membership, a token — and registers the member's pass with the den.</p>
+        <div class="tip" id="tip-issuer" role="tooltip" hidden>The den's page opens a window on your site. Your server registers the hash of a fresh pass code with the den, using the den's issuer token, and your page hands the code to the den's page alone. Sign-ins and wallets run on your site, never beside the chat's keys.</div>
+      </article>
+    </div>
+  </section>
+
+  <section id="install" class="install" aria-labelledby="install-title">
+    <h2 id="install-title">Install</h2>
+    <ol class="steps">
+      <li>
+        <h3>Point a domain at a server</h3>
+        <p>A Linux server, x86-64, with the domain's A or AAAA record pointing at it. Open TCP 80 and 443, and UDP 50000–50199 for voice.</p>
+      </li>
+      <li>
+        <h3>Run the installer <button type="button" class="info" aria-label="What the installer does" data-tip="tip-install">i</button></h3>
+        <div class="term">
+          <code id="cmd">curl -fsSL https://epeaky.zyn-network.com/install.sh | sudo bash</code>
+          <button type="button" class="copy" data-copy="cmd">Copy</button>
+        </div>
+        <p class="alt">Or without questions: <code>sudo bash install.sh --domain chat.example.org --email you@example.org --yes</code></p>
+        <div class="tip" id="tip-install" role="tooltip" hidden>It asks for your domain, and installs Docker if it is missing (after asking). It writes /opt/epeaky with the den, a Caddy proxy that gets the TLS certificate, and a generated secret, then starts both. The den makes and rotates its own day keys. Read it before you run it: <a href="/install.sh">install.sh</a></div>
+      </li>
+      <li>
+        <h3>Open the invite link it prints</h3>
+        <p>That makes you the first member. From the server, the <code>epeaky</code> command runs the door:</p>
+        <dl class="cmds">
+          <div><dt><code>epeaky invite 5 7</code></dt><dd>five invite links, valid seven days</dd></div>
+          <div><dt><code>epeaky requests</code></dt><dd>who asked to join</dd></div>
+          <div><dt><code>epeaky approve &lt;id&gt;</code></dt><dd>let one in</dd></div>
+          <div><dt><code>epeaky update</code></dt><dd>the latest version</dd></div>
+        </dl>
+      </li>
+    </ol>
+  </section>
+
+  <section class="source" aria-labelledby="source-title">
+    <h2 id="source-title">Source</h2>
+    <a class="repo" href="https://github.com/zyn-io/epeaky">
+      <span>github.com/zyn-io/epeaky</span>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+    <ul class="links">
+      <li><a href="https://github.com/zyn-io/epeaky/blob/main/THREAT_MODEL.md">Threat model</a></li>
+      <li><a href="https://github.com/zyn-io/epeaky/blob/main/SECURITY.md">Report a vulnerability</a></li>
+      <li><a href="https://github.com/zyn-io/epeaky/blob/main/README.md">Build and run</a></li>
+    </ul>
+  </section>
+
+  <p class="coda">Small rooms, thick walls.</p>
+</main>
+
+<footer class="foot">
+  <p>Epeaky is made by the <a href="https://zyn-network.com">Zyn</a> team. MIT or Apache-2.0.</p>
+  <p>This site sets no cookies and loads nothing from anyone else.</p>
+</footer>
+</body>
+</html>
