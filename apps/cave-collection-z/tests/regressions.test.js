@@ -52,9 +52,10 @@ test('the whitelist runs one dig at a time and never says "reload"', () => {
   assert.match(whitelist, /if \(digging && digHandle === handle\) return digging;/);
   assert.doesNotMatch(whitelist, /Reload and try again/);
   assert.doesNotMatch(whitelist, /Places are given, not bought/);
-  // Since §168 the list gates the sale: the page must not say it gates nothing.
-  assert.doesNotMatch(whitelist, /gates nothing|anyone can buy/);
-  assert.match(whitelist, /Only accounts on this list can buy tickets/);
+  // Since §187 the list sets a lower price in an open mint: the page says so,
+  // and no longer that only listed accounts can buy.
+  assert.doesNotMatch(whitelist, /gates nothing|can buy tickets/);
+  assert.match(whitelist, /Accounts on this list mint at 0\.01 ZEC instead of 0\.05/);
   assert.match(whitelist, /inset: -20% 0 auto;/, 'the glow stays inside a phone screen');
 });
 

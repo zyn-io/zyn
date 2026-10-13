@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070807" />
-    <meta name="description" content="How Collection Z is sold and traded, from the whitelist to the market: tickets, the draw, claims, the open mint, resales and the floor." />
+    <meta name="description" content="How Collection Z is sold and traded, from the whitelist to the market: the open mint, the whitelist price, the cap per wallet, resales and the floor." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://cavebro.win/rules" />
     <meta property="og:title" content="Cave Collection Z — sale rules" />
@@ -68,7 +68,7 @@
       <p class="lede">
         How Cave's first batch, 4,444 items, is sold and traded: from the whitelist to the market.
         Everything happens on this site; your Nap wallet only signs. The numbers are the ones in the
-        published <a href="/terms">sale terms</a> (digest <span class="hash">9267d58e…3d3c</span>) and in
+        published <a href="/terms">sale terms</a> (digest <span class="hash">ec3b0c2f…04e8</span>) and in
         the ledger's own rules.
       </p>
 
@@ -76,11 +76,11 @@
         <div class="ledger-index"><span>At a glance</span><span>Collection Z · <b>4,444</b></span></div>
         <div class="ledger-body">
           <div class="term-table">
-            <div><span>Who can buy</span><b>Whitelisted accounts only</b></div>
-            <div><span>Ticket</span><b>0.01 ZEC each for an account's first 10; each one after costs 0.01 more than the last (11th 0.02, 12th 0.03, …)</b></div>
-            <div><span>Per ticket</span><b>1 item (80%), 2 items (19%) or 3 items (1%)</b></div>
-            <div><span>Claim</span><b>0.005 ZEC per item, within 16,128 Zcash blocks (about 14 days) of the close</b></div>
-            <div><span>Open mint</span><b>0.0133 ZEC per item, for what the draw handed nobody or winners left</b></div>
+            <div><span>Who can mint</span><b>Anyone, from the open mint</b></div>
+            <div><span>Price</span><b>0.05 ZEC per item</b></div>
+            <div><span>Whitelist price</span><b>0.01 ZEC per item, for accounts on the list</b></div>
+            <div><span>Per account</span><b>20 items at most, listed or not</b></div>
+            <div><span>Order</span><b>Fixed once, when the mint opens, by a public random number nobody chooses</b></div>
             <div><span>Sale payments</span><b>90% to the collection's floor, 10% to the ZCaveDAO treasury</b></div>
             <div><span>Resale fee</span><b>1% from the buyer and 1% from the seller</b></div>
             <div><span>Fee split</span><b>Of the fees: 40% to the floor, 10% to the ZCaveDAO treasury, 50% to the team treasury</b></div>
@@ -93,30 +93,29 @@
       <section class="stage" aria-labelledby="s1">
         <h2 id="s1"><b>01</b>Whitelist</h2>
         <ul class="rules">
-          <li class="rule">Apply on <a href="/whitelist">the list page</a> with your X handle and a link to your repost or comment of the pinned post. Asking twice changes nothing.</li>
-          <li class="rule">An approved handle gets a <strong>code</strong>. Link it once to your account on <a href="/mint">/mint</a>; from then on that account is on the list.</li>
-          <li class="rule">The ledger sells tickets <strong>only to listed accounts</strong>. Everyone on the list is drawn at the same odds.</li>
-          <li class="rule">The list keeps your X handle, your link and your note — no email, no wallet or Zcash address. Your account is linked only when you use the code.</li>
+          <li class="rule">Apply on <a href="/whitelist">the list page</a> with your X handle and a link to your repost or comment of the pinned post. Every applicant is accepted; asking twice changes nothing.</li>
+          <li class="rule">On <a href="/mint">/mint</a>, connect Nap and <strong>sign in with X</strong>: that account goes on the list. A code you were sent, or one from signing with a REGI wallet, does the same.</li>
+          <li class="rule">Accounts on the list mint at <strong>0.01 ZEC</strong> an item. The ledger charges the price; nobody can give it to an account that is not listed.</li>
+          <li class="rule">Signing in with X reads only your X account's id and handle, once; nothing is posted and no X login is kept. The list keeps your handle, its id, your link and note, and the Zyn account you linked — no email, no Zcash address.</li>
         </ul>
       </section>
 
       <section class="stage" aria-labelledby="s2">
         <h2 id="s2"><b>02</b>ZEC in and out</h2>
         <ul class="rules">
-          <li class="rule">Tickets, claims and resales are paid with <strong>ZEC you have brought in</strong>. <a href="/deposit">Bring ZEC in</a> from any Zcash wallet; it counts after 6 confirmations.</li>
+          <li class="rule">Mints and resales are paid with <strong>ZEC you have brought in</strong>. <a href="/deposit">Bring ZEC in</a> from any Zcash wallet; it counts after 6 confirmations.</li>
           <li class="rule">ZEC can be taken back out to any Zcash address at any time. Two of three custodians sign each payout, and the Zcash network fee comes out of the amount.</li>
           <li class="rule">A <strong>0.5% bridge fee</strong> applies each way: on ZEC brought in and on ZEC taken out.</li>
         </ul>
       </section>
 
       <section class="stage" aria-labelledby="s3">
-        <h2 id="s3"><b>03</b>Tickets</h2>
+        <h2 id="s3"><b>03</b>Mint</h2>
         <ul class="rules">
-          <li class="rule">Bought on <a href="/mint">/mint</a>, <strong>1 to 20 at a time</strong>. A ticket exists the moment you sign the purchase.</li>
-          <li class="rule">Each account's first 10 tickets cost <strong>0.01 ZEC</strong>; each one after costs 0.01 more than the last. The ledger counts this per account.</li>
-          <li class="rule">A ticket buys <strong>a place in the draw</strong>, not a chosen item. Nobody — the team included — sees which items a ticket gets before the draw.</li>
-          <li class="rule">Of every ticket payment, <strong>90% goes to the collection's floor</strong> and 10% to the ZCaveDAO treasury, on the ledger, as it is bought.</li>
-          <li class="rule">Tickets are sold in <strong>one window</strong>. The close is a Zcash block height announced at least 1,152 blocks (about a day) ahead; after it the ledger refuses tickets.</li>
+          <li class="rule">On <a href="/mint">/mint</a>, <strong>1 to 20 at a time</strong>: <strong>0.05 ZEC</strong> each, or 0.01 on the list. You get the next items in the order, minted straight to your account.</li>
+          <li class="rule">No account mints <strong>more than 20</strong>, listed or not. The ledger counts this per account.</li>
+          <li class="rule">Of every mint payment, <strong>90% goes to the collection's floor</strong> and 10% to the ZCaveDAO treasury, on the ledger, as it is paid.</li>
+          <li class="rule">The opening is a Zcash block height announced at least 1,152 blocks (about a day) ahead. An item is your membership in ZCaveDAO.</li>
         </ul>
       </section>
 
@@ -124,7 +123,7 @@
         <h2 id="s4"><b>04</b>Paying with ZCAVE or REGI</h2>
         <ul class="rules">
           <li class="rule">Burning <strong>ZCAVE on Solana or REGI on Arc</strong> gives credit in the sale worth what you burned at its USD price, at the lower of the last hour's prices.</li>
-          <li class="rule">Credit pays <strong>tickets, claims and the open mint</strong> before any ZEC.zy, under the same whitelist and rising ticket price.</li>
+          <li class="rule">Credit pays for <strong>mints</strong> before any ZEC.zy, at your price.</li>
           <li class="rule">The team paid ZEC into the sale for this credit, split like any payment, so items bought with it back the floor like any others.</li>
           <li class="rule">The burn carries a one-time code from your Nap, so the credit is yours without your Solana or Arc wallet naming your account.</li>
           <li class="rule">A burn cannot be undone. A burn past the credit left in the sale <strong>gets only what is left</strong>; credit is spent only in this sale and is never paid out, and what is unspent when the sale ends is gone.</li>
@@ -132,33 +131,16 @@
       </section>
 
       <section class="stage" aria-labelledby="s5">
-        <h2 id="s5"><b>05</b>The draw</h2>
+        <h2 id="s5"><b>05</b>The order</h2>
         <ul class="rules">
-          <li class="rule">Runs <strong>once</strong>, over every ticket bought before the close, from a Zcash block 100 blocks after the close and a drand round announced with the close (+2,400 rounds). Neither exists when the close is named.</li>
-          <li class="rule">Each ticket gets <strong>1 item (80%), 2 (19%) or 3 (1%)</strong>, and which items, by a shuffle of the frozen 4,444-item manifest (root <span class="hash">0c56593e…8426</span>).</li>
-          <li class="rule">The result is posted on the ledger as a Merkle root. Anyone with the public inputs can run the draw again and get the same root.</li>
+          <li class="rule">Fixed <strong>once</strong>, from a Zcash block 100 blocks after the announced close and a drand round announced with it (+2,400 rounds). Neither exists when the opening is named.</li>
+          <li class="rule">It is a shuffle of the frozen 4,444-item manifest (root <span class="hash">0c56593e…8426</span>), posted on the ledger as a Merkle root. The ledger mints only the next item in it.</li>
+          <li class="rule">Nobody — the team included — picks which item comes next. Anyone with the public inputs can recompute the order and get the same root.</li>
         </ul>
       </section>
 
       <section class="stage" aria-labelledby="s6">
-        <h2 id="s6"><b>06</b>Claims</h2>
-        <ul class="rules">
-          <li class="rule">A winning ticket claims its items at <strong>0.005 ZEC each</strong>, within <strong>16,128 blocks (about 14 days)</strong> of the close. 90% of each claim goes to the floor, 10% to the ZCaveDAO treasury.</li>
-          <li class="rule">Only the wallet that bought a ticket can claim it, with a proof against the posted root. Nobody can claim for you, and nobody can refuse you an item the draw gave.</li>
-          <li class="rule">Each item is minted straight to your account; it shows on <a href="/items">your shelf</a>.</li>
-        </ul>
-      </section>
-
-      <section class="stage" aria-labelledby="s7">
-        <h2 id="s7"><b>07</b>Open mint</h2>
-        <ul class="rules">
-          <li class="rule">After the claim window, what the draw handed nobody and what winners left sell at <strong>0.0133 ZEC each</strong>, in an order fixed by the draw — the next ones in line, whichever they are.</li>
-          <li class="rule">Open-mint payments split like every sale payment: 90% to the floor, 10% to the ZCaveDAO treasury.</li>
-        </ul>
-      </section>
-
-      <section class="stage" aria-labelledby="s8">
-        <h2 id="s8"><b>08</b>The market</h2>
+        <h2 id="s6"><b>06</b>The market</h2>
         <ul class="rules">
           <li class="rule">List an item on <a href="/market">the market</a> at a price in ZEC. A listing says what is for sale and what it costs; it <strong>never names the seller</strong>. Cancel any time; the item stays yours.</li>
           <li class="rule">The fee is <strong>1% from each side</strong>: the buyer pays the price plus 1%, the seller receives the price less 1%.</li>
@@ -167,27 +149,27 @@
         </ul>
       </section>
 
-      <section class="stage" aria-labelledby="s9">
-        <h2 id="s9"><b>09</b>The floor</h2>
+      <section class="stage" aria-labelledby="s7">
+        <h2 id="s7"><b>07</b>The floor</h2>
         <ul class="rules">
           <li class="rule">The floor holds 90% of every sale payment and 40% of every resale fee. It is <strong>keyless</strong>: no key can move it, and it pays only redemptions.</li>
           <li class="rule">Any holder can <strong>redeem an item for its share</strong>: the floor divided by the items outstanding. The item is burned, which cannot be undone.</li>
         </ul>
       </section>
 
-      <section class="stage" aria-labelledby="s10">
-        <h2 id="s10"><b>10</b>Membership</h2>
+      <section class="stage" aria-labelledby="s8">
+        <h2 id="s8"><b>08</b>Membership</h2>
         <ul class="rules">
           <li class="rule">Each item is one membership and one vote in <strong>ZCaveDAO</strong>, which decides what its treasury pays. Selling, moving or redeeming the item ends its membership. See <a href="/dao-rules">the DAO rules</a>.</li>
         </ul>
       </section>
 
-      <section class="stage" aria-labelledby="s11">
-        <h2 id="s11"><b>11</b>What the operator can and cannot do</h2>
+      <section class="stage" aria-labelledby="s9">
+        <h2 id="s9"><b>09</b>What the operator can and cannot do</h2>
         <ul class="rules">
-          <li class="rule">The operator orders transactions, so it <strong>can delay or refuse</strong> a ticket, a claim, a listing or a vote. It announces the close.</li>
+          <li class="rule">The operator orders transactions, so it <strong>can delay or refuse</strong> a mint, a listing or a vote. It announces the opening.</li>
           <li class="rule">It decides which burns count and at what price; every burn is on Solana or Arc and every credit on Zyn, so both can be checked.</li>
-          <li class="rule">It <strong>cannot</strong> change a price or the split once the sale starts, mint items outside the sale, give itself items, or move the floor or the DAO treasury.</li>
+          <li class="rule">It <strong>cannot</strong> change a price, the cap or the split once the mint starts, pick which item comes next, mint items outside the sale, give itself items, or move the floor or the DAO treasury.</li>
           <li class="rule">The operator and the replicas that check the ledger can see which account holds which item; the public cannot.</li>
         </ul>
         <p class="warn"><strong>Risk.</strong> Items and their floor can lose value. ZEC brought in sits in a vault held by two of three team-held custodian keys, and there is no forced exit yet. Nothing here is investment advice.</p>
