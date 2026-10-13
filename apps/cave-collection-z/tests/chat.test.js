@@ -20,8 +20,9 @@ test('only /chat reaches the chat server, and it detaches the site-wide policy f
 test('the chat page says what the team can see, inline, before anyone enters', async () => {
   const page = await readFile(new URL('../chat.html', import.meta.url), 'utf8');
   assert.match(page, /end-to-end encrypted \(MLS\)/);
-  assert.match(page, /sees which device names are in which room, when they write or talk, file sizes and the names of open rooms, not whose they are/);
-  assert.match(page, /first day, entering right after the pass check can be timed together/);
+  assert.match(page, /sees which device names are in which room, when they write or talk, file sizes, the names of open rooms, and who joins or leaves which room/);
+  // The pass and the device can be linked by the server that runs both: said, not hidden (§184.13).
+  assert.match(page, /could link your pass to this device by your network address and timing; a VPN or Tor keeps them apart/);
   assert.match(page, /ends your entry at the end of the day/);
   assert.match(page, /<title>Members' chat<\/title>/);
 });
