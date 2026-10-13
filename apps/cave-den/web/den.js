@@ -137,8 +137,20 @@ export class DenClient {
     await this.kv.put('private', [...this.rooms.values()].filter((r) => r.kind === 'private'));
   }
 
+  /// The door's key for day `d`. Each day's key is pinned on this device the
+  /// first time it is seen: a den that later shows a different key for a day
+  /// (to tell this device apart from the other members) is refused.
   async dayKey(d) {
-    this.keys ??= fetch(this.keysUrl, { credentials: 'omit' }).then((r) => r.json()).then((j) => j.keys || {});
+    this.keys ??= fetch(this.keysUrl, { credentials: 'omit' }).then((r) => r.json()).then(async (j) => {
+      const keys = j.keys || {};
+      for (const [day, k] of Object.entries(keys)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || typeof k !== 'string') continue;
+        const pinned = await this.kv.get(`pin:${day}`);
+        if (pinned && pinned !== k) throw new Error(`The den showed this device a different door key for ${day} than it showed before. Entry is refused: the den may be trying to tell this device apart.`);
+        if (!pinned) await this.kv.put(`pin:${day}`, k);
+      }
+      return keys;
+    });
     const k = (await this.keys)[d];
     return k ? unb64(k) : null;
   }

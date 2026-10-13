@@ -42,7 +42,7 @@ const issuer = createServer(async (req, res) => {
 }).listen(4181);
 const pageConfig = new URL('../../server/priv/page/config.json', import.meta.url);
 const savedConfig = readFileSync(pageConfig, 'utf8');
-writeFileSync(pageConfig, JSON.stringify({ keysUrl: '/den-keys.json', prefix: 'e2e', issuer: 'http://localhost:4181/' }));
+writeFileSync(pageConfig, JSON.stringify({ keysUrl: '/door/keys', prefix: 'e2e', issuer: 'http://localhost:4181/' }));
 
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 const errs = [];
@@ -89,6 +89,15 @@ ok(await inside(c.p, 40000), 'C is let in by the approval, on the page it asked 
 await c.p.evaluate(async () => { const kv = window.__den.kv; await kv.del('session'); for (const d of [0, 1]) await kv.del(`token:${new Date(Date.now() + d * 86400000).toISOString().slice(0, 10)}`); });
 await c.p.reload({ waitUntil: 'networkidle' });
 ok(await inside(c.p), 'with no session or token left, the kept pass lets the device back in');
+// A den that shows this device a different key for a day it has seen is refused.
+const swapped = await c.p.evaluate(async () => {
+  const den = window.__den;
+  const d = new Date().toISOString().slice(0, 10);
+  await den.kv.put(`pin:${d}`, 'AAAA');
+  den.keys = undefined;
+  return den.dayKey(d).then(() => 'accepted', (e) => e.message);
+});
+ok(/different door key/.test(swapped), 'a day key different from the pinned one is refused');
 await c.ctx.close();
 const A = { p: a.p, me: await meOf(a.p) };
 const B = { p: bb.p, me: await meOf(bb.p) };
