@@ -143,6 +143,7 @@ styles, and write `config.json`:
 | `keysUrl` | where the day keys are published (default `/door/keys`, on the den) |
 | `prefix` | the name this browser keeps the den's state under |
 | `issuer` | the page that lets members in (below) |
+| `issuerCode` | `true` if the issuer makes the pass code and sends it back (otherwise it gets only a hash) |
 
 ## Who gets in
 
@@ -157,23 +158,28 @@ default):
 - **`approval`: the host lets people in.** Someone writes a short note and
   asks; the host approves or declines. The note is forgotten once decided.
 - **`external`: the host's own site decides.** A page on the host's site
-  checks whatever the host requires (a wallet, a sign-in, a token), registers
-  the pass's hash with `DEN_ISSUER_TOKEN`, and hands the den's page the code
-  in a window the page opens (`config.json`'s `issuer`). The page accepts it
-  only from that window and the issuer's origin:
-
-  ```sh
-  curl -X POST https://den.example.org/door/passes \
-    -H "authorization: Bearer $DEN_ISSUER_TOKEN" -H 'content-type: application/json' \
-    -d '{"pass":"<sha256 of 0x00 ‖ den.pass.v1 ‖ code, hex>"}'
-  ```
+  (`config.json`'s `issuer`) checks whatever the host requires (a wallet, a
+  sign-in, a token). The den's page opens it in a window, having made the
+  member's pass code itself, and gives it only the code's hash after `#`.
+  The issuer registers that hash with `DEN_ISSUER_TOKEN` and answers the
+  page; it never learns the code:
 
   ```js
-  opener.postMessage({ den: 'pass', code }, 'https://den.example.org');
+  const pass = new URLSearchParams(location.hash.slice(1)).get('den-pass');
+  // …check the visitor, then from the host's server:
+  //   POST https://den.example.org/door/passes  {"pass": pass}
+  //   authorization: Bearer $DEN_ISSUER_TOKEN
+  opener.postMessage({ den: 'pass', registered: true }, 'https://den.example.org');
   ```
 
-  The host's wallet or sign-in scripts run on the issuer's page, never next
-  to the den's keys. `DELETE /door/passes/<hash>` removes a pass.
+  The page takes the answer only from that window and the issuer's origin.
+  Have the issuer ask its visitor to confirm ("let this device into the
+  den") before it registers anything: any site can open the issuer with a
+  hash of its own choosing. A host whose check must make the code itself
+  (a wallet that derives it, say) sets `"issuerCode": true` and answers
+  `{ den: 'pass', code }`; then the issuer knows the code. The host's
+  wallet or sign-in scripts run on the issuer's page, never next to the
+  den's keys. `DELETE /door/passes/<hash>` removes a pass.
 
 The host runs these on the den's server:
 

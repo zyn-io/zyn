@@ -30,10 +30,11 @@ The door and the den are one server run by one operator, the host.
 
 1. A device gets in once, by a way the host opened: an invite link, the
    host's approval, or the host's own site registering a pass (`external`).
-   With an invite or approval the device makes its pass code itself and the
-   den keeps only its hash; with `external` the host's site makes the code,
-   so the host's site knows it. Either way the host knows whom it invited or
-   approved, and which pass that was.
+   The device makes its pass code itself and the den keeps only its hash; in
+   `external` the host's issuer is given only that hash, unless the host
+   chose to have its issuer make the code (`issuerCode`), in which case the
+   issuer knows it. Either way the host knows whom it invited, approved or
+   registered, and which pass that was.
 2. Each day the device asks the door for a token, blinded, and shows its pass
    code: the door sees the code itself every day. It checks the pass, signs
    at most 3 tokens per pass per day, and never sees a token.

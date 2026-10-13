@@ -9,7 +9,6 @@
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -25,19 +24,27 @@ const SERVER = new URL('../../server/', import.meta.url).pathname;
 // What the host runs on the den's server (Den.Gate.Members), against its database.
 const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
 
-// A stand-in for the host's issuer: its server makes a pass code, registers
-// the pass's hash with the den (the host's token), and its page hands the
-// opener the code, addressed to the den's origin only. A code sent to any
-// other origin never arrives.
-const passHash = (code) => createHash('sha256').update(Buffer.concat([Buffer.from([0]), Buffer.from('den.pass.v1'), code])).digest('hex');
+// A stand-in for the host's issuer. Its page reads the hash the den's page
+// put after "#", its server registers that hash with the den (the host's
+// token), and the page tells its opener, addressed to the den's origin only,
+// that it is registered. The issuer never sees the pass code. A message sent
+// to any other origin never arrives.
 const issuer = createServer(async (req, res) => {
-  const code = randomBytes(32);
-  const r = await fetch(`${DEN}/door/passes`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ISSUER_TOKEN}` }, body: JSON.stringify({ pass: passHash(code) }) });
+  const url = new URL(req.url, 'http://localhost:4181');
+  if (url.pathname === '/register') {
+    const pass = url.searchParams.get('pass') || '';
+    const r = await fetch(`${DEN}/door/passes`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ISSUER_TOKEN}` }, body: JSON.stringify({ pass }) });
+    res.setHeader('content-type', 'application/json');
+    return res.end(JSON.stringify({ ok: r.ok }));
+  }
   res.setHeader('content-type', 'text/html');
   res.end(`<!doctype html><title>Issuer</title><script>
-    opener.postMessage({ den: 'pass', code: 'f'.repeat(64) }, 'https://elsewhere.example');
-    ${r.ok ? `opener.postMessage({ den: 'pass', code: ${JSON.stringify(code.toString('hex'))} }, ${JSON.stringify(DEN)});` : ''}
-    setTimeout(() => close(), 200);
+    (async () => {
+      const pass = new URLSearchParams(location.hash.slice(1)).get('den-pass');
+      opener.postMessage({ den: 'pass', registered: true }, 'https://elsewhere.example');
+      const ok = pass && (await (await fetch('/register?pass=' + pass)).json()).ok;
+      opener.postMessage({ den: 'pass', registered: !!ok }, ${JSON.stringify(DEN)});
+    })();
   </script>`);
 }).listen(4181);
 const pageConfig = new URL('../../server/priv/page/config.json', import.meta.url);
@@ -74,7 +81,7 @@ await reuse.ctx.close();
 const bb = await person('B', `${DEN}/`);
 ok(await bb.p.isVisible('#way-ask') && await bb.p.isVisible('#way-invite') && await bb.p.isVisible('#enter'), 'the door offers the ways this den opens');
 await bb.p.click('#enter');
-ok(await inside(bb.p), 'B is in through the issuer window; a code sent to another origin never arrives');
+ok(await inside(bb.p), 'B is in through the issuer window, which saw only its pass hash; a message to another origin never arrives');
 
 // C: asks, and the host approves.
 const c = await person('C', `${DEN}/`);
