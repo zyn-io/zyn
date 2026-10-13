@@ -33,6 +33,11 @@ defmodule Den.Rooms do
       field :last_committer, :string
       field :last_commit_at, :utc_datetime
       field :info_epoch, :integer
+      # Set by moderators (Den.Mod.room_save/3).
+      field :slow_seconds, :integer, default: 0
+      field :post_roles, :string
+      field :topic, :string
+      field :position, :integer
       timestamps(type: :utc_datetime)
     end
   end
@@ -68,10 +73,11 @@ defmodule Den.Rooms do
     end
   end
 
-  @doc "Make the configured rooms if they are not there."
+  @doc "Make the configured rooms if they are not there (a moderator's name for one stays)."
   def seed do
     for {id, title} <- Application.fetch_env!(:den, :rooms) do
-      Repo.insert!(%Room{id: id, title: title}, on_conflict: [set: [title: title]], conflict_target: :id)
+      conflict = if Den.Mod.renamed?(id), do: :nothing, else: [set: [title: title]]
+      Repo.insert!(%Room{id: id, title: title}, on_conflict: conflict, conflict_target: :id)
     end
 
     :ok

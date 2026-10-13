@@ -27,7 +27,30 @@ defmodule Den.Limits do
   }
 
   # A map or a keyword list in config; DEN_LIMITS="files=100,file_bytes=…".
-  def get(k), do: Map.get(Map.new(Application.get_env(:den, :limits, %{})), k, Map.fetch!(@defaults, k))
+  # A moderator with Manage server may set some lower (Den.Mod.limits/0),
+  # never higher than the host's.
+  def get(k) do
+    host = Map.get(Map.new(Application.get_env(:den, :limits, %{})), k, Map.fetch!(@defaults, k))
+
+    case Map.get(set_in_den(), k) do
+      n when is_integer(n) -> min(n, host)
+      _ -> host
+    end
+  end
+
+  @doc "The host's own value for `k` (the ceiling for what the den may set)."
+  def host(k), do: Map.get(Map.new(Application.get_env(:den, :limits, %{})), k, Map.fetch!(@defaults, k))
+
+  defp set_in_den do
+    Den.Mod.limits()
+  rescue
+    _ -> %{}
+  catch
+    _, _ -> %{}
+  end
+
+  @doc "Nothing cached here: Den.Mod keeps the den's own limits."
+  def forget, do: :ok
 
   @doc """
   Whether the disk the den writes to has room: read with `df` at most once a
