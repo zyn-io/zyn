@@ -21,5 +21,15 @@ done
 PHX="$WEB/../server/deps/phoenix/priv/static/phoenix.mjs"
 [ -f "$PHX" ] || { echo "the server's deps are missing: run mix deps.get in server/" >&2; exit 1; }
 cp "$PHX" "$OUT/den/phoenix.mjs"
-if [ -n "$ADDON" ]; then "$ADDON/build.sh" "$OUT"; fi
+if [ -n "$ADDON" ]; then
+  "$ADDON/build.sh" "$OUT"
+  # An add-on's own page must keep every element the scripts look up that
+  # the core page has, or that part of the page silently goes missing.
+  used=$(grep -ohE "el\('[a-z0-9-]+'\)|getElementById\('[a-z0-9-]+'\)" "$WEB"/app.js "$WEB"/den-ui.js | grep -oE "'[a-z0-9-]+'" | tr -d "'" | sort -u)
+  for id in $used; do
+    if grep -q "id=\"$id\"" "$WEB/index.html" && ! grep -q "id=\"$id\"" "$OUT/index.html"; then
+      echo "warning: $ADDON/index.html has no #$id, which the core page has and the scripts use" >&2
+    fi
+  done
+fi
 echo "page in $OUT"

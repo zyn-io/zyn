@@ -5,6 +5,8 @@ rooms, files and voice. Each Epeaky server is a **den**. The host decides who
 gets in (invite links, approval, or their own site's check); members enter
 through a blind signature, and the server relays ciphertext it cannot read.
 
+![A den: rooms on the left, a conversation in General](docs/screenshot.png)
+
 **Status: alpha.** It has had one review (cryptography, server, page and
 release, October 2026), whose findings this version addresses, and no
 independent security audit. Read [THREAT_MODEL.md](THREAT_MODEL.md) before

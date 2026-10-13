@@ -39,7 +39,7 @@
 .side-head { display: flex; gap: 10px; align-items: center; padding: 14px; border-bottom: 1px solid var(--line); }
 .side-head p { margin: 0; flex: 1; min-width: 0; }
 .side-head small { display: block; margin-bottom: 3px; font: 8px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
-.side-head b { font: 13px ui-monospace, Menlo, monospace; color: var(--acid); font-weight: 400; }
+.side-head b { display: block; font: 12px ui-monospace, Menlo, monospace; color: var(--acid); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-head + .bubble { position: absolute; left: 10px; right: 10px; top: 62px; z-index: 7; margin: 0; box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55); background: #0d100e; }
 .side-search { padding: 12px 12px 4px; }
 #search { width: 100%; box-sizing: border-box; font: 14px var(--sans); color: var(--ink); background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); padding: 8px 10px; }

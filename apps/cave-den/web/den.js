@@ -126,7 +126,7 @@ export class DenClient {
   }
 
   async start() {
-    await init(new URL('./den/den_mls_bg.wasm', import.meta.url));
+    await init({ module_or_path: new URL('./den/den_mls_bg.wasm', import.meta.url) });
     const saved = await this.kv.get('device');
     this.den = saved ? Den.restore(saved) : new Den();
     if (!saved) await this.save();
@@ -828,7 +828,8 @@ export class DenClient {
 
   async unread(room) {
     const last = this.read[room] || 0;
-    return (await this.log(room)).filter((m) => !m.mine && m.seq > last).length;
+    // Words and files only: a line saying someone joined is not a message.
+    return (await this.log(room)).filter((m) => !m.mine && m.t !== 'note' && m.seq > last).length;
   }
 
   lastRead(room) {
