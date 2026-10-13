@@ -684,6 +684,19 @@ export function mountDen(den, el, me) {
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
+    // A roommate was shown a different door key for a day: the den may be
+    // telling members apart. Stays on screen until the page is reloaded.
+    if (event === 'keywarn') {
+      let w = document.getElementById('den-warn');
+      if (!w) {
+        w = document.createElement('p');
+        w.id = 'den-warn';
+        w.className = 'den-warn';
+        w.setAttribute('role', 'alert');
+        el('den-main').prepend(w);
+      }
+      w.textContent = `The den showed ${nameOf(d.key)} a different door key for ${d.day} than it showed this device, so it may be telling members apart. Tell the host, and keep private things off this den until it is explained.`;
+    }
   };
 
   drawRooms();

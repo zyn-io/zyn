@@ -102,6 +102,12 @@ await c.ctx.close();
 const A = { p: a.p, me: await meOf(a.p) };
 const B = { p: bb.p, me: await meOf(bb.p) };
 ok(await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [B.me.key], 40000) && await until(B.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [A.me.key], 40000), `A and B in General (${A.me.name}, ${B.me.name})`);
+// A roommate shown another door key for today is flagged in the room, sealed.
+await A.p.evaluate(async () => {
+  const d = new Date().toISOString().slice(0, 10);
+  await window.__den.send('general', { t: 'seen', day: d, key_hash: 'f'.repeat(64) });
+});
+ok(await until(B.p, () => /different door key/.test(document.querySelector('#den-warn')?.textContent || ''), null, 15000), 'a roommate shown a different door key is flagged');
 
 // Words, a mention, a reply, a reaction, an edit, a deletion.
 await A.p.fill('#say-text', `Hello @${B.me.name}, welcome to the den.`);

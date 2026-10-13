@@ -358,6 +358,7 @@ export class DenClient {
       await this.catchUp(room);
     }
     this.on('ready', { room, members: this.members(room) });
+    this.tellSeen(room);
     const present = (await this.push(ch, 'state', {})).present || [];
     const stale = this.members(room).map((m) => m.key).filter((k) => k !== this.den.key() && !present.includes(k));
     if (stale.length) await this.removeStale(room, stale, false);
@@ -458,6 +459,15 @@ export class DenClient {
       if (m.t === 'edit') Object.assign(log[i], { text: String(m.text || '').slice(0, 4000), edited: true });
       else Object.assign(log[i], { text: '', file: null, deleted: true });
       shown = log[i];
+    } else if (m.t === 'seen') {
+      // A roommate's fingerprint of the door key the den showed it for a day.
+      // Ours differs: the den is showing members different keys, to tell
+      // them apart. Said loudly; the message travels sealed, so the den
+      // cannot hide or change it.
+      if (mine || typeof m.day !== 'string' || typeof m.key_hash !== 'string') return;
+      const own = await this.seenHash(m.day);
+      if (own && own !== m.key_hash) this.on('keywarn', { room, day: m.day, from: m.from, key: m.key });
+      return;
     } else if (m.t === 'title') {
       const r = this.rooms.get(room);
       if (r && r.kind === 'private') { r.title = String(m.text || '').slice(0, 60); await this.keepPrivate(); this.on('rooms', [...this.rooms.values()]); }
@@ -465,6 +475,26 @@ export class DenClient {
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
     this.on('message', { room, message: shown, kind: m.t, mine, mention: !mine && (m.text || '').includes(`@${this.me.name}`) });
+  }
+
+  /// SHA-256 of the door key this device pinned for `day`, hex; null if none.
+  async seenHash(day) {
+    const k = await this.kv.get(`pin:${day}`);
+    if (typeof k !== 'string') return null;
+    return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(k))));
+  }
+
+  /// Once a day in each room: tell the members, sealed, which door key the
+  /// den showed this device today, so each can compare with its own.
+  async tellSeen(room) {
+    const d = day();
+    if ((await this.kv.get(`seen:${room}`)) === d) return;
+    const key_hash = await this.seenHash(d);
+    if (!key_hash) return;
+    try {
+      await this.send(room, { t: 'seen', day: d, key_hash });
+      await this.kv.put(`seen:${room}`, d);
+    } catch { /* next time */ }
   }
 
   /// Send one sealed document to a room, and keep it here.
