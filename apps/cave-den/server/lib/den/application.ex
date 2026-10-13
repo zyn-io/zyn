@@ -18,7 +18,6 @@ defmodule Den.Application do
       Den.Repo,
       {Ecto.Migrator,
        repos: Application.fetch_env!(:den, :ecto_repos), skip: skip_migrations?()},
-      {DNSCluster, query: Application.get_env(:den, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Den.PubSub},
       # The configured rooms, made once the database is there.
       {Task, &Den.Rooms.seed/0},

@@ -33,8 +33,7 @@ config :den, DenWeb.Endpoint,
     formats: [json: DenWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Den.PubSub,
-  live_view: [signing_salt: "+rMCX0rh"]
+  pubsub_server: Den.PubSub
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

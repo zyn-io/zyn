@@ -78,8 +78,9 @@ if [ ${#blocked[@]} -gt 0 ]; then
   exit 0
 fi
 if [ "$PUSH" = --push ]; then
-  git -c user.name="$(git -C "$ZYN" config user.name)" -c user.email="$(git -C "$ZYN" config user.email)" \
-    commit -q -m "Epeaky as published from Zyn $REV" -m "The MLS core, the server and the page."
+  # Published under the account's GitHub no-reply address, never a personal one.
+  git -c user.name="${EPEAKY_AUTHOR:-Legatia}" -c user.email="${EPEAKY_EMAIL:-220167764+Legatia@users.noreply.github.com}" \
+    commit -q -m "${EPEAKY_MESSAGE:-Epeaky, $(date -u +%Y-%m-%d)}"
   git push -q origin HEAD:main
   echo "pushed $(git rev-parse --short HEAD)"
 fi

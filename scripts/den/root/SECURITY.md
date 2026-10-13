@@ -3,7 +3,9 @@
 ## Reporting a vulnerability
 
 Report security issues privately through this repository's **Security →
-Advisories → New draft security advisory**. Do not open a public issue for
+Advisories → Report a vulnerability**. If you cannot use that, open an issue
+that says only that you have something to report, with no details, and we
+will reply with a private way to send it. Do not open a public issue for
 anything that lets someone read a room, enter without a pass, act as another
 member or device, or take a room or the voice service down.
 

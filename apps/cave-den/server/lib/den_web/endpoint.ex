@@ -1,16 +1,6 @@
 defmodule DenWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :den
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
-  @session_options [
-    store: :cookie,
-    key: "_den_key",
-    signing_salt: "+5a7LKUx",
-    same_site: "Lax"
-  ]
-
   # Devices: a session from the door, then rooms of ciphertext.
   # The session rides in the WebSocket's protocol header (auth_token), not in
   # its URL, which proxies write to their logs.
@@ -18,10 +8,6 @@ defmodule DenWeb.Endpoint do
     auth_token: true,
     websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 262_144],
     longpoll: false
-
-  # socket "/live", Phoenix.LiveView.Socket,
-  #   websocket: [connect_info: [session: @session_options]],
-  #   longpoll: [connect_info: [session: @session_options]]
 
   # The den's own page at "/" (priv/page), under its own policy.
   plug DenWeb.Page
@@ -57,6 +43,5 @@ defmodule DenWeb.Endpoint do
 
   plug Plug.MethodOverride
   plug Plug.Head
-  plug Plug.Session, @session_options
   plug DenWeb.Router
 end

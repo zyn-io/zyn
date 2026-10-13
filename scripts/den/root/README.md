@@ -5,6 +5,11 @@ rooms, files and voice. Each Epeaky server is a **den**. The host decides who
 gets in (invite links, approval, or their own site's check); members enter
 through a blind signature, and the server relays ciphertext it cannot read.
 
+**Status: alpha.** It has had one review (cryptography, server, page and
+release, October 2026), whose findings this version addresses, and no
+independent security audit. Read [THREAT_MODEL.md](THREAT_MODEL.md) before
+you trust it with anything that matters.
+
 - **Rooms** are MLS groups (RFC 9420, OpenMLS), held only on members'
   devices. Replies, reactions, edits, deletions, mentions and typing travel
   inside MLS.
@@ -45,6 +50,24 @@ Settings are in `/opt/epeaky/.env` (the ways in, the rooms; then
 addresses: on a host whose public address is not on the machine itself (AWS
 and GCP put it behind NAT), set `DEN_VOICE_PUBLIC_ONLY=0`, and expect voice to
 work only for devices that can reach that private address.
+
+## Back up and update
+
+What a den keeps is in its data folder (`/opt/epeaky/data` with the
+installer): the database `den.db`, the day keys in `keys/`, the files in
+`blobs/` and the release cookie. To back up while it runs:
+
+```sh
+cd /opt/epeaky/data
+sqlite3 den.db "VACUUM INTO '/root/den-$(date +%F).db'"   # a consistent copy
+tar -czf /root/den-keys-$(date +%F).tgz keys cookie       # keep private: they let in and sign
+```
+
+Keep backups no longer than the den keeps ciphertext (30 days by default).
+Restoring an older database puts every room behind its members' devices:
+they join open rooms again by themselves, and private rooms need their
+members invited again. `epeaky update` pulls the latest image and restarts
+it; the database is migrated on start.
 
 ## Layout
 

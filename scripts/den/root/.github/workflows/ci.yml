@@ -3,14 +3,21 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 jobs:
   mls:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # The same Rust as the image's.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.93.1
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mls
       - run: cargo test
         working-directory: mls
       - run: cargo build --release --target wasm32-unknown-unknown
@@ -20,19 +27,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libsrtp2-dev pkg-config libssl-dev
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.1
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '28'
           elixir-version: '1.19'
-      - run: mix deps.get && mix test
+      - uses: actions/cache@v4
+        with:
+          path: |
+            server/deps
+            server/_build
+          key: mix-${{ runner.os }}-${{ hashFiles('server/mix.lock', 'server/native/**/Cargo.lock') }}
+      - run: mix deps.get
+        working-directory: server
+      - run: MIX_ENV=test mix compile --warnings-as-errors
+        working-directory: server
+      - run: mix test
         working-directory: server
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.93.1
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mls
       - run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
       - run: ./build.sh
         working-directory: mls
