@@ -108,7 +108,7 @@ await A.p.evaluate(async () => {
   const d = new Date().toISOString().slice(0, 10);
   await window.__den.send('general', { t: 'seen', day: d, key_hash: 'f'.repeat(64) });
 });
-ok(await until(B.p, () => /different door key/.test(document.querySelector('#den-warn')?.textContent || ''), null, 15000), 'a roommate shown a different door key is flagged');
+ok(await until(B.p, () => /reports a different door key/.test(document.querySelector('#den-warn')?.textContent || ''), null, 15000), 'a roommate shown a different door key is flagged, by name');
 
 // Words, a mention, a reply, a reaction, an edit, a deletion.
 await A.p.fill('#say-text', `Hello @${B.me.name}, welcome to the den.`);

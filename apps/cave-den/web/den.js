@@ -502,6 +502,9 @@ export class DenClient {
     let shown = null;
     if (m.t === 'msg' || m.t === 'file') {
       if (typeof m.id !== 'string' || at(m.id) >= 0) return;
+      // Every message carries its sender's door-key fingerprint for its day,
+      // so the den cannot drop the evidence without dropping the words.
+      if (!mine && m.kh) await this.compareKey(room, new Date(m.at || Date.now()).toISOString().slice(0, 10), m.kh, m);
       const file = m.t === 'file' ? fileMeta(m.file) : null;
       if (m.t === 'file' && !file) return;
       shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
@@ -523,13 +526,9 @@ export class DenClient {
       else Object.assign(log[i], { text: '', file: null, deleted: true });
       shown = log[i];
     } else if (m.t === 'seen') {
-      // A roommate's fingerprint of the door key the den showed it for a day.
-      // Ours differs: the den is showing members different keys, to tell
-      // them apart. Said loudly; the message travels sealed, so the den
-      // cannot hide or change it.
-      if (mine || typeof m.day !== 'string' || typeof m.key_hash !== 'string') return;
-      const own = await this.seenHash(m.day);
-      if (own && own !== m.key_hash) this.on('keywarn', { room, day: m.day, from: m.from, key: m.key });
+      // A roommate's fingerprint of the door key the den showed it for a day,
+      // for a member who has not written that day (words carry it too).
+      if (!mine) await this.compareKey(room, m.day, m.key_hash, m);
       return;
     } else if (m.t === 'title') {
       const r = this.rooms.get(room);
@@ -538,6 +537,15 @@ export class DenClient {
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
     this.on('message', { room, message: shown, kind: m.t, mine, mention: !mine && (m.text || '').includes(`@${this.me.name}`) });
+  }
+
+  /// A roommate's fingerprint of the door key it was shown for `day`: one
+  /// different from ours is said loudly. The message is sealed, so the den
+  /// cannot hide or change it (though any member can send a wrong one).
+  async compareKey(room, d, hash, m) {
+    if (typeof d !== 'string' || typeof hash !== 'string') return;
+    const own = await this.seenHash(d);
+    if (own && own !== hash) this.on('keywarn', { room, day: d, from: m.from, key: m.key });
   }
 
   /// SHA-256 of the door key this device pinned for `day`, hex; null if none.
@@ -565,6 +573,11 @@ export class DenClient {
     return this.lock(async () => {
       const ch = this.channels.get(room);
       const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
+      if (body.t === 'msg' || body.t === 'file') {
+        m.kh = await this.seenHash(day()).catch(() => null);
+        if (!m.kh) delete m.kh;
+        await this.kv.put(`seen:${room}`, day());
+      }
       for (let tries = 0; tries < 2; tries++) {
         try {
           const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });

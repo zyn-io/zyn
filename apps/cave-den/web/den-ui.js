@@ -696,7 +696,7 @@ export function mountDen(den, el, me) {
         w.setAttribute('role', 'alert');
         el('den-main').prepend(w);
       }
-      w.textContent = `The den showed ${nameOf(d.key)} a different door key for ${d.day} than it showed this device, so it may be telling members apart. Tell the host, and keep private things off this den until it is explained.`;
+      w.textContent = `${nameOf(d.key)} reports a different door key for ${d.day} than this device was shown. Either the den is telling members apart, or ${nameOf(d.key)}'s device is wrong. Tell the host, and keep private things off this den until it is explained.`;
     }
   };
 

@@ -34,6 +34,8 @@ defmodule DenWeb.RateLimit do
   """
   def client(conn), do: conn |> peer() |> prefix()
 
+  # An IPv4 client seen through a dual-stack listener is its IPv4 address.
+  defp prefix({0, 0, 0, 0, 0, 0xFFFF, x, y}), do: {div(x, 256), rem(x, 256), div(y, 256), rem(y, 256)}
   defp prefix({a, b, c, d, _, _, _, _}), do: {a, b, c, d}
   defp prefix(ip), do: ip
 

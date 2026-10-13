@@ -166,6 +166,9 @@ defmodule Den.MembersTest do
     v6 = fn last -> build_conn() |> Map.put(:remote_ip, {0x2001, 0xDB8, 1, 2, 3, 4, 5, last}) |> get("/door/ways") end
     for i <- 1..3, do: assert(v6.(i).status == 200)
     assert v6.(99).status == 429, "an IPv6 /64 is one address: rotating inside it does not help"
+    mapped = fn a -> build_conn() |> Map.put(:remote_ip, {0, 0, 0, 0, 0, 0xFFFF, a, 1}) end
+    assert DenWeb.RateLimit.client(mapped.(0xC633)) == {198, 51, 0, 1}
+    refute DenWeb.RateLimit.client(mapped.(0xC633)) == DenWeb.RateLimit.client(mapped.(0xCB00)), "IPv4 clients behind ::ffff: are not one bucket"
     before = :ets.info(DenWeb.RateLimit, :size)
     assert before > 0
     :ets.insert(DenWeb.RateLimit, {{{:door, {9, 9, 9, 9}}, 0}, 5})
