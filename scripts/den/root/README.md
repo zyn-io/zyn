@@ -1,0 +1,79 @@
+# The den
+
+A self-hosted chat server for closed communities, with end-to-end encrypted
+rooms, files and voice. Members get in with a pass, through a blind signature,
+and the server only relays ciphertext. It was built for ZCaveDAO's members'
+chat at [cavebro.win/chat](https://cavebro.win/chat).
+
+- **Rooms** are MLS groups (RFC 9420, OpenMLS), held only on members'
+  devices. Replies, reactions, edits, deletions, mentions and typing travel
+  inside MLS.
+- **Files and images** are encrypted in the browser and stored as opaque
+  blobs.
+- **Voice rooms** forward audio the server cannot hear: each frame is
+  encrypted in the browser under a key from the room's MLS group.
+- **Entry** is a blind token (RFC 9474): the door checks a pass and signs a
+  token it never sees; the den admits the device that token names.
+
+[THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
+cannot see. Read it before you run a den for people who depend on it.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `mls/` | Rust → WebAssembly: MLS rooms, blind tokens, voice keys. `cargo test` |
+| `server/` | Elixir / Phoenix: the door, the relay, files and voice. `mix test` |
+
+## Build
+
+You need Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli`
+0.2.128 exactly, Elixir 1.19 on OTP 28, and libsrtp2, OpenSSL and pkg-config
+for voice (`brew install srtp openssl pkg-config` on macOS).
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.128
+(cd mls && ./build.sh)                   # → mls/pkg/
+(cd server && mix setup && mix test)
+```
+
+## Run
+
+`server/Dockerfile` builds a release. Run it bound to loopback behind a TLS
+proxy that sends `X-Forwarded-Proto: https`; the den forces https and
+redirects every request that arrives without it.
+
+| Variable | |
+|---|---|
+| `SECRET_KEY_BASE` | Phoenix's secret (`mix phx.gen.secret`) |
+| `PHX_HOST` | the den's public host name |
+| `PORT` | the port it listens on (default 4000) |
+| `DEN_IP` | the address it binds to (default 127.0.0.1) |
+| `DATABASE_PATH` | the SQLite file |
+| `DEN_KEYS_DIR` | where the day keys are kept (private; back it up) |
+| `DEN_ORIGINS` | the page origins allowed to talk to it, comma-separated |
+| `DEN_NODE_URL` | the pass checker's node (the Zyn adapter) |
+| `POOL_SIZE` | database connections |
+
+Voice needs UDP ports 50000–50199 open to the internet. There is no TURN
+server option yet, so a member behind a strict NAT may not get audio.
+
+**Day keys.** `mix den.keys --days 90 --out den-keys.json` (or
+`bin/den eval 'Den.Release.keys(90, "den-keys.json")'` in a release) makes one
+signing key per UTC day ahead, for days that have none, and writes their public
+halves to one JSON file. Publish that file from the page's own origin, the
+same for everyone, and publish new keys before the old ones run out, or
+nobody can enter after the last day.
+
+## Entry rules
+
+Today the door checks passes against a Zyn node: a pass is live while its
+holder holds an item of the configured collection. Other rules (invite links,
+token holders on other chains) are planned as adapters behind the same door.
+
+## License
+
+Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or
+the [MIT license](LICENSE-MIT), at your option. Third-party terms are in
+[NOTICE](NOTICE).

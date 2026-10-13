@@ -1,0 +1,15 @@
+/mls/target/
+/mls/pkg/
+/server/_build/
+/server/deps/
+/server/node_modules/
+/server/priv/keys/
+/server/priv/blobs/
+*.db
+*.db-*
+erl_crash.dump
+.env
+.env.*
+*.pem
+!/server/test/fixtures/keys/*.pem
+.DS_Store

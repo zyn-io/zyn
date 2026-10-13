@@ -1,0 +1,16 @@
+The den
+Copyright (c) 2026 Legatia
+
+Licensed under either of the Apache License, Version 2.0 (LICENSE-APACHE) or
+the MIT license (LICENSE-MIT), at your option.
+
+Third-party code with terms other than MIT or Apache-2.0:
+
+- hpke-rs, hpke-rs-crypto and hpke-rs-rust-crypto 0.7.0 (pulled in by
+  OpenMLS) are under the Mozilla Public License 2.0. They are compiled,
+  unmodified, into mls/'s WebAssembly. Their source:
+  https://github.com/cryspen/hpke-rs
+- curve25519-dalek and ed25519-dalek are under the BSD 3-Clause license.
+
+Every other dependency of mls/ and server/ is under MIT, Apache-2.0 or a
+compatible permissive license; see Cargo.lock and server/mix.lock.
