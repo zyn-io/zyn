@@ -259,6 +259,10 @@ ok(!(await A.p.evaluate(([k]) => window.__den.isMe(k), [B.me.key])), 'a wrong co
 ok(await until(E.p, () => window.__den.me.nick === 'Ada', null, 10000), "E takes A's name");
 await B.p.click('#room-meta');
 ok(await until(B.p, () => /2 devices/.test(document.querySelector('#members')?.textContent || ''), null, 10000), "B's members list shows Ada once, with 2 devices");
+await B.p.click('[data-room="general"]');
+await B.p.waitForTimeout(800);
+const heads = await B.p.evaluate(() => { const ms = window.__den.members('general'); const seen = new Set(); const n = ms.filter((m) => { if (seen.has(m.key)) return false; seen.add(m.key); window.__den.linkedTo(m.key).forEach((k) => seen.add(k)); return true; }).length; return { n, devices: ms.length, shown: document.querySelector('#room-meta')?.textContent, room: document.querySelector('#room-title')?.textContent }; });
+ok(heads.n < heads.devices && heads.shown === `Members · ${heads.n}`, `the room's header counts people, not devices (${JSON.stringify(heads)})`);
 await B.p.click('#room-meta');
 ok(await until(E.p, () => !!document.querySelector('[data-join]'), null, 30000), 'A brings E into its private room: an invitation waits on E');
 

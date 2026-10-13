@@ -803,11 +803,16 @@ export function mountDen(den, el, me) {
     el('typing').innerHTML = who.length ? `<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>${esc(who.slice(0, 3).join(', '))}${who.length > 3 ? ` and ${who.length - 3} more` : ''} ${who.length > 1 ? 'are' : 'is'} writing` : '';
   }
 
+  // People, not devices: a member's linked devices count once, as in the members list.
+  const people = (members) => {
+    const seenKeys = new Set();
+    return members.filter((m) => { if (seenKeys.has(m.key)) return false; seenKeys.add(m.key); den.linkedTo(m.key).forEach((k) => seenKeys.add(k)); return true; }).length;
+  };
   let nickTimer;
   den.on = (event, d) => {
     if (event === 'rooms' || event === 'invites') drawRooms();
     if (event === 'ready' || event === 'members') {
-      counts[d.room] = d.members.length;
+      counts[d.room] = people(d.members);
       if (d.room === room) { drawComposer(); if (!el('members').hidden) drawMembers(); }
       if (event === 'ready' && d.room === room && !shown.length) drawLog();
     }
@@ -824,7 +829,7 @@ export function mountDen(den, el, me) {
     }
     if (event === 'nicks') {
       clearTimeout(nickTimer);
-      nickTimer = setTimeout(() => { drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
+      nickTimer = setTimeout(() => { for (const r of Object.keys(counts)) if (den.inRoom(r)) counts[r] = people(den.members(r)); drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
     }
     if (event === 'linked') status('Linked: members now see these devices as one person.');
     if (event === 'offline') status('Reconnecting…', true);
