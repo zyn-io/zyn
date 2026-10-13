@@ -10,6 +10,7 @@ defmodule Den.Sweeper do
 
   @impl true
   def init(_) do
+    Den.Keys.check()
     schedule()
     {:ok, nil}
   end
@@ -17,6 +18,8 @@ defmodule Den.Sweeper do
   @impl true
   def handle_info(:sweep, s) do
     run()
+    # Once an hour: does the door still have day keys ahead?
+    if rem(System.os_time(:second), 3600) < div(Application.get_env(:den, :sweep_ms, 60_000), 1000), do: Den.Keys.check()
     schedule()
     {:noreply, s}
   end
@@ -29,7 +32,16 @@ defmodule Den.Sweeper do
     end
 
     for key <- ended, do: DenWeb.Endpoint.broadcast("device:" <> key, "disconnect", %{})
+    checkpoint()
     {by_room, ended}
+  end
+
+  # What was deleted leaves the write-ahead log too (secure_delete has
+  # overwritten it in the database itself).
+  defp checkpoint do
+    Den.Repo.query("PRAGMA wal_checkpoint(TRUNCATE)")
+  rescue
+    _ -> :ok
   end
 
   defp schedule, do: Process.send_after(self(), :sweep, Application.get_env(:den, :sweep_ms, 60_000))

@@ -78,17 +78,20 @@ defmodule Den.Rooms do
 
   @doc "A private room: an unguessable id, no title, no GroupInfo ever kept."
   def private_room(id) do
-    if id =~ ~r/^p-[0-9a-f]{32}$/, do: insert(id, "", "private"), else: {:error, :id}
+    if id =~ ~r/\Ap-[0-9a-f]{32}\z/, do: insert(id, "", "private"), else: {:error, :id}
   end
 
   @doc "A ZCaveDAO proposal's room (the den makes these)."
   def proposal_room(n) when is_integer(n), do: insert("proposal-#{n}", "Proposal ##{n}", "proposal")
 
+  # Two at once for one id: the second is told it exists, not a crash.
   defp insert(id, title, kind) do
-    if Repo.get(Room, id) do
-      {:error, :exists}
-    else
-      Repo.insert(%Room{id: id, title: title, kind: kind})
+    now = now()
+    row = %{id: id, title: title, kind: kind, epoch: 0, seq: 0, inserted_at: now, updated_at: now}
+
+    case Repo.insert_all(Room, [row], on_conflict: :nothing, conflict_target: :id) do
+      {1, _} -> {:ok, Repo.get(Room, id)}
+      {0, _} -> {:error, :exists}
     end
   end
 
@@ -99,7 +102,7 @@ defmodule Den.Rooms do
 
   @doc "Count one `what` for a device today; :ok under `limit`."
   def quota(key, what, limit, amount \\ 1) do
-    day = Date.to_iso8601(Date.utc_today())
+    day = quota_day(key)
     Repo.transaction(fn ->
       n = Repo.one(from q in "quota", where: q.key == ^key and q.day == ^day and q.what == ^what, select: q.count) || 0
       if n + amount > limit, do: Repo.rollback(:quota)
@@ -220,6 +223,15 @@ defmodule Den.Rooms do
     Repo.all(from m in Message, where: m.room == ^room and m.seq > ^seq, order_by: m.seq, limit: ^limit)
   end
 
+  # A device's quotas run for the day its token was for, the grace hour
+  # after midnight included: not a fresh day's worth in that hour.
+  defp quota_day(key) do
+    case device_until(key) do
+      %DateTime{} = until -> until |> DateTime.add(-3600, :second) |> DateTime.to_date() |> Date.add(-1) |> Date.to_iso8601()
+      _ -> Date.to_iso8601(Date.utc_today())
+    end
+  end
+
   @doc "Admit a device until `until`."
   def admit(key, until) do
     Repo.insert!(%Device{key: key, until: until}, on_conflict: [set: [until: until, updated_at: now()]], conflict_target: :key)
@@ -233,24 +245,43 @@ defmodule Den.Rooms do
     end
   end
 
-  @doc "Devices whose day ended, by room — then forgotten. Old ciphertext and door records go too."
+  @doc """
+  Devices whose day ended, by room — then forgotten. Old ciphertext, files
+  and door records go too. One transaction, so a device that enters again
+  while the sweep runs is either swept (before) or kept (after), never half.
+  """
   def sweep do
-    now = now()
-    ended = Repo.all(from d in Device, where: d.until <= ^now, select: d.key)
-    by_room = Repo.all(from rd in RoomDevice, where: rd.key in ^ended, select: {rd.room, rd.key}) |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-    Repo.delete_all(from rd in RoomDevice, where: rd.key in ^ended)
-    Repo.delete_all(from d in Device, where: d.key in ^ended)
-    keep = DateTime.add(now, -Application.get_env(:den, :retention_days, 30) * 86_400, :second)
-    Repo.delete_all(from m in Message, where: m.inserted_at < ^keep)
-    old = Date.utc_today() |> Date.add(-2) |> Date.to_iso8601()
-    Repo.delete_all(from i in "issued", where: i.day < ^old)
-    Repo.delete_all(from s in "spent", where: s.day < ^old)
-    Repo.delete_all(from q in "quota", where: q.day < ^old)
-    Repo.delete_all(from i in "inbox", where: i.inserted_at < ^keep)
-    Repo.delete_all(from k in "key_packages", where: k.key in ^ended)
-    old_blobs = Repo.all(from b in "blobs", where: b.inserted_at < ^keep, select: b.id)
+    {:ok, result} =
+      Repo.transaction(fn ->
+        now = now()
+        ended = Repo.all(from d in Device, where: d.until <= ^now, select: d.key)
+        by_room =
+          ended
+          |> Enum.chunk_every(500)
+          |> Enum.flat_map(&Repo.all(from rd in RoomDevice, where: rd.key in ^&1, select: {rd.room, rd.key}))
+          |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+        for keys <- Enum.chunk_every(ended, 500) do
+          Repo.delete_all(from rd in RoomDevice, where: rd.key in ^keys)
+          Repo.delete_all(from d in Device, where: d.key in ^keys)
+          Repo.delete_all(from k in "key_packages", where: k.key in ^keys)
+        end
+
+        keep = DateTime.add(now, -Application.get_env(:den, :retention_days, 30) * 86_400, :second)
+        Repo.delete_all(from m in Message, where: m.inserted_at < ^keep)
+        old = Date.utc_today() |> Date.add(-2) |> Date.to_iso8601()
+        Repo.delete_all(from i in "issued", where: i.day < ^old)
+        Repo.delete_all(from s in "spent", where: s.day < ^old)
+        Repo.delete_all(from q in "quota", where: q.day < ^old)
+        Repo.delete_all(from i in "inbox", where: i.inserted_at < ^keep)
+        old_blobs = Repo.all(from b in "blobs", where: b.inserted_at < ^keep, select: b.id)
+        for ids <- Enum.chunk_every(old_blobs, 500), do: Repo.delete_all(from b in "blobs", where: b.id in ^ids)
+        {by_room, ended, old_blobs}
+      end)
+
+    {by_room, ended, old_blobs} = result
+    # The files themselves once their rows are gone.
     for id <- old_blobs, do: File.rm(Path.join(Den.Blobs.dir(), id))
-    Repo.delete_all(from b in "blobs", where: b.id in ^old_blobs)
     {by_room, ended}
   end
 end

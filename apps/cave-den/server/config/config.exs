@@ -17,6 +17,11 @@ config :den, Den.Repo,
   # Queries are not logged: their parameters are device keys and room ids.
   log: false,
   default_transaction_mode: :immediate,
+  # Deleted rows are overwritten, not left in free pages: ciphertext past its
+  # 30 days, devices and pass hashes past their day. The write-ahead log is
+  # kept small and truncated after each sweep (Den.Sweeper).
+  secure_delete: :on,
+  journal_size_limit: 67_108_864,
   busy_timeout: 5_000,
   journal_mode: :wal
 

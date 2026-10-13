@@ -19,7 +19,7 @@ defmodule Den.Keys do
 
   @doc "The day's private key, or :error."
   def private(day) do
-    with true <- day =~ ~r/^\d{4}-\d{2}-\d{2}$/,
+    with true <- day =~ ~r/\A\d{4}-\d{2}-\d{2}\z/,
          {:ok, pem} <- File.read(Path.join(dir(), day <> ".pem")),
          [entry] <- :public_key.pem_decode(pem) do
       {:ok, :public_key.pem_entry_decode(entry)}
@@ -41,10 +41,44 @@ defmodule Den.Keys do
     {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 113_549, 1, 1, 1}, <<5, 0>>}, :public_key.der_encode(:RSAPublicKey, pub)}
   end
 
-  @doc "Every day key from `from` for `days` days, public halves: %{day => base64 DER}."
+  @doc """
+  Every day key from `from` for `days` days, public halves: %{day => base64
+  DER}. Read from the private keys once per day and kept: `/door/keys` is
+  asked by anyone, and decoding 31 PEMs a request is work for nothing.
+  """
   def published(from, days) do
-    for d <- 0..(days - 1), day = Date.to_iso8601(Date.add(from, d)), {:ok, der} <- [public_der(day)], into: %{} do
-      {day, Base.encode64(der)}
+    cache = {__MODULE__, :published, from, days, dir()}
+
+    case :persistent_term.get(cache, nil) do
+      nil ->
+        keys = for d <- 0..(days - 1), day = Date.to_iso8601(Date.add(from, d)), {:ok, der} <- [public_der(day)], into: %{}, do: {day, Base.encode64(der)}
+        # A new day gives a new cache key; an empty answer is not kept.
+        if map_size(keys) > 0, do: :persistent_term.put(cache, keys)
+        keys
+
+      keys ->
+        keys
+    end
+  end
+
+  @doc "How many days from `from` on have a key, in a row."
+  def days_ahead(from) do
+    Stream.iterate(from, &Date.add(&1, 1))
+    |> Enum.take_while(&File.exists?(Path.join(dir(), Date.to_iso8601(&1) <> ".pem")))
+    |> length()
+  end
+
+  @doc """
+  Say, in the log, when the door is about to run out of day keys: with none
+  for today nobody can enter, and keys must be made and published ahead.
+  """
+  def check(today \\ Date.utc_today()) do
+    require Logger
+
+    case days_ahead(today) do
+      0 -> Logger.error("den: the door has no key for today (#{today}); nobody can enter. Make keys with `den eval 'Den.Release.keys(90, ...)'` and publish them.")
+      n when n < 14 -> Logger.warning("den: the door has day keys for #{n} more days; make and publish more before #{Date.add(today, n)}.")
+      _ -> :ok
     end
   end
 
@@ -62,14 +96,19 @@ defmodule Den.Keys do
     :ok
   end
 
-  @doc "Sign a blinded message with the day's key: m^d mod n, checked."
+  @doc """
+  Sign a blinded message with the day's key: m^d mod n, checked. Through
+  OpenSSL's RSA (no padding), which uses the key's CRT parameters and blinds
+  the exponentiation, so its timing does not depend on the private exponent;
+  a plain modular power would, on inputs anyone may choose.
+  """
   def blind_sign(day, blinded) do
-    with {:ok, {:RSAPrivateKey, _, n, e, d, _, _, _, _, _, _}} <- private(day),
+    with {:ok, {:RSAPrivateKey, _, n, e, _, _, _, _, _, _, _} = key} <- private(day),
          k = byte_size(:binary.encode_unsigned(n)),
          true <- byte_size(blinded) == k or {:error, :wrong_length},
          m = :binary.decode_unsigned(blinded),
          true <- m < n or {:error, :out_of_range} do
-      s = :crypto.mod_pow(m, d, n)
+      s = :public_key.encrypt_private(blinded, key, rsa_padding: :rsa_no_padding)
       # RFC 9474 §4.3: check the signature before it leaves.
       if :crypto.mod_pow(s, e, n) == :binary.encode_unsigned(m) do
         {:ok, pad(s, k)}

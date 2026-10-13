@@ -16,14 +16,23 @@ defmodule Den.Blobs do
     id = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     File.mkdir_p!(dir())
     path = Path.join(dir(), id)
-    unless File.exists?(path), do: File.write!(path, bytes)
-    Repo.insert_all("blobs", [%{id: id, size: byte_size(bytes), inserted_at: Den.Rooms.now()}], on_conflict: :nothing)
+
+    # Written whole or not at all: to a temporary name, then renamed.
+    unless File.exists?(path) do
+      tmp = path <> ".part-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+      File.write!(tmp, bytes)
+      File.rename!(tmp, path)
+    end
+
+    # Sent again: kept again for its full time.
+    now = Den.Rooms.now()
+    Repo.insert_all("blobs", [%{id: id, size: byte_size(bytes), inserted_at: now}], on_conflict: [set: [inserted_at: now]], conflict_target: :id)
     {:ok, id}
   end
 
   def put(_), do: {:error, :size}
 
   def path(id) do
-    if id =~ ~r/^[0-9a-f]{64}$/ and Repo.exists?(from b in "blobs", where: b.id == ^id), do: {:ok, Path.join(dir(), id)}, else: :error
+    if id =~ ~r/\A[0-9a-f]{64}\z/ and Repo.exists?(from b in "blobs", where: b.id == ^id), do: {:ok, Path.join(dir(), id)}, else: :error
   end
 end

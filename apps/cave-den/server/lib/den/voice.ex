@@ -21,6 +21,29 @@ defmodule Den.Voice do
   default 150), and one client cannot take every port.
   """
   def max_peers, do: Application.get_env(:den, :voice_max_peers, 150)
+
+  @doc """
+  Which of the server's addresses voice offers devices: never loopback,
+  link-local or a Docker bridge (nobody outside reaches those, and they say
+  how the server is set up); with `:voice_public_only`, no private LAN
+  address either, for a den on the open internet.
+  """
+  def ip_ok?({127, _, _, _}), do: false
+  def ip_ok?({169, 254, _, _}), do: false
+  def ip_ok?({172, 17, _, _}), do: false
+  def ip_ok?({0, 0, 0, 0, 0, 0, 0, 1}), do: false
+  def ip_ok?({a, _, _, _, _, _, _, _}) when a in 0xFE80..0xFEBF, do: false
+
+  def ip_ok?(ip) do
+    not (Application.get_env(:den, :voice_public_only, false) and private?(ip))
+  end
+
+  defp private?({10, _, _, _}), do: true
+  defp private?({172, b, _, _}) when b in 16..31, do: true
+  defp private?({192, 168, _, _}), do: true
+  defp private?({100, b, _, _}) when b in 64..127, do: true
+  defp private?({a, _, _, _, _, _, _, _}) when a in 0xFC00..0xFDFF, do: true
+  defp private?(_), do: false
   def peers, do: Registry.count(Den.Voice.Peers)
 
   @doc "An offer as a device may send it: an SDP offer, of a sane size."
@@ -87,7 +110,7 @@ defmodule Den.Voice.Room do
   defp answer(channel, key, offer, s) do
     ports = Application.get_env(:den, :voice_ports, 50_000..50_199)
 
-    case PeerConnection.start_link(ice_port_range: ports, audio_codecs: [:opus], video_codecs: [], controlling_process: self()) do
+    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, audio_codecs: [:opus], video_codecs: [], controlling_process: self()) do
       {:ok, pc} ->
         try do
           :ok = PeerConnection.set_remote_description(pc, SessionDescription.from_json(offer))
