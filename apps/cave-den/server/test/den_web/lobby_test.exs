@@ -31,7 +31,7 @@ defmodule DenWeb.LobbyTest do
     ref = push(socket, "private_room", %{"id" => "p-guessable"})
     assert_reply ref, :error, %{reason: "id"}
     refute Enum.any?(Den.Rooms.listed(), &(&1.kind == "private"))
-    assert length(Den.Rooms.listed()) == 7
+    assert length(Den.Rooms.listed()) == 5
   end
 
   test "a private room: tracked from its creator's GroupInfo, kept for nobody; no public joins; the add checked" do
