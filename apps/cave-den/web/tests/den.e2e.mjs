@@ -129,6 +129,12 @@ ok(await until(A.p, () => [...document.querySelectorAll('#log .quote')].some((q)
 const firstId = await A.p.$eval('#log li.mine', (li) => li.dataset.id);
 await B.p.evaluate(([id]) => window.__den.react('general', id, '👍'), [firstId]);
 ok(await until(A.p, () => /👍 1/.test(document.querySelector('#log')?.textContent || '')), 'A sees B\'s reaction');
+// A reaction outside the page's set is not taken; a mention inside a link stays inside the link.
+await B.p.evaluate(([id]) => window.__den.react('general', id, '🦊'), [firstId]);
+await A.p.fill('#say-text', `see https://example.org/@${B.me.name}/x now`);
+await A.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => [...document.querySelectorAll('#log a')].some((l) => /example\.org\/@m-[0-9a-f]{20}\/x$/.test(l.href) && !l.querySelector('mark') && l.rel.includes('noopener'))), 'a mention inside a link stays a plain part of the link');
+ok(!/🦊/.test(await A.p.textContent('#log')), 'a reaction the page does not offer is not shown');
 const replyId = await B.p.$eval('#log li.mine', (li) => li.dataset.id);
 await B.p.evaluate(([id]) => window.__den.edit('general', id, 'Glad to be here, truly.'), [replyId]);
 ok(await until(A.p, () => /truly\./.test(document.querySelector('#log')?.textContent || '') && /edited/.test(document.querySelector('#log')?.textContent || '')), 'A sees B\'s edit, marked edited');
@@ -163,6 +169,7 @@ const nw = await B.p.evaluate(() => window.__den.push(window.__den.lobby, 'open_
 ok(await until(A.p, ([id]) => document.querySelector(`[data-room="${id}"]`), [nw.id]), 'A sees the room B made');
 await A.p.click(`[data-room="${nw.id}"]`);
 ok(await until(A.p, () => /Members · ([2-9]|\d\d)/.test(document.querySelector('#room-meta')?.textContent || ''), null, 30000), 'both are in it');
+ok(await until(B.p, async ([id, n]) => (await window.__den.log(id)).some((m) => m.t === 'note' && m.text === `${n} joined`), [nw.id, A.me.name], 15000), 'the room tells B that A joined');
 
 // Unread counts.
 await A.p.click('[data-room="general"]');

@@ -2,8 +2,12 @@
 // Everything here works on what den.js keeps on this device; nothing is
 // fetched in the clear but the den's ciphertext and the day keys.
 
-const EMOJI = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
+import { REACTIONS as EMOJI } from './den.js';
 const GROUP_MS = 5 * 60_000;
+// One line of text with nothing hidden in it: no bidirectional or zero-width
+// controls (which can make a name or a file name read backwards), and
+// whitespace collapsed, for names, titles and notifications.
+export const plain = (s) => String(s ?? '').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim();
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const time = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -242,12 +246,21 @@ export function mountDen(den, el, me) {
 
   // ---- Messages -------------------------------------------------------------
 
+  // One pass over the words: code, links, mentions and line breaks are each
+  // found once, in order, so none can land inside another's markup.
+  const TOKENS = /`([^`\n]{1,200})`|(\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'])|@(m-[0-9a-f]{20})|(\n)/g;
   function words(text) {
-    return esc(text)
-      .replace(/`([^`\n]{1,200})`/g, '<code>$1</code>')
-      .replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer nofollow">${u}</a>`)
-      .replace(/@(m-[0-9a-f]{20})/g, (m, n) => `<mark class="${n === me.name ? 'me' : ''}">${m}</mark>`)
-      .replace(/\n/g, '<br>');
+    let out = '';
+    let last = 0;
+    for (const t of String(text).matchAll(TOKENS)) {
+      out += esc(text.slice(last, t.index));
+      if (t[1] !== undefined) out += `<code>${esc(t[1])}</code>`;
+      else if (t[2] !== undefined) out += `<a href="${esc(t[2])}" target="_blank" rel="noopener noreferrer nofollow">${esc(t[2])}</a>`;
+      else if (t[3] !== undefined) out += `<mark class="${t[3] === me.name ? 'me' : ''}">@${esc(t[3])}</mark>`;
+      else out += '<br>';
+      last = t.index + t[0].length;
+    }
+    return out + esc(text.slice(last));
   }
 
   /// One message as list items; `prev` decides the day line and whether it
@@ -256,6 +269,11 @@ export function mountDen(den, el, me) {
     const parts = [];
     if (!prev || dayKey(prev.at) !== dayKey(m.at)) parts.push(`<li class="day" role="separator"><span>${dayName(m.at)}</span></li>`);
     if (readFrom && !m.mine && m.seq > readFrom && (!prev || prev.mine || prev.seq <= readFrom)) parts.push('<li class="new-line" role="separator"><span>New</span></li>');
+    // What happened to the room itself: who joined, who left, who named it.
+    if (m.t === 'note') {
+      parts.push(`<li class="note" data-id="${esc(m.id)}"><span>${esc(m.text)}</span> <time datetime="${new Date(m.at).toISOString()}">${time(m.at)}</time></li>`);
+      return parts.join('');
+    }
     const cont = prev && !m.reply && prev.key === m.key && !prev.deleted && m.at - prev.at < GROUP_MS && !parts.length;
     const own = m.key === me.key;
     const head = `<p class="msg-head"><b class="who" title="${esc(fingerprint(m.key))}">${esc(m.from)}</b>${own ? '<span class="you">you</span>' : ''}<time datetime="${new Date(m.at).toISOString()}" title="${esc(new Date(m.at).toLocaleString())}">${time(m.at)}</time>${m.edited && !m.deleted ? '<span class="edited">edited</span>' : ''}</p>`;
@@ -614,7 +632,7 @@ export function mountDen(den, el, me) {
     if (!document.hidden || notify === 'off' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const priv = den.rooms.get(room_)?.kind === 'private';
     if (notify === 'mentions' && !mention && !priv) return;
-    const n = new Notification(roomTitle(room_), { body: `${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`, tag: room_ });
+    const n = new Notification(plain(roomTitle(room_)), { body: plain(`${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_ });
     n.onclick = () => { window.focus(); go(room_); n.close(); };
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && nearBottom()) { den.markRead(room); drawRooms(); } });
@@ -673,7 +691,7 @@ export function mountDen(den, el, me) {
     if (event === 'message') {
       if (d.room === room) onMessage(d).then(drawRooms);
       else drawRooms();
-      if (!d.mine && d.kind !== 'react') ping(d.room, d.message, d.mention);
+      if (!d.mine && d.kind !== 'react' && d.kind !== 'note' && d.kind !== 'title') ping(d.room, d.message, d.mention);
       if (d.room === room && !d.mine) { delete typing[d.message.key]; drawTyping(); }
     }
     if (event === 'typing' && d.room === room) {

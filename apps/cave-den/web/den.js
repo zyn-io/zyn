@@ -32,6 +32,10 @@ export const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8
 export const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 const FILE_MAX = 25 * 1024 * 1024;
+/// The reactions the page offers (den-ui.js), and the only ones taken.
+export const REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
+/// One line with nothing hidden in it (see den-ui.js plain()).
+const plainText = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim();
 // Shown in place only these; anything else (SVG, HTML, …) is a download.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 
@@ -44,7 +48,7 @@ export function fileMeta(f) {
   if (typeof f.blob !== 'string' || !/^[0-9a-f]{64}$/.test(f.blob)) return null;
   if (!bytes(f.key, 32) || !bytes(f.iv, 12)) return null;
   if (!Number.isSafeInteger(f.size) || f.size < 0 || f.size > FILE_MAX) return null;
-  const name = (typeof f.name === 'string' ? f.name : '').replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
+  const name = (typeof f.name === 'string' ? f.name : '').replace(/[\u0000-\u001f\u007f/\\\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'file';
   const mime = typeof f.mime === 'string' && INLINE.has(f.mime.toLowerCase()) ? f.mime.toLowerCase() : 'application/octet-stream';
   return { blob: f.blob, name, mime, size: f.size, key: f.key, iv: f.iv };
 }
@@ -362,6 +366,7 @@ export class DenClient {
     } else {
       await this.catchUp(room);
     }
+    (this.seenMembers ||= {})[room] = new Set(this.members(room).map((m) => m.key));
     this.on('ready', { room, members: this.members(room) });
     this.tellSeen(room);
     const present = (await this.push(ch, 'state', {})).present || [];
@@ -431,9 +436,27 @@ export class DenClient {
         if (this.rooms.get(room)?.kind !== 'private') return this.sync(room, await this.push(this.channels.get(room), 'state', {}));
         return;
       }
+      await this.noteMembers(room, ev.members);
       this.on('members', { room, members: ev.members });
     }
     await this.save();
+  }
+
+  /// A line in the room's log for each device a commit added or took out.
+  async noteMembers(room, members) {
+    const now = new Set(members.map((m) => m.key));
+    const before = this.seenMembers?.[room];
+    (this.seenMembers ||= {})[room] = now;
+    if (!before) return;
+    const names = new Map(members.map((m) => [m.key, m.name]));
+    const lines = [];
+    for (const k of now) if (!before.has(k) && k !== this.den.key()) lines.push(`${names.get(k)} joined`);
+    for (const k of before) if (!now.has(k)) lines.push(`m-${k.slice(0, 20)} left`);
+    if (!lines.length) return;
+    const log = await this.log(room);
+    for (const text of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', text, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
+    await this.kv.put(`log:${room}`, log.slice(-KEEP));
+    this.on('message', { room, message: log.at(-1), kind: 'note', mine: false, mention: false });
   }
 
   /// This device cannot apply the commit the den ordered at `m.seq`. It says
@@ -511,11 +534,14 @@ export class DenClient {
       if (!mine && m.kh) await this.compareKey(room, new Date(m.at || Date.now()).toISOString().slice(0, 10), m.kh, m);
       const file = m.t === 'file' ? fileMeta(m.file) : null;
       if (m.t === 'file' && !file) return;
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
+      // As the sender's page caps it: a longer message from a modified client is cut.
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
-      if (i < 0 || typeof m.emoji !== 'string' || !m.emoji || [...m.emoji].length > 4) return;
+      // Only the reactions the page offers, and at most a dozen kinds a message.
+      if (i < 0 || !REACTIONS.includes(m.emoji)) return;
+      if (!log[i].reactions[m.emoji] && Object.keys(log[i].reactions).length >= 12) return;
       // Counted by the reactor's key (the MLS sender's), not by its name.
       if (!m.key) return;
       const r = (log[i].reactions[m.emoji] ||= []);
@@ -535,9 +561,17 @@ export class DenClient {
       if (!mine) await this.compareKey(room, m.day, m.key_hash, m);
       return;
     } else if (m.t === 'title') {
+      // A private room's name: one line, never a member's name (which would
+      // make it look like a one-to-one room with someone else), and the room
+      // is told who gave it.
       const r = this.rooms.get(room);
-      if (r && r.kind === 'private') { r.title = String(m.text || '').slice(0, 60); await this.keepPrivate(); this.on('rooms', [...this.rooms.values()]); }
-      return;
+      const title = plainText(m.text).slice(0, 60);
+      if (!r || r.kind !== 'private' || !title || /^m-[0-9a-f]/i.test(title)) return;
+      r.title = title;
+      await this.keepPrivate();
+      this.on('rooms', [...this.rooms.values()]);
+      shown = { id: `note-${m.id}`, t: 'note', text: `${m.from} named the room “${title}”`, at: m.at || Date.now(), seq: m.seq || 0, reactions: {} };
+      log.push(shown);
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
     this.on('message', { room, message: shown, kind: m.t, mine, mention: !mine && (m.text || '').includes(`@${this.me.name}`) });
