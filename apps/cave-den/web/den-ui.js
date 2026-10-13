@@ -780,6 +780,22 @@ export function mountDen(den, el, me) {
     }
   };
 
+  // This device's own settings: keeping its pass, and forgetting it all.
+  const keep = el('keep-pass');
+  if (keep) {
+    den.keepsPass().then((on) => { keep.checked = on; });
+    keep.onchange = () => den.setKeepPass(keep.checked);
+  }
+  const forgetButton = el('forget');
+  if (forgetButton) {
+    forgetButton.onclick = async () => {
+      if (!(await ask({ heading: 'Forget this device?', text: 'Its chat name, its pass, its rooms and every word it keeps are deleted from this browser. To come back it needs a new way in.', yes: 'Forget', danger: true }))) return;
+      forgetButton.disabled = true;
+      await den.forget();
+      location.reload();
+    };
+  }
+
   drawRooms();
   drawLog();
   drawComposer();

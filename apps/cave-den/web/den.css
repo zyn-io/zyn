@@ -141,8 +141,9 @@ button.group-head:hover { color: var(--ink); }
 .chip:hover { border-color: rgba(240, 238, 230, 0.36); }
 .chip.on { border-color: rgba(199, 240, 75, 0.55); background: rgba(199, 240, 75, 0.08); }
 .chip.on span { color: var(--acid); }
-.tools { position: absolute; top: -14px; right: 16px; z-index: 2; display: none; background: #0d100e; border: 1px solid var(--line); box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5); }
-.msg:hover .tools, .msg:focus-within .tools, .msg.touch .tools { display: flex; }
+/* Out of sight until a message is hovered or focused, but always reachable by keyboard. */
+.tools { position: absolute; top: -14px; right: 16px; z-index: 2; display: flex; opacity: 0; pointer-events: none; background: #0d100e; border: 1px solid var(--line); box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5); }
+.msg:hover .tools, .msg:focus-within .tools, .msg.touch .tools { opacity: 1; pointer-events: auto; }
 .msg:first-child .tools { top: 2px; }
 .tools > button { width: 32px; height: 28px; display: grid; place-items: center; color: var(--muted); background: none; border: 0; cursor: pointer; }
 .tools > button:hover, .tools > button[aria-expanded="true"] { color: var(--ink); background: rgba(240, 238, 230, 0.07); }
@@ -252,3 +253,5 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .log .note time { margin-left: 6px; color: var(--read-dim); }
 .invites .invite { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font: 13.5px/1.4 var(--sans); color: var(--read); }
 .invites .invite span { flex: 1; }
+.side-foot .keep { display: flex; align-items: center; gap: 6px; }
+.side-foot #forget { margin: 6px 0 10px; }

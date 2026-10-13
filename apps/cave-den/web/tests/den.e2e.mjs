@@ -106,6 +106,13 @@ const swapped = await c.p.evaluate(async () => {
   return den.dayKey(d).then(() => 'accepted', (e) => e.message);
 });
 ok(/different door key/.test(swapped), 'a day key different from the pinned one is refused');
+// Forget this device: everything it keeps is gone, and it is outside again.
+const cBefore = (await meOf(c.p)).key;
+await c.p.click('#forget');
+await c.p.click('#ask [data-yes]');
+await c.p.waitForLoadState('networkidle');
+ok(await until(c.p, () => document.querySelector('#den')?.hidden && !document.querySelector('.ledger')?.hidden, null, 15000), 'forgetting the device puts it back outside the door');
+ok((await meOf(c.p)).key !== cBefore, 'and it comes back as a new device, with nothing of the old one');
 await c.ctx.close();
 const A = { p: a.p, me: await meOf(a.p) };
 const B = { p: bb.p, me: await meOf(bb.p) };

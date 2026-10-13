@@ -30,6 +30,9 @@ for (const b of document.querySelectorAll('.tip[data-tip]')) {
 const out = el('chat-out');
 const say = (t, bad = false) => { out.textContent = t; out.classList.toggle('bad', bad); };
 const me = await den.start();
+// Ask the browser not to clear this device's keys under storage pressure.
+navigator.storage?.persist?.().catch(() => {});
+for (const t of document.querySelectorAll('.tip:not([aria-label])')) t.setAttribute('aria-label', 'Explain');
 const open = (session) => {
   el('me').textContent = me.name;
   document.querySelector('.ledger').hidden = true;
@@ -37,6 +40,7 @@ const open = (session) => {
   el('den').hidden = false;
   mountDen(den, el, me);
   den.connect(session);
+
 };
 
 // The ways in. An invite link carries its code after "#", so it never reaches

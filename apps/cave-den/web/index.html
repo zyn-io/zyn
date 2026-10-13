@@ -25,6 +25,7 @@
             <li>Messages, files and voice are end-to-end encrypted (MLS). The den relays what it cannot read; only members' devices hold the keys.</li>
             <li>Whoever runs this den sees which device names are in which room, when they write or talk, file sizes, the names of open rooms, and who joins or leaves which room. The door and the den run on the same server, so they could link your pass to this device by your network address and timing; a VPN or Tor keeps them apart.</li>
             <li>Your words are kept on this device. Clearing the browser's data forgets them and your chat name.</li>
+            <li>This device keeps its pass, so it comes back by itself. You can turn that off, or forget the device, inside.</li>
           </ul>
           <p class="say" id="way-invite" hidden>Have an invite link? Open it on this device.</p>
           <form class="ask-form" id="way-ask" hidden>
@@ -51,6 +52,10 @@
           <div id="found" class="found" hidden></div>
           <nav id="rooms" class="rooms" aria-label="Rooms"></nav>
           <div class="side-foot">
+            <label class="keep"><input type="checkbox" id="keep-pass" checked /> Keep this device's pass
+              <button class="tip" type="button" aria-expanded="false" aria-label="About keeping the pass" data-tip="With the pass kept, this device gets its own day tokens and comes back without going through the door again. Turned off, it is asked for again after tomorrow. Anyone with this browser profile can use a kept pass.">i</button>
+            </label>
+            <button type="button" class="mini ghost" id="forget">Forget this device</button>
             <label>Notifications
               <select id="notify">
                 <option value="mentions">Mentions and private</option>

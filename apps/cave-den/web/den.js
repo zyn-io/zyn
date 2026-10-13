@@ -74,6 +74,11 @@ function store(name, prefix) {
     });
   };
   return {
+    /// Everything this device keeps, gone: the database itself is deleted.
+    wipe: async () => {
+      (await db).close();
+      await new Promise((resolve, reject) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = resolve; r.onerror = () => reject(r.error); r.onblocked = resolve; });
+    },
     get: (k) => tx('readonly', (s) => s.get(`${prefix}:${k}`)),
     put: (k, v) => tx('readwrite', (s) => s.put(v, `${prefix}:${k}`)),
     del: (k) => tx('readwrite', (s) => s.delete(`${prefix}:${k}`)),
@@ -211,7 +216,7 @@ export class DenClient {
     if (!today) throw new Error('The door has published no key for today yet.');
     const tomorrow = await this.tokenFor(code, day(1));
     if (tomorrow) await this.kv.put(`token:${day(1)}`, tomorrow);
-    await this.kv.put('pass', code);
+    if (await this.keepsPass()) await this.kv.put('pass', code);
     return this.enter(today);
   }
 
@@ -863,9 +868,22 @@ export class DenClient {
     return voice;
   }
 
-  /// Forget this device: its key, rooms, session, tokens and words.
+  /// Forget this device: its key, pass, rooms, invitations, session,
+  /// tokens, pinned door keys and words, by deleting its database.
   async forget() {
-    for (const k of ['device', 'seq', 'read', 'session', 'private', `token:${day()}`, `token:${day(1)}`, ...[...this.rooms.keys()].map((r) => `log:${r}`)]) await this.kv.del(k);
+    try { this.socket?.disconnect(); } catch { /* not connected */ }
+    await this.kv.wipe();
+  }
+
+  /// Whether this device keeps its pass code, so it can come back by itself
+  /// (on unless its member turned it off).
+  async keepsPass() {
+    return (await this.kv.get('keep_pass')) !== false;
+  }
+
+  async setKeepPass(on) {
+    await this.kv.put('keep_pass', !!on);
+    if (!on) await this.kv.del('pass');
   }
 }
 
