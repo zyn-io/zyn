@@ -1,0 +1,13 @@
+.git
+**/_build
+**/deps
+**/target
+**/node_modules
+mls/pkg
+web/dist
+server/priv/page
+server/priv/keys
+server/priv/blobs
+server/*.db*
+server/tmp
+server/test

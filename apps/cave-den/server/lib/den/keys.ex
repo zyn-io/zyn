@@ -76,10 +76,31 @@ defmodule Den.Keys do
     require Logger
 
     case days_ahead(today) do
-      0 -> Logger.error("den: the door has no key for today (#{today}); nobody can enter. Make keys with `den eval 'Den.Release.keys(90, ...)'` and publish them.")
-      n when n < 14 -> Logger.warning("den: the door has day keys for #{n} more days; make and publish more before #{Date.add(today, n)}.")
+      0 -> Logger.error("den: the door has no key for today (#{today}); nobody can enter. Let the den keep its keys (DEN_KEYS_AHEAD), or make them with `den eval 'Den.Release.keys(90, ...)'` and publish them.")
+      n when n < 14 -> Logger.warning("den: the door has day keys for #{n} more days; make and publish more before #{Date.add(today, n)}, or let the den keep them (DEN_KEYS_AHEAD).")
       _ -> :ok
     end
+  end
+
+  @doc """
+  Keeps the door's day keys itself: makes a key for each of the next `ahead`
+  days that has none, and deletes keys from before yesterday, which nothing
+  can use any more (the door signs for today and tomorrow, the den admits a
+  token only on its day). `config :den, keys_ahead: 0` (`DEN_KEYS_AHEAD=0`)
+  leaves the keys to the host.
+  """
+  def keep(today \\ Date.utc_today(), ahead \\ Application.get_env(:den, :keys_ahead, 45)) do
+    if ahead > 0 do
+      for d <- 0..(ahead - 1), do: make(Date.to_iso8601(Date.add(today, d)))
+      cutoff = Date.add(today, -1)
+
+      for f <- File.ls!(dir()), [_, day] <- [Regex.run(~r/\A(\d{4}-\d{2}-\d{2})\.pem\z/, f)],
+          {:ok, d} <- [Date.from_iso8601(day)], Date.compare(d, cutoff) == :lt do
+        File.rm!(Path.join(dir(), f))
+      end
+    end
+
+    :ok
   end
 
   @doc "Make the day's key if it does not exist."

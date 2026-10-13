@@ -43,6 +43,9 @@ end
 
 if v = System.get_env("DEN_EXTRA_CHILDREN"), do: config(:den, extra_children: Enum.map(list.(v), module))
 
+# How many days of day keys the den keeps ahead itself (0: the host makes them).
+if v = System.get_env("DEN_KEYS_AHEAD"), do: config(:den, keys_ahead: String.to_integer(v))
+
 if config_env() == :prod do
   database_path =
     System.get_env("DATABASE_PATH") ||

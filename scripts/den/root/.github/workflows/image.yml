@@ -1,0 +1,71 @@
+name: image
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: epeaky:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The image on its own: it starts, keeps its day keys, serves its page
+      # and its door, and prints a new den's first invite.
+      - name: Smoke test
+        run: |
+          mkdir -m 777 data
+          docker run -d --name den --network host -v "$PWD/data:/var/lib/den" \
+            -e SECRET_KEY_BASE="$(openssl rand -base64 48)" -e PHX_HOST=localhost epeaky:test
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:4000/door/ways && break; sleep 2; done
+          curl -fsS http://127.0.0.1:4000/door/ways | grep -q '"invite":true'
+          test "$(curl -fsS http://127.0.0.1:4000/door/keys | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["keys"]))')" -ge 31
+          curl -fsS http://127.0.0.1:4000/ | grep -q '<title>Epeaky</title>'
+          curl -fsSI http://127.0.0.1:4000/den/den_mls_bg.wasm | grep -qi 'application/wasm'
+          docker logs den 2>&1 | grep -q 'Your first invite'
+          docker logs den 2>&1 | tail -20
+          docker rm -f den
+      # The installer, as a host runs it: Caddy in front (its own certificate
+      # for a .localhost name), the page over HTTPS, the first invite printed.
+      - name: Install test
+        run: |
+          sudo EPEAKY_IMAGE=epeaky:test EPEAKY_NO_PULL=1 bash install.sh --domain den.localhost --yes | tee install.log
+          grep -Eq 'https://den\.localhost/#invite=[0-9a-f]{64}' install.log
+          for i in $(seq 1 30); do curl -ksf -o /dev/null --resolve den.localhost:443:127.0.0.1 https://den.localhost/ && break; sleep 2; done
+          curl -ksf --resolve den.localhost:443:127.0.0.1 https://den.localhost/ | grep -q '<title>Epeaky</title>'
+          curl -ksfI --resolve den.localhost:443:127.0.0.1 https://den.localhost/ | grep -qi "content-security-policy: default-src 'none'"
+          curl -ksf --resolve den.localhost:443:127.0.0.1 https://den.localhost/door/ways | grep -q '"invite":true'
+          sudo epeaky invite 2 3 | grep -Ec '#invite=[0-9a-f]{64}' | grep -qx 2
+          sudo epeaky members
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=semver,pattern={{version}}
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

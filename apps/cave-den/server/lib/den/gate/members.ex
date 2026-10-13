@@ -142,6 +142,16 @@ defmodule Den.Gate.Members do
     end
   end
 
+  @doc """
+  A new den's first way in: with nobody on the member list and no invite made
+  yet, one invite for 30 days, so the host can enter. Returns its code, or nil.
+  """
+  def first_invite do
+    if Den.Gate.module() == __MODULE__ and open?(:invite) and not Repo.exists?(from(m in "members")) and not Repo.exists?(from(i in "invites")) do
+      hd(invite(1, 30))
+    end
+  end
+
   # ---- The host's view ----------------------------------------------------------
 
   @doc "Invites: id prefix, when made, until when, whether used or withdrawn."

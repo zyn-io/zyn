@@ -18,6 +18,34 @@ through a blind signature, and the server relays ciphertext it cannot read.
 [THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
 cannot see. Read it before you run a den for people who depend on it.
 
+## Install
+
+On a Linux server (x86-64) with a domain pointing at it, TCP 80 and 443 open,
+and UDP 50000–50199 open for voice:
+
+```sh
+curl -fsSL https://epeaky.zyn-network.com/install.sh | sudo bash
+# or: sudo bash install.sh --domain chat.example.org [--email you@example.org] [--yes]
+```
+
+It installs Docker if it is missing (after asking), puts the den and Caddy
+(TLS from Let's Encrypt) in `/opt/epeaky`, starts them, and prints your first
+invite link: open it on the device you will use. Then, on the server:
+
+```sh
+epeaky invite 5 7      # 5 one-use invite links, good for 7 days
+epeaky requests        # people asking to join, once approval is open
+epeaky approve <id>    # or: epeaky decline <id>
+epeaky members         # how many, by the way they joined
+epeaky update          # the latest image
+```
+
+Settings are in `/opt/epeaky/.env` (the ways in, the rooms; then
+`docker compose up -d` there). Voice offers devices the server's own public
+addresses: on a host whose public address is not on the machine itself (AWS
+and GCP put it behind NAT), set `DEN_VOICE_PUBLIC_ONLY=0`, and expect voice to
+work only for devices that can reach that private address.
+
 ## Layout
 
 | Path | What it is |
@@ -47,7 +75,10 @@ web/build.sh                             # the page → server/priv/page/
 
 ## Run
 
-`server/Dockerfile` builds a release. Run it bound to loopback behind a TLS
+The `Dockerfile` at the root builds the whole den, the wasm and the page
+included: `docker build -t epeaky .` (the image `ghcr.io/zyn-io/epeaky` is
+built the same way). `server/Dockerfile` builds only the server, around a page
+already built into `server/priv/page`. Run it bound to loopback behind a TLS
 proxy that sends `X-Forwarded-Proto: https`; the den forces https and
 redirects every request that arrives without it.
 
@@ -66,6 +97,8 @@ redirects every request that arrives without it.
 | `DEN_ROOMS` | the rooms every member sees, as `id:Title,…` (default `general:General`) |
 | `DEN_GATE` | another gate module, compiled in from `extra/` |
 | `DEN_EXTRA_CHILDREN` | processes an add-on starts, by module name |
+| `DEN_KEYS_AHEAD` | days of day keys the den keeps ahead itself (default 45; 0: the host makes them) |
+| `DEN_VOICE_PUBLIC_ONLY` | `1`: voice offers devices only public addresses |
 | `POOL_SIZE` | database connections |
 
 **Limits** go under `config :den, :limits`, each key optional. They are per
@@ -86,12 +119,13 @@ Ciphertext and files are kept `retention_days` (30) days.
 Voice needs UDP ports 50000–50199 open to the internet. There is no TURN
 server option yet, so a member behind a strict NAT may not get audio.
 
-**Day keys.** `mix den.keys --days 90 --out den-keys.json` (or
-`bin/den eval 'Den.Release.keys(90, "den-keys.json")'` in a release) makes one
-signing key per UTC day ahead, for days that have none, and writes their public
-halves to one JSON file. Publish that file from the page's own origin, the
-same for everyone, and publish new keys before the old ones run out, or
-nobody can enter after the last day.
+**Day keys.** The door signs with one key per UTC day. The den keeps them
+itself: it makes 45 days ahead (`DEN_KEYS_AHEAD`), deletes those it can no
+longer use, and publishes the next 31 at `/door/keys`, the same for everyone,
+which the page reads by default. A host who would rather publish keys from
+somewhere else sets `DEN_KEYS_AHEAD=0`, makes them with
+`bin/den eval 'Den.Release.keys(90, "den-keys.json")'`, publishes that file,
+and points the page's `keysUrl` at it.
 
 ## The page
 
@@ -106,7 +140,7 @@ styles, and write `config.json`:
 
 | Key | |
 |---|---|
-| `keysUrl` | where the day keys are published (default `/den-keys.json`, on the den) |
+| `keysUrl` | where the day keys are published (default `/door/keys`, on the den) |
 | `prefix` | the name this browser keeps the den's state under |
 | `issuer` | the page that lets members in (below) |
 

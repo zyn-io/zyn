@@ -114,6 +114,32 @@ defmodule Den.MembersTest do
     assert %{"status" => "pending"} = build_conn() |> get("/door/ask/" <> id) |> json_response(200)
   end
 
+  test "a new den makes one first invite, and only while it has nobody and no invite" do
+    code = Members.first_invite()
+    assert code =~ ~r/\A[0-9a-f]{64}\z/
+    assert Members.first_invite() == nil, "once there is an invite"
+    {_, pass} = device_pass()
+    assert Members.join(code, pass) == :ok
+    assert Members.first_invite() == nil, "once there is a member"
+  end
+
+  test "the den keeps its own day keys: ahead, and none from before yesterday" do
+    dir = Path.join(System.tmp_dir!(), "den-keep-#{System.unique_integer([:positive])}")
+    Application.put_env(:den, :keys_dir, dir)
+    File.mkdir_p!(dir)
+    for d <- ["2026-10-01", "2026-10-10"], do: File.write!(Path.join(dir, d <> ".pem"), "old")
+    File.write!(Path.join(dir, "notes.txt"), "left alone")
+    assert Den.Keys.keep(~D[2026-10-12], 3) == :ok
+    assert File.ls!(dir) |> Enum.sort() == ["2026-10-12.pem", "2026-10-13.pem", "2026-10-14.pem", "notes.txt"]
+    assert Den.Keys.days_ahead(~D[2026-10-12]) == 3
+    assert {:ok, _} = Den.Keys.public_der("2026-10-13")
+    before = File.read!(Path.join(dir, "2026-10-13.pem"))
+    Den.Keys.keep(~D[2026-10-12], 3)
+    assert File.read!(Path.join(dir, "2026-10-13.pem")) == before, "an existing key is never replaced"
+    assert Den.Keys.keep(~D[2026-10-12], 0) == :ok
+    File.rm_rf!(dir)
+  end
+
   test "a pass hash is SHA-256 over a zero byte, the domain and the code, as the page makes it" do
     assert Base.encode16(Members.hash(:binary.copy(<<0x11>>, 32)), case: :lower) == "89fbbb8554656bd7bdd0f200b552b67d6cc3c8faabd86261531e1d49ce822833"
   end

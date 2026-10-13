@@ -27,7 +27,7 @@ test('the core page has nothing of the Cave or Zyn in it', async () => {
 test("the client takes day keys from the host's one file, and keeps tomorrow's token", async () => {
   const den = await read('../den.js');
   const app = await read('../app.js');
-  assert.match(app, /keysUrl: config\.keysUrl \|\| '\/den-keys\.json'/);
+  assert.match(app, /keysUrl: config\.keysUrl \|\| '\/door\/keys'/, "by default the den's own published keys");
   assert.match(den, /fetch\(this\.keysUrl, \{ credentials: 'omit' \}\)/);
   // The door gets the pass code and a blinded token; the den gets the token, later.
   assert.match(den, /this\.post\('\/door\/sign', \{ code, day: d, blinded: JSON\.parse\(pending\)\.blinded \}\)/);

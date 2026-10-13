@@ -1,5 +1,5 @@
 {
-  "keysUrl": "/den-keys.json",
+  "keysUrl": "/door/keys",
   "prefix": "den",
   "issuer": null
 }

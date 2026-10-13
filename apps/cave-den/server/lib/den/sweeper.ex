@@ -10,16 +10,23 @@ defmodule Den.Sweeper do
 
   @impl true
   def init(_) do
-    Den.Keys.check()
     schedule()
-    {:ok, nil}
+    {:ok, nil, {:continue, :keys}}
+  end
+
+  # The den's own day keys, made before anyone asks for them; then checked.
+  @impl true
+  def handle_continue(:keys, s) do
+    Den.Keys.keep()
+    Den.Keys.check()
+    {:noreply, s}
   end
 
   @impl true
   def handle_info(:sweep, s) do
     run()
     # Once an hour: does the door still have day keys ahead?
-    if rem(System.os_time(:second), 3600) < div(Application.get_env(:den, :sweep_ms, 60_000), 1000), do: Den.Keys.check()
+    if rem(System.os_time(:second), 3600) < div(Application.get_env(:den, :sweep_ms, 60_000), 1000), do: (Den.Keys.keep(); Den.Keys.check())
     schedule()
     {:noreply, s}
   end
