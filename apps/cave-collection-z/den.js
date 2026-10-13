@@ -31,6 +31,24 @@ export const VOICE_LABEL = 'cave-den voice';
 
 export const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+const FILE_MAX = 25 * 1024 * 1024;
+// Shown in place only these; anything else (SVG, HTML, …) is a download.
+const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
+
+/// A file message's fields as another device sent them, checked: a den blob
+/// id, a 32-byte key, a 12-byte iv, a size in range, a plain name. Null if
+/// any is wrong.
+export function fileMeta(f) {
+  if (!f || typeof f !== 'object') return null;
+  const bytes = (v, n) => { try { return typeof v === 'string' && unb64(v).length === n; } catch { return false; } };
+  if (typeof f.blob !== 'string' || !/^[0-9a-f]{64}$/.test(f.blob)) return null;
+  if (!bytes(f.key, 32) || !bytes(f.iv, 12)) return null;
+  if (!Number.isSafeInteger(f.size) || f.size < 0 || f.size > FILE_MAX) return null;
+  const name = (typeof f.name === 'string' ? f.name : '').replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
+  const mime = typeof f.mime === 'string' && INLINE.has(f.mime.toLowerCase()) ? f.mime.toLowerCase() : 'application/octet-stream';
+  return { blob: f.blob, name, mime, size: f.size, key: f.key, iv: f.iv };
+}
 const unhex = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
 const hex = (u8) => [...u8].map((x) => x.toString(16).padStart(2, '0')).join('');
 const rand = (n) => crypto.getRandomValues(new Uint8Array(n));
@@ -342,8 +360,10 @@ export class DenClient {
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
     if (m.t === 'msg' || m.t === 'file') {
-      if (at(m.id) >= 0) return;
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: m.text || '', reply: m.reply || null, file: m.t === 'file' ? m.file : null, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
+      if (typeof m.id !== 'string' || at(m.id) >= 0) return;
+      const file = m.t === 'file' ? fileMeta(m.file) : null;
+      if (m.t === 'file' && !file) return;
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
@@ -413,7 +433,7 @@ export class DenClient {
   /// A file: sealed here with a one-time key, its ciphertext to the den, the
   /// key only in the room's message.
   async sendFile(room, file) {
-    if (file.size > 25 * 1024 * 1024) throw new Error('A file is at most 25 MB.');
+    if (file.size > FILE_MAX) throw new Error('A file is at most 25 MB.');
     const raw = rand(32);
     const iv = rand(12);
     const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
@@ -425,7 +445,9 @@ export class DenClient {
   }
 
   /// A file from the den, opened here.
-  async openFile(file) {
+  async openFile(given) {
+    const file = fileMeta(given);
+    if (!file) throw new Error('That file cannot be opened.');
     const r = await fetch(`${this.base}/blob/${file.blob}`, { headers: { authorization: `Bearer ${this.sessionToken.session}` }, credentials: 'omit' });
     if (!r.ok) throw new Error('That file is gone (files are kept 30 days).');
     const key = await crypto.subtle.importKey('raw', unb64(file.key), 'AES-GCM', false, ['decrypt']);
@@ -557,10 +579,11 @@ export class DenClient {
 
   // ---- Voice -----------------------------------------------------------------
 
-  /// The room's voice key for this epoch: every member derives it alike.
-  async voiceKey(room) {
-    const raw = this.den.export(room, VOICE_LABEL, 32);
-    return { index: Number(this.den.epoch(room)) % 256, key: await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']) };
+  /// One member's voice key for this epoch: every member derives it alike,
+  /// and it opens only frames sealed by that member.
+  async voiceKey(room, sender) {
+    const raw = this.den.export(room, `${VOICE_LABEL}|${sender}`, 32);
+    return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
   }
 
   /// Join a room's voice: one connection to the den, our microphone up,
@@ -580,62 +603,53 @@ export class DenClient {
 }
 
 // ---------------------------------------------------------------------------
-// Voice: WebRTC to the den's forwarding unit; each audio frame sealed with
-// AES-GCM under the room's voice key: [ciphertext ‖ tag][iv 12][key index 1].
+// Voice: WebRTC to the den's forwarding unit; each audio frame sealed in a
+// worker (den-voice-worker.js) under its sender's key for the epoch.
 
 const supportsScript = typeof RTCRtpScriptTransform !== 'undefined';
+const supportsStreams = typeof RTCRtpSender !== 'undefined' && 'createEncodedStreams' in RTCRtpSender.prototype;
+const VOICE_BITRATE = 64_000;
 
 class Voice {
   constructor(client, room, onSlots) {
     Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], sealed: 0, opened: 0, failed: 0 });
   }
 
+  /// Keys for us and everyone in a slot, for this epoch; the last three
+  /// epochs are kept for frames still in flight.
   async refreshKey() {
-    const { index, key } = await this.client.voiceKey(this.room);
-    this.keys.set(index, key);
+    const index = Number(this.client.den.epoch(this.room)) % 256;
+    const me = this.client.den.key();
+    const ks = index === this.current ? this.keys.get(index) : new Map();
+    for (const k of [me, ...this.people.map((p) => p.key)]) {
+      if (!ks.has(k)) ks.set(k, await this.client.voiceKey(this.room, k));
+    }
+    this.keys.delete(index);
+    this.keys.set(index, ks);
     this.current = index;
-    if (this.keys.size > 3) this.keys.delete([...this.keys.keys()][0]);
-    this.worker?.postMessage({ keys: [...this.keys.entries()], current: index });
+    while (this.keys.size > 3) this.keys.delete(this.keys.keys().next().value);
+    this.worker.postMessage({ keys: [...this.keys].map(([i, m]) => [i, [...m]]), current: index, me });
   }
 
-  async seal(frame) {
-    const key = this.keys.get(this.current);
-    const iv = rand(12);
-    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, frame.data));
-    const out = new Uint8Array(ct.length + 13);
-    out.set(ct); out.set(iv, ct.length); out[ct.length + 12] = this.current;
-    frame.data = out.buffer;
-    this.sealed++;
-    return frame;
+  /// Which member speaks in which down slot, as the den names them.
+  postSlots() {
+    const byMid = new Map(this.people.map((p) => [p.mid, p.key]));
+    this.worker.postMessage({ slots: this.downs.map((t, i) => [i, byMid.get(t.mid)]).filter(([, k]) => k) });
   }
 
-  async open(frame) {
-    const d = new Uint8Array(frame.data);
-    if (d.length < 29) throw new Error('short');
-    const key = this.keys.get(d[d.length - 1]);
-    if (!key) throw new Error('no key for that epoch');
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: d.subarray(d.length - 13, d.length - 1) }, key, d.subarray(0, d.length - 13));
-    frame.data = plain;
-    this.opened++;
-    return frame;
-  }
-
-  transform(endpoint, mode) {
+  transform(endpoint, mode, slot) {
     if (supportsScript) {
-      this.worker ??= new Worker(new URL('./den/voice-worker.js', import.meta.url));
-      this.worker.postMessage({ keys: [...this.keys.entries()], current: this.current });
-      this.worker.onmessage = (e) => { if (e.data.count) { this.sealed = e.data.sealed; this.opened = e.data.opened; } };
-      endpoint.transform = new RTCRtpScriptTransform(this.worker, { mode });
+      endpoint.transform = new RTCRtpScriptTransform(this.worker, { mode, slot });
       return;
     }
     const { readable, writable } = endpoint.createEncodedStreams();
-    const step = mode === 'seal' ? (f) => this.seal(f) : (f) => this.open(f);
-    readable.pipeThrough(new TransformStream({
-      transform: async (frame, ctl) => { try { ctl.enqueue(await step(frame)); } catch { this.failed++; } },
-    })).pipeTo(writable);
+    this.worker.postMessage({ readable, writable, mode, slot }, [readable, writable]);
   }
 
   async start() {
+    if (!supportsScript && !supportsStreams) throw new Error('This browser cannot encrypt voice.');
+    this.worker = new Worker(new URL('./den/voice-worker.js', import.meta.url));
+    this.worker.onmessage = (e) => { if (e.data.count) Object.assign(this, { sealed: e.data.sealed, opened: e.data.opened, failed: e.data.failed }); };
     await this.refreshKey();
     this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
       .catch((e) => { throw new Error(e?.name === 'NotAllowedError' ? 'The microphone is blocked for this page.' : 'No microphone found.'); });
@@ -645,7 +659,7 @@ class Voice {
     this.transform(up.sender, 'seal');
     this.downs = [];
     for (let i = 0; i < 8; i++) this.downs.push(pc.addTransceiver('audio', { direction: 'recvonly' }));
-    for (const t of this.downs) this.transform(t.receiver, 'open');
+    this.downs.forEach((t, i) => this.transform(t.receiver, 'open', i));
     pc.ontrack = (e) => {
       const stream = new MediaStream([e.track]);
       const audio = new Audio();
@@ -661,6 +675,7 @@ class Voice {
     ch.on('ice', (c) => pc.addIceCandidate(c).catch(() => {}));
     ch.on('slots', (slots) => {
       this.people = Object.entries(slots).map(([mid, key]) => ({ mid, key }));
+      this.refreshKey().then(() => this.postSlots()).catch(() => {});
       this.onSlots(this.people);
     });
     pc.onicecandidate = (e) => { if (e.candidate) ch.push('ice', e.candidate.toJSON()); };
@@ -669,10 +684,15 @@ class Voice {
     await pc.setLocalDescription(offer);
     const answer = await this.client.push(ch, 'offer', { type: 'offer', sdp: offer.sdp });
     await pc.setRemoteDescription(answer);
+    this.postSlots();
+    const p = up.sender.getParameters();
+    p.encodings = p.encodings?.length ? p.encodings : [{}];
+    p.encodings[0].maxBitrate = VOICE_BITRATE;
+    await up.sender.setParameters(p).catch(() => {});
     // A new epoch (someone joined or left the room): a new voice key.
     this.offMembers = setInterval(() => {
       const e = Number(this.client.den.epoch(this.room)) % 256;
-      if (e !== this.current) this.refreshKey();
+      if (e !== this.current) this.refreshKey().catch(() => {});
     }, 1000);
   }
 

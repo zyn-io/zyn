@@ -41,3 +41,17 @@ test("the den's client is served from this site: its wasm, the pinned socket cli
   assert.match(den, /this\.post\('\/door\/sign', \{ code, day: d, blinded: JSON\.parse\(pending\)\.blinded \}\)/);
   assert.match(den, /kv\.put\(`token:\$\{d\}`, token\)/, "tomorrow's token is kept for tomorrow");
 });
+
+test('a file message from another device is checked before it is shown or fetched', async () => {
+  const { fileMeta } = await import('../dist/den.js');
+  const b64 = (n) => Buffer.alloc(n, 7).toString('base64');
+  const good = { blob: 'a'.repeat(64), name: 'cave.png', mime: 'image/png', size: 1000, key: b64(32), iv: b64(12) };
+  assert.deepEqual(fileMeta(good), good);
+  for (const bad of [{ blob: '../door/keys' }, { blob: 'A'.repeat(64) }, { key: b64(16) }, { iv: 'not base64!' }, { size: -1 }, { size: 26 * 1024 * 1024 }, { size: '9' }]) {
+    assert.equal(fileMeta({ ...good, ...bad }), null, JSON.stringify(bad));
+  }
+  assert.equal(fileMeta({ ...good, mime: 'image/svg+xml' }).mime, 'application/octet-stream', 'SVG is a download, never shown in place');
+  assert.equal(fileMeta({ ...good, mime: 'text/html' }).mime, 'application/octet-stream');
+  assert.equal(fileMeta({ ...good, name: '../../etc/pass\u0000wd' }).name, '....etcpasswd');
+  assert.equal(fileMeta({ ...good, name: 7 }).name, 'file');
+});

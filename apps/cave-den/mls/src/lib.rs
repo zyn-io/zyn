@@ -414,6 +414,23 @@ pub mod token {
         move |e| format!("{what}: {e}")
     }
 
+    /// A day key as published, checked before use: RSA with a modulus of 2048
+    /// to 4096 bits and e = 65537, so a weak or odd key is refused here.
+    pub fn door_key(der: &[u8]) -> Result<Pk, String> {
+        let pk = Pk::from_der(der).map_err(err("door key"))?;
+        let n = pk.components().n();
+        let n = &n[n.iter().position(|&b| b != 0).unwrap_or(n.len())..];
+        let bits = n.len() * 8 - n.first().map_or(8, |b| b.leading_zeros() as usize);
+        if !(2048..=4096).contains(&bits) {
+            return Err(format!("door key: a {bits}-bit modulus"));
+        }
+        let e = pk.components().e();
+        if e[e.iter().position(|&b| b != 0).unwrap_or(e.len())..] != [1u8, 0, 1][..] {
+            return Err("door key: the exponent is not 65537".into());
+        }
+        Ok(pk)
+    }
+
     /// What the device keeps between asking the door and redeeming.
     #[derive(Serialize, Deserialize)]
     pub struct Pending {
@@ -426,7 +443,7 @@ pub mod token {
     /// A token for `day`, bound to the device's signature key: blinded for the
     /// door. The door sees only `blinded`.
     pub fn blind(pk_der: &[u8], day: &str, device_key: &str) -> Result<Pending, String> {
-        let pk = Pk::from_der(pk_der).map_err(err("door key"))?;
+        let pk = door_key(pk_der)?;
         let mut nonce = [0u8; 16];
         getrandom::getrandom(&mut nonce).map_err(err("randomness"))?;
         let msg = format!("cave-den-token-v1|{day}|{device_key}|{}", hex::encode(nonce));
@@ -441,7 +458,7 @@ pub mod token {
 
     /// The door's blind signature, unblinded into a signature on the token.
     pub fn finalize(pk_der: &[u8], pending: &Pending, blind_sig: &[u8]) -> Result<String, String> {
-        let pk = Pk::from_der(pk_der).map_err(err("door key"))?;
+        let pk = door_key(pk_der)?;
         let randomizer: [u8; 32] = hex::decode(&pending.randomizer).map_err(err("randomizer"))?.try_into().map_err(|_| "randomizer length".to_string())?;
         let result = BlindingResult {
             blind_message: BlindMessage(hex::decode(&pending.blinded).map_err(err("blinded"))?),
@@ -828,5 +845,19 @@ mod tests {
         let randomizer: [u8; 32] = hex::decode(&p.randomizer).unwrap().try_into().unwrap();
         let s = blind_rsa_signatures::Signature(hex::decode(&sig).unwrap());
         assert!(kp.pk.verify(&s, Some(blind_rsa_signatures::MessageRandomizer(randomizer)), p.msg.as_bytes()).is_ok());
+    }
+
+    /// A day key with e = 3 (which the RSA library alone would take) is
+    /// refused before anything is blinded.
+    #[test]
+    fn an_odd_day_key_is_refused() {
+        // PKCS#1 RSAPublicKey { n: 2048 bits, top and bottom bit set; e: 3 }.
+        let mut n = vec![0xc5u8; 256];
+        n[255] |= 1;
+        let mut der = vec![0x30, 0x82, 0x01, 0x08, 0x02, 0x82, 0x01, 0x01, 0x00];
+        der.extend(n);
+        der.extend([0x02, 0x01, 0x03]);
+        let err = token::blind(&der, "2026-10-12", "ab".repeat(32).as_str()).err().unwrap();
+        assert!(err.contains("65537"), "{err}");
     }
 }

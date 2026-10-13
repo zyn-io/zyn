@@ -1,41 +1,100 @@
-// The den's voice frames, sealed and opened off the main thread where the
-// browser offers RTCRtpScriptTransform (Safari, Firefox): AES-GCM under the
-// room's voice key, [ciphertext ‖ tag][iv 12][key index 1].
+// The den's voice frames, sealed and opened off the main thread: AES-GCM under
+// the sender's own voice key for the epoch (the MLS exporter, labelled with the
+// sender's key), so a slot opens only under the key of the member the slot map
+// names. Frame: [ciphertext ‖ tag][iv 12][counter 8][key index 1]; the last
+// nine bytes are authenticated, and a counter already seen is refused.
+//
+// Streams arrive by transfer (Chrome) or through RTCRtpScriptTransform
+// (Safari, Firefox).
 
-let keys = new Map();
-let current = 0;
+const TAIL = 21;
+const TAG = 16;
+const WINDOW = 64n;
+
+let keys = new Map(); // key index → Map(sender key hex → CryptoKey)
+let current = -1;
+let me = '';
+let slots = new Map(); // slot → sender key hex
+const seen = new Map(); // sender key hex → { max, mask }
+let counter = Date.now() * 1000; // above any counter this device sent before
 let sealed = 0;
 let opened = 0;
+let failed = 0;
 
 onmessage = (e) => {
-  if (e.data.keys) {
-    keys = new Map(e.data.keys);
-    current = e.data.current;
+  const d = e.data;
+  if (d.keys) {
+    keys = new Map(d.keys.map(([i, ks]) => [i, new Map(ks)]));
+    current = d.current;
+    me = d.me;
   }
+  if (d.slots) slots = new Map(d.slots);
+  if (d.readable) pipe(d.readable, d.writable, d.mode, d.slot);
 };
 
+onrtctransform = (e) => pipe(e.transformer.readable, e.transformer.writable, e.transformer.options.mode, e.transformer.options.slot);
+
+setInterval(() => postMessage({ count: true, sealed, opened, failed }), 2000);
+
+function pipe(readable, writable, mode, slot) {
+  const step = mode === 'seal' ? seal : (f) => open(f, slot);
+  readable
+    .pipeThrough(new TransformStream({ transform: async (f, c) => { try { c.enqueue(await step(f)); } catch { failed++; } } }))
+    .pipeTo(writable);
+}
+
 async function seal(frame) {
+  const key = keys.get(current)?.get(me);
+  if (!key) throw new Error('no key');
+  counter++;
+  const head = new Uint8Array(9);
+  const v = new DataView(head.buffer);
+  v.setUint32(0, Math.floor(counter / 2 ** 32));
+  v.setUint32(4, counter >>> 0);
+  head[8] = current;
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, keys.get(current), frame.data));
-  const out = new Uint8Array(ct.length + 13);
-  out.set(ct); out.set(iv, ct.length); out[ct.length + 12] = current;
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: head }, key, frame.data));
+  const out = new Uint8Array(ct.length + TAIL);
+  out.set(ct);
+  out.set(iv, ct.length);
+  out.set(head, ct.length + 12);
   frame.data = out.buffer;
   sealed++;
   return frame;
 }
 
-async function open(frame) {
+async function open(frame, slot) {
   const d = new Uint8Array(frame.data);
-  const key = keys.get(d[d.length - 1]);
-  frame.data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: d.subarray(d.length - 13, d.length - 1) }, key, d.subarray(0, d.length - 13));
+  if (d.length < TAG + TAIL) throw new Error('short');
+  const sender = slots.get(slot);
+  const head = d.slice(d.length - 9);
+  const key = sender && keys.get(head[8])?.get(sender);
+  if (!key) throw new Error('no key');
+  const v = new DataView(head.buffer);
+  const n = BigInt(v.getUint32(0)) * 2n ** 32n + BigInt(v.getUint32(4));
+  const iv = d.subarray(d.length - TAIL, d.length - 9);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: head }, key, d.subarray(0, d.length - TAIL));
+  if (!fresh(sender, n)) throw new Error('replay');
+  frame.data = plain;
   opened++;
   return frame;
 }
 
-onrtctransform = (e) => {
-  const step = e.transformer.options.mode === 'seal' ? seal : open;
-  e.transformer.readable
-    .pipeThrough(new TransformStream({ transform: async (f, c) => { try { c.enqueue(await step(f)); } catch { /* a frame from before our key */ } } }))
-    .pipeTo(e.transformer.writable);
-  setInterval(() => postMessage({ count: true, sealed, opened }), 2000);
-};
+/// A sliding window of 64 frames per sender: newer counters move it on, a
+/// late frame inside it is taken once, anything older is refused.
+function fresh(sender, n) {
+  const s = seen.get(sender);
+  if (!s) { seen.set(sender, { max: n, mask: 1n }); return true; }
+  if (n > s.max) {
+    const shift = n - s.max;
+    s.mask = shift >= WINDOW ? 1n : ((s.mask << shift) | 1n) & ((1n << WINDOW) - 1n);
+    s.max = n;
+    return true;
+  }
+  const back = s.max - n;
+  if (back >= WINDOW) return false;
+  const bit = 1n << back;
+  if (s.mask & bit) return false;
+  s.mask |= bit;
+  return true;
+}

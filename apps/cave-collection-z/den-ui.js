@@ -20,6 +20,11 @@ function dayName(t) {
 // A device's mark: a 5×5 mirrored pixel pattern from its key, so the same
 // device looks the same to everyone, without a name or picture to go on.
 const INKS = ['#c7f04b', '#f4b728', '#7fd1b9', '#e58a6b', '#b9a7e8', '#e9e6dc'];
+// Shown in place: raster images of at most 5 MB (never SVG); den.js already
+// turns any other type into a download.
+const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
+const inlineImage = (f) => INLINE.has(String(f?.mime).toLowerCase()) && f.size <= 5 * 1048576;
+
 export function mark(key, px = 28) {
   const h = String(key || '').replace(/[^0-9a-f]/gi, '').padEnd(16, '0');
   const ink = INKS[parseInt(h.slice(0, 2), 16) % INKS.length];
@@ -255,7 +260,7 @@ export function mountDen(den, el, me) {
     const q = m.reply ? `<button type="button" class="quote" data-jump="${esc(m.reply)}">${quoted ? `<b>${esc(quoted.from)}</b> ${esc(quoted.deleted ? 'Message deleted' : (quoted.text || quoted.file?.name || '').slice(0, 140))}` : 'An earlier message'}</button>` : '';
     let body = `<div class="body">${words(m.text)}${m.edited && cont ? ' <span class="edited">edited</span>' : ''}</div>`;
     if (m.file) {
-      const img = m.file.mime?.startsWith('image/') && m.file.size <= 5 * 1048576;
+      const img = inlineImage(m.file);
       body = img
         ? `<button type="button" class="att" data-view="${esc(m.id)}" aria-label="Open ${esc(m.file.name)}"><img data-blob="${esc(m.id)}" alt="${esc(m.file.name)}" /></button>`
         : `<button type="button" class="file" data-file="${esc(m.id)}">${ICON.file}<span><b>${esc(m.file.name)}</b><small>${size(m.file.size)} · Download</small></span></button>`;
