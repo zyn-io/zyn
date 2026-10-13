@@ -45,4 +45,48 @@ defmodule Den.VoiceTest do
     PeerConnection.stop(pc_a)
     PeerConnection.stop(pc_b)
   end
+
+  test "a bad offer, a second offer, garbage ICE and a full den are refused; the room goes on" do
+    {:ok, room} = Den.Voice.ensure("voice-bad")
+    {pc_a, offer_a} = device()
+    {:ok, _} = Den.Voice.Room.join(room, self(), "key-a", offer_a)
+    assert_receive {:voice, "slots", _}
+    other = spawn_link(fn -> receive do: (:stop -> :ok) end)
+
+    # Offers that are not offers, or not this den's kind, are errors, not crashes.
+    for bad <- [%{}, %{"type" => "offer"}, %{"type" => "offer", "sdp" => 7}, %{"type" => "offer", "sdp" => "v=0 nonsense"}, %{"type" => "offer", "sdp" => String.duplicate("a", 40_000)}] do
+      assert {:error, _} = Den.Voice.Room.join(room, other, "key-x", bad)
+    end
+
+    # An offer with too few slots (one audio line).
+    {:ok, pc_one} = PeerConnection.start(audio_codecs: [:opus], video_codecs: [])
+    {:ok, _} = PeerConnection.add_track(pc_one, MediaStreamTrack.new(:audio))
+    {:ok, one} = PeerConnection.create_offer(pc_one)
+    assert {:error, :offer} = Den.Voice.Room.join(room, other, "key-x", SessionDescription.to_json(one))
+    PeerConnection.stop(pc_one)
+
+    # The same device a second time.
+    {_pc, offer_again} = device()
+    assert {:error, :already} = Den.Voice.Room.join(room, self(), "key-a", offer_again)
+
+    # ICE that is not ICE does nothing.
+    for bad <- [%{"candidate" => 5}, %{"x" => "y"}, %{"candidate" => "candidate:junk"}], do: Den.Voice.Room.ice(room, self(), bad)
+    Process.sleep(50)
+    assert Process.alive?(room)
+    assert Den.Voice.peers() >= 1
+
+    # The den-wide cap: no new connection past it.
+    Application.put_env(:den, :voice_max_peers, Den.Voice.peers())
+    {_pc, offer_b} = device()
+    assert {:error, :busy} = Den.Voice.Room.join(room, other, "key-b", offer_b)
+    Application.delete_env(:den, :voice_max_peers)
+
+    # Leaving gives the connection back.
+    before = Den.Voice.peers()
+    Den.Voice.Room.leave(room, self())
+    Process.sleep(50)
+    assert Den.Voice.peers() == before - 1
+    send(other, :stop)
+    PeerConnection.stop(pc_a)
+  end
 end

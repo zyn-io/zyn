@@ -19,6 +19,8 @@ defmodule Den.Application do
       Den.Sweeper,
       Den.Proposals,
       {Registry, keys: :unique, name: Den.Voice.Registry},
+      # Every voice connection, for the den-wide cap.
+      {Registry, keys: :duplicate, name: Den.Voice.Peers},
       {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one},
       # Start a worker by calling: Den.Worker.start_link(arg)
       # {Den.Worker, arg},
