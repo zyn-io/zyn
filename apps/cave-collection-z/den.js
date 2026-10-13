@@ -260,8 +260,7 @@ export class DenClient {
         return;
       }
     } else {
-      const { messages } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
-      for (const m of messages) await this.take(room, m);
+      await this.catchUp(room);
     }
     this.on('ready', { room, members: this.members(room) });
     const present = (await this.push(ch, 'state', {})).present || [];
@@ -282,9 +281,33 @@ export class DenClient {
     return this.den.rooms().includes(room);
   }
 
-  /// One relayed message: read it, keep it.
-  async take(room, m) {
+  /// Everything the room holds after what this device has read, a page at a
+  /// time (the den caps a reply's size and says when there is more).
+  async catchUp(room) {
+    const ch = this.channels.get(room);
+    for (let page = 0; page < 1000; page++) {
+      const { messages, more } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
+      for (const m of messages) await this.take(room, m, false);
+      if (!more || !messages.length) return;
+    }
+  }
+
+  /// The den ordered something of this device's at `seq`: read what came
+  /// before it first (a broadcast can still be on its way, or be overtaken
+  /// by the den's answer), then stand at `seq`.
+  async advance(room, seq) {
+    if (seq > (this.seq[room] || 0) + 1) await this.catchUp(room);
+    this.seq[room] = Math.max(this.seq[room] || 0, seq);
+  }
+
+  /// One relayed message: read it, keep it. A live message that skips a
+  /// number means one was not seen: those are fetched first, so none is lost.
+  async take(room, m, live = true) {
     if ((this.seq[room] || 0) >= m.seq) return;
+    if (live && m.seq > (this.seq[room] || 0) + 1) {
+      await this.catchUp(room);
+      if ((this.seq[room] || 0) >= m.seq) return;
+    }
     this.seq[room] = m.seq;
     if (!this.inRoom(room)) return;
     let ev;
@@ -355,7 +378,7 @@ export class DenClient {
       for (let tries = 0; tries < 2; tries++) {
         try {
           const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
-          this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
+          await this.advance(room, r.seq);
           await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
           this.markRead(room);
           await this.save();
@@ -363,8 +386,7 @@ export class DenClient {
         } catch (e) {
           if (e.reason !== 'epoch') throw e;
           // Behind: catch up, then send again.
-          const { messages } = await this.push(ch, 'history', { after: this.seq[room] || 0 });
-          for (const x of messages) await this.take(room, x);
+          await this.catchUp(room);
         }
       }
       throw new Error('The room moved while sending; try again.');
@@ -444,8 +466,8 @@ export class DenClient {
       const { commit, welcome } = JSON.parse(this.den.add(room, JSON.stringify(kps), JSON.stringify(keys)));
       try {
         const r = await this.push(this.channels.get(room), 'relay', { bytes: commit });
-        this.seq[room] = r.seq;
         this.den.confirm(room);
+        await this.advance(room, r.seq);
       } catch (e) {
         this.den.discard(room);
         throw e;
@@ -461,7 +483,7 @@ export class DenClient {
   async lockless_send(room, body) {
     const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...body };
     const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
-    this.seq[room] = Math.max(this.seq[room] || 0, r.seq);
+    await this.advance(room, r.seq);
     await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
   }
 
@@ -494,8 +516,8 @@ export class DenClient {
     if (!commit) return;
     try {
       const r = await this.push(this.channels.get(room), 'relay', { bytes: b64(commit) });
-      this.seq[room] = r.seq;
       this.den.confirm(room);
+      await this.advance(room, r.seq);
       await this.publishInfo(room);
       this.on('members', { room, members: this.members(room) });
     } catch {

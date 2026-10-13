@@ -98,12 +98,12 @@ defmodule Den.Rooms do
   end
 
   @doc "Count one `what` for a device today; :ok under `limit`."
-  def quota(key, what, limit) do
+  def quota(key, what, limit, amount \\ 1) do
     day = Date.to_iso8601(Date.utc_today())
     Repo.transaction(fn ->
       n = Repo.one(from q in "quota", where: q.key == ^key and q.day == ^day and q.what == ^what, select: q.count) || 0
-      if n >= limit, do: Repo.rollback(:quota)
-      Repo.insert_all("quota", [%{key: key, day: day, what: what, count: n + 1}], on_conflict: [set: [count: n + 1]], conflict_target: [:key, :day, :what])
+      if n + amount > limit, do: Repo.rollback(:quota)
+      Repo.insert_all("quota", [%{key: key, day: day, what: what, count: n + amount}], on_conflict: [set: [count: n + amount]], conflict_target: [:key, :day, :what])
     end)
     |> case do
       {:ok, _} -> :ok

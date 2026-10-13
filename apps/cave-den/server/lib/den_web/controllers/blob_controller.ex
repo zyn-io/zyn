@@ -19,13 +19,16 @@ defmodule DenWeb.BlobController do
 
   def create(conn, _) do
     with {:ok, key} <- device(conn),
-         :ok <- Den.Rooms.quota(key, "file", 200),
+         true <- Den.Limits.disk_ok?() || {:error, :disk},
+         :ok <- Den.Rooms.quota(key, "file", Den.Limits.get(:files)),
          {:ok, body, conn} <- read_all(conn, ""),
+         :ok <- Den.Rooms.quota(key, "file_bytes", Den.Limits.get(:file_bytes), byte_size(body)),
          {:ok, id} <- Den.Blobs.put(body) do
       json(conn, %{id: id})
     else
       :error -> conn |> put_status(401) |> json(%{error: "enter the den first"})
       {:error, :quota} -> conn |> put_status(429) |> json(%{error: "this device has sent enough files today"})
+      {:error, :disk} -> conn |> put_status(507) |> json(%{error: "the den is full for now; try again later"})
       {:error, :size} -> conn |> put_status(413) |> json(%{error: "a file is at most 25 MB"})
       _ -> conn |> put_status(400) |> json(%{error: "could not read the file"})
     end

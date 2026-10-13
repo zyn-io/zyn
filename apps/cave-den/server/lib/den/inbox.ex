@@ -36,9 +36,11 @@ defmodule Den.Inbox do
     end)
   end
 
-  @doc "A Welcome for each device, kept until it takes it."
+  @doc "A Welcome for each device with room in its inbox (`:inbox` waiting at most), kept until it takes it."
   def deliver(keys, room, welcome) do
     now = Den.Rooms.now()
+    cap = Den.Limits.get(:inbox)
+    keys = Enum.filter(Enum.uniq(keys), &(Repo.one(from i in "inbox", where: i.key == ^&1, select: count(i.id)) < cap))
     Repo.insert_all("inbox", Enum.map(keys, &%{key: &1, room: room, bytes: welcome, inserted_at: now}))
     for k <- keys, do: DenWeb.Endpoint.broadcast("inbox:" <> k, "welcome", %{room: room, welcome: Base.encode64(welcome)})
     :ok

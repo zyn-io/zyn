@@ -33,9 +33,21 @@ defmodule DenWeb.RoomChannel do
   end
 
   @impl true
+  # At most `:history_bytes` of ciphertext a reply (and always one message);
+  # `more` says to ask again after the last.
   def handle_in("history", %{"after" => n}, socket) when is_integer(n) do
-    msgs = for m <- Rooms.since(socket.assigns.room, n), do: %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: Base.encode64(m.bytes)}
-    {:reply, {:ok, %{messages: msgs}}, socket}
+    rows = Rooms.since(socket.assigns.room, n)
+    cap = Den.Limits.get(:history_bytes)
+
+    {kept, _} =
+      Enum.reduce_while(rows, {[], 0}, fn m, {acc, size} ->
+        size = size + byte_size(m.bytes)
+        if acc != [] and size > cap, do: {:halt, {acc, size}}, else: {:cont, {[m | acc], size}}
+      end)
+
+    kept = Enum.reverse(kept)
+    msgs = for m <- kept, do: %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: Base.encode64(m.bytes)}
+    {:reply, {:ok, %{messages: msgs, more: length(kept) < length(rows) or length(rows) == 500}}, socket}
   end
 
   def handle_in("state", _, socket) do
@@ -65,6 +77,8 @@ defmodule DenWeb.RoomChannel do
 
   def handle_in("relay", %{"bytes" => b64}, socket) do
     with {:ok, bytes} <- decode(b64),
+         true <- Den.Limits.disk_ok?() || {:error, :disk},
+         :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(bytes)),
          {:ok, m} <- Rooms.relay(socket.assigns.room, bytes, socket.assigns.key) do
       broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64})
       {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch)}}, socket}
@@ -73,6 +87,8 @@ defmodule DenWeb.RoomChannel do
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
+      {:error, :quota} -> {:reply, {:error, %{reason: "this device has written enough for today"}}, socket}
+      {:error, :disk} -> {:reply, {:error, %{reason: "the den is full for now; try again later"}}, socket}
       {:error, {:bad_commit, _}} -> {:reply, {:error, %{reason: "that commit does not check out against the room"}}, socket}
       {:error, why} -> {:reply, {:error, %{reason: inspect(why)}}, socket}
     end
@@ -87,7 +103,8 @@ defmodule DenWeb.RoomChannel do
   # After an Add the den ordered: the Welcome for the devices added.
   def handle_in("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 do
     with {:ok, welcome} <- decode(b64),
-         true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/^[0-9a-f]{64}$/)) || {:error, :keys} do
+         true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/\A[0-9a-f]{64}\z/)) || {:error, :keys},
+         :ok <- Rooms.quota(socket.assigns.key, "invite", Den.Limits.get(:invites)) do
       Den.Inbox.deliver(keys, socket.assigns.room, welcome)
       {:reply, :ok, socket}
     else
