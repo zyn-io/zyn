@@ -1847,7 +1847,8 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
             }
             let mut minted = Vec::new();
             let mut spent: Vec<[u8; 32]> = Vec::new();
-            for _ in 0..count + 8 {
+            let mut waits = 0;
+            for _ in 0..count + 12 {
                 if minted.len() as u64 == count {
                     break;
                 }
@@ -1886,6 +1887,19 @@ pub fn api(app: &Arc<App>, method: &str, path: &str, input: &Value) -> Result<Va
                     // Someone else minted that place first; take the next one.
                     Err(e) if e.contains("not the next item") || e.contains("already minted") => continue,
                     Err(e) if e.contains("as many as one account may") => break,
+                    // The chain takes 12 intents from one account an epoch
+                    // (fair batches, §179): wait for the next one there.
+                    Err(e) if e.contains("its share of this epoch's intents") && waits < 4 => {
+                        waits += 1;
+                        let was = crate::object_client::call(&host, "zyn_status", json!({})).ok().and_then(|s| s["epoch"].as_u64()).unwrap_or(0);
+                        for _ in 0..120 {
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            if crate::object_client::call(&host, "zyn_status", json!({})).ok().and_then(|s| s["epoch"].as_u64()).unwrap_or(0) > was {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     other => {
                         other?;
                     }

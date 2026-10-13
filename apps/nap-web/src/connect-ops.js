@@ -1663,11 +1663,21 @@ export const METHODS = {
           ...(a.open ? [['This wallet', `${a.open.minted + count} of ${a.open.cap} after this`]] : []),
           ['Left', String(left)],
         ],
-        note: 'Items come in the order posted after the draw — the next ones in line, whichever they are.',
+        note: 'Items come in the order fixed when the mint opened — the next ones in line, whichever they are.',
         run: async () => {
           const minted = [];
           let spent = [];
           await ledger.takeUpCredit(ctx.config, ctx.identity, collection);
+          // The chain takes 12 intents from one account an epoch (fair
+          // batches, §179): a longer run waits for the next epoch there.
+          let waits = 0;
+          const nextEpoch = async () => {
+            const was = Number((await ledger.call(ctx.config, 'zyn_status')).epoch);
+            for (let i = 0; i < 120; i++) {
+              await new Promise((r) => setTimeout(r, 1000));
+              if (Number((await ledger.call(ctx.config, 'zyn_status')).epoch) > was) return;
+            }
+          };
           for (let got = 0, tries = 0; got < count && tries < count + 8; tries++) {
             if (spent.length) await ledger.waitSpent(ctx.config, ctx.identity, spent);
             const now = await ledger.loadSale(ctx.config, collection);
@@ -1686,6 +1696,7 @@ export const METHODS = {
               // Someone else minted that place first; take the next one.
               if (/not the next item|already minted/.test(String(e.message))) continue;
               if (/as many as one account may/.test(String(e.message))) break;
+              if (/its share of this epoch's intents/.test(String(e.message)) && waits++ < 4) { tries--; await nextEpoch(); continue; }
               throw e;
             }
             spent = inputs.map((x) => hex(x.commitment));
