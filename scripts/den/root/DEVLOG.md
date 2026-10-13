@@ -2,10 +2,75 @@
 
 Newest first. What changed, why, and what we found along the way.
 
+## 13 October 2026: past the first limits
+
+The first public version listed its limits. Most of them moved:
+
+| | Before | Now |
+|---|---|---|
+| Members in a room | 200 | 500, up to 1000 if the host allows |
+| People in a voice room | 9 | 50; each hears the eight who spoke most recently |
+| Voice on a network that blocks UDP | none | through the den's own connection |
+| One file | 25 MB | 100 MB by default (`file_max`), sealed in 1 MiB pieces |
+| A removed pass lets a device in until | the end of the next day | midnight, if removed before 22:00 UTC |
+| A copied device reads its rooms | until it leaves them | until its next daily key refresh |
+| Who is who | `m-` and 20 hex digits | a name each member gives themselves, beside it |
+| One person, two devices | two strangers | linked: one name, one row |
+
+How each works:
+
+- **Names.** A member's name travels sealed inside MLS, in every message and
+  in a profile each device sends when someone joins. It is a claim, so the
+  page always shows it beside the start of the device's own name, and the
+  members list warns when two members chose the same one.
+- **Linked devices.** One device shows a ten-letter code; the other, already
+  in the den by its own invite, proves it knows the code by a hash with its
+  key, sealed in MLS. Each then says the other is the same person's, and
+  members see one person only while both say so. The first device invites
+  the second into its private rooms.
+- **Key refresh.** Each device replaces its own MLS keys once a day in each
+  room (a self-update commit), so a copy of its state taken earlier reads
+  nothing after that. The den checks and orders these like any commit.
+- **Faster removal.** The door signs tomorrow's tokens only from 22:00 UTC
+  (`DEN_TOMORROW_FROM`); devices fetch them at a random moment in those
+  hours.
+- **Bigger files.** A file is sealed piece by piece, each piece's number and
+  whether it is the last authenticated, so none can be reordered or dropped,
+  and opened piece by piece as it arrives, with progress either way.
+- **Voice for more.** Each browser marks in its packets' headers how loud
+  each frame is (RFC 6464); the den ranks speakers by it every 300 ms and
+  moves the eight most recent into each listener's slots, rewriting packet
+  numbers so a slot that changes speaker stays one stream to the browser.
+- **Voice through the den.** Where WebRTC finds no path within eight
+  seconds, the page encodes the microphone itself (WebCodecs Opus), seals
+  each frame exactly as before and sends it over the den's WebSocket; the den
+  forwards relayed and WebRTC frames through one forwarder, so both kinds of
+  device hear each other.
+- **Big rooms.** A room's GroupInfo is about 190 KB at a thousand members, so
+  the den now takes GroupInfos up to 768 KB and commits up to 128 KB, and a
+  device writes its MLS state (several MB in a big room) at most once a
+  second after reading, at once after anything it sends.
+
+What it costs, measured (2 shared vCPUs, 4 GB, the den in Germany, the load
+from a laptop elsewhere): one room of 40 writing members and 400 listening
+devices took 50 messages a second with every one delivered, p95 50 ms; the
+den topped out near 80 a second (32,000 deliveries a second) at about 500 MB.
+In a room of 1000, a device applies a change in 18 ms and the den checks one
+in 20 ms. `web/tests/load.mjs` and `web/tests/bench.mjs` reproduce these.
+
+The tests grew with it: the server's go to 58 (one with eleven live WebRTC
+devices and one with a relayed device), the browser test to 79 checks (a
+relayed member, a member whose WebRTC finds no path, two linked devices, a
+30 MB file).
+
+Still open: an independent audit; history for a device that joins later
+(MLS gives it none, by design, and a linked device could be sent it); push
+notifications while the page is closed.
+
 ## 13 October 2026: public
 
-The repository and the image (`ghcr.io/zyn-io/epeaky`) are public, under
-MIT OR Apache-2.0. The image is built for x86-64 and arm64, on native
+The repository is public, under MIT OR Apache-2.0. The image,
+`ghcr.io/zyn-io/epeaky`, is built for x86-64 and arm64, on native
 runners for each, and every build is started, checked and installed before
 it is pushed. The installer is at
 [epeaky.zyn-network.com](https://epeaky.zyn-network.com):
@@ -18,7 +83,7 @@ It is alpha. It has had one review and no independent audit;
 [THREAT_MODEL.md](THREAT_MODEL.md) says what that means. Security reports go
 through the repository's private advisories ([SECURITY.md](SECURITY.md)).
 
-Not done yet: a TURN server option for members behind strict NATs, devices
+Not done yet, that day: voice for members behind strict networks, devices
 refreshing their own keys in MLS (post-compromise security), and an
 independent audit.
 

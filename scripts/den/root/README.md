@@ -13,12 +13,19 @@ independent security audit. Read [THREAT_MODEL.md](THREAT_MODEL.md) before
 you trust it with anything that matters.
 
 - **Rooms** are MLS groups (RFC 9420, OpenMLS), held only on members'
-  devices. Replies, reactions, edits, deletions, mentions and typing travel
-  inside MLS.
-- **Files and images** are encrypted in the browser and stored as opaque
-  blobs.
+  devices, up to 500 members each (1000 if the host allows). Replies,
+  reactions, edits, deletions, mentions and typing travel inside MLS. Every
+  device refreshes its own keys once a day in each room.
+- **Names**: each device has one made from its key, which nobody can copy;
+  members can also give themselves a name, sealed in MLS and shown beside it.
+  A member's devices can be linked, so others see one person.
+- **Files and images** are encrypted in the browser in 1 MiB pieces and
+  stored as opaque blobs, up to 100 MB each by default.
 - **Voice rooms** forward audio the server cannot hear: each frame is
-  encrypted in the browser under a key from the room's MLS group.
+  encrypted in the browser under a key from the room's MLS group. Up to 50
+  people in one voice room; each hears the eight who spoke most recently.
+  Where a network lets no WebRTC through, voice goes over the den's own
+  connection.
 - **Entry** is a blind token (RFC 9474): the door checks a pass and signs a
   token it never sees; the den admits the device that token names.
 
@@ -53,6 +60,21 @@ Settings are in `/opt/epeaky/.env` (the ways in, the rooms; then
 addresses: on a host whose public address is not on the machine itself (AWS
 and GCP put it behind NAT), set `DEN_VOICE_PUBLIC_ONLY=0`, and expect voice to
 work only for devices that can reach that private address.
+
+## How much a den holds
+
+Measured on the smallest server we would suggest (2 shared vCPUs, 4 GB; a
+Hetzner CPX22), with the tests in `web/tests/` (`load.mjs`, `bench.mjs`):
+
+- **One room of 440 devices**: up to 50 messages a second, every message
+  reaching every device, 95% of them within 50 ms (from another country).
+  The den tops out near 80 messages a second there (32,000 deliveries a
+  second), far past a busy chat.
+- **Memory**: about 500 MB at that load; a few hundred kilobytes a connected
+  device.
+- **Room size**: in a room of 1000, a device applies a change in about
+  18 ms and opens a message in about 5 ms; the den checks a change in about
+  20 ms and keeps about 2 MB for the room.
 
 ## Back up and update
 
@@ -124,17 +146,24 @@ redirects every request that arrives without it.
 | `DEN_GATE` | another gate module, compiled in from `extra/` |
 | `DEN_EXTRA_CHILDREN` | processes an add-on starts, by module name |
 | `DEN_KEYS_AHEAD` | days of day keys the den keeps ahead itself (default 45; 0: the host makes them) |
+| `DEN_TOMORROW_FROM` | the UTC hour from which the door signs tomorrow's tokens (default 22) |
+| `DEN_LIMITS` | the limits below, as `name=number,…` (e.g. `room_members=1000,file_max=200000000`) |
+| `DEN_RETENTION_DAYS` | days ciphertext and files are kept (default 30) |
+| `DEN_DOOR_PER_MINUTE` | requests to the door per address a minute (default 60; more for a circle behind one address) |
+| `DEN_ASK_PER_HOUR` | requests to join per address an hour (default 5) |
 | `DEN_VOICE_PUBLIC_ONLY` | `1`: voice offers devices only public addresses |
 | `POOL_SIZE` | database connections |
 
-**Limits** go under `config :den, :limits`, each key optional. They are per
-device per day unless noted:
+**Limits** go in `DEN_LIMITS` (or `config :den, :limits`), each key
+optional. They are per device per day unless noted:
 
 | Key | Default | |
 |---|---|---|
 | `message_bytes` | 20 MB | bytes of messages relayed |
-| `file_bytes` | 250 MB | bytes of files stored |
+| `file_max` | 100 MB | one file, encrypted (not per day) |
+| `file_bytes` | 500 MB | bytes of files stored |
 | `files` | 200 | files stored |
+| `room_members` | 500 | members in one room, at most 1000 (not per day) |
 | `invites` | 200 | invitations sent |
 | `inbox` | 100 | invitations waiting for one device at once |
 | `history_bytes` | 4 MB | ciphertext in one history reply |
@@ -142,8 +171,11 @@ device per day unless noted:
 
 Ciphertext and files are kept `retention_days` (30) days.
 
-Voice needs UDP ports 50000–50199 open to the internet. There is no TURN
-server option yet, so a member behind a strict NAT may not get audio.
+Voice needs UDP ports 50000–50199 open to the internet. A device whose
+network lets no UDP through (some offices and hotels) gets no WebRTC
+connection; after a few seconds its page sends the same sealed frames over
+the den's own connection (port 443) instead, which works wherever the page
+does, a little later than WebRTC.
 
 **Day keys.** The door signs with one key per UTC day. The den keeps them
 itself: it makes 45 days ahead (`DEN_KEYS_AHEAD`), deletes those it can no
@@ -219,9 +251,10 @@ bin/den rpc 'Den.Host.members()'              # how many, by the way they joined
 ```
 
 A device keeps its pass code and gets its next days' tokens itself, so a
-member enters once and stays in until the host removes the pass. Removing it
-ends entry by the end of the next day (a device may already hold tomorrow's
-token).
+member enters once and stays in until the host removes the pass. The door
+signs tomorrow's tokens only late in the day (from 22:00 UTC,
+`DEN_TOMORROW_FROM`): a pass removed before then lets no device in after
+midnight; one removed later, by the end of the next day.
 
 **Your own gate.** To decide membership another way (holders of a token on
 some chain, say), write a module implementing `Den.Gate` (`id/1` and

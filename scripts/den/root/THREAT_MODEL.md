@@ -65,8 +65,11 @@ paths. Blind tokens are no protection against an operator who correlates.
 can sign tokens for devices of its own, which appear as new, anonymous
 members of open rooms.
 
-**Leaving.** Removing a pass stops new tokens, but a device keeps tomorrow's
-token: entry ends by the end of the next day, not at once.
+**Leaving.** Removing a pass stops new tokens, but a device may hold
+tomorrow's token, which the door signs only from 22:00 UTC (the host's
+`DEN_TOMORROW_FROM`): a pass removed before then admits nobody after midnight
+(an hour's grace); one removed later, nobody after the next midnight. Not at
+once in either case.
 
 ## Rooms
 
@@ -74,9 +77,19 @@ token: entry ends by the end of the next day, not at once.
   messages, readable only by the room's members. A message's author is the
   member whose leaf signed it, named from the tree at the message's own epoch:
   a late message from someone the room has since taken out is refused, and
-  is never credited to whoever took that seat. A display name is derived from
-  the author's key (`m-` and 20 hex digits, 80 bits), never chosen; the
-  members list warns when two names start alike.
+  is never credited to whoever took that seat. A device's name is derived
+  from its key (`m-` and 20 hex digits, 80 bits), never chosen; the members
+  list warns when two names start alike.
+- A member may also give themselves a name. It travels sealed (the den never
+  sees it) and is a claim: anyone can choose any name, so the page shows it
+  beside the start of the device's own name, and warns when two members of a
+  room chose the same one.
+- A member's devices can be linked: one shows a code, the other proves it
+  knows the code inside MLS (a hash with its key; the code itself never
+  travels), and each then says, sealed, that the other is the same
+  person's. Devices count as one person only while each says so of the
+  other; a device can claim another, but not be claimed into a link it never
+  agreed to.
 - Commits (who is in a room) are sent as MLS PublicMessages: signed, not
   encrypted. The den keeps each room's public state (OpenMLS's PublicGroup,
   in `server/native/`) and orders a commit only if it verifies against that
@@ -111,22 +124,33 @@ token: entry ends by the end of the next day, not at once.
   anyone on the den's word.
 - A Welcome to a private room can come from any member, under any title.
 - Forward secrecy: a device keeps what it has read; nobody, the den
-  included, can decrypt a room's past messages later. There is no
-  post-compromise security yet: devices do not refresh their own keys, so an
-  attacker who once copied a device's state can keep reading its rooms until
-  the device leaves them.
+  included, can decrypt a room's past messages later.
+- Post-compromise security: every device replaces its own keys in each room
+  once a day (an MLS self-update commit, at a random moment). Someone who
+  once copied a device's state can read that device's rooms until its next
+  refresh, then nothing more. This holds against a copy that only reads: the
+  copy also holds the device's signing key, so someone who acts with it
+  first can take the device's place in a room (the device then cannot apply
+  the room's changes and says so).
 
 ## Files
 
 Files and images are encrypted in the browser with AES-GCM under a fresh key
-per file, and the key travels inside an MLS message. The den stores an opaque
-blob (at most 25 MB) and sees its size, when it was sent, and which devices
+per file, in 1 MiB pieces whose number and last-piece mark are
+authenticated (none can be reordered or dropped), and the key travels inside
+an MLS message. The den stores an opaque blob (at most the host's `file_max`,
+100 MB by default) and sees its size, when it was sent, and which devices
 download it.
 
 ## Voice
 
-Every room has a voice room. The den forwards audio (one stream up, up to
-eight down, nine people at most) and cannot hear it. Each frame is encrypted
+Every room has a voice room. The den forwards audio (one stream up, eight
+down, up to 50 people) and cannot hear it. Each listener hears the eight who
+spoke most recently, which the den tells from the audio level each browser
+puts in its packets' headers (RFC 6464), outside the frame's encryption. A
+device whose network lets no WebRTC through sends and receives the same
+sealed frames over its connection to the den, with the same level beside
+each. Each frame is encrypted
 in the browser with AES-GCM under its sender's own key, derived from the
 room's MLS group and renewed every epoch; a frame carries a counter, and a
 listener refuses one it has already played. A slot plays only under the key
@@ -134,7 +158,10 @@ of the member the den names for it, so a den that relabels who is speaking
 is caught. A member the room takes out is heard for at most 5 seconds more.
 Voice is refused in a browser that cannot encrypt frames.
 
-The den sees who is in a voice room, when they talk and how much. A frame's
+The den sees who is in a voice room, when they talk and how much, and how
+loud each frame is (in steps of a decibel, every 20 ms). Loudness and frame
+sizes over time can give away something of what is said, as research on
+encrypted voice has shown: voice is less private than written words. A frame's
 counter is its send time, authenticated, and a listener refuses frames more
 than a minute old, so the den can replay what a member said to a later
 listener only within that minute (devices whose clocks are more than a minute
@@ -148,7 +175,8 @@ Outsiders cannot.
 - device keys and which rooms each one is in, private rooms included, and
   every change to a room's membership (which keys were added or removed, and
   by whom), because commits are signed plaintext;
-- when each device writes, reacts, types or talks, and how much;
+- when each device writes, reacts, types or talks, and how much (in voice,
+  how loud, frame by frame);
 - file sizes, and who downloads which file; the names of open rooms; the room
   each voice frame belongs to;
 - network addresses at the door and the den;
