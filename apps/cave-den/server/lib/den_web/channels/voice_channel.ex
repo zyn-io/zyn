@@ -39,7 +39,7 @@ defmodule DenWeb.VoiceChannel do
          {:ok, answer} <- Den.Voice.Room.join(pid, self(), socket.assigns.key, offer) do
       {:reply, {:ok, answer}, assign(socket, :room_pid, pid)}
     else
-      {:error, :full} -> {:reply, {:error, %{reason: "the voice room is full (#{Den.Voice.slots() + 1})"}}, socket}
+      {:error, :full} -> {:reply, {:error, %{reason: "the voice room is full (#{Den.Voice.room_max()})"}}, socket}
       {:error, :busy} -> {:reply, {:error, %{reason: "voice is busy on this den; try again shortly"}}, socket}
       {:error, :already} -> {:reply, {:error, %{reason: "this device is already in the voice room"}}, socket}
       {:error, :offer} -> {:reply, {:error, %{reason: "that is not a voice offer this den can answer"}}, socket}

@@ -1108,17 +1108,18 @@ const VOICE_BITRATE = 64_000;
 
 class Voice {
   constructor(client, room, onSlots) {
-    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], sealed: 0, opened: 0, failed: 0 });
+    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0 });
   }
 
-  /// Keys for us and everyone in a slot, for this epoch. The previous
+  /// Keys for us and everyone in the voice room (not only those in a slot
+  /// now: the den moves speakers between slots), for this epoch. The previous
   /// epoch's are kept a few seconds only, for frames still in flight: a member
   /// the new epoch took out is not heard for long after.
   async refreshKey() {
     const index = Number(this.client.den.epoch(this.room)) % 256;
     const me = this.client.den.key();
     const ks = index === this.current ? this.keys.get(index) : new Map();
-    for (const k of [me, ...this.people.map((p) => p.key)]) {
+    for (const k of new Set([me, ...this.roster, ...this.people.map((p) => p.key)])) {
       if (!ks.has(k)) ks.set(k, await this.client.voiceKey(this.room, k));
     }
     this.keys.delete(index);
@@ -1178,6 +1179,13 @@ class Voice {
     const ch = this.client.socket.channel(`voice:${this.room}`);
     this.ch = ch;
     ch.on('ice', (c) => pc.addIceCandidate(c).catch(() => {}));
+    // Everyone in the voice room; the slots carry the eight heard most recently.
+    ch.on('roster', ({ keys }) => {
+      const members = new Set(this.client.members(this.room).map((m) => m.key));
+      this.roster = (Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && members.has(k) && k !== this.client.den.key()).slice(0, 100);
+      this.refreshKey().catch(() => {});
+      this.onSlots(this.people);
+    });
     ch.on('slots', (slots) => {
       this.people = Object.entries(slots).map(([mid, key]) => ({ mid, key }));
       this.refreshKey().then(() => this.postSlots()).catch(() => {});

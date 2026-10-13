@@ -122,4 +122,108 @@ defmodule Den.VoiceTest do
     {:ok, sup} = :application.get_supervisor(:ex_ice)
     refute Enum.any?(Supervisor.which_children(sup), fn {id, pid, _, _} -> id == ExICE.Priv.MDNS.Resolver and is_pid(pid) end)
   end
+
+  # A device played by ex_webrtc over a real connection to the den: its own
+  # process (the "channel"), relaying ICE both ways, telling the test about
+  # slots, the roster and the packets that reach it.
+  defp live_device(room, key, test) do
+    spawn_link(fn ->
+      exts = [%{type: :all, uri: "urn:ietf:params:rtp-hdrext:sdes:mid"}, %{type: :audio, uri: Den.Voice.level_uri()}]
+      {:ok, pc} = PeerConnection.start_link(audio_codecs: [:opus], video_codecs: [], rtp_header_extensions: exts)
+      track = MediaStreamTrack.new(:audio)
+      {:ok, _} = PeerConnection.add_track(pc, track)
+      [up] = PeerConnection.get_transceivers(pc)
+      :ok = PeerConnection.set_transceiver_direction(pc, up.id, :sendonly)
+      for _ <- 1..Den.Voice.slots(), do: {:ok, _} = PeerConnection.add_transceiver(pc, :audio, direction: :recvonly)
+      {:ok, offer} = PeerConnection.create_offer(pc)
+      :ok = PeerConnection.set_local_description(pc, offer)
+      [_, level] = Regex.run(~r/a=extmap:(\d+) #{Regex.escape(Den.Voice.level_uri())}/, offer.sdp)
+      {:ok, answer} = Den.Voice.Room.join(room, self(), key, SessionDescription.to_json(offer))
+      :ok = PeerConnection.set_remote_description(pc, SessionDescription.from_json(answer))
+      mids = for t <- PeerConnection.get_transceivers(pc), t.direction == :recvonly, into: %{}, do: {t.receiver.track.id, t.mid}
+      loop(%{pc: pc, room: room, key: key, test: test, track: track.id, level: String.to_integer(level), mids: mids, seq: 0})
+    end)
+  end
+
+  # The newest slot map the test has been told for `key`, from its mailbox.
+  defp last_slots(key, acc) do
+    receive do
+      {^key, "slots", m} -> last_slots(key, m)
+    after
+      0 -> acc
+    end
+  end
+
+  defp loop(d) do
+    receive do
+      {:voice, "ice", c} ->
+        PeerConnection.add_ice_candidate(d.pc, ExWebRTC.ICECandidate.from_json(c))
+        loop(d)
+
+      {:voice, event, payload} ->
+        send(d.test, {d.key, event, payload})
+        loop(d)
+
+      {:ex_webrtc, _, {:ice_candidate, c}} ->
+        Den.Voice.Room.ice(d.room, self(), ExWebRTC.ICECandidate.to_json(c))
+        loop(d)
+
+      {:ex_webrtc, _, {:connection_state_change, :connected}} ->
+        send(d.test, {d.key, :connected})
+        loop(d)
+
+      {:ex_webrtc, _, {:rtp, track, _, packet}} ->
+        send(d.test, {d.key, :rtp, d.mids[track], packet.sequence_number})
+        loop(d)
+
+      {:speak, n, voice} ->
+        for i <- 1..n do
+          # ex_webrtc sends no audio level of its own: speech is told by size here.
+          packet = ExRTP.Packet.new(:binary.copy(<<0>>, if(voice, do: 160, else: 40)), payload_type: 111, sequence_number: d.seq + i + 1000, timestamp: (d.seq + i) * 960, ssrc: 1)
+          PeerConnection.send_rtp(d.pc, d.track, packet)
+          Process.sleep(20)
+        end
+
+        loop(%{d | seq: d.seq + n})
+
+      :stop ->
+        PeerConnection.stop(d.pc)
+
+      _ ->
+        loop(d)
+    end
+  end
+
+  test "more people than slots: each listener hears the most recent speakers, and a slot goes on as one stream" do
+    {:ok, room} = Den.Voice.ensure("voice-many")
+    keys = for i <- 0..10, do: "key-#{i}"
+    devices = Map.new(keys, fn k -> {k, live_device(room, k, self())} end)
+    for k <- keys, do: assert_receive({^k, :connected}, 15_000)
+    assert_receive {"key-0", "roster", %{keys: roster}}, 5_000
+    on_exit(fn -> for {_, d} <- devices, do: send(d, :stop) end)
+
+    # Ten others, eight slots: key-0 starts out carrying the first eight to join.
+    Process.sleep(200)
+    slots0 = last_slots("key-0", %{})
+    assert length(Enum.uniq(roster)) >= 2
+    assert map_size(slots0) == Den.Voice.slots()
+    [outside, _] = (keys -- ["key-0"]) -- Map.values(slots0)
+    inside = hd(Map.values(slots0))
+
+    # One in a slot speaks; then one outside speaks, and takes a slot from someone silent.
+    send(devices[inside], {:speak, 25, true})
+    Process.sleep(600)
+    send(devices[outside], {:speak, 40, true})
+    assert_receive {"key-0", "slots", slots1}, 3_000
+    assert outside in Map.values(slots1), "the newest speaker is carried"
+    assert inside in Map.values(slots1), "a recent speaker keeps their slot"
+    {mid, _} = Enum.find(slots1, fn {_, k} -> k == outside end)
+    # key-0 hears them in that slot, numbered on from what the slot carried before.
+    seqs = for _ <- 1..10 do
+      assert_receive {"key-0", :rtp, ^mid, seq}, 3_000
+      seq
+    end
+    assert seqs == Enum.sort(seqs) and List.last(seqs) - hd(seqs) < 30, "one stream, its numbers rising: #{inspect(seqs)}"
+    for {_, d} <- devices, do: send(d, :stop)
+  end
 end

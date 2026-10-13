@@ -751,7 +751,10 @@ export function mountDen(den, el, me) {
     if (!v) return;
     el('voice-room').textContent = roomTitle(v.room);
     el('voice-room').onclick = () => go(v.room);
-    const people = [{ mid: 'me', key: me.key }, ...(v.people || [])];
+    // Everyone in voice; who is in a slot now (heard here) shows who speaks.
+    const mids = new Map((v.people || []).map((p) => [p.key, p.mid]));
+    const keys = [...new Set([...(v.roster || []), ...mids.keys()])];
+    const people = [{ mid: 'me', key: me.key }, ...keys.map((key) => ({ key, mid: mids.get(key) || '' }))];
     el('voice-who').innerHTML = people.map((p) => `<li data-mid="${esc(p.mid)}" title="${esc(nameOf(p.key))}">${mark(p.key, 22)}<span>${p.mid === 'me' ? 'You' : esc(display(p.key))}</span></li>`).join('');
     meterTimer = setInterval(() => {
       const lv = den.voice?.levels?.() || {};

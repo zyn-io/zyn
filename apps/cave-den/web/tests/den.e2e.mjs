@@ -260,6 +260,8 @@ const va = await A.p.evaluate(async () => { const v = window.__den.voice; const 
 const vb = await B.p.evaluate(async () => { const v = window.__den.voice; return { sealed: v.sealed, opened: v.opened, failed: v.failed, state: v.pc.connectionState }; });
 console.log('      A voice:', JSON.stringify(va), '· B voice:', JSON.stringify(vb));
 ok(va.state === 'connected' && vb.state === 'connected', 'both voice connections are up');
+ok(await A.p.evaluate(() => /a=extmap:\d+ urn:ietf:params:rtp-hdrext:ssrc-audio-level/.test(window.__den.voice.pc.remoteDescription.sdp)), 'the den asks for the audio level it ranks speakers by');
+ok(await A.p.evaluate(([k]) => window.__den.voice.roster.includes(k), [B.me.key]), "B is on A's voice roster");
 ok(va.sealed > 50 && vb.sealed > 50, 'each side seals its own audio frames');
 ok(va.opened > 50 && vb.opened > 50, 'each side opens the other\'s frames (the key is the room\'s, the den has none)');
 // A forwarding unit that names the wrong speaker: A's slot for B relabelled

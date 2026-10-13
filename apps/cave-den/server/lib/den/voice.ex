@@ -2,9 +2,12 @@ defmodule Den.Voice do
   @moduledoc """
   Voice rooms: a selective forwarding unit in Elixir
   (ex_webrtc). Every participant has one WebRTC connection to the den: one
-  audio track up, and #{8} audio slots down. When someone joins, the den
-  forwards their audio into a free slot on everyone else's connection and
-  tells each device which slot is whose — no renegotiation.
+  audio track up, and #{8} audio slots down. Up to `room_max/0` people can
+  be in one voice room; each listener's slots carry the eight who spoke most
+  recently, by the audio level each browser puts in its packets' headers
+  (RFC 6464), and the den tells each device which slot is whose — no
+  renegotiation. A slot that changes speaker continues its packet numbers
+  and timestamps, so the browser hears one stream.
 
   The audio is end-to-end encrypted before it leaves the browser (each frame
   sealed with AES-GCM under a key every member derives from the room's MLS
@@ -21,6 +24,12 @@ defmodule Den.Voice do
   default 150), and one client cannot take every port.
   """
   def max_peers, do: Application.get_env(:den, :voice_max_peers, 150)
+
+  @doc "How many people one voice room holds (`:voice_room_max`, default 50)."
+  def room_max, do: Application.get_env(:den, :voice_room_max, 50)
+
+  @level_uri "urn:ietf:params:rtp-hdrext:ssrc-audio-level"
+  def level_uri, do: @level_uri
 
   @doc """
   Which of the server's addresses voice offers devices: never loopback,
@@ -108,6 +117,11 @@ defmodule Den.Voice.Room do
   require Logger
   alias ExWebRTC.{ICECandidate, MediaStreamTrack, PeerConnection, SessionDescription}
 
+  # Who speaks is re-ranked this often (ms); a level at or under this
+  # (-dBov, 127 is silence) counts as speaking, as does the voice flag.
+  @tick 300
+  @speaking 50
+
   def start_link(room), do: GenServer.start_link(__MODULE__, room, name: {:via, Registry, {Den.Voice.Registry, room}})
 
   @doc "A device's offer in; the den's answer out. `channel` gets {:voice, event, payload}."
@@ -120,7 +134,7 @@ defmodule Den.Voice.Room do
     # Connections are linked to this room: if it stops, they stop (and give
     # their ports back); if one fails, it is dropped, not the room.
     Process.flag(:trap_exit, true)
-    {:ok, %{room: room, peers: %{}}}
+    {:ok, %{room: room, peers: %{}, ticking: false}}
   end
 
   # A peer: its connection, its own track (once the device sends it), its
@@ -135,7 +149,7 @@ defmodule Den.Voice.Room do
       Map.has_key?(s.peers, channel) -> {:reply, {:error, :already}, s}
       not Den.Voice.offer?(offer) -> {:reply, {:error, :offer}, s}
       not sdp?(offer["sdp"]) -> {:reply, {:error, :offer}, s}
-      map_size(s.peers) >= Den.Voice.slots() + 1 -> {:reply, {:error, :full}, s}
+      map_size(s.peers) >= Den.Voice.room_max() -> {:reply, {:error, :full}, s}
       Den.Voice.peers() >= Den.Voice.max_peers() -> {:reply, {:error, :busy}, s}
       true -> answer(channel, key, offer, s)
     end
@@ -147,7 +161,9 @@ defmodule Den.Voice.Room do
   defp answer(channel, key, offer, s) do
     ports = Application.get_env(:den, :voice_ports, 50_000..50_199)
 
-    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, host_to_srflx_ip_mapper: &Den.Voice.srflx/1, audio_codecs: [:opus], video_codecs: [], controlling_process: self()) do
+    exts = [%{type: :all, uri: "urn:ietf:params:rtp-hdrext:sdes:mid"}, %{type: :audio, uri: Den.Voice.level_uri()}]
+
+    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, host_to_srflx_ip_mapper: &Den.Voice.srflx/1, audio_codecs: [:opus], video_codecs: [], rtp_header_extensions: exts, controlling_process: self()) do
       {:ok, pc} ->
         try do
           :ok = PeerConnection.set_remote_description(pc, SessionDescription.from_json(offer))
@@ -168,10 +184,11 @@ defmodule Den.Voice.Room do
           :ok = PeerConnection.set_local_description(pc, answer)
           Process.monitor(channel)
           {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
-          peer = %{pc: pc, key: key, up: nil, slots: slots, carrying: %{}, connected: false, candidates: 0}
+          now = System.monotonic_time(:millisecond)
+          peer = %{pc: pc, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: false, candidates: 0, level: level_id(answer.sdp), spoke: nil, joined: now}
           # A connection that never connects gives its port back.
           Process.send_after(self(), {:reap, channel, pc}, Application.get_env(:den, :voice_connect_ms, 20_000))
-          s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all()
+          s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()
           {:reply, {:ok, SessionDescription.to_json(answer)}, s}
         rescue
           _ -> stop_pc(pc, s, :offer)
@@ -181,6 +198,14 @@ defmodule Den.Voice.Room do
 
       _ ->
         {:reply, {:error, :busy}, s}
+    end
+  end
+
+  # The id the answer gives the audio level extension, if the device offered it.
+  defp level_id(sdp) do
+    case Regex.run(~r/a=extmap:(\d+)(?:\/\w+)? #{Regex.escape(Den.Voice.level_uri())}/, sdp) do
+      [_, id] -> String.to_integer(id)
+      _ -> nil
     end
   end
 
@@ -247,6 +272,9 @@ defmodule Den.Voice.Room do
     end
   end
   def handle_info(:stop_if_empty, %{peers: peers} = s) when map_size(peers) == 0, do: {:stop, :normal, s}
+
+  # Re-rank who speaks, while there are more people than slots.
+  def handle_info(:tick, s), do: {:noreply, %{s | ticking: false} |> assign_all() |> tick()}
   def handle_info(_, s), do: {:noreply, s}
 
   defp on_pc({:ice_candidate, c}, channel, _peer, s) do
@@ -258,36 +286,97 @@ defmodule Den.Voice.Room do
     put_in(s.peers[channel], %{peer | up: id})
   end
 
-  # Audio from one device: into its slot on everyone else's connection.
-  defp on_pc({:rtp, id, _rid, packet}, channel, %{up: id}, s) do
-    for {other, p} <- s.peers, other != channel, mid = p.carrying[channel], mid != nil do
-      PeerConnection.send_rtp(p.pc, p.slots[mid], packet)
-    end
+  # Audio from one device: into its slot on the connection of everyone who
+  # carries it now. Its header extensions stay here (their ids are this
+  # connection's, not the listener's); the den writes the listener's own.
+  defp on_pc({:rtp, id, _rid, packet}, channel, %{up: id} = peer, s) do
+    now = System.monotonic_time(:millisecond)
+    s = if speaking?(packet, peer.level), do: put_in(s.peers[channel].spoke, now), else: s
+    packet = ExRTP.Packet.remove_extensions(packet)
 
-    s
+    Enum.reduce(s.peers, s, fn {other, p}, s ->
+      case other != channel and p.carrying[channel] do
+        mid when is_binary(mid) -> forward(s, other, p, mid, channel, packet, now)
+        _ -> s
+      end
+    end)
   end
 
   defp on_pc({:connection_state_change, :failed}, channel, _peer, s), do: drop(s, channel)
   defp on_pc({:connection_state_change, :connected}, channel, peer, s), do: put_in(s.peers[channel], %{peer | connected: true})
   defp on_pc(_, _, _, s), do: s
 
-  # Every listener carries every other speaker in a slot of its own.
-  defp assign_all(s) do
+  # By the level the browser measured; without one, by size: a frame of
+  # speech is far larger than one of silence (our frame seal adds 37 bytes).
+  defp speaking?(packet, id) do
+    with true <- is_integer(id),
+         {:ok, ext} <- ExRTP.Packet.fetch_extension(packet, id),
+         {:ok, %{voice: voice, level: level}} <- ExRTP.Packet.Extension.AudioLevel.from_raw(ext) do
+      voice or level <= @speaking
+    else
+      _ -> byte_size(packet.payload) > 100
+    end
+  end
+
+  # One packet into a listener's slot. A slot that now carries someone else
+  # goes on from its last packet number and timestamp (a marker on the first
+  # packet), so the browser takes it as the same stream, not a broken one.
+  defp forward(s, listener, p, mid, src, packet, now) do
+    o = case p.out[mid] do
+      %{src: ^src} = o -> o
+      %{last_seq: seq, last_ts: ts, last_at: at} when is_integer(seq) ->
+        elapsed = max(now - at, 20)
+        %{src: src, seq_off: seq + 1 - packet.sequence_number, ts_off: ts + elapsed * 48 - packet.timestamp, fresh: true}
+      _ ->
+        %{src: src, seq_off: 0, ts_off: 0, fresh: true}
+    end
+
+    seq = Integer.mod(packet.sequence_number + o.seq_off, 65_536)
+    ts = Integer.mod(packet.timestamp + o.ts_off, 4_294_967_296)
+    PeerConnection.send_rtp(p.pc, p.slots[mid], %{packet | sequence_number: seq, timestamp: ts, marker: packet.marker or o.fresh})
+    put_in(s.peers[listener].out[mid], Map.merge(o, %{last_seq: seq, last_ts: ts, last_at: now, fresh: false}))
+  end
+
+  # Each listener carries, in its slots, the others who spoke most recently
+  # (then the earliest to join); someone keeps their slot while they stay
+  # among those. A listener is told only when its slots change (`force`:
+  # always, such as on joining).
+  defp assign_all(s, force \\ []) do
     peers =
       Map.new(s.peers, fn {listener, p} ->
-        wanted = Map.keys(s.peers) -- [listener]
-        kept = Map.filter(p.carrying, fn {src, _} -> src in wanted end)
+        ranked =
+          for({c, q} <- s.peers, c != listener, do: {c, q})
+          # Speakers first, the most recent first (monotonic time may be negative).
+          |> Enum.sort_by(fn {_, q} -> {is_nil(q.spoke), -(q.spoke || 0), q.joined} end)
+          |> Enum.take(Den.Voice.slots())
+          |> Enum.map(&elem(&1, 0))
+
+        kept = Map.filter(p.carrying, fn {src, _} -> src in ranked end)
         free = Map.keys(p.slots) -- Map.values(kept)
-        new = Enum.zip(wanted -- Map.keys(kept), free) |> Map.new()
+        new = Enum.zip(Enum.reject(ranked, &Map.has_key?(kept, &1)), free) |> Map.new()
         {listener, %{p | carrying: Map.merge(kept, new)}}
       end)
 
-    for {listener, p} <- peers do
+    for {listener, p} <- peers, listener in force or p.carrying != s.peers[listener].carrying do
       send(listener, {:voice, "slots", Map.new(p.carrying, fn {src, mid} -> {mid, peers[src].key} end)})
     end
 
     %{s | peers: peers}
   end
+
+  # Everyone in the voice room, for each device's list (and its keys).
+  defp roster(s) do
+    keys = for {_, p} <- s.peers, do: p.key
+    for {listener, _} <- s.peers, do: send(listener, {:voice, "roster", %{keys: keys}})
+    s
+  end
+
+  defp tick(%{ticking: false, peers: peers} = s) when map_size(peers) > 9 do
+    Process.send_after(self(), :tick, @tick)
+    %{s | ticking: true}
+  end
+
+  defp tick(s), do: s
 
   defp drop(s, channel) do
     case Map.pop(s.peers, channel) do
@@ -298,7 +387,7 @@ defmodule Den.Voice.Room do
         Process.unlink(p.pc)
         catch_exit(fn -> PeerConnection.stop(p.pc) end)
         Registry.unregister(Den.Voice.Peers, channel)
-        s = assign_all(%{s | peers: rest})
+        s = assign_all(%{s | peers: rest}) |> roster()
         if map_size(s.peers) == 0, do: send(self(), :stop_if_empty)
         s
     end
