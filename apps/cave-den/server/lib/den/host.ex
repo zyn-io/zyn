@@ -14,7 +14,14 @@ defmodule Den.Host do
   """
   alias Den.Gate.Members
 
-  def invite(n, days \\ 7) do
+  def invite(n, days \\ 7)
+
+  def invite(n, days) when not (is_integer(n) and n in 1..100 and is_integer(days) and days in 1..90) do
+    IO.puts("epeaky invite N DAYS: N from 1 to 100 at a time, DAYS from 1 to 90")
+    :error
+  end
+
+  def invite(n, days) do
     base = DenWeb.Endpoint.url()
     for code <- Members.invite(n, days), do: IO.puts("#{base}/#invite=#{code}")
     unless Members.open?(:invite), do: IO.puts("(invite links are not open on this den: add invite to DEN_ENTRY)")

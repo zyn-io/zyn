@@ -186,6 +186,7 @@ defmodule Den.MembersTest do
     assert capture_io(fn -> Den.Host.invites() end) =~ ~r/made 20\d\d-.* open until 20\d\d-/
     assert capture_io(fn -> Den.Host.requests() end) =~ "hello there"
     assert capture_io(fn -> Den.Host.invite(2, 1) end) |> String.split("\n", trim: true) |> length() == 2
+    assert capture_io(fn -> Den.Host.invite(420, 1) end) =~ "1 to 100 at a time"
     assert %{} = Den.Host.members()
   end
 
