@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publishes the den to github.com/zyn-io/den: the MLS core (mls/), the server
+# Publishes Epeaky (the den) to github.com/zyn-io/epeaky: the MLS core (mls/), the server
 # (server/) and the page the server serves (web/).
 # Taken from this repository's HEAD only, so nothing uncommitted (another
 # session's work in progress) is ever published, and never with this
@@ -13,7 +13,7 @@ ZYN=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 HERE="$ZYN/scripts/den"
 OUT=${OUT:-$(mktemp -d)/den}
 REV=$(git -C "$ZYN" rev-parse --short HEAD)
-REPO=zyn-io/den
+REPO=zyn-io/epeaky
 PUSH=${1:-}
 
 # The public repo's history if it exists; otherwise a new one with none.
@@ -77,7 +77,7 @@ if [ ${#blocked[@]} -gt 0 ]; then
 fi
 if [ "$PUSH" = --push ]; then
   git -c user.name="$(git -C "$ZYN" config user.name)" -c user.email="$(git -C "$ZYN" config user.email)" \
-    commit -q -m "The den as published from Zyn $REV" -m "The MLS core, the server and the page."
+    commit -q -m "Epeaky as published from Zyn $REV" -m "The MLS core, the server and the page."
   git push -q origin HEAD:main
   echo "pushed $(git rev-parse --short HEAD)"
 fi

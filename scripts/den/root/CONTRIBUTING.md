@@ -1,6 +1,6 @@
 # Contributing
 
-The den is developed inside the Zyn workspace and published here, so a pull
+Epeaky is developed inside the Zyn workspace and published here, so a pull
 request is applied there and comes back in the next sync.
 
 ## Checks

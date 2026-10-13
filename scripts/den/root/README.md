@@ -1,7 +1,7 @@
-# The den
+# Epeaky
 
-A self-hosted chat server for closed communities, with end-to-end encrypted
-rooms, files and voice. Members get in with a pass, through a blind signature,
+A self-hosted chat for small private circles, with end-to-end encrypted
+rooms, files and voice. Each Epeaky server is a **den**. Members get in with a pass, through a blind signature,
 and the server relays ciphertext it cannot read. It was built for ZCaveDAO's members'
 chat at [cavebro.win/chat](https://cavebro.win/chat).
 

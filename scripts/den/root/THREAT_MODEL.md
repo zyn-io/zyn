@@ -1,6 +1,6 @@
-# What the den sees
+# What an Epeaky den sees
 
-The den is a chat server for a closed community: members enter with a pass,
+A den is an Epeaky server for a closed circle: members enter with a pass,
 talk in rooms, share files and join voice. It relays and stores ciphertext,
 checks membership changes, and never holds a key that decrypts anything. This page says what each party can and cannot see, so a
 community can decide whether that is enough for them.
