@@ -9,6 +9,7 @@ defmodule Den.Application do
   def start(_type, _args) do
     # The door's day keys, made before the den answers anyone.
     Den.Keys.keep()
+    DenWeb.RateLimit.setup()
 
     children = [
       DenWeb.Telemetry,

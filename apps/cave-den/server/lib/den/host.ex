@@ -44,6 +44,7 @@ defmodule Den.Host do
   end
 
   def approve(id), do: Members.approve(id)
+  def decline_all, do: IO.puts("declined #{Members.decline_all()} waiting requests")
   def decline(id), do: Members.decline(id)
   def members, do: Members.count()
 

@@ -19,6 +19,7 @@ defmodule Den.Gate.Members do
   @domain "den.pass.v1"
   @note_max 280
   @pending_max 200
+  @pending_per_source 3
 
   @doc "The hash a code makes: what the member list keeps."
   def hash(<<code::binary-size(32)>>), do: :crypto.hash(:sha256, <<0>> <> @domain <> code)
@@ -70,18 +71,30 @@ defmodule Den.Gate.Members do
 
   # ---- The host's approval ----------------------------------------------------
 
-  @doc "Asks to join: the hash of the asker's pass code and a note for the host. Returns the request's id."
-  def ask(pass_hex, note) do
+  @doc """
+  Asks to join: the hash of the asker's pass code, a note for the host, and a
+  keyed tag of the address it came from (`DenWeb.RateLimit.tag/1`), so one
+  address cannot fill the queue: at most #{3} waiting from one source, #{200}
+  in all. The tag is forgotten with the note. Returns the request's id.
+  """
+  def ask(pass_hex, note, source \\ nil) do
     note = String.trim(note || "")
 
     with true <- open?(:approval) || {:error, :closed},
          {:ok, pass} <- pass_hash(pass_hex),
          true <- (note != "" and String.length(note) <= @note_max) || {:error, :note},
+         true <- is_nil(source) or Repo.aggregate(from(r in "requests", where: is_nil(r.decided) and r.source == ^source), :count) < @pending_per_source || {:error, :busy},
          true <- Repo.aggregate(from(r in "requests", where: is_nil(r.decided)), :count) < @pending_max || {:error, :busy} do
       id = hex(:crypto.strong_rand_bytes(16))
-      Repo.insert_all("requests", [%{id: id, pass: pass, note: note, asked_at: now()}])
+      Repo.insert_all("requests", [%{id: id, pass: pass, note: note, source: source, asked_at: now()}])
       {:ok, id}
     end
+  end
+
+  @doc "The host turns down every request still waiting. Returns how many."
+  def decline_all do
+    {n, _} = Repo.update_all(from(r in "requests", where: is_nil(r.decided)), set: [decided: "declined", note: nil, source: nil])
+    n
   end
 
   @doc "Where a request stands: \"pending\", \"approved\" or \"declined\"."
@@ -105,7 +118,7 @@ defmodule Den.Gate.Members do
       case Repo.one(from r in "requests", where: r.id == ^to_string(id) and is_nil(r.decided), select: r.pass) do
         nil -> Repo.rollback(:request)
         pass ->
-          Repo.update_all(from(r in "requests", where: r.id == ^to_string(id)), set: [decided: how, note: nil])
+          Repo.update_all(from(r in "requests", where: r.id == ^to_string(id)), set: [decided: how, note: nil, source: nil])
           if how == "approved", do: add!(pass, "approval", to_string(id)), else: :ok
       end
     end)

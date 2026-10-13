@@ -2,6 +2,7 @@ defmodule Den.MembersTest do
   use DenWeb.ConnCase, async: false
   import Ecto.Query
   alias Den.Gate.Members
+  alias Den.Repo
 
   @f Path.expand("../fixtures", __DIR__)
   @issuer String.duplicate("t", 40)
@@ -140,6 +141,28 @@ defmodule Den.MembersTest do
     assert File.read!(Path.join(dir, "2026-10-13.pem")) == before, "an existing key is never replaced"
     assert Den.Keys.keep(~D[2026-10-12], 0) == :ok
     File.rm_rf!(dir)
+  end
+
+  test "one source cannot fill the queue; the host can turn every waiting request down" do
+    for _ <- 1..3, do: assert({:ok, _} = Members.ask(elem(device_pass(), 1), "hi", "src-a"))
+    assert Members.ask(elem(device_pass(), 1), "hi", "src-a") == {:error, :busy}
+    assert {:ok, _} = Members.ask(elem(device_pass(), 1), "hi", "src-b")
+    assert Members.decline_all() == 4
+    assert Members.pending() == []
+    assert {:ok, _} = Members.ask(elem(device_pass(), 1), "hi again", "src-a"), "decided requests do not count"
+    assert Repo.all(from r in "requests", where: not is_nil(r.decided), select: r.source) |> Enum.uniq() == [nil], "the source is forgotten with the note"
+  end
+
+  test "the door limits each address; behind a proxy on this machine, the forwarded one", %{conn: _} do
+    Application.put_env(:den, :door_per_minute, 3)
+    on_exit(fn -> Application.put_env(:den, :door_per_minute, 1_000_000) end)
+    get = fn fwd -> build_conn() |> Map.put(:remote_ip, {127, 0, 0, 1}) |> put_req_header("x-forwarded-for", fwd) |> get("/door/ways") end
+    for _ <- 1..3, do: assert(get.("198.51.100.1").status == 200)
+    assert get.("198.51.100.1").status == 429
+    assert get.("198.51.100.2").status == 200, "another address has its own budget"
+    assert get.("203.0.113.9, 198.51.100.1").status == 429, "the proxy's own entry (the last) is the address"
+    far = build_conn() |> Map.put(:remote_ip, {198, 51, 100, 77}) |> put_req_header("x-forwarded-for", "198.51.100.2")
+    assert DenWeb.RateLimit.client(far) == {198, 51, 100, 77}, "a forwarded header from elsewhere is not believed"
   end
 
   test "a pass hash is SHA-256 over a zero byte, the domain and the code, as the page makes it" do

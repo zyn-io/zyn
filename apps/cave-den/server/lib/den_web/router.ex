@@ -2,6 +2,7 @@ defmodule DenWeb.Router do
   use DenWeb, :router
 
   pipeline :api do
+    plug DenWeb.RateLimit
     plug DenWeb.Cors
     plug :accepts, ["json"]
   end

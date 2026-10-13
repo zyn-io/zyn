@@ -59,7 +59,7 @@ defmodule DenWeb.DoorController do
   def join(conn, _), do: fail(conn, :invite)
 
   def ask(conn, %{"pass" => pass} = p) do
-    case Members.ask(pass, p["note"]) do
+    case Members.ask(pass, p["note"], DenWeb.RateLimit.tag(conn.assigns[:client] || conn.remote_ip)) do
       {:ok, id} -> json(conn, %{id: id})
       {:error, why} -> fail(conn, why)
     end

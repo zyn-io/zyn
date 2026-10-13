@@ -29,5 +29,5 @@ config :phoenix,
 
 config :den, keys_dir: Path.expand("../tmp/test-keys", __DIR__), origins: ["http://localhost:4180"], sweep_ms: 3_600_000,
   entry: [:invite, :approval, :external], issuer_token: String.duplicate("t", 40),
-  rooms: [{"general", "General"}, {"news", "News"}], keys_ahead: 0
+  rooms: [{"general", "General"}, {"news", "News"}], keys_ahead: 0, door_per_minute: 1_000_000, ask_per_hour: 1_000_000
 
