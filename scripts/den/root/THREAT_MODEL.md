@@ -76,11 +76,17 @@ blob (at most 25 MB) and sees its size and when it was sent.
 ## Voice
 
 Every room has a voice room. The den forwards audio (one stream up, up to
-eight down, nine people at most) and cannot hear it: each frame is encrypted in
-the browser with AES-GCM under a key derived from the room's MLS group, renewed
-every epoch. The den sees who is in a voice room, when they talk and how much.
-All members share one voice key per epoch, so a member could relabel another
-member's frames; per-sender keys (SFrame) are not built yet.
+eight down, nine people at most) and cannot hear it. Each frame is encrypted
+in the browser with AES-GCM under its sender's own key, derived from the
+room's MLS group and renewed every epoch, and carries an authenticated counter
+so a replayed frame is refused. A slot plays only under the key of the member
+the den names for it, so a den that relabels who is speaking is caught. Voice
+is refused in a browser that cannot encrypt frames.
+
+The den sees who is in a voice room, when they talk and how much. Any member
+can derive every other member's voice key, because frames are not signed, so
+one member can impersonate another member's voice. Outsiders and the den
+cannot.
 
 ## What the operator can see
 
