@@ -136,3 +136,48 @@ test('two devices are one person only when each says so of the other', async () 
   assert.equal(den.nickFor(a), 'Ada', "a device takes its linked device's name");
   assert.equal(den.nickFor(c), '');
 });
+
+test('permissions and the order of roles, as the den works them out', async () => {
+  const { DenClient, PERMS } = await import('../dist/den.js');
+  const den = Object.create(DenClient.prototype);
+  const [owner, mod, helper, member] = ['a', 'b', 'c', 'd'].map((x) => x.repeat(64));
+  den.me = { key: mod, nick: '' };
+  den.rooms = new Map([['general', { id: 'general', kind: 'open', slow: 30, post_roles: [] }], ['news', { id: 'news', kind: 'open', post_roles: ['r-team'] }]]);
+  den.said = {};
+  den.mod = {
+    owner,
+    roles: [
+      { id: 'r-mod', name: 'Moderator', colour: '#e0a030', position: 10, perms: ['timeout', 'kick'] },
+      { id: 'r-team', name: 'Team', colour: null, position: 5, perms: ['bypass_slow'] },
+      { id: 'everyone', name: '@everyone', colour: null, position: 0, perms: ['mention_everyone'] },
+    ],
+    holders: { [mod]: ['r-mod'], [helper]: ['r-team'] },
+    sanctions: [{ key: member, kind: 'timeout', until: Math.floor(Date.now() / 1000) + 60 }, { key: helper, kind: 'timeout', until: 1 }],
+  };
+  assert.deepEqual([...den.perms(owner)].sort(), [...PERMS].sort());
+  assert.ok(den.can('kick') && !den.can('ban'));
+  assert.ok(den.can('mention_everyone', member), "@everyone's permissions are everyone's");
+  assert.ok(den.above(helper) && den.above(member) && !den.above(owner));
+  assert.equal(den.colourOf(mod), '#e0a030');
+  assert.equal(den.colourOf(helper), null, 'a role without a colour gives none');
+  assert.equal(den.sanctionOf(member)?.kind, 'timeout');
+  assert.equal(den.sanctionOf(helper), null, 'a timeout that ended');
+  assert.ok(den.mayPost('general') && !den.mayPost('news'));
+  assert.equal(den.slowLeft('general'), 0);
+  den.said.general = Date.now();
+  assert.ok(den.slowLeft('general') > 29_000);
+  den.me.key = helper;
+  assert.equal(den.slowLeft('general'), 0, 'Bypass slow mode');
+  assert.ok(den.mayPost('news'));
+});
+
+test('a second message from one device inside the slow mode window is not shown', async () => {
+  const { tooSoon } = await import('../dist/den.js');
+  const k = 'a'.repeat(64);
+  const log = [{ t: 'msg', key: k, srv: 1000 }, { t: 'react', key: k }, { t: 'msg', key: 'b'.repeat(64), srv: 1020 }];
+  assert.equal(tooSoon(log, { t: 'msg', key: k, srv: 1010 }, 30), true);
+  assert.equal(tooSoon(log, { t: 'msg', key: k, srv: 1030 }, 30), false);
+  assert.equal(tooSoon(log, { t: 'file', key: k, srv: 1010 }, 0), false, 'no slow mode');
+  assert.equal(tooSoon([], { t: 'msg', key: k, srv: 1010 }, 30), false);
+  assert.equal(tooSoon(log, { t: 'msg', key: k }, 30), false, 'from a den that gives no time');
+});

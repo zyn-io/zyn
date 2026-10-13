@@ -43,6 +43,26 @@ const chunkIv = (iv, i) => { const v = Uint8Array.from(iv); const d = new DataVi
 const chunkAad = (i, last) => { const a = new Uint8Array(16); a.set(new TextEncoder().encode('den-file-v2')); new DataView(a.buffer).setUint32(11, i); a[15] = last ? 1 : 0; return a; };
 /// Bytes a file of `size` takes sealed: a 16-byte tag per piece.
 export const sealedSize = (size) => size + 16 * Math.max(1, Math.ceil(size / CHUNK));
+/// What a role can allow (Den.Mod on the den checks the same).
+export const PERMS = ['administrator', 'manage_server', 'manage_channels', 'manage_roles', 'manage_messages', 'timeout', 'kick', 'ban', 'manage_invites', 'bypass_slow', 'mention_everyone'];
+/// Slow mode choices, in seconds (0: off).
+export const SLOW = [0, 5, 10, 15, 30, 60, 120, 300, 600, 3600, 21600];
+const OWNER_TOP = 1_000_000;
+
+/// Whether a moderated room hides this message: a second message or file
+/// from the same device inside the room's slow mode window, by the den's
+/// own time (`srv`, seconds). A page that sends faster than the den lets
+/// through gets its extras hidden from everyone.
+export function tooSoon(log, m, slow) {
+  if (!slow || !Number.isFinite(m.srv)) return false;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const x = log[i];
+    if (x.key !== m.key || (x.t !== 'msg' && x.t !== 'file') || !Number.isFinite(x.srv)) continue;
+    return m.srv - x.srv < slow;
+  }
+  return false;
+}
+
 /// The reactions the page offers (den-ui.js), and the only ones taken.
 export const REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
 /// One line with nothing hidden in it (see den-ui.js plain()).
@@ -139,6 +159,9 @@ export class DenClient {
     this.nicks = {}; // device key → { name, at }: the names members gave themselves
     this.claims = {}; // device key → the device keys it says are the same person's
     this.typingAt = 0;
+    // The den's roles, who holds them, timeouts and bans in force, its name.
+    this.mod = { owner: null, roles: [], holders: {}, sanctions: [], den: { name: '', description: '', icon: false }, limits: {} };
+    this.said = {}; // room → when this device last sent a message there (slow mode)
   }
 
   /// Run MLS steps one at a time: the group state is one thing.
@@ -363,7 +386,9 @@ export class DenClient {
 
     this.lobby = this.socket.channel('lobby');
     this.lobby.on('room', (r) => this.addRoom(r));
-    this.lobby.join().receive('ok', ({ rooms }) => rooms.forEach((r) => this.addRoom(r)));
+    this.lobby.on('room_gone', ({ id }) => this.dropRoom(id));
+    this.lobby.on('mod', (m) => this.setMod(m));
+    this.lobby.join().receive('ok', ({ rooms, mod }) => { if (mod) this.setMod(mod); rooms.forEach((r) => this.addRoom(r)); });
     for (const r of this.rooms.values()) if (r.kind === 'private') this.joinRoom(r.id);
 
     const inbox = this.socket.channel(`inbox:${this.den.key()}`);
@@ -377,10 +402,93 @@ export class DenClient {
   }
 
   addRoom(r) {
-    if (this.rooms.has(r.id) && this.channels.has(r.id)) return;
     this.rooms.set(r.id, { ...this.rooms.get(r.id), ...r });
     this.on('rooms', [...this.rooms.values()]);
     this.joinRoom(r.id);
+  }
+
+  /// A moderator deleted an open room: gone here too, with its words.
+  dropRoom(id) {
+    if (!this.rooms.has(id) || this.rooms.get(id).kind === 'private') return;
+    this.channels.get(id)?.leave();
+    this.channels.delete(id);
+    this.joined.delete(id);
+    this.rooms.delete(id);
+    this.lock(async () => {
+      try { this.den.forget(id); } catch { /* not in it */ }
+      await this.kv.del(`log:${id}`);
+      await this.save();
+    });
+    this.on('rooms', [...this.rooms.values()]);
+  }
+
+  // ---- Roles and moderation (the den's Den.Mod) -------------------------------
+
+  setMod(m) {
+    this.mod = { ...this.mod, ...m, holders: m.holders || {}, roles: m.roles || [], sanctions: m.sanctions || [] };
+    this.on('mod', this.mod);
+  }
+
+  role(id) { return this.mod.roles.find((r) => r.id === id); }
+  rolesOf(key) { return (this.mod.holders[key] || []).map((id) => this.role(id)).filter(Boolean).sort((a, b) => b.position - a.position); }
+  isOwner(key = this.me.key) { return !!key && key === this.mod.owner; }
+
+  /// A device's permissions, as the den works them out: all for the owner
+  /// and for Administrator; otherwise @everyone's and its roles'.
+  perms(key = this.me.key) {
+    if (this.isOwner(key)) return new Set(PERMS);
+    const p = new Set(this.role('everyone')?.perms || []);
+    for (const r of this.rolesOf(key)) for (const x of r.perms) p.add(x);
+    return p.has('administrator') ? new Set(PERMS) : p;
+  }
+  can(perm, key = this.me.key) { return this.perms(key).has(perm); }
+  /// Any moderator's permission (who sees Den settings).
+  moderates(key = this.me.key) { return [...this.perms(key)].some((p) => p !== 'bypass_slow' && p !== 'mention_everyone'); }
+  top(key) { return this.isOwner(key) ? OWNER_TOP : Math.max(0, ...this.rolesOf(key).map((r) => r.position)); }
+  /// Whether this device may act on `target`: its highest role is above theirs.
+  above(target, actor = this.me.key) { return !this.isOwner(target) && (this.isOwner(actor) || this.top(actor) > this.top(target)); }
+  /// A device's colour: its highest role that has one (as on Discord).
+  colourOf(key) { return this.rolesOf(key).find((r) => r.colour)?.colour || null; }
+  /// What holds a device now: { kind: 'timeout' | 'kick' | 'ban', until } or null.
+  sanctionOf(key) {
+    const s = this.mod.sanctions.find((x) => x.key === key);
+    return s && (s.until === null || s.until * 1000 > Date.now()) ? s : null;
+  }
+  /// Whether this device may write in `room` (its "Who may post").
+  mayPost(room) {
+    const r = this.rooms.get(room);
+    const ids = r?.post_roles || [];
+    if (!ids.length || r.kind === 'private') return true;
+    if (this.isOwner() || this.can('administrator')) return true;
+    return (this.mod.holders[this.me.key] || []).some((id) => ids.includes(id));
+  }
+  slowOf(room) { const r = this.rooms?.get(room); return r?.kind === 'private' ? 0 : r?.slow || 0; }
+  /// Milliseconds before this device may send its next message in `room`.
+  slowLeft(room) {
+    const s = this.slowOf(room);
+    if (!s || this.can('bypass_slow')) return 0;
+    return Math.max(0, (this.said?.[room] || 0) + s * 1000 - Date.now());
+  }
+
+  /// One moderator action on the den (Den.Mod checks it).
+  modDo(event, payload = {}) { return this.push(this.lobby, event, payload); }
+
+  /// An action on a person: on each of their devices this device knows.
+  async onPerson(event, key, payload = {}) {
+    for (const k of [key, ...this.linkedTo(key)]) await this.modDo(event, { key: k, ...payload });
+  }
+
+  /// A moderator's deletion of someone else's message (by its number).
+  modDelete(room, seq) { return this.push(this.channels.get(room), 'delete', { seq }); }
+
+  /// The den deleted a message (a moderator did): gone here too.
+  async deleted(room, seq) {
+    const log = await this.log(room);
+    const m = log.find((x) => x.seq === seq && (x.t === 'msg' || x.t === 'file'));
+    if (!m) return;
+    Object.assign(m, { text: '', file: null, deleted: true, byMod: true });
+    await this.kv.put(`log:${room}`, log);
+    this.on('message', { room, message: m, kind: 'del', mine: false, mention: false });
   }
 
   push(ch, event, payload) {
@@ -400,10 +508,11 @@ export class DenClient {
     ch.on('rolled_back', (r) => this.lock(() => this.rolledBack(room, r)));
     ch.on('expired', ({ keys }) => this.lock(() => this.removeStale(room, keys, true)));
     ch.on('typing', ({ key }) => this.on('typing', { room, key }));
+    ch.on('deleted', ({ seq }) => this.lock(() => this.deleted(room, seq)));
     this.joined.set(room, new Promise((resolve) => {
       ch.join()
         .receive('ok', (state) => { resolve(true); this.lock(() => this.sync(room, state)); })
-        .receive('error', (e) => { resolve(false); this.on('error', { room, error: e?.reason || 'could not open the room' }); });
+        .receive('error', (e) => { resolve(false); if (e?.reason === 'removed') this.on('removed', {}); else this.on('error', { room, error: e?.reason || 'could not open the room' }); });
     }));
   }
 
@@ -507,7 +616,7 @@ export class DenClient {
     }
     if (ev.kind === 'text') {
       const d = decode(ev.text);
-      await this.apply(room, { ...d, from: ev.from, key: ev.key, seq: m.seq, at: sent(d.at) });
+      await this.apply(room, { ...d, from: ev.from, key: ev.key, seq: m.seq, at: sent(d.at), srv: m.at });
     } else if (ev.kind === 'commit') {
       if (!ev.members.some((x) => x.key === this.den.key())) {
         // Taken out (a day that ended without renewal): join again if admitted.
@@ -619,13 +728,15 @@ export class DenClient {
     let shown = null;
     if (m.t === 'msg' || m.t === 'file') {
       if (typeof m.id !== 'string' || at(m.id) >= 0) return;
+      // Faster than the room's slow mode lets anyone write: not shown.
+      if (!mine && !this.can('bypass_slow', m.key) && tooSoon(log, m, this.slowOf(room))) return;
       // Every message carries its sender's door-key fingerprint for its day,
       // so the den cannot drop the evidence without dropping the words.
       if (!mine && m.kh) await this.compareKey(room, new Date(m.at || Date.now()).toISOString().slice(0, 10), m.kh, m);
       const file = m.t === 'file' ? fileMeta(m.file) : null;
       if (m.t === 'file' && !file) return;
       // As the sender's page caps it: a longer message from a modified client is cut.
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), mine, reactions: {} };
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {} };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
@@ -665,7 +776,7 @@ export class DenClient {
     } else return;
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
     // A mention of this device, or of one linked to it, is a mention of its member.
-    const mention = !mine && [this.me.key, ...this.linkedTo(this.me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`));
+    const mention = !mine && ([this.me.key, ...this.linkedTo(this.me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`)) || this.everyone(room, m));
     this.on('message', { room, message: shown, kind: m.t, mine, mention });
   }
 
@@ -699,7 +810,16 @@ export class DenClient {
   }
 
   /// Send one sealed document to a room, and keep it here.
+  /// Whether a message pings everyone: @everyone, in an open room, from a
+  /// device allowed to (Mention everyone).
+  everyone(room, m) {
+    return /(^|\s)@everyone\b/.test(m.text || '') && this.rooms.get(room)?.kind !== 'private' && this.can('mention_everyone', m.key);
+  }
+
   send(room, body) {
+    const words = body.t === 'msg' || body.t === 'file';
+    const left = words ? this.slowLeft(room) : 0;
+    if (left > 0) return Promise.reject(Object.assign(new Error(`Slow mode is on: you can send again in ${Math.ceil(left / 1000)} s.`), { code: 'slow' }));
     return this.lock(async () => {
       const ch = this.channels.get(room);
       const m = { v: 1, id: hex(rand(8)), at: Date.now(), ...(this.me.nick ? { nick: this.me.nick } : {}), ...body };
@@ -710,9 +830,17 @@ export class DenClient {
       }
       for (let tries = 0; tries < 2; tries++) {
         try {
-          const r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
+          let r;
+          try {
+            r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
+          } catch (e) {
+            // The den holds this device to the room's slow mode: wait a window.
+            if (e.code === 'slow') this.said[room] = Date.now();
+            throw e;
+          }
+          if (words) this.said[room] = Date.now();
           await this.advance(room, r.seq);
-          await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq }, true);
+          await this.apply(room, { ...m, from: this.me.name, key: this.me.key, seq: r.seq, srv: r.at }, true);
           this.markRead(room);
           await this.save();
           return m.id;
@@ -754,6 +882,8 @@ export class DenClient {
   /// ciphertext to the den, the key only in the room's message. `progress`
   /// hears ('seal' | 'send', 0..1).
   async sendFile(room, file, progress = () => {}) {
+    const left = this.slowLeft(room);
+    if (left > 0) throw Object.assign(new Error(`Slow mode is on: you can send again in ${Math.ceil(left / 1000)} s.`), { code: 'slow' });
     const max = await this.fileMax();
     if (sealedSize(file.size) > max) throw new Error(`A file is at most ${Math.floor(max / 1e6)} MB on this den.`);
     const raw = rand(32);
