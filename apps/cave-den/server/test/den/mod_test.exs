@@ -81,6 +81,17 @@ defmodule Den.ModTest do
     _ = mod
   end
 
+  test "with the cache on (as in production), every change is seen at once" do
+    Application.put_env(:den, :mod_cache, true)
+    on_exit(fn -> Application.put_env(:den, :mod_cache, false); :persistent_term.erase({Den.Mod, :state}) end)
+    refute Mod.banned?(@member)
+    refute Mod.banned?(@member), "read from the cache"
+    :ok = Mod.ban(@owner, @member, "spam")
+    assert Mod.banned?(@member)
+    :ok = Mod.unban(@owner, @member)
+    refute Mod.banned?(@member)
+  end
+
   test "bad input is refused, not a crash" do
     assert Mod.role_save(@owner, %{"id" => false, "name" => "x"}) == {:error, :role}
     assert Mod.role_save(@owner, %{"id" => 12}) == {:error, :role}
