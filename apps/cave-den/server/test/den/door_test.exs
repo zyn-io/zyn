@@ -8,7 +8,8 @@ defmodule Den.DoorTest do
     Application.put_env(:den, :today, fn -> ~D[2026-10-12] end)
     %{"code" => code} = Jason.decode!(File.read!(Path.join(@f, "pass.json")))
     blinded = String.trim(File.read!(Path.join(@f, "blinded.hex")))
-    on_exit(fn -> Application.delete_env(:den, :today) && Application.delete_env(:den, :gate_check) end)
+    Application.put_env(:den, :now, fn -> ~U[2026-10-12 22:30:00Z] end)
+    on_exit(fn -> Enum.each([:today, :now, :gate_check], &Application.delete_env(:den, &1)) end)
     %{code: code, blinded: blinded}
   end
 
@@ -19,6 +20,21 @@ defmodule Den.DoorTest do
     for _ <- 1..3, do: assert({:ok, _} = Den.Door.sign(code, "2026-10-12", b))
     assert Den.Door.sign(code, "2026-10-12", b) == {:error, :limit}
     # Tomorrow's are counted apart (and that key is not made here).
+    assert Den.Door.sign(code, "2026-10-13", b) == {:error, :no_key}
+  end
+
+  # A pass the host removes before the evening lets nobody in tomorrow: no
+  # device can hold tomorrow's token from earlier in the day.
+  test "tomorrow's token only in the day's last hours", %{code: code, blinded: b} do
+    on_exit(fn -> Application.delete_env(:den, :tomorrow_from_hour) end)
+    ledger({:ok, true})
+    Application.put_env(:den, :now, fn -> ~U[2026-10-12 21:59:00Z] end)
+    assert Den.Door.sign(code, "2026-10-13", b) == {:error, :early}
+    assert {:ok, _} = Den.Door.sign(code, "2026-10-12", b)
+    Application.put_env(:den, :now, fn -> ~U[2026-10-12 22:00:00Z] end)
+    assert Den.Door.sign(code, "2026-10-13", b) == {:error, :no_key}, "past the hour: on to the day key"
+    Application.put_env(:den, :tomorrow_from_hour, 0)
+    Application.put_env(:den, :now, fn -> ~U[2026-10-12 08:00:00Z] end)
     assert Den.Door.sign(code, "2026-10-13", b) == {:error, :no_key}
   end
 

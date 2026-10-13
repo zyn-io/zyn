@@ -4,9 +4,12 @@ defmodule Den.Door do
   join them:
 
   1. `sign/3`: a member's page shows its pass code and a *blinded* token for
-     today or tomorrow. The door asks the gate (`Den.Gate`) whether the pass
+     today or, in the day's last hours (from `:tomorrow_from_hour` UTC, 22 by
+     default), tomorrow. The door asks the gate (`Den.Gate`) whether the pass
      is live, counts at most #{3} tokens per pass per day, and signs the
      blinded token with the day's key. It sees the pass, never the token.
+     Tomorrow's token is signed only late in the day so that a pass the host
+     removes before then lets no device in after midnight.
   2. `enter/4`: a device presents an unblinded token, which names its day,
      the device's key and a nonce, on the token's day. The den checks the
      signature against the day key and the device's proof that it holds the
@@ -20,6 +23,10 @@ defmodule Den.Door do
   @grace 3600
 
   def today, do: (Application.get_env(:den, :today) || fn -> Date.utc_today() end).()
+  defp now, do: (Application.get_env(:den, :now) || fn -> DateTime.utc_now() end).()
+
+  @doc "The UTC hour from which the door signs tomorrow's tokens."
+  def tomorrow_from, do: Application.get_env(:den, :tomorrow_from_hour, 22)
   defp day_string(d), do: Date.to_iso8601(d)
 
   @doc "Blind-sign a token for `day` (today or tomorrow) for a live pass."
@@ -28,6 +35,7 @@ defmodule Den.Door do
 
     with {:ok, code} <- Den.Gate.code(code_hex),
          true <- day in [day_string(today), day_string(Date.add(today, 1))] || {:error, :day},
+         true <- day == day_string(today) or now().hour >= tomorrow_from() || {:error, :early},
          {:ok, blinded} <- Base.decode16(blinded_hex || "", case: :lower) |> ok_or(:blinded),
          pass = Den.Gate.id(code),
          {:ok, true} <- live(code),

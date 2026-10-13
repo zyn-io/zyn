@@ -81,6 +81,12 @@ if v = System.get_env("DEN_RETENTION_DAYS"), do: config(:den, retention_days: St
 # How many days of day keys the den keeps ahead itself (0: the host makes them).
 if v = System.get_env("DEN_KEYS_AHEAD"), do: config(:den, keys_ahead: String.to_integer(v))
 
+if v = System.get_env("DEN_TOMORROW_FROM") do
+  h = String.to_integer(v)
+  h in 0..23 || raise "DEN_TOMORROW_FROM: the UTC hour (0 to 23) from which the door signs tomorrow's tokens"
+  config :den, tomorrow_from_hour: h
+end
+
 if config_env() == :prod do
   database_path = System.get_env("DATABASE_PATH", "/var/lib/den/den.db")
 

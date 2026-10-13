@@ -9,6 +9,7 @@ defmodule DenWeb.DoorController do
     limit: {429, "this pass has had its tokens for that day"},
     gate: {503, "the den cannot check passes right now — try again shortly"},
     no_key: {503, "the door has no key for that day yet"},
+    early: {425, "the door signs tomorrow's tokens only late in the day"},
     token: {400, "that is not a den token"},
     signature: {403, "that token was not signed by the door for its day"},
     spent: {403, "that token was already used"},
@@ -52,7 +53,7 @@ defmodule DenWeb.DoorController do
 
   def ways(conn, _) do
     members = Den.Gate.module() == Members
-    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval)})
+    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval), tomorrow_from: Den.Door.tomorrow_from()})
   end
 
   def join(conn, %{"invite" => invite, "pass" => pass}), do: done(conn, Members.join(invite, pass))

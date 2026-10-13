@@ -217,21 +217,54 @@ export class DenClient {
     return { msg: p.msg, randomizer: p.randomizer, sig: tokenFinalize(der, pending, unhex(sig)) };
   }
 
-  /// With a pass code: tokens for today and tomorrow; today's used now,
-  /// tomorrow's kept for tomorrow, when the door cannot see it. The code is
-  /// kept on this device, so it can get the next days' tokens itself.
+  /// With a pass code: today's token, used now, and in the day's last hours
+  /// tomorrow's too, kept for tomorrow, when the door cannot see it. The
+  /// code is kept on this device, so it can get the next days' tokens itself.
   async fromPass(code) {
     const today = await this.tokenFor(code, day());
     if (!today) throw new Error('The door has published no key for today yet.');
-    const tomorrow = await this.tokenFor(code, day(1));
-    if (tomorrow) await this.kv.put(`token:${day(1)}`, tomorrow);
+    if (await this.lateInDay()) {
+      const tomorrow = await this.tokenFor(code, day(1)).catch(() => null);
+      if (tomorrow) await this.kv.put(`token:${day(1)}`, tomorrow);
+    }
     if (await this.keepsPass()) await this.kv.put('pass', code);
     return this.enter(today);
   }
 
-  /// Tomorrow's token, fetched at a random moment while connected rather than
-  /// at entry, so the door's and the den's records of this device do not line
-  /// up in time.
+  /// The UTC hour from which the door signs tomorrow's tokens (it signs them
+  /// only late in the day, so a pass the host removes stops at midnight).
+  async tomorrowFrom() {
+    this.waysSeen ??= this.ways().catch(() => ({}));
+    const h = (await this.waysSeen).tomorrow_from;
+    return Number.isInteger(h) && h >= 0 && h <= 23 ? h : 0;
+  }
+
+  async lateInDay() {
+    return new Date().getUTCHours() >= await this.tomorrowFrom();
+  }
+
+  /// When to fetch tomorrow's token: a random moment in the day's last hours,
+  /// while connected, rather than at entry, so the door's and the den's
+  /// records of this device do not line up in time.
+  async refillAt() {
+    const from = await this.tomorrowFrom();
+    const now = Date.now();
+    const d = new Date(now);
+    const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), from);
+    const end = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - 10 * 60_000;
+    const lo = Math.max(start, now + 60_000);
+    return lo >= end ? null : lo + Math.random() * (end - lo);
+  }
+
+  scheduleRefill() {
+    clearTimeout(this.refillTimer);
+    this.refillAt().then((at) => {
+      // Past the window today: try again tomorrow.
+      const wait = at ? at - Date.now() : Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1) + 60_000 - Date.now();
+      this.refillTimer = setTimeout(() => (at ? this.refill() : Promise.resolve()).finally(() => this.scheduleRefill()), Math.min(wait, 2 ** 31 - 1));
+    });
+  }
+
   async refill() {
     const d = day(1);
     const code = await this.kv.get('pass');
@@ -295,7 +328,7 @@ export class DenClient {
     this.socket.onError(() => this.on('offline'));
     this.socket.onOpen(() => this.on('online'));
     this.socket.connect();
-    setTimeout(() => this.refill(), 60_000 + Math.random() * 20 * 60_000);
+    this.scheduleRefill();
 
     this.lobby = this.socket.channel('lobby');
     this.lobby.on('room', (r) => this.addRoom(r));
