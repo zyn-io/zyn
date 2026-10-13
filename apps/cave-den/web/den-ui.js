@@ -472,7 +472,7 @@ export function mountDen(den, el, me) {
   async function download(m) {
     status(`Opening ${m.file.name}…`, true);
     try {
-      const url = URL.createObjectURL(await den.openFile(m.file));
+      const url = URL.createObjectURL(await den.openFile(m.file, (x) => { if (m.file.size > 4 * 1048576) status(`Opening ${m.file.name} · ${Math.round(x * 100)}%`, true); }));
       Object.assign(document.createElement('a'), { href: url, download: m.file.name }).click();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       status('');
@@ -643,9 +643,12 @@ export function mountDen(den, el, me) {
   // Files: the button, a paste, or a drop anywhere on the conversation.
   async function sendFiles(files) {
     for (const f of [...files].slice(0, 5)) {
-      if (f.size > 25 * 1048576) { status(`${f.name} is over 25 MB.`); continue; }
-      status(`Sealing and sending ${f.name}…`, true);
-      try { await den.sendFile(room, f); status(''); } catch (e) { status(e.message); }
+      const pct = (x) => `${Math.round(x * 100)}%`;
+      status(`Sealing ${f.name}…`, true);
+      try {
+        await den.sendFile(room, f, (step, x) => status(step === 'seal' ? `Sealing ${f.name} · ${pct(x)}` : `Sending ${f.name} · ${pct(x)}`, true));
+        status('');
+      } catch (e) { status(e.message); }
     }
   }
   el('attach').onclick = () => el('attach-file').click();

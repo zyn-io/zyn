@@ -31,7 +31,18 @@ export const VOICE_LABEL = 'den voice';
 export const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
 export const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-const FILE_MAX = 25 * 1024 * 1024;
+/// Files are sealed in pieces of 1 MiB, each its own AES-GCM message under
+/// the file's one-time key: its IV is the file's with the piece's number mixed
+/// in, and its authenticated data names that number and whether it is the
+/// last, so pieces can be neither reordered nor dropped from the end.
+export const CHUNK = 1 << 20;
+/// The largest file any message may describe; each den sets its own lower
+/// limit (/door/ways file_max), which is what this device checks before sealing.
+const FILE_HARD = 2 ** 31;
+const chunkIv = (iv, i) => { const v = Uint8Array.from(iv); const d = new DataView(v.buffer); d.setUint32(8, d.getUint32(8) ^ i); return v; };
+const chunkAad = (i, last) => { const a = new Uint8Array(16); a.set(new TextEncoder().encode('den-file-v2')); new DataView(a.buffer).setUint32(11, i); a[15] = last ? 1 : 0; return a; };
+/// Bytes a file of `size` takes sealed: a 16-byte tag per piece.
+export const sealedSize = (size) => size + 16 * Math.max(1, Math.ceil(size / CHUNK));
 /// The reactions the page offers (den-ui.js), and the only ones taken.
 export const REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '🙏', '🔥', '✅'];
 /// One line with nothing hidden in it (see den-ui.js plain()).
@@ -47,10 +58,12 @@ export function fileMeta(f) {
   const bytes = (v, n) => { try { return typeof v === 'string' && unb64(v).length === n; } catch { return false; } };
   if (typeof f.blob !== 'string' || !/^[0-9a-f]{64}$/.test(f.blob)) return null;
   if (!bytes(f.key, 32) || !bytes(f.iv, 12)) return null;
-  if (!Number.isSafeInteger(f.size) || f.size < 0 || f.size > FILE_MAX) return null;
+  if (!Number.isSafeInteger(f.size) || f.size < 0 || f.size > FILE_HARD) return null;
+  // Sealed in pieces (CHUNK), or, from older devices, whole.
+  if (f.chunk !== undefined && f.chunk !== CHUNK) return null;
   const name = (typeof f.name === 'string' ? f.name : '').replace(/[\u0000-\u001f\u007f/\\\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'file';
   const mime = typeof f.mime === 'string' && INLINE.has(f.mime.toLowerCase()) ? f.mime.toLowerCase() : 'application/octet-stream';
-  return { blob: f.blob, name, mime, size: f.size, key: f.key, iv: f.iv };
+  return { blob: f.blob, name, mime, size: f.size, key: f.key, iv: f.iv, ...(f.chunk ? { chunk: f.chunk } : {}) };
 }
 /// A name a member gives themselves, as others take it: one plain line of 1
 /// to 32 characters that cannot pass for a device name (m- and hex). Empty
@@ -706,29 +719,97 @@ export class DenClient {
 
   // ---- Files -----------------------------------------------------------------
 
-  /// A file: sealed here with a one-time key, its ciphertext to the den, the
-  /// key only in the room's message.
-  async sendFile(room, file) {
-    if (file.size > FILE_MAX) throw new Error('A file is at most 25 MB.');
+  /// The most one file may be on this den, sealed (older dens: 25 MiB).
+  async fileMax() {
+    this.waysSeen ??= this.ways().catch(() => ({}));
+    const m = (await this.waysSeen).file_max;
+    return Number.isSafeInteger(m) && m > 0 ? m : 25 * 1024 * 1024;
+  }
+
+  /// A file: sealed here, piece by piece, with a one-time key; its
+  /// ciphertext to the den, the key only in the room's message. `progress`
+  /// hears ('seal' | 'send', 0..1).
+  async sendFile(room, file, progress = () => {}) {
+    const max = await this.fileMax();
+    if (sealedSize(file.size) > max) throw new Error(`A file is at most ${Math.floor(max / 1e6)} MB on this den.`);
     const raw = rand(32);
     const iv = rand(12);
     const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
-    const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, await file.arrayBuffer()));
-    const r = await fetch(`${this.base}/blob/`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${this.sessionToken.session}` }, body: sealed, credentials: 'omit' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `The den answered ${r.status}`);
-    return this.send(room, { t: 'file', file: { blob: j.id, name: String(file.name).slice(0, 120), mime: String(file.type || 'application/octet-stream').slice(0, 80), size: file.size, key: b64(raw), iv: b64(iv) } });
+    const n = Math.max(1, Math.ceil(file.size / CHUNK));
+    // A Blob of Blobs: the browser may keep a large one on disk, not in memory.
+    let sealed = new Blob([]);
+    for (let i = 0; i < n; i++) {
+      const piece = await file.slice(i * CHUNK, (i + 1) * CHUNK).arrayBuffer();
+      sealed = new Blob([sealed, await crypto.subtle.encrypt({ name: 'AES-GCM', iv: chunkIv(iv, i), additionalData: chunkAad(i, i === n - 1) }, key, piece)]);
+      progress('seal', (i + 1) / n);
+    }
+    const j = await this.upload(sealed, (f) => progress('send', f));
+    return this.send(room, { t: 'file', file: { blob: j.id, name: String(file.name).slice(0, 120), mime: String(file.type || 'application/octet-stream').slice(0, 80), size: file.size, key: b64(raw), iv: b64(iv), chunk: CHUNK } });
   }
 
-  /// A file from the den, opened here.
-  async openFile(given) {
+  /// Sealed bytes to the den, with progress (an XMLHttpRequest says how far
+  /// an upload is; fetch does not).
+  upload(body, progress = () => {}) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', `${this.base}/blob/`);
+      x.setRequestHeader('content-type', 'application/octet-stream');
+      x.setRequestHeader('authorization', `Bearer ${this.sessionToken.session}`);
+      x.upload.onprogress = (e) => { if (e.lengthComputable) progress(e.loaded / e.total); };
+      x.onload = () => {
+        let j = {};
+        try { j = JSON.parse(x.responseText); } catch { /* not JSON */ }
+        if (x.status >= 200 && x.status < 300 && typeof j.id === 'string') resolve(j); else reject(new Error(j.error || `The den answered ${x.status}`));
+      };
+      x.onerror = () => reject(new Error('The file did not reach the den.'));
+      x.send(body);
+    });
+  }
+
+  /// A file from the den, opened here, piece by piece as it arrives.
+  /// `progress` hears 0..1.
+  async openFile(given, progress = () => {}) {
     const file = fileMeta(given);
     if (!file) throw new Error('That file cannot be opened.');
     const r = await fetch(`${this.base}/blob/${file.blob}`, { headers: { authorization: `Bearer ${this.sessionToken.session}` }, credentials: 'omit' });
     if (!r.ok) throw new Error('That file is gone (files are kept 30 days).');
     const key = await crypto.subtle.importKey('raw', unb64(file.key), 'AES-GCM', false, ['decrypt']);
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(file.iv) }, key, await r.arrayBuffer());
-    return new Blob([plain], { type: file.mime });
+    const iv = unb64(file.iv);
+    if (!file.chunk) {
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, await r.arrayBuffer());
+      return new Blob([plain], { type: file.mime });
+    }
+    const n = Math.max(1, Math.ceil(file.size / file.chunk));
+    const whole = file.chunk + 16;
+    const parts = [];
+    let pending = [];
+    let have = 0;
+    let i = 0;
+    let out = 0;
+    const flat = () => { const b = new Uint8Array(have); let o = 0; for (const p of pending) { b.set(p, o); o += p.length; } return b; };
+    const open = async (bytes, last) => {
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: chunkIv(iv, i), additionalData: chunkAad(i, last) }, key, bytes);
+      parts.push(new Blob([plain]));
+      out += plain.byteLength;
+      i++;
+      progress(i / n);
+    };
+    const reader = r.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value?.length) { pending.push(value); have += value.length; }
+      while (i < n - 1 && have >= whole) {
+        const b = flat();
+        await open(b.subarray(0, whole), false);
+        pending = [b.subarray(whole)];
+        have = pending[0].length;
+      }
+      if (done) break;
+    }
+    if (i !== n - 1 || have < 16 || have > whole) throw new Error('That file is not whole.');
+    await open(flat(), true);
+    if (out !== file.size) throw new Error('That file is not whole.');
+    return new Blob(parts, { type: file.mime });
   }
 
   // ---- Private rooms ---------------------------------------------------------

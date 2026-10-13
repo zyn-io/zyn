@@ -53,7 +53,7 @@ defmodule DenWeb.DoorController do
 
   def ways(conn, _) do
     members = Den.Gate.module() == Members
-    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval), tomorrow_from: Den.Door.tomorrow_from()})
+    json(conn, %{invite: members and Members.open?(:invite), approval: members and Members.open?(:approval), tomorrow_from: Den.Door.tomorrow_from(), file_max: Den.Blobs.max()})
   end
 
   def join(conn, %{"invite" => invite, "pass" => pass}), do: done(conn, Members.join(invite, pass))

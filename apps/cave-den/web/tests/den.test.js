@@ -45,7 +45,7 @@ test('a file message from another device is checked before it is shown or fetche
   const b64 = (n) => Buffer.alloc(n, 7).toString('base64');
   const good = { blob: 'a'.repeat(64), name: 'cave.png', mime: 'image/png', size: 1000, key: b64(32), iv: b64(12) };
   assert.deepEqual(fileMeta(good), good);
-  for (const bad of [{ blob: '../door/keys' }, { blob: 'A'.repeat(64) }, { key: b64(16) }, { iv: 'not base64!' }, { size: -1 }, { size: 26 * 1024 * 1024 }, { size: '9' }]) {
+  for (const bad of [{ blob: '../door/keys' }, { blob: 'A'.repeat(64) }, { key: b64(16) }, { iv: 'not base64!' }, { size: -1 }, { size: 2 ** 31 + 1 }, { size: '9' }, { chunk: 4096 }]) {
     assert.equal(fileMeta({ ...good, ...bad }), null, JSON.stringify(bad));
   }
   assert.equal(fileMeta({ ...good, mime: 'image/svg+xml' }).mime, 'application/octet-stream', 'SVG is a download, never shown in place');
@@ -79,4 +79,43 @@ test('a name a member gives themselves is one plain line that cannot pass for a 
   assert.equal(nickOf('m-zed'), 'm-zed', 'only m- and hex is a device name');
   assert.equal(nickOf(''), '');
   assert.equal(nickOf(7), '7');
+});
+
+test('a file is sealed in pieces that open only whole and in order', async () => {
+  const { webcrypto } = await import('node:crypto');
+  globalThis.crypto ??= webcrypto;
+  const { DenClient, CHUNK, sealedSize } = await import('../dist/den.js');
+  const den = Object.create(DenClient.prototype);
+  den.base = 'https://den.test';
+  den.sessionToken = { session: 's' };
+  den.waysSeen = Promise.resolve({ file_max: 100e6 });
+  let sealed = null;
+  let sentMsg = null;
+  den.upload = async (blob) => { sealed = new Uint8Array(await blob.arrayBuffer()); return { id: 'a'.repeat(64) }; };
+  den.send = async (_room, body) => { sentMsg = body; return 'id'; };
+  const realFetch = globalThis.fetch;
+  let served = null;
+  globalThis.fetch = async () => new Response(served);
+  try {
+    for (const size of [0, 1, CHUNK, CHUNK + 1, 2.5 * CHUNK]) {
+      const data = new Uint8Array(size);
+      for (let o = 0; o < size; o += 65536) webcrypto.getRandomValues(data.subarray(o, o + 65536));
+      await den.sendFile('general', new File([data], 'f.bin'));
+      assert.equal(sealed.length, sealedSize(size), `sealed size for ${size}`);
+      assert.equal(sentMsg.file.chunk, CHUNK);
+      served = sealed;
+      const back = new Uint8Array(await (await den.openFile(sentMsg.file)).arrayBuffer());
+      assert.deepEqual(back, data, `round trip of ${size} bytes`);
+    }
+    // 2.5 pieces: the last one dropped, or two swapped, does not open.
+    const whole = CHUNK + 16;
+    served = sealed.slice(0, 2 * whole);
+    await assert.rejects(den.openFile(sentMsg.file), /not whole|operation/i, 'cut short');
+    served = new Uint8Array([...sealed.slice(whole, 2 * whole), ...sealed.slice(0, whole), ...sealed.slice(2 * whole)]);
+    await assert.rejects(den.openFile(sentMsg.file), 'reordered');
+    served = sealed;
+    await assert.rejects(den.openFile({ ...sentMsg.file, size: sentMsg.file.size - 1 }), 'a size that does not match');
+    den.waysSeen = Promise.resolve({ file_max: 1000 });
+    await assert.rejects(den.sendFile('general', new File([new Uint8Array(2000)], 'big.bin')), /at most/);
+  } finally { globalThis.fetch = realFetch; }
 });

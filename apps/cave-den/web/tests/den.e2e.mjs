@@ -193,6 +193,22 @@ await A.p.evaluate(async () => {
 ok(await until(B.p, () => [...document.querySelectorAll('#log .att img')].some((i) => i.src.startsWith('blob:') && i.naturalWidth === 40)), 'B sees the image, decrypted in the browser');
 const doc = await B.p.evaluate(async () => { const log = await window.__den.log('general'); const f = log.find((m) => m.file?.name === 'minutes.txt'); return (await window.__den.openFile(f.file)).text(); });
 ok(doc === 'the minutes of the first meeting', 'B opens the document');
+// A file of several pieces, past the old 25 MB limit's pieces logic: 30 MB.
+const bigSum = await A.p.evaluate(async () => {
+  const data = new Uint8Array(30 * 1024 * 1024);
+  for (let o = 0; o < data.length; o += 65536) crypto.getRandomValues(data.subarray(o, o + 65536));
+  await window.__den.sendFile('general', new File([data], 'archive.bin', { type: 'application/octet-stream' }));
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data))).map((x) => x.toString(16).padStart(2, '0')).join('');
+});
+const bigBack = await B.p.evaluate(async () => {
+  for (let t = 0; t < 50; t++) {
+    const f = (await window.__den.log('general')).find((m) => m.file?.name === 'archive.bin');
+    if (f) { const b = await window.__den.openFile(f.file); return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await b.arrayBuffer()))).map((x) => x.toString(16).padStart(2, '0')).join(''); }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return 'not arrived';
+});
+ok(bigBack === bigSum, 'a 30 MB file, sealed in pieces, opens whole on the other side');
 
 // A room a member makes.
 const nw = await B.p.evaluate(() => window.__den.push(window.__den.lobby, 'open_room', { title: 'Night watch' }));

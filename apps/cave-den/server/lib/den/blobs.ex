@@ -7,12 +7,17 @@ defmodule Den.Blobs do
   import Ecto.Query
   alias Den.Repo
 
-  @max 25 * 1024 * 1024
-
-  def max, do: @max
+  @doc "The most one file may be, encrypted: `:file_max` (Den.Limits)."
+  def max, do: Den.Limits.get(:file_max)
   def dir, do: Application.get_env(:den, :blobs_dir) || Path.join(Path.dirname(Application.fetch_env!(:den, :keys_dir)), "blobs")
 
-  def put(bytes) when byte_size(bytes) <= @max and byte_size(bytes) > 0 do
+  def put(bytes) when byte_size(bytes) > 0 do
+    if byte_size(bytes) <= max(), do: keep(bytes), else: {:error, :size}
+  end
+
+  def put(_), do: {:error, :size}
+
+  defp keep(bytes) do
     id = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     File.mkdir_p!(dir())
     path = Path.join(dir(), id)
@@ -30,8 +35,6 @@ defmodule Den.Blobs do
     {:ok, id}
   end
 
-  def put(_), do: {:error, :size}
-
   @doc "A fresh temporary name in the blob folder, for a file being received."
   def part do
     File.mkdir_p!(dir())
@@ -39,7 +42,7 @@ defmodule Den.Blobs do
   end
 
   @doc "Keeps a received file (`tmp`, of `size` bytes, SHA-256 `hash`) under its hash."
-  def put_file(tmp, hash, size) when size > 0 and size <= @max do
+  def put_file(tmp, hash, size) when size > 0 do
     id = Base.encode16(hash, case: :lower)
     path = Path.join(dir(), id)
     if File.exists?(path), do: File.rm!(tmp), else: File.rename!(tmp, path)

@@ -33,7 +33,7 @@ defmodule DenWeb.BlobController do
       :error -> conn |> put_status(401) |> json(%{error: "enter the den first"})
       {:error, :quota} -> conn |> put_status(429) |> json(%{error: "this device has sent enough files today"})
       {:error, :disk} -> conn |> put_status(507) |> json(%{error: "the den is full for now; try again later"})
-      {:error, :size} -> conn |> put_status(413) |> json(%{error: "a file is at most 25 MB, and its length is sent first"})
+      {:error, :size} -> conn |> put_status(413) |> json(%{error: "a file is at most #{div(Den.Blobs.max(), 1_000_000)} MB here, and its length is sent first"})
       _ -> conn |> put_status(400) |> json(%{error: "could not read the file"})
     end
   end

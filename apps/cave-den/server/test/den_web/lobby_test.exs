@@ -110,7 +110,7 @@ defmodule DenWeb.LobbyTest do
     authed = put_req_header(conn, "authorization", "Bearer " <> s)
     assert authed |> post("/blob/", "sealed bytes") |> json_response(413), "no length sent first"
     assert authed |> put_req_header("content-length", "5") |> post("/blob/", "sealed bytes") |> json_response(413), "more than it said"
-    assert authed |> put_req_header("content-length", "#{26 * 1024 * 1024}") |> post("/blob/", "x") |> json_response(413), "past 25 MB, refused unread"
+    assert authed |> put_req_header("content-length", "#{Den.Blobs.max() + 1}") |> post("/blob/", "x") |> json_response(413), "past the den's file size, refused unread"
     up = authed |> put_req_header("content-length", "12") |> post("/blob/", "sealed bytes") |> json_response(200)
     assert up["id"] == :crypto.hash(:sha256, "sealed bytes") |> Base.encode16(case: :lower)
     got = build_conn() |> put_req_header("authorization", "Bearer " <> s) |> get("/blob/" <> up["id"])
