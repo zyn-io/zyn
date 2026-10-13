@@ -101,4 +101,20 @@ defmodule Den.VoiceTest do
     assert Den.Voice.srflx({198, 51, 100, 9}) == nil, "a public address needs no stand-in"
     refute Den.Voice.ip_ok?({127, 0, 0, 1})
   end
+
+  test "a device's ICE candidate may not point the den at loopback, link-local or (public only) private addresses" do
+    on_exit(fn -> Application.delete_env(:den, :voice_public_only) end)
+    c = fn addr -> %{"candidate" => "candidate:1 1 udp 2122260223 #{addr} 54321 typ host", "sdpMid" => "0"} end
+    refute Den.Voice.candidate?(c.("127.0.0.1"))
+    refute Den.Voice.candidate?(c.("169.254.3.4"))
+    refute Den.Voice.candidate?(c.("0.0.0.0"))
+    refute Den.Voice.candidate?(c.("::1"))
+    assert Den.Voice.candidate?(c.("198.51.100.4"))
+    assert Den.Voice.candidate?(c.("2c0f9a3e-7a1b-4d1e-9f00-1b2c3d4e5f60.local"))
+    assert Den.Voice.candidate?(%{"candidate" => ""})
+    assert Den.Voice.candidate?(c.("192.168.50.10"))
+    Application.put_env(:den, :voice_public_only, true)
+    refute Den.Voice.candidate?(c.("192.168.50.10"))
+    refute Den.Voice.candidate?(%{"candidate" => "garbage"})
+  end
 end

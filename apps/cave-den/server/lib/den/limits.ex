@@ -22,7 +22,8 @@ defmodule Den.Limits do
     min_free_bytes: 2_000_000_000
   }
 
-  def get(k), do: Map.get(Application.get_env(:den, :limits, %{}), k, Map.fetch!(@defaults, k))
+  # A map or a keyword list in config; DEN_LIMITS="files=100,file_bytes=…".
+  def get(k), do: Map.get(Map.new(Application.get_env(:den, :limits, %{})), k, Map.fetch!(@defaults, k))
 
   @doc """
   Whether the disk the den writes to has room: read with `df` at most once a

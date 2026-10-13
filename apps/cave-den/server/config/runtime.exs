@@ -60,6 +60,24 @@ end
 
 if v = System.get_env("DEN_EXTRA_CHILDREN"), do: config(:den, extra_children: Enum.map(list.(v), module))
 
+# The den's limits (Den.Limits), as "files=100,file_bytes=100000000".
+if v = System.get_env("DEN_LIMITS") do
+  limits =
+    for pair <- list.(v), into: %{} do
+      with [k, n] <- String.split(pair, "=", parts: 2),
+           {n, ""} <- Integer.parse(String.trim(n)),
+           key when is_atom(key) <- Enum.find([:message_bytes, :file_bytes, :files, :invites, :inbox, :history_bytes, :min_free_bytes], &(Atom.to_string(&1) == String.trim(k))) do
+        {key, n}
+      else
+        _ -> raise "DEN_LIMITS: #{inspect(pair)} is not name=number (message_bytes, file_bytes, files, invites, inbox, history_bytes, min_free_bytes)"
+      end
+    end
+
+  config :den, limits: limits
+end
+
+if v = System.get_env("DEN_RETENTION_DAYS"), do: config(:den, retention_days: String.to_integer(v))
+
 # How many days of day keys the den keeps ahead itself (0: the host makes them).
 if v = System.get_env("DEN_KEYS_AHEAD"), do: config(:den, keys_ahead: String.to_integer(v))
 
@@ -71,10 +89,10 @@ if config_env() == :prod do
     keys_dir: System.get_env("DEN_KEYS_DIR", "/var/lib/den/keys"),
     # Other sites whose pages may use this den (comma-separated https
     # origins); the den's own page always may.
-    origins: String.split(System.get_env("DEN_ORIGINS", ""), ",", trim: true),
+    origins: System.get_env("DEN_ORIGINS", "") |> String.split(",", trim: true) |> Enum.map(&String.trim/1),
     # Origins the den's own page may reach besides the den: where its day keys
     # are published, if not on the den itself (comma-separated).
-    page_connect: String.split(System.get_env("DEN_PAGE_CONNECT", ""), ",", trim: true),
+    page_connect: System.get_env("DEN_PAGE_CONNECT", "") |> String.split(",", trim: true) |> Enum.map(&String.trim/1),
     voice_public_only: System.get_env("DEN_VOICE_PUBLIC_ONLY") in ["1", "true"]
 
   config :den, Den.Repo,

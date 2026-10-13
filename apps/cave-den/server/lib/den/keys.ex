@@ -109,10 +109,16 @@ defmodule Den.Keys do
     path = Path.join(dir(), day <> ".pem")
 
     unless File.exists?(path) do
+      # A private folder, and the key written private under a temporary name
+      # before it takes its own: never readable by anyone else, even briefly.
       File.mkdir_p!(dir())
+      File.chmod!(dir(), 0o700)
       key = :public_key.generate_key({:rsa, 2048, 65_537})
-      File.write!(path, :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)]))
-      File.chmod!(path, 0o600)
+      tmp = path <> ".part"
+      File.touch!(tmp)
+      File.chmod!(tmp, 0o600)
+      File.write!(tmp, :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, key)]))
+      File.rename!(tmp, path)
     end
 
     :ok

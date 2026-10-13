@@ -61,10 +61,33 @@ defmodule Den.Voice do
   def offer?(_), do: false
 
   @doc "An ICE candidate as a device may send it."
-  def candidate?(%{"candidate" => c} = m) when is_binary(c) and byte_size(c) <= 1024,
-    do: Enum.all?(Map.keys(m), &(&1 in ["candidate", "sdpMid", "sdpMLineIndex", "usernameFragment"]))
+  def candidate?(%{"candidate" => c} = m) when is_binary(c) and byte_size(c) <= 1024 do
+    Enum.all?(Map.keys(m), &(&1 in ["candidate", "sdpMid", "sdpMLineIndex", "usernameFragment"])) and reachable?(c)
+  end
 
   def candidate?(_), do: false
+
+  # A device's candidate names an address the den would send to: never
+  # loopback, link-local or unspecified, nor (with :voice_public_only) a
+  # private one, so a device cannot point the den at its own network. An
+  # mDNS name (.local) or an empty end-of-candidates line passes; the den
+  # cannot resolve or send to those.
+  defp reachable?(""), do: true
+
+  defp reachable?(c) do
+    case String.split(c) do
+      [_foundation, _component, _proto, _priority, addr | _] ->
+        case :inet.parse_address(String.to_charlist(addr)) do
+          {:ok, {0, 0, 0, 0}} -> false
+          {:ok, {0, 0, 0, 0, 0, 0, 0, 0}} -> false
+          {:ok, ip} -> ip_ok?(ip)
+          _ -> String.ends_with?(addr, ".local")
+        end
+
+      _ ->
+        false
+    end
+  end
 
   def ensure(room) do
     case Registry.lookup(Den.Voice.Registry, room) do
@@ -104,6 +127,10 @@ defmodule Den.Voice.Room do
   # slots down (mid → track id), and which source each slot carries.
   @impl true
   def handle_call({:join, channel, key, offer}, _from, s) do
+    # One seat per device: a second join from the same key takes the place
+    # of the first.
+    s = Enum.reduce(for({c, %{key: ^key}} <- s.peers, c != channel, do: c), s, &drop(&2, &1))
+
     cond do
       Map.has_key?(s.peers, channel) -> {:reply, {:error, :already}, s}
       not Den.Voice.offer?(offer) -> {:reply, {:error, :offer}, s}
@@ -141,7 +168,9 @@ defmodule Den.Voice.Room do
           :ok = PeerConnection.set_local_description(pc, answer)
           Process.monitor(channel)
           {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
-          peer = %{pc: pc, key: key, up: nil, slots: slots, carrying: %{}}
+          peer = %{pc: pc, key: key, up: nil, slots: slots, carrying: %{}, connected: false, candidates: 0}
+          # A connection that never connects gives its port back.
+          Process.send_after(self(), {:reap, channel, pc}, Application.get_env(:den, :voice_connect_ms, 20_000))
           s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all()
           {:reply, {:ok, SessionDescription.to_json(answer)}, s}
         rescue
@@ -178,20 +207,29 @@ defmodule Den.Voice.Room do
   @impl true
   def handle_cast({:ice, channel, candidate}, s) do
     with true <- Den.Voice.candidate?(candidate),
-         %{pc: pc} <- s.peers[channel] do
+         %{pc: pc, candidates: n} when n < 20 <- s.peers[channel] do
       try do
         PeerConnection.add_ice_candidate(pc, ICECandidate.from_json(candidate))
       rescue
         _ -> :ok
       end
-    end
 
-    {:noreply, s}
+      {:noreply, put_in(s.peers[channel].candidates, n + 1)}
+    else
+      _ -> {:noreply, s}
+    end
   end
 
   def handle_cast({:leave, channel}, s), do: {:noreply, drop(s, channel)}
 
   @impl true
+  def handle_info({:reap, channel, pc}, s) do
+    case s.peers[channel] do
+      %{pc: ^pc, connected: false} -> {:noreply, drop(s, channel)}
+      _ -> {:noreply, s}
+    end
+  end
+
   def handle_info({:ex_webrtc, pc, msg}, s) do
     case Enum.find(s.peers, fn {_, p} -> p.pc == pc end) do
       nil -> {:noreply, s}
@@ -230,6 +268,7 @@ defmodule Den.Voice.Room do
   end
 
   defp on_pc({:connection_state_change, :failed}, channel, _peer, s), do: drop(s, channel)
+  defp on_pc({:connection_state_change, :connected}, channel, peer, s), do: put_in(s.peers[channel], %{peer | connected: true})
   defp on_pc(_, _, _, s), do: s
 
   # Every listener carries every other speaker in a slot of its own.
