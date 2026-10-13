@@ -51,7 +51,9 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   else
     answer=$(ask "Docker (with compose) is not installed. Install it now with Docker's own script from get.docker.com? [y/N] ") || answer=n
   fi
-  case "$answer" in y|Y|yes) curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sh /tmp/get-docker.sh </dev/null && rm -f /tmp/get-docker.sh ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
+  # Docker's script to a file of our own (mktemp: new, 0600, a name nobody
+  # could have placed), so sh reads it rather than this script's input.
+  case "$answer" in y|Y|yes) get=$(mktemp) && curl -fsSL https://get.docker.com -o "$get" && sh "$get" </dev/null && rm -f "$get" ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
 fi
 
 # ---- The domain -----------------------------------------------------------------
