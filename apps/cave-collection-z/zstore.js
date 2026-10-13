@@ -711,40 +711,10 @@ async function mintPage() {
     if (gen !== generation) return;
     box.hidden = over || listed();
     el('gate-link').hidden = !current;
-    el('x-row').hidden = !current;
     el('gate-say').textContent = current
-      ? 'Applied for the whitelist? Sign in with X to link this wallet and mint at the whitelist price.'
-      : 'Applied for the whitelist? Connect Nap, then sign in with X to mint at the whitelist price.';
+      ? 'On the whitelist? Enter the code you were sent to link this wallet and mint at the whitelist price.'
+      : 'On the whitelist? Connect Nap, then enter the code you were sent to mint at the whitelist price.';
   };
-  // X sign-in (§187.8): a window on X, which comes back to /x-done and says
-  // how it went on this site's own channel.
-  el('x-go').onclick = () => {
-    if (!current) return pick();
-    const out = el('out-gate');
-    out.classList.remove('bad');
-    const win = window.open(`/api/whitelist/x/start?account=${encodeURIComponent(current.session.account)}`, 'cave-x-signin', 'popup,width=520,height=720');
-    out.textContent = win ? 'Finish in the X window.' : 'The browser blocked the window. Allow pop-ups for this page and try again.';
-  };
-  try {
-    const channel = new BroadcastChannel('cave-x-signin');
-    const SAID = {
-      linked: 'Linked. This wallet gets the whitelist price once it is listed on Zyn — this page shows it then.',
-      already: 'This wallet is already linked to your X account. It gets the whitelist price once listed.',
-      'not-approved': 'That X account has no whitelist application. Apply on the whitelist page first.',
-      'other-wallet': 'Your X account is already linked to another wallet.',
-      'wallet-used': 'This wallet is already linked to another X account.',
-      cancelled: 'Not signed in. Nothing was linked.',
-      unavailable: 'X sign-in is not set up yet. Use your code instead.',
-    };
-    channel.onmessage = (e) => {
-      if (gen !== generation) return channel.close();
-      const r = String(e.data?.r || 'failed');
-      const out = el('out-gate');
-      out.textContent = SAID[r] || 'X did not answer. Try again in a moment.';
-      out.classList.toggle('bad', !['linked', 'already', 'cancelled'].includes(r));
-      if (r === 'linked' || r === 'already') for (const wait of [60000, 300000, 900000]) setTimeout(read, wait);
-    };
-  } catch { /* no BroadcastChannel: the X window still says how it went */ }
   el('gate-go').onclick = async () => {
     const out = el('out-gate');
     out.classList.remove('bad');
