@@ -1070,11 +1070,13 @@ export class DenClient {
   }
 
   /// Join a room's voice: one connection to the den, our microphone up,
-  /// eight slots down, every frame sealed here and opened here.
-  async joinVoice(room, onSlots) {
+  /// eight slots down, every frame sealed here and opened here. By WebRTC;
+  /// where the network lets none through, the same sealed frames go over the
+  /// den's own connection (`mode`: 'auto', 'rtc' or 'relay').
+  async joinVoice(room, onSlots, { mode = 'auto' } = {}) {
     if (!this.inRoom(room)) throw new Error('Enter the room first.');
     const voice = new Voice(this, room, onSlots);
-    await voice.start();
+    await voice.start(mode);
     this.voice = voice;
     return voice;
   }
@@ -1108,7 +1110,7 @@ const VOICE_BITRATE = 64_000;
 
 class Voice {
   constructor(client, room, onSlots) {
-    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0 });
+    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0, waiting: new Map(), asked: 0 });
   }
 
   /// Keys for us and everyone in the voice room (not only those in a slot
@@ -1140,6 +1142,15 @@ class Voice {
     // slot the den names for anyone else stays silent.
     const members = new Set(this.client.members(this.room).map((m) => m.key));
     const byMid = new Map(this.people.filter((p) => members.has(p.key)).map((p) => [p.mid, p.key]));
+    if (this.mode === 'relay') {
+      // Relayed slots are w0…w7; a slot that changed speaker starts afresh.
+      const slots = [...byMid].map(([mid, key]) => [Number(mid.slice(1)), key]).filter(([i]) => Number.isInteger(i) && i >= 0 && i < 8);
+      for (const [i, key] of slots) if (this.carried?.get(i) !== key) this.resetSlot(i);
+      this.carried = new Map(slots);
+      this.worker.postMessage({ slots });
+      return;
+    }
+    if (!this.downs) return;
     this.worker.postMessage({ slots: this.downs.map((t, i) => [i, byMid.get(t.mid)]).filter(([, k]) => k) });
   }
 
@@ -1152,13 +1163,81 @@ class Voice {
     this.worker.postMessage({ readable, writable, mode, slot }, [readable, writable]);
   }
 
-  async start() {
-    if (!supportsScript && !supportsStreams) throw new Error('This browser cannot encrypt voice.');
+  /// One seal or open in the worker, by message (relayed voice).
+  ask(op, data, slot) {
+    const id = ++this.asked;
+    return new Promise((resolve) => {
+      this.waiting.set(id, resolve);
+      this.worker.postMessage({ op, id, data, slot }, [data]);
+    });
+  }
+
+  async start(mode = 'auto') {
+    const rtc = supportsScript || supportsStreams;
+    const relay = typeof AudioEncoder !== 'undefined' && typeof AudioDecoder !== 'undefined' && typeof AudioWorkletNode !== 'undefined';
+    if (!rtc && !relay) throw new Error('This browser cannot encrypt voice.');
+    if (!rtc) mode = 'relay';
+    if (!relay && mode === 'relay') throw new Error('This browser cannot send voice through the den; try another browser or network.');
     this.worker = new Worker(new URL('./den/voice-worker.js', import.meta.url));
-    this.worker.onmessage = (e) => { if (e.data.count) Object.assign(this, { sealed: e.data.sealed, opened: e.data.opened, failed: e.data.failed }); };
+    this.worker.onmessage = (e) => {
+      if (e.data.count) Object.assign(this, { sealed: e.data.sealed, opened: e.data.opened, failed: e.data.failed });
+      if (e.data.id) { this.waiting.get(e.data.id)?.(e.data.data); this.waiting.delete(e.data.id); }
+    };
     await this.refreshKey();
-    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+    this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false })
       .catch((e) => { throw new Error(e?.name === 'NotAllowedError' ? 'The microphone is blocked for this page.' : 'No microphone found.'); });
+    const ch = this.client.socket.channel(`voice:${this.room}`);
+    this.ch = ch;
+    ch.on('ice', (c) => this.pc?.addIceCandidate(c).catch(() => {}));
+    // Everyone in the voice room; the slots carry the eight heard most recently.
+    ch.on('roster', ({ keys }) => {
+      const members = new Set(this.client.members(this.room).map((m) => m.key));
+      this.roster = (Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && members.has(k) && k !== this.client.den.key()).slice(0, 100);
+      this.refreshKey().catch(() => {});
+      this.onSlots(this.people);
+    });
+    ch.on('slots', (slots) => {
+      this.people = Object.entries(slots).map(([mid, key]) => ({ mid, key }));
+      this.refreshKey().then(() => this.postSlots()).catch(() => {});
+      this.onSlots(this.people);
+    });
+    ch.on('f', (buf) => this.heard(buf));
+    await new Promise((resolve, reject) => ch.join().receive('ok', resolve).receive('error', (e) => reject(new Error(e?.reason || 'could not join the voice room'))));
+    if (mode !== 'relay') {
+      await this.startRtc();
+      // WebRTC needs UDP to the den. Where none gets through (a strict
+      // office or hotel network), the same sealed frames go by the den's own
+      // connection instead.
+      if (mode === 'rtc' || !relay || await this.connected(8000)) return this.watchEpochs();
+      await this.stopRtc();
+    }
+    await this.startRelay();
+    this.watchEpochs();
+  }
+
+  // A new epoch (someone joined or left the room): a new voice key.
+  watchEpochs() {
+    this.offMembers = setInterval(() => {
+      const e = Number(this.client.den.epoch(this.room)) % 256;
+      if (e !== this.current) this.refreshKey().catch(() => {});
+    }, 1000);
+  }
+
+  connected(ms) {
+    return new Promise((resolve) => {
+      const done = (v) => { clearTimeout(t); this.pc.removeEventListener('connectionstatechange', check); resolve(v); };
+      const check = () => {
+        if (this.pc.connectionState === 'connected') done(true);
+        if (['failed', 'closed'].includes(this.pc.connectionState)) done(false);
+      };
+      const t = setTimeout(() => done(this.pc.connectionState === 'connected'), ms);
+      this.pc.addEventListener('connectionstatechange', check);
+      check();
+    });
+  }
+
+  async startRtc() {
+    this.mode = 'rtc';
     const pc = new RTCPeerConnection({ encodedInsertableStreams: !supportsScript, bundlePolicy: 'max-bundle' });
     this.pc = pc;
     const up = pc.addTransceiver(this.mic.getAudioTracks()[0], { direction: 'sendonly' });
@@ -1176,37 +1255,99 @@ class Voice {
       this.meter(e.transceiver.mid, stream);
     };
     this.meter('me', this.mic);
-    const ch = this.client.socket.channel(`voice:${this.room}`);
-    this.ch = ch;
-    ch.on('ice', (c) => pc.addIceCandidate(c).catch(() => {}));
-    // Everyone in the voice room; the slots carry the eight heard most recently.
-    ch.on('roster', ({ keys }) => {
-      const members = new Set(this.client.members(this.room).map((m) => m.key));
-      this.roster = (Array.isArray(keys) ? keys : []).filter((k) => typeof k === 'string' && members.has(k) && k !== this.client.den.key()).slice(0, 100);
-      this.refreshKey().catch(() => {});
-      this.onSlots(this.people);
-    });
-    ch.on('slots', (slots) => {
-      this.people = Object.entries(slots).map(([mid, key]) => ({ mid, key }));
-      this.refreshKey().then(() => this.postSlots()).catch(() => {});
-      this.onSlots(this.people);
-    });
-    pc.onicecandidate = (e) => { if (e.candidate) ch.push('ice', e.candidate.toJSON()); };
-    await new Promise((resolve, reject) => ch.join().receive('ok', resolve).receive('error', (e) => reject(new Error(e?.reason || 'could not join the voice room'))));
+    pc.onicecandidate = (e) => { if (e.candidate) this.ch.push('ice', e.candidate.toJSON()); };
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    const answer = await this.client.push(ch, 'offer', { type: 'offer', sdp: offer.sdp });
+    const answer = await this.client.push(this.ch, 'offer', { type: 'offer', sdp: offer.sdp });
     await pc.setRemoteDescription(answer);
     this.postSlots();
     const p = up.sender.getParameters();
     p.encodings = p.encodings?.length ? p.encodings : [{}];
     p.encodings[0].maxBitrate = VOICE_BITRATE;
     await up.sender.setParameters(p).catch(() => {});
-    // A new epoch (someone joined or left the room): a new voice key.
-    this.offMembers = setInterval(() => {
-      const e = Number(this.client.den.epoch(this.room)) % 256;
-      if (e !== this.current) this.refreshKey().catch(() => {});
-    }, 1000);
+  }
+
+  async stopRtc() {
+    try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
+    this.pc.close();
+    this.pc = null;
+    this.downs = null;
+    (this.audios || []).forEach((a) => { a.srcObject = null; });
+    this.audios = [];
+    this.meters?.clear();
+  }
+
+  /// Voice through the den's own connection: the microphone encoded here
+  /// (Opus, WebCodecs), each 20 ms frame sealed as WebRTC's would be, up the
+  /// channel; each slot's frames down the channel, opened, decoded, played.
+  async startRelay() {
+    this.mode = 'relay';
+    // The worklet frames 20 ms at 48 kHz: a context at another rate (one made
+    // for WebRTC's meters) is replaced.
+    if (this.ac?.sampleRate !== 48000) { this.ac?.close().catch(() => {}); this.ac = new AudioContext({ sampleRate: 48000 }); }
+    await this.ac.audioWorklet.addModule(new URL('./den/voice-io.js', import.meta.url));
+    this.io = new AudioWorkletNode(this.ac, 'den-voice-io', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    this.ac.createMediaStreamSource(this.mic).connect(this.io);
+    this.io.connect(this.ac.destination);
+    this.ac.resume?.().catch(() => {});
+    this.relayLevels = {};
+    this.decoders = new Map();
+    this.enc = new AudioEncoder({ output: (chunk) => this.say(chunk), error: () => { this.failed++; } });
+    this.enc.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1, bitrate: VOICE_BITRATE, opus: { frameDuration: 20000 } });
+    let at = 0;
+    this.io.port.onmessage = (e) => {
+      const pcm = e.data;
+      this.level = rms(pcm);
+      if (this.muted) return;
+      this.enc.encode(new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: pcm.length, numberOfChannels: 1, timestamp: at, data: pcm }));
+      at += 20_000;
+    };
+    await this.client.push(this.ch, 'relay_join', {});
+    this.postSlots();
+  }
+
+  /// One encoded frame of ours: sealed, then up the channel after its level
+  /// (as -dBov, what WebRTC tells the den in each packet's header).
+  async say(chunk) {
+    const bytes = new Uint8Array(chunk.byteLength);
+    chunk.copyTo(bytes);
+    const sealed = await this.ask('seal', bytes.buffer);
+    if (!sealed || !this.ch) return;
+    const out = new Uint8Array(sealed.byteLength + 1);
+    out[0] = Math.max(0, Math.min(127, Math.round(-20 * Math.log10(this.level || 1e-7))));
+    out.set(new Uint8Array(sealed), 1);
+    this.ch.push('frame', out.buffer);
+  }
+
+  /// One frame down the channel: its slot's number, then the sealed frame.
+  async heard(buf) {
+    if (this.mode !== 'relay' || !(buf instanceof ArrayBuffer) || buf.byteLength < 2) return;
+    const slot = new Uint8Array(buf)[0];
+    const plain = await this.ask('open', buf.slice(1), slot);
+    if (!plain) return;
+    let dec = this.decoders.get(slot);
+    if (!dec) {
+      dec = new AudioDecoder({
+        output: (data) => {
+          const pcm = new Float32Array(data.numberOfFrames);
+          data.copyTo(pcm, { planeIndex: 0 });
+          data.close();
+          this.relayLevels[`w${slot}`] = rms(pcm);
+          this.io.port.postMessage({ slot, pcm }, [pcm.buffer]);
+        },
+        error: () => { this.decoders.delete(slot); },
+      });
+      dec.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 });
+      dec.at = 0;
+      this.decoders.set(slot, dec);
+    }
+    dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: (dec.at += 20_000), data: plain }));
+  }
+
+  resetSlot(slot) {
+    const dec = this.decoders?.get(slot);
+    if (dec) { try { dec.close(); } catch { /* closed */ } this.decoders.delete(slot); }
+    this.io?.port.postMessage({ slot, reset: true });
   }
 
   /// A level meter on one stream (a slot's mid, or 'me'), read after the
@@ -1223,6 +1364,11 @@ class Voice {
 
   /// Each stream's loudness now, 0..1, by slot mid (and 'me').
   levels() {
+    if (this.mode === 'relay') {
+      const out = { ...this.relayLevels, me: this.muted ? 0 : this.level || 0 };
+      for (const k of Object.keys(this.relayLevels)) this.relayLevels[k] *= 0.5;
+      return out;
+    }
     const out = {};
     const buf = new Uint8Array(512);
     for (const [id, a] of this.meters || []) {
@@ -1245,11 +1391,20 @@ class Voice {
     clearTimeout(this.dropOld);
     try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
     this.ch.leave();
-    this.pc.close();
+    this.pc?.close();
+    try { this.enc?.close(); } catch { /* closed */ }
+    for (const d of this.decoders?.values() || []) { try { d.close(); } catch { /* closed */ } }
     this.mic.getTracks().forEach((t) => t.stop());
     (this.audios || []).forEach((a) => { a.srcObject = null; });
     this.worker?.terminate();
     this.ac?.close().catch(() => {});
     this.client.voice = null;
   }
+}
+
+/// Root mean square of some samples: 0 (silence) to 1.
+function rms(pcm) {
+  let sum = 0;
+  for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
+  return Math.sqrt(sum / (pcm.length || 1));
 }

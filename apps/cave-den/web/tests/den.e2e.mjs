@@ -282,6 +282,48 @@ ok(await until(A.p, ([n]) => window.__den.voice.opened > n, [relabel.after], 100
 await A.p.click('#voice-leave');
 ok(await until(A.p, () => document.querySelector('#voice').hidden), 'A leaves voice');
 
+// Voice relayed by the den (a network that lets no WebRTC through): B over
+// the channel, A over WebRTC; each opens the other's sealed frames.
+await B.p.click('#voice-leave');
+await until(B.p, () => document.querySelector('#voice').hidden);
+await A.p.click('#voice-go');
+ok(await until(A.p, () => window.__den.voice?.pc?.connectionState === 'connected', null, 15000), 'A is back in voice over WebRTC');
+await B.p.evaluate(() => window.__den.joinVoice('general', () => {}, { mode: 'relay' }));
+ok(await until(B.p, () => window.__den.voice?.mode === 'relay', null, 10000), 'B is in voice through the den');
+await A.p.waitForTimeout(5000);
+const ra = await A.p.evaluate(() => { const v = window.__den.voice; return { opened: v.opened, sealed: v.sealed }; });
+const rb = await B.p.evaluate(() => { const v = window.__den.voice; return { opened: v.opened, sealed: v.sealed, decoders: v.decoders.size, level: Object.values(v.relayLevels).some((x) => x > 0) }; });
+console.log('      relay A:', JSON.stringify(ra), '· B:', JSON.stringify(rb));
+ok(rb.sealed > 100 && ra.opened > 100, "A hears B's relayed frames over WebRTC");
+ok(rb.opened > 100 && rb.decoders >= 1, "B opens and decodes A's frames from the channel");
+await B.p.evaluate(() => window.__den.voice?.leave());
+
+// And found by itself: D's WebRTC finds no path to the den (relay-only ICE
+// with no relay, as on a network that lets no UDP out), so it never
+// connects and the page moves voice to the den's own connection.
+const strict = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+const dCtx = await strict.newContext({ viewport: { width: 1300, height: 900 }, permissions: ['microphone'] });
+const D = { p: await dCtx.newPage() };
+await D.p.addInitScript(() => {
+  navigator.mediaDevices.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; };
+  const Real = window.RTCPeerConnection;
+  window.RTCPeerConnection = function (cfg) { return new Real({ ...cfg, iceTransportPolicy: 'relay' }); };
+  window.RTCPeerConnection.prototype = Real.prototype;
+});
+D.p.on('pageerror', (e) => errs.push(`D: ${e.message.slice(0, 200)}`));
+await D.p.goto(`${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))')}`, { waitUntil: 'networkidle' });
+ok(await inside(D.p), 'D is in, on a browser whose WebRTC finds no path');
+ok(await until(D.p, () => window.__den.inRoom('general'), null, 30000), 'D is in General');
+await D.p.click('#voice-go');
+ok(await until(D.p, () => window.__den.voice?.mode === 'relay', null, 25000), 'WebRTC cannot connect, so D is in voice through the den');
+ok(await until(D.p, () => /relayed/.test(document.querySelector('#voice .voice-label')?.textContent || ''), null, 5000), 'the page says voice is relayed');
+await A.p.waitForTimeout(4000);
+const rd = await D.p.evaluate(() => ({ opened: window.__den.voice.opened, sealed: window.__den.voice.sealed }));
+ok(rd.opened > 50 && rd.sealed > 50, `D hears A and is heard (${JSON.stringify(rd)})`);
+await D.p.evaluate(() => window.__den.voice?.leave());
+await strict.close();
+await A.p.click('#voice-leave');
+
 // A member sends a commit the den accepts but nobody can apply (its
 // membership tag flipped): B cannot apply it, reports it, and the den undoes
 // it (B is the only other member it leaves in the room); words flow again,

@@ -129,6 +129,10 @@ defmodule Den.Voice.Room do
   def ice(pid, channel, candidate), do: GenServer.cast(pid, {:ice, channel, candidate})
   def leave(pid, channel), do: GenServer.cast(pid, {:leave, channel})
 
+  @doc "A device whose voice goes over its channel instead of WebRTC."
+  def join_relay(pid, channel, key), do: GenServer.call(pid, {:join_relay, channel, key}, 15_000)
+  def frame(pid, channel, level, frame), do: GenServer.cast(pid, {:frame, channel, level, frame})
+
   @impl true
   def init(room) do
     # Connections are linked to this room: if it stops, they stop (and give
@@ -152,6 +156,22 @@ defmodule Den.Voice.Room do
       map_size(s.peers) >= Den.Voice.room_max() -> {:reply, {:error, :full}, s}
       Den.Voice.peers() >= Den.Voice.max_peers() -> {:reply, {:error, :busy}, s}
       true -> answer(channel, key, offer, s)
+    end
+  end
+
+  def handle_call({:join_relay, channel, key}, _from, s) do
+    s = Enum.reduce(for({c, %{key: ^key}} <- s.peers, c != channel, do: c), s, &drop(&2, &1))
+
+    cond do
+      Map.has_key?(s.peers, channel) -> {:reply, {:error, :already}, s}
+      map_size(s.peers) >= Den.Voice.room_max() -> {:reply, {:error, :full}, s}
+      Den.Voice.peers() >= Den.Voice.max_peers() -> {:reply, {:error, :busy}, s}
+      true ->
+        Process.monitor(channel)
+        {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
+        slots = for i <- 0..(Den.Voice.slots() - 1), into: %{}, do: {"w#{i}", i}
+        peer = %{kind: :relay, pc: nil, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: true, candidates: 0, level: nil, spoke: nil, joined: System.monotonic_time(:millisecond), seq: 0}
+        {:reply, :ok, %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()}
     end
   end
 
@@ -185,7 +205,7 @@ defmodule Den.Voice.Room do
           Process.monitor(channel)
           {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
           now = System.monotonic_time(:millisecond)
-          peer = %{pc: pc, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: false, candidates: 0, level: level_id(answer.sdp), spoke: nil, joined: now}
+          peer = %{kind: :rtc, pc: pc, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: false, candidates: 0, level: level_id(answer.sdp), spoke: nil, joined: now}
           # A connection that never connects gives its port back.
           Process.send_after(self(), {:reap, channel, pc}, Application.get_env(:den, :voice_connect_ms, 20_000))
           s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()
@@ -247,6 +267,21 @@ defmodule Den.Voice.Room do
 
   def handle_cast({:leave, channel}, s), do: {:noreply, drop(s, channel)}
 
+  # A relayed device's frame: forwarded as the RTP packet it would have been.
+  def handle_cast({:frame, channel, level, frame}, s) do
+    case s.peers[channel] do
+      %{kind: :relay, seq: seq} ->
+        now = System.monotonic_time(:millisecond)
+        s = put_in(s.peers[channel].seq, seq + 1)
+        s = if level <= @speaking, do: put_in(s.peers[channel].spoke, now), else: s
+        packet = ExRTP.Packet.new(frame, payload_type: 111, sequence_number: Integer.mod(seq, 65_536), timestamp: Integer.mod(seq * 960, 4_294_967_296), ssrc: 1)
+        {:noreply, fan_out(s, channel, packet, now)}
+
+      _ ->
+        {:noreply, s}
+    end
+  end
+
   @impl true
   def handle_info({:reap, channel, pc}, s) do
     case s.peers[channel] do
@@ -292,14 +327,7 @@ defmodule Den.Voice.Room do
   defp on_pc({:rtp, id, _rid, packet}, channel, %{up: id} = peer, s) do
     now = System.monotonic_time(:millisecond)
     s = if speaking?(packet, peer.level), do: put_in(s.peers[channel].spoke, now), else: s
-    packet = ExRTP.Packet.remove_extensions(packet)
-
-    Enum.reduce(s.peers, s, fn {other, p}, s ->
-      case other != channel and p.carrying[channel] do
-        mid when is_binary(mid) -> forward(s, other, p, mid, channel, packet, now)
-        _ -> s
-      end
-    end)
+    fan_out(s, channel, ExRTP.Packet.remove_extensions(packet), now)
   end
 
   defp on_pc({:connection_state_change, :failed}, channel, _peer, s), do: drop(s, channel)
@@ -316,6 +344,21 @@ defmodule Den.Voice.Room do
     else
       _ -> byte_size(packet.payload) > 100
     end
+  end
+
+  defp fan_out(s, src, packet, now) do
+    Enum.reduce(s.peers, s, fn {other, p}, s ->
+      case other != src and p.carrying[src] do
+        mid when is_binary(mid) -> forward(s, other, p, mid, src, packet, now)
+        _ -> s
+      end
+    end)
+  end
+
+  # To a relayed listener: the frame and its slot's number, over its channel.
+  defp forward(s, listener, %{kind: :relay} = p, mid, _src, packet, _now) do
+    send(listener, {:voice_frame, p.slots[mid], packet.payload})
+    s
   end
 
   # One packet into a listener's slot. A slot that now carries someone else
@@ -384,8 +427,10 @@ defmodule Den.Voice.Room do
         s
 
       {p, rest} ->
-        Process.unlink(p.pc)
-        catch_exit(fn -> PeerConnection.stop(p.pc) end)
+        if p.pc do
+          Process.unlink(p.pc)
+          catch_exit(fn -> PeerConnection.stop(p.pc) end)
+        end
         Registry.unregister(Den.Voice.Peers, channel)
         s = assign_all(%{s | peers: rest}) |> roster()
         if map_size(s.peers) == 0, do: send(self(), :stop_if_empty)

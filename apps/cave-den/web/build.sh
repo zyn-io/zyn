@@ -14,6 +14,7 @@ ADDON=${2:-}
 rm -rf "$OUT" && mkdir -p "$OUT/den"
 cp "$WEB"/{index.html,base.css,den.css,app.js,gate.js,den.js,den-ui.js,config.json} "$OUT/"
 cp "$WEB/voice-worker.js" "$OUT/den/voice-worker.js"
+cp "$WEB/voice-io.js" "$OUT/den/voice-io.js"
 for f in den_mls.js den_mls_bg.wasm; do
   [ -f "$WEB/../mls/pkg/$f" ] || { echo "mls/pkg/$f is missing: run mls/build.sh" >&2; exit 1; }
   cp "$WEB/../mls/pkg/$f" "$OUT/den/"

@@ -8,7 +8,7 @@
 // said earlier to someone who joins voice later.
 //
 // Streams arrive by transfer (Chrome) or through RTCRtpScriptTransform
-// (Safari, Firefox).
+// (Safari, Firefox); relayed frames, one by one as messages.
 
 const TAIL = 21;
 const TAG = 16;
@@ -27,6 +27,13 @@ let failed = 0;
 
 onmessage = (e) => {
   const d = e.data;
+  // Relayed voice (frames over the den's channel, not WebRTC): the same
+  // seal and open, by message.
+  if (d.op) {
+    const step = d.op === 'seal' ? seal({ data: d.data }) : open({ data: d.data }, d.slot);
+    step.then((f) => postMessage({ id: d.id, data: f.data }, [f.data]), () => { failed++; postMessage({ id: d.id }); });
+    return;
+  }
   if (d.keys) {
     keys = new Map(d.keys.map(([i, ks]) => [i, new Map(ks)]));
     current = d.current;

@@ -226,4 +226,36 @@ defmodule Den.VoiceTest do
     assert seqs == Enum.sort(seqs) and List.last(seqs) - hd(seqs) < 30, "one stream, its numbers rising: #{inspect(seqs)}"
     for {_, d} <- devices, do: send(d, :stop)
   end
+
+  test "a device whose network lets no WebRTC through hears and is heard over its channel" do
+    {:ok, room} = Den.Voice.ensure("voice-relay")
+    rtc = live_device(room, "key-rtc", self())
+    assert_receive {"key-rtc", :connected}, 15_000
+    # This test process is the relayed device's channel.
+    assert :ok = Den.Voice.Room.join_relay(room, self(), "key-relay")
+    assert {:error, :already} = Den.Voice.Room.join_relay(room, self(), "key-relay")
+    assert_receive {:voice, "slots", %{"w0" => "key-rtc"}}
+    assert_receive {:voice, "roster", %{keys: keys}}
+    assert Enum.sort(keys) == ["key-relay", "key-rtc"]
+    assert_receive {"key-rtc", "slots", rtc_slots} when map_size(rtc_slots) == 1
+    assert Map.values(rtc_slots) == ["key-relay"]
+
+    # WebRTC up, the channel down: the sealed frame as the browser sent it.
+    send(rtc, {:speak, 3, true})
+    assert_receive {:voice_frame, 0, frame}, 3_000
+    assert byte_size(frame) == 160
+
+    # The channel up, WebRTC down: in the relayed device's slot, numbered.
+    [{mid, "key-relay"}] = Map.to_list(rtc_slots)
+    for _ <- 1..5, do: Den.Voice.Room.frame(room, self(), 30, :binary.copy(<<7>>, 120))
+    seqs = for _ <- 1..5 do
+      assert_receive {"key-rtc", :rtp, ^mid, seq}, 3_000
+      seq
+    end
+    assert seqs == [0, 1, 2, 3, 4]
+
+    Den.Voice.Room.leave(room, self())
+    assert_receive {"key-rtc", "slots", after_leave} when after_leave == %{}, 3_000
+    send(rtc, :stop)
+  end
 end

@@ -750,6 +750,9 @@ export function mountDen(den, el, me) {
     clearInterval(meterTimer);
     if (!v) return;
     el('voice-room').textContent = roomTitle(v.room);
+    // Relayed: this network let no WebRTC through, so voice goes by the den's own connection.
+    el('voice').querySelector('.voice-label').lastChild.textContent = v.mode === 'relay' ? 'Voice · relayed' : 'Voice';
+    el('voice').querySelector('.voice-label').title = v.mode === 'relay' ? 'This network lets no direct voice connection through, so the sealed audio goes over the den\'s own connection. It may lag a little more.' : '';
     el('voice-room').onclick = () => go(v.room);
     // Everyone in voice; who is in a slot now (heard here) shows who speaks.
     const mids = new Map((v.people || []).map((p) => [p.key, p.mid]));

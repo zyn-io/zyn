@@ -7,7 +7,7 @@ defmodule DenWeb.Throttle do
   """
   @window 10
 
-  @limits %{"typing" => 5, "history" => 20, "state" => 20, "info" => 5, "create" => 5, "report" => 5, "relay" => 60, "invite" => 10, "publish" => 5, "taken" => 20, "claim" => 10, "open_room" => 5, "private_room" => 10, "offer" => 5, "ice" => 40, "leave" => 5}
+  @limits %{"typing" => 5, "history" => 20, "state" => 20, "info" => 5, "create" => 5, "report" => 5, "relay" => 60, "invite" => 10, "publish" => 5, "taken" => 20, "claim" => 10, "open_room" => 5, "private_room" => 10, "offer" => 5, "ice" => 40, "leave" => 5, "relay_join" => 5, "frame" => 600}
 
   @doc "Whether this channel may handle one more `event` now."
   def allow?(event) do
