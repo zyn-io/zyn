@@ -223,6 +223,11 @@ defmodule Den.Rooms do
     end
   end
 
+  # A room's public state, and its members, kept within bounds: a member
+  # cannot grow it without limit with mass Adds.
+  @state_max 2_000_000
+  @members_max 200
+
   @doc """
   Relay `bytes` in `room`: a commit only at the room's epoch (it moves the room
   to the next), words at that epoch or a few before. Returns the message.
@@ -254,7 +259,9 @@ defmodule Den.Rooms do
             # device whose session sent it: no commit-shaped bytes, and no
             # commits in another device's name.
             case Den.Public.commit(r.public_state, bytes) do
-              {:ok, {state, epoch, ^sender}} when epoch == r.epoch + 1 -> order(r, env, bytes, epoch, state, sender)
+              {:ok, {state, _, ^sender}} when byte_size(state) > @state_max -> Repo.rollback(:too_big)
+              {:ok, {state, epoch, ^sender}} when epoch == r.epoch + 1 ->
+                if length(public_members(state, r.id)) > @members_max, do: Repo.rollback(:too_big), else: order(r, env, bytes, epoch, state, sender)
               {:ok, {_, _, _}} -> Repo.rollback(:not_yours)
               {:error, why} -> Repo.rollback({:bad_commit, why})
             end
@@ -415,6 +422,17 @@ defmodule Den.Rooms do
 
         keep = DateTime.add(now, -Application.get_env(:den, :retention_days, 30) * 86_400, :second)
         Repo.delete_all(from m in Message, where: m.inserted_at < ^keep)
+        # A private room nobody has written in or sat in for that long goes,
+        # its public state with it.
+        idle =
+          Repo.all(
+            from r in Room,
+              where: r.kind == "private" and r.updated_at < ^keep,
+              where: fragment("NOT EXISTS (SELECT 1 FROM messages m WHERE m.room = ?)", r.id),
+              where: fragment("NOT EXISTS (SELECT 1 FROM room_devices d WHERE d.room = ?)", r.id),
+              select: r.id
+          )
+        for ids <- Enum.chunk_every(idle, 500), do: Repo.delete_all(from r in Room, where: r.id in ^ids)
         old = Date.utc_today() |> Date.add(-2) |> Date.to_iso8601()
         Repo.delete_all(from i in "issued", where: i.day < ^old)
         Repo.delete_all(from s in "spent", where: s.day < ^old)

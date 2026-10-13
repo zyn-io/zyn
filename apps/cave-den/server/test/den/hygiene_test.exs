@@ -47,4 +47,16 @@ defmodule Den.HygieneTest do
     assert Enum.count(results, &(&1 == {:error, :exists})) == 1
     assert Den.Rooms.private_room(id <> "\n") == {:error, :id}
   end
+
+  test "a private room nobody wrote or sat in for the retention time is swept; one in use stays" do
+    idle = "p-" <> String.duplicate("6a", 16)
+    used = "p-" <> String.duplicate("6b", 16)
+    {:ok, _} = Den.Rooms.private_room(idle, String.duplicate("aa", 32))
+    {:ok, _} = Den.Rooms.private_room(used, String.duplicate("aa", 32))
+    Den.Rooms.seat(used, String.duplicate("ac", 32))
+    Repo.update_all(from(r in Den.Rooms.Room, where: r.id in ^[idle, used]), set: [updated_at: ~U[2025-01-01 00:00:00Z]])
+    Den.Rooms.sweep()
+    assert Den.Rooms.get(idle) == nil
+    assert Den.Rooms.get(used) != nil
+  end
 end

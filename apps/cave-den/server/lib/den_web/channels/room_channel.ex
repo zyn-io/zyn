@@ -129,6 +129,7 @@ defmodule DenWeb.RoomChannel do
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
       {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
+      {:error, :too_big} -> {:reply, {:error, %{reason: "a room holds at most 200 members"}}, socket}
       {:error, :barred} -> {:reply, {:error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}}, socket}
       {:error, :quota} -> {:reply, {:error, %{reason: "this device has written enough for today"}}, socket}
       {:error, :disk} -> {:reply, {:error, %{reason: "the den is full for now; try again later"}}, socket}
