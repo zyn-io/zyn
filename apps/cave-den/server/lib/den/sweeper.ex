@@ -31,6 +31,7 @@ defmodule Den.Sweeper do
   end
 
   def run do
+    if :ets.whereis(DenWeb.RateLimit) != :undefined, do: DenWeb.RateLimit.sweep()
     {by_room, ended} = Den.Rooms.sweep()
 
     for {room, keys} <- by_room do

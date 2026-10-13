@@ -27,8 +27,17 @@ defmodule DenWeb.RateLimit do
     end
   end
 
-  @doc "The address a request comes from, as above."
-  def client(conn) do
+  @doc """
+  The address a request comes from, as above, as the den counts it: an IPv6
+  address by its /64, which one host commonly holds whole and could rotate
+  through.
+  """
+  def client(conn), do: conn |> peer() |> prefix()
+
+  defp prefix({a, b, c, d, _, _, _, _}), do: {a, b, c, d}
+  defp prefix(ip), do: ip
+
+  defp peer(conn) do
     case {conn.remote_ip, get_req_header(conn, "x-forwarded-for")} do
       {ip, [fwd | _]} when ip in [{127, 0, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 1}] ->
         last = fwd |> String.split(",") |> List.last() |> String.trim()
@@ -46,9 +55,18 @@ defmodule DenWeb.RateLimit do
 
   defp over?(key, window, max) do
     slot = div(System.system_time(:second), window)
-    n = :ets.update_counter(@table, {key, slot}, 1, {{key, slot}, 0})
-    if n == 1, do: :ets.select_delete(@table, [{{{key, :"$1"}, :_}, [{:<, :"$1", slot}], [true]}])
-    n > max
+    :ets.update_counter(@table, {key, slot}, 1, {{key, slot}, 0}) > max
+  end
+
+  @doc "Drops counters from windows that have ended (the Sweeper runs it), so many addresses leave nothing behind."
+  def sweep do
+    now = System.system_time(:second)
+    door = div(now, 60)
+    ask = div(now, 3600)
+    :ets.select_delete(@table, [
+      {{{{:door, :_}, :"$1"}, :_}, [{:<, :"$1", door}], [true]},
+      {{{{:ask, :_}, :"$1"}, :_}, [{:<, :"$1", ask}], [true]}
+    ])
   end
 
   defp refuse(conn) do

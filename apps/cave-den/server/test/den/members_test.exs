@@ -163,6 +163,14 @@ defmodule Den.MembersTest do
     assert get.("203.0.113.9, 198.51.100.1").status == 429, "the proxy's own entry (the last) is the address"
     far = build_conn() |> Map.put(:remote_ip, {198, 51, 100, 77}) |> put_req_header("x-forwarded-for", "198.51.100.2")
     assert DenWeb.RateLimit.client(far) == {198, 51, 100, 77}, "a forwarded header from elsewhere is not believed"
+    v6 = fn last -> build_conn() |> Map.put(:remote_ip, {0x2001, 0xDB8, 1, 2, 3, 4, 5, last}) |> get("/door/ways") end
+    for i <- 1..3, do: assert(v6.(i).status == 200)
+    assert v6.(99).status == 429, "an IPv6 /64 is one address: rotating inside it does not help"
+    before = :ets.info(DenWeb.RateLimit, :size)
+    assert before > 0
+    :ets.insert(DenWeb.RateLimit, {{{:door, {9, 9, 9, 9}}, 0}, 5})
+    DenWeb.RateLimit.sweep()
+    assert :ets.lookup(DenWeb.RateLimit, {{:door, {9, 9, 9, 9}}, 0}) == [], "ended windows are swept"
   end
 
   test "a pass hash is SHA-256 over a zero byte, the domain and the code, as the page makes it" do
