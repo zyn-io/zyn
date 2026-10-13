@@ -1,5 +1,6 @@
 defmodule DenWeb.RoomChannelTest do
   use DenWeb.ChannelCase, async: false
+  import Ecto.Query, only: [from: 2]
 
   @f Path.expand("../fixtures", __DIR__)
 
@@ -93,6 +94,62 @@ defmodule DenWeb.RoomChannelTest do
 
     ref = push(a, "history", %{"after" => 0})
     assert_reply ref, :ok, %{messages: [%{seq: 1, epoch: 0, commit: true}, %{seq: 2, epoch: 1, commit: false}, %{seq: 3, epoch: 1, commit: true}]}
+  end
+
+  test "a commit most members report they cannot apply is undone, and its sender may not commit there for a day" do
+    %{"a" => ka, "b" => kb, "c" => kc} = keys()
+    {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
+    {:ok, _, b} = subscribe_and_join(device(kb), DenWeb.RoomChannel, "room:general")
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :ok
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :ok, %{seq: 1, epoch: 1}
+    sig = String.trim(File.read!(Path.join(@m, "report-a-general-1.hex")))
+
+    # Not from the commit's own sender, not a forged signature, not a stale seq.
+    ref = push(b, "report", %{"seq" => 1, "sig" => sig})
+    assert_reply ref, :error, %{reason: "not_member"}
+    ref = push(a, "report", %{"seq" => 1, "sig" => String.duplicate("00", 64)})
+    assert_reply ref, :error, %{reason: "signature"}
+    ref = push(a, "report", %{"seq" => 2, "sig" => sig})
+    assert_reply ref, :error, %{reason: "stale"}
+    {:ok, _, c} = subscribe_and_join(device(kc), DenWeb.RoomChannel, "room:general")
+    ref = push(c, "report", %{"seq" => 1, "sig" => sig})
+    # C is not a member of the room.
+    assert_reply ref, :error, %{reason: "not_member"}
+
+    # A, the only other member, reports: the den goes back to before B's join.
+    ref = push(a, "report", %{"seq" => 1, "sig" => sig})
+    assert_reply ref, :ok, %{rolled_back: true}
+    assert_broadcast "rolled_back", %{epoch: 0, seq: 0}
+    r = Den.Rooms.get("general")
+    assert {r.epoch, r.seq} == {0, 0}
+    assert Den.Rooms.members(r) == [ka]
+    assert Den.Rooms.since("general", 0) == []
+    # B may not commit here until tomorrow, its join included.
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}
+  end
+
+  test "an open room's commit whose GroupInfo never comes is undone, its sender not barred" do
+    %{"a" => ka, "b" => kb} = keys()
+    {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
+    {:ok, _, b} = subscribe_and_join(device(kb), DenWeb.RoomChannel, "room:general")
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :ok
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :ok, %{seq: 1, epoch: 1}
+    assert Den.Rooms.undo_unannounced(30) == [], "not before its time"
+    Den.Repo.update_all(from(r in Den.Rooms.Room, where: r.id == "general"), set: [last_commit_at: ~U[2026-01-01 00:00:00Z]])
+    assert Den.Rooms.undo_unannounced(30) == [{"general", 0, 0}]
+    assert Den.Rooms.get("general").epoch == 0
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    # Not barred: a GroupInfo may simply have been lost.
+    assert_reply ref, :ok, %{seq: 1, epoch: 1}
+    ref = push(b, "info", %{"epoch" => 1, "group_info" => mls("general-1.info")})
+    assert_reply ref, :ok
+    Den.Repo.update_all(from(r in Den.Rooms.Room, where: r.id == "general"), set: [last_commit_at: ~U[2026-01-01 00:00:00Z]])
+    assert Den.Rooms.undo_unannounced(30) == [], "announced, it stays"
   end
 
   test "when a device's day ends, its rooms are told and its connection closed", %{socket: socket} do

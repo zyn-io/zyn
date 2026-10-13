@@ -336,6 +336,13 @@ impl Member {
         self.signer.sign(&enter_payload(token_msg)).map_err(err("sign"))
     }
 
+    /// This device's signed report that it cannot apply the room's commit
+    /// ordered at `seq`: over `den-report-v1|<room>|<seq>`, by its own key.
+    pub fn report(&self, room: &str, seq: u64) -> Result<Vec<u8>, String> {
+        use openmls_traits::signatures::Signer;
+        self.signer.sign(format!("den-report-v1|{room}|{seq}").as_bytes()).map_err(err("sign"))
+    }
+
     /// One message the server relayed, read.
     pub fn receive(&mut self, room: &str, bytes: &[u8]) -> Result<Event, String> {
         let provider = &self.provider;
@@ -584,6 +591,9 @@ mod wasm {
         /// The proof of key for entering with a token (hex).
         pub fn prove(&self, token_msg: &str) -> Result<String, JsError> {
             self.0.prove(token_msg).map(hex::encode).map_err(js)
+        }
+        pub fn report(&self, room: &str, seq: u64) -> Result<String, JsError> {
+            self.0.report(room, seq).map(hex::encode).map_err(js)
         }
         pub fn export(&self, room: &str, label: &str, len: usize) -> Result<Vec<u8>, JsError> {
             self.0.export(room, label, len).map_err(js)
@@ -860,6 +870,8 @@ mod tests {
         w("private-add.bin", &add);
         a.confirm(P).unwrap();
         w("private-join.bin", &b.join(P, &a.group_info(P).unwrap()).unwrap());
+        // A's signed report that it cannot apply the room's first ordered commit (B's join, seq 1).
+        w("report-a-general-1.hex", hex::encode(a.report("general", 1).unwrap()).as_bytes());
         let keys = serde_json::json!({ "a": a.key(), "b": b.key(), "c": c.key(), "x": x.key() });
         w("keys.json", keys.to_string().as_bytes());
         let _ = &mut c;

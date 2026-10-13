@@ -32,6 +32,7 @@ defmodule Den.Sweeper do
 
   def run do
     if :ets.whereis(DenWeb.RateLimit) != :undefined, do: DenWeb.RateLimit.sweep()
+    for {room, epoch, seq} <- Den.Rooms.undo_unannounced(), do: DenWeb.Endpoint.broadcast("room:" <> room, "rolled_back", %{epoch: epoch, seq: seq})
     {by_room, ended} = Den.Rooms.sweep()
 
     for {room, keys} <- by_room do

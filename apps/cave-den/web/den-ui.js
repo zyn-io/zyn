@@ -684,6 +684,7 @@ export function mountDen(den, el, me) {
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
+    if (event === 'notice') status(`${roomTitle(d.room)}: ${d.text}`, true);
     // A roommate was shown a different door key for a day: the den may be
     // telling members apart. Stays on screen until the page is reloaded.
     if (event === 'keywarn') {

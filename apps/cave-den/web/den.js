@@ -314,6 +314,7 @@ export class DenClient {
     const ch = this.socket.channel(`room:${room}`);
     this.channels.set(room, ch);
     ch.on('msg', (m) => this.lock(() => this.take(room, m)));
+    ch.on('rolled_back', (r) => this.lock(() => this.rolledBack(room, r)));
     ch.on('expired', ({ keys }) => this.lock(() => this.removeStale(room, keys, true)));
     ch.on('typing', ({ key }) => this.on('typing', { room, key }));
     this.joined.set(room, new Promise((resolve) => {
@@ -407,7 +408,14 @@ export class DenClient {
     this.seq[room] = m.seq;
     if (!this.inRoom(room)) return;
     let ev;
-    try { ev = JSON.parse(this.den.receive(room, unb64(m.bytes))); } catch { await this.save(); return; } // before this device joined, or its own
+    const at = (() => { try { return Number(this.den.epoch(room)); } catch { return -1; } })();
+    try { ev = JSON.parse(this.den.receive(room, unb64(m.bytes))); } catch {
+      // A commit at this device's own epoch that it cannot apply: never
+      // skipped quietly, or the room would go on without this device.
+      if (m.commit && m.epoch === at) return this.cannotApply(room, m);
+      await this.save();
+      return; // before this device joined, or its own
+    }
     if (ev.kind === 'text') {
       const d = decode(ev.text);
       await this.apply(room, { ...d, from: ev.from, key: ev.key, seq: m.seq, at: sent(d.at) });
@@ -422,6 +430,61 @@ export class DenClient {
       this.on('members', { room, members: ev.members });
     }
     await this.save();
+  }
+
+  /// This device cannot apply the commit the den ordered at `m.seq`. It says
+  /// so, signed, to the den, which undoes the commit when most members say
+  /// the same; otherwise an open room is joined again where it now stands,
+  /// and a private room waits for a member to invite this device again.
+  async cannotApply(room, m) {
+    const ch = this.channels.get(room);
+    this.on('notice', { room, text: 'A member sent a change to this room that this device could not apply. It has told the den.' });
+    let undone = false;
+    try {
+      const r = await this.push(ch, 'report', { seq: m.seq, sig: this.den.report(room, BigInt(m.seq)) });
+      undone = !!r.rolled_back;
+    } catch { /* stale, or already undone */ }
+    if (undone) { this.seq[room] = m.seq - 1; await this.save(); return; }
+    await this.save();
+    if (this.rooms.get(room)?.kind === 'private') {
+      this.on('notice', { room, text: 'This device is out of step with this private room. Ask a member to invite it again.' });
+      return;
+    }
+    // An open room: join again where it now stands, once someone has given
+    // the den its GroupInfo there; if nobody does, the den undoes the commit
+    // and this device is in step again. Waited for outside the lock.
+    setTimeout(() => this.recover(room, m.epoch), 3000);
+  }
+
+  async recover(room, stuckAt, tries = 0) {
+    const ch = this.channels.get(room);
+    const st = await this.push(ch, 'state', {}).catch(() => null);
+    if (st && st.epoch <= stuckAt) return; // undone: the room is back where this device is
+    if (st && st.info_epoch === st.epoch && st.group_info) {
+      return this.lock(async () => {
+        try { this.den.forget(room); } catch { /* not in it */ }
+        await this.save();
+        return this.sync(room, st);
+      });
+    }
+    if (tries < 30) setTimeout(() => this.recover(room, stuckAt, tries + 1), 5000);
+  }
+
+  /// The den undid a commit most members could not apply. A device that had
+  /// applied it is now ahead of the room: it joins again (an open room) or
+  /// waits to be invited again (a private one).
+  async rolledBack(room, { epoch, seq }) {
+    if ((this.seq[room] || 0) > seq) this.seq[room] = seq;
+    let mine = -1;
+    try { mine = Number(this.den.epoch(room)); } catch { /* not in it */ }
+    if (mine <= epoch) { await this.save(); return; }
+    try { this.den.forget(room); } catch { /* not in it */ }
+    await this.save();
+    if (this.rooms.get(room)?.kind === 'private') {
+      this.on('notice', { room, text: 'A change in this private room was undone and this device had already applied it. Ask a member to invite it again.' });
+      return;
+    }
+    return this.sync(room, await this.push(this.channels.get(room), 'state', {}));
   }
 
   // ---- Messages --------------------------------------------------------------

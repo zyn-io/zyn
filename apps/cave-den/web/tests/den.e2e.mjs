@@ -85,6 +85,7 @@ ok(!(await inside(c.p, 2000)), 'nobody is in before the host approves');
 const approved = host('for r <- Den.Gate.Members.pending(), r.note == "Hi, C from the reading group", do: :ok = Den.Gate.Members.approve(r.id); IO.puts("approved")');
 ok(approved === 'approved', 'the host approves C from the server');
 ok(await inside(c.p, 40000), 'C is let in by the approval, on the page it asked from');
+const cKey = (await meOf(c.p)).key;
 // The device keeps its own pass: with its session and tokens gone, a reload goes straight back in.
 await c.p.evaluate(async () => { const kv = window.__den.kv; await kv.del('session'); for (const d of [0, 1]) await kv.del(`token:${new Date(Date.now() + d * 86400000).toISOString().slice(0, 10)}`); });
 await c.p.reload({ waitUntil: 'networkidle' });
@@ -214,6 +215,36 @@ await A.p.evaluate(() => window.__den.voice.postSlots());
 ok(await until(A.p, ([n]) => window.__den.voice.opened > n, [relabel.after], 10000), 'named rightly again, it opens');
 await A.p.click('#voice-leave');
 ok(await until(A.p, () => document.querySelector('#voice').hidden), 'A leaves voice');
+
+// A member sends a commit the den accepts but nobody can apply (its
+// membership tag flipped): B cannot apply it, reports it, and the den undoes
+// it (B is the only other member it leaves in the room); words flow again,
+// and A may not change the room until tomorrow.
+await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [cKey], 20000);
+const tampered = await A.p.evaluate(async ([victim]) => {
+  const den = window.__den;
+  const bad = den.den.remove('general', JSON.stringify([victim]));
+  bad[bad.length - 1] ^= 1;
+  let s = ''; for (const x of bad) s += String.fromCharCode(x);
+  const r = await den.push(den.channels.get('general'), 'relay', { bytes: btoa(s) }).then(() => 'ordered', (e) => JSON.stringify(e));
+  den.den.discard('general');
+  return r;
+}, [cKey]);
+ok(tampered === 'ordered', `the den orders the tampered commit (it cannot check its tag): ${tampered}`);
+ok(await until(B.p, () => /could not apply/.test(document.querySelector('#den-status')?.textContent || ''), null, 15000), 'B says it could not apply a change');
+await A.p.waitForTimeout(3000);
+await A.p.fill('#say-text', 'After the undo.');
+await A.p.press('#say-text', 'Enter');
+ok(await until(B.p, () => /After the undo\./.test(document.querySelector('#log')?.textContent || ''), null, 20000), 'the room is not frozen: B reads A after the undo');
+const barred = await A.p.evaluate(async ([victim]) => {
+  const den = window.__den;
+  const again = den.den.remove('general', JSON.stringify([victim]));
+  let s = ''; for (const x of again) s += String.fromCharCode(x);
+  const r = await den.push(den.channels.get('general'), 'relay', { bytes: btoa(s) }).then(() => 'ordered', (e) => e.reason || JSON.stringify(e));
+  den.den.discard('general');
+  return r;
+}, [cKey]);
+ok(/until tomorrow/.test(barred), `its sender may not change the room until tomorrow: ${barred}`);
 
 await A.p.screenshot({ path: `${SHOTS}/den-e2e-a.png` });
 await B.p.screenshot({ path: `${SHOTS}/den-e2e-b.png` });

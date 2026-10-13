@@ -34,7 +34,7 @@ defmodule DenWeb.RoomChannel do
   defp enter(id, room, socket) do
         Rooms.seat(id, socket.assigns.key)
         info = room.group_info && Base.encode64(room.group_info)
-        {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(id)}, socket |> assign(:room, id) |> assign(:kind, room.kind)}
+        {:ok, %{title: room.title, kind: room.kind, epoch: room.epoch, seq: room.seq, group_info: info, info_epoch: room.info_epoch, present: Rooms.present(id)}, socket |> assign(:room, id) |> assign(:kind, room.kind)}
   end
 
   # After a commit in a private room: a device it took out leaves the channel
@@ -67,7 +67,7 @@ defmodule DenWeb.RoomChannel do
   def handle_in("state", _, socket) do
     room = Rooms.get(socket.assigns.room)
     info = room.group_info && Base.encode64(room.group_info)
-    {:reply, {:ok, %{epoch: room.epoch, seq: room.seq, group_info: info, present: Rooms.present(room.id)}}, socket}
+    {:reply, {:ok, %{epoch: room.epoch, seq: room.seq, group_info: info, info_epoch: room.info_epoch, present: Rooms.present(room.id)}}, socket}
   end
 
   def handle_in("create", %{"group_info" => b64}, socket) do
@@ -89,6 +89,22 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
+  # This device cannot apply the room's last commit: its signed report. When
+  # most members report it, the den undoes the commit and tells the room.
+  def handle_in("report", %{"seq" => seq, "sig" => sig}, socket) when is_integer(seq) do
+    case Rooms.report(socket.assigns.room, seq, socket.assigns.key, sig) do
+      {:ok, :rolled_back, epoch, to} ->
+        broadcast!(socket, "rolled_back", %{epoch: epoch, seq: to})
+        {:reply, {:ok, %{rolled_back: true}}, socket}
+
+      {:ok, :noted} ->
+        {:reply, {:ok, %{rolled_back: false}}, socket}
+
+      {:error, why} ->
+        {:reply, {:error, %{reason: to_string(why)}}, socket}
+    end
+  end
+
   def handle_in("relay", %{"bytes" => b64}, socket) do
     with {:ok, bytes} <- decode(b64),
          true <- Den.Limits.disk_ok?() || {:error, :disk},
@@ -103,6 +119,7 @@ defmodule DenWeb.RoomChannel do
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
       {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
+      {:error, :barred} -> {:reply, {:error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}}, socket}
       {:error, :quota} -> {:reply, {:error, %{reason: "this device has written enough for today"}}, socket}
       {:error, :disk} -> {:reply, {:error, %{reason: "the den is full for now; try again later"}}, socket}
       {:error, {:bad_commit, _}} -> {:reply, {:error, %{reason: "that commit does not check out against the room"}}, socket}
