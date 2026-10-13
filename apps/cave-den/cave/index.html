@@ -60,7 +60,8 @@
           <div class="side-head">
             <span id="me-mark"></span>
             <p><small>You are</small><b id="me">—</b></p>
-            <button class="tip" type="button" aria-expanded="false" data-tip="This name comes from a key made on this device. Members see it, never your wallet or item. Clearing the browser's data gives this device a new name.">i</button>
+            <button type="button" class="mini ghost" id="set-name">Name</button>
+            <button class="tip" type="button" aria-expanded="false" data-tip="This device has a name made from a key of its own (m- and digits), which nobody can copy, and never from your wallet or item. You can also give yourself a name: members see it beside the device's name, and anyone can choose the same one. Clearing the browser's data gives this device a new key.">i</button>
           </div>
           <div class="side-search">
             <label class="visually-hidden" for="search">Search messages</label>
@@ -70,8 +71,9 @@
           <nav id="rooms" class="rooms" aria-label="Rooms"></nav>
           <div class="side-foot">
             <label class="keep"><input type="checkbox" id="keep-pass" checked /> Keep this device's pass
-              <button class="tip" type="button" aria-expanded="false" aria-label="About keeping the pass" data-tip="With the pass kept, this device gets its own day tokens and comes back without Nap. Turned off, Nap is asked again after tomorrow. Anyone with this browser profile can use a kept pass while you hold the item.">i</button>
+              <button class="tip" type="button" aria-expanded="false" aria-label="About keeping the pass" data-tip="With the pass kept, this device gets its own day tokens and comes back without Nap. Turned off, Nap is asked again after today (or tomorrow, if this device was here late in the day). Anyone with this browser profile can use a kept pass while you hold the item.">i</button>
             </label>
+            <div class="link-acts"><button type="button" class="mini ghost" id="link-device">Link another device</button><button type="button" class="mini ghost" id="link-code">Enter a link code</button></div>
             <button type="button" class="mini ghost" id="forget">Forget this device</button>
             <label>Notifications
               <select id="notify">
