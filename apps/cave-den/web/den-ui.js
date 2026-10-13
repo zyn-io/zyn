@@ -60,8 +60,8 @@ export function mountDen(den, el, me) {
   let readFrom = 0;
   let mentionAt = -1;
   let mentionPick = 0;
-  let notify = (() => { try { return localStorage.getItem('cave.den.notify') || 'mentions'; } catch { return 'mentions'; } })();
-  let propsOpen = (() => { try { return localStorage.getItem('cave.den.props') === 'open'; } catch { return false; } })();
+  let notify = (() => { try { return localStorage.getItem('den.notify') || 'mentions'; } catch { return 'mentions'; } })();
+  let propsOpen = (() => { try { return localStorage.getItem('den.props') === 'open'; } catch { return false; } })();
   const counts = {};
   const typing = {};
   const urls = new Map();
@@ -128,7 +128,7 @@ export function mountDen(den, el, me) {
     el('rooms').querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => go(b.dataset.room); });
     el('rooms').querySelectorAll('[data-new]').forEach((b) => { b.onclick = () => (b.dataset.new === 'open' ? newRoom() : pickMembers('New private room', 'Make room', true, (keys, name) => den.startPrivate(keys, name).then(go))); });
     const t = el('rooms').querySelector('[data-toggle]');
-    if (t) t.onclick = () => { propsOpen = !propsOpen; try { localStorage.setItem('cave.den.props', propsOpen ? 'open' : 'closed'); } catch { /* not kept */ } drawRooms(); };
+    if (t) t.onclick = () => { propsOpen = !propsOpen; try { localStorage.setItem('den.props', propsOpen ? 'open' : 'closed'); } catch { /* not kept */ } drawRooms(); };
     drawHead();
   }
 
@@ -594,7 +594,7 @@ export function mountDen(den, el, me) {
     notify = el('notify').value;
     if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission();
     if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'denied') status('Notifications are blocked for this site in the browser settings.');
-    try { localStorage.setItem('cave.den.notify', notify); } catch { /* not kept */ }
+    try { localStorage.setItem('den.notify', notify); } catch { /* not kept */ }
   };
 
   function ping(room_, m, mention) {
