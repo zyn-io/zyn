@@ -45,9 +45,11 @@ defmodule DenWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # JSON for the door, at most 64 KB; files are read by BlobController itself.
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [:json],
     pass: ["*/*"],
+    length: 65_536,
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

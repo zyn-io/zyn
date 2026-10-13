@@ -32,6 +32,22 @@ defmodule Den.Blobs do
 
   def put(_), do: {:error, :size}
 
+  @doc "A fresh temporary name in the blob folder, for a file being received."
+  def part do
+    File.mkdir_p!(dir())
+    Path.join(dir(), ".part-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower))
+  end
+
+  @doc "Keeps a received file (`tmp`, of `size` bytes, SHA-256 `hash`) under its hash."
+  def put_file(tmp, hash, size) when size > 0 and size <= @max do
+    id = Base.encode16(hash, case: :lower)
+    path = Path.join(dir(), id)
+    if File.exists?(path), do: File.rm!(tmp), else: File.rename!(tmp, path)
+    now = Den.Rooms.now()
+    Repo.insert_all("blobs", [%{id: id, size: size, inserted_at: now}], on_conflict: [set: [inserted_at: now]], conflict_target: :id)
+    {:ok, id}
+  end
+
   def path(id) do
     if id =~ ~r/\A[0-9a-f]{64}\z/ and Repo.exists?(from b in "blobs", where: b.id == ^id), do: {:ok, Path.join(dir(), id)}, else: :error
   end

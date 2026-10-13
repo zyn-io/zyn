@@ -24,6 +24,8 @@ COPY lib lib
 COPY extra extra
 RUN mix compile
 COPY config/runtime.exs config/
+# The release environment: Erlang distribution on loopback, each den its own cookie.
+COPY rel rel
 RUN mix release
 
 FROM debian:bookworm-20260824-slim

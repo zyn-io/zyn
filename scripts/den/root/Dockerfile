@@ -36,6 +36,8 @@ COPY server/lib lib
 COPY server/extra extra
 RUN mix compile
 COPY server/config/runtime.exs config/
+# The release environment: Erlang distribution on loopback, each den its own cookie.
+COPY server/rel rel
 RUN mix release
 
 FROM debian:${DEBIAN}
