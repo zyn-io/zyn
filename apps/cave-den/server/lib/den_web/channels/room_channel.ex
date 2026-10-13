@@ -132,6 +132,7 @@ defmodule DenWeb.RoomChannel do
       {:error, {:no_group, _}} -> {:reply, {:error, %{reason: "no group yet"}}, socket}
       {:error, :private} -> {:reply, {:error, %{reason: "a private room is joined by invitation"}}, socket}
       {:error, :not_yours} -> {:reply, {:error, %{reason: "a commit is signed by the device that sends it"}}, socket}
+      {:error, :may_not_remove} -> {:reply, {:error, %{reason: "only a moderator allowed to kick may take that member out of the room"}}, socket}
       {:error, :not_member} -> {:reply, {:error, %{reason: "this device is not a member of the room"}}, socket}
       {:error, :too_big} -> {:reply, {:error, %{reason: "a room holds at most #{Rooms.members_max()} members"}}, socket}
       {:error, :barred} -> {:reply, {:error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}}, socket}

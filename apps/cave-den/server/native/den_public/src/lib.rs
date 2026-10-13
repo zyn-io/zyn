@@ -73,11 +73,12 @@ fn track(gi: Binary) -> Result<(String, String, u64), String> {
     Ok((dump(&storage)?, room, pg.group_context().epoch().as_u64()))
 }
 
-/// A commit, checked and applied: `{state, epoch, signer key (hex)}`. The
-/// signer is the member whose leaf signed it, or, for an external commit,
-/// the joiner's new leaf.
+/// A commit, checked and applied: `{state, epoch, signer key (hex), removed
+/// keys (hex)}`. The signer is the member whose leaf signed it, or, for an
+/// external commit, the joiner's new leaf; the removed are the members its
+/// Remove proposals take out, so the den can ask whether the signer may.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn commit(state: String, msg: Binary) -> Result<(String, u64, String), String> {
+fn commit(state: String, msg: Binary) -> Result<(String, u64, String, Vec<String>), String> {
     let crypto = RustCrypto::default();
     let storage = load(&state)?;
     let m = MlsMessageIn::tls_deserialize_exact(msg.as_slice()).map_err(e("message"))?;
@@ -101,8 +102,15 @@ fn commit(state: String, msg: Binary) -> Result<(String, u64, String), String> {
         Sender::NewMemberCommit => staged.update_path_leaf_node().ok_or("an external commit without its new leaf")?.signature_key().as_slice().to_vec(),
         _ => return Err("a commit from outside the room".into()),
     };
+    let removed: Vec<String> = staged
+        .remove_proposals()
+        .filter_map(|p| {
+            let idx = p.remove_proposal().removed();
+            pg.members().find(|m| m.index == idx).map(|m| hex::encode(m.signature_key))
+        })
+        .collect();
     pg.merge_commit(&storage, *staged).map_err(e("merge"))?;
-    Ok((dump(&storage)?, pg.group_context().epoch().as_u64(), hex::encode(key)))
+    Ok((dump(&storage)?, pg.group_context().epoch().as_u64(), hex::encode(key), removed))
 }
 
 /// Whether a GroupInfo describes the state the den tracks (same group

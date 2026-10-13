@@ -75,9 +75,14 @@ defmodule DenWeb.RoomChannelTest do
     assert_reply ref, :ok
     assert Den.Rooms.get("general").group_info == File.read!(Path.join(@m, "general-1.info"))
 
-    # A's commit removing B: not B's to send; A's.
+    # A's commit removing B: not B's to send; A's, and only once B's day has
+    # ended (or B is kicked or banned, or A may kick): one member cannot
+    # throw another out of an open room.
     ref = push(b, "relay", %{"bytes" => mls("remove.bin")})
     assert_reply ref, :error, %{reason: "a commit is signed by the device that sends it"}
+    ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :error, %{reason: "only a moderator allowed to kick may take that member out of the room"}
+    Den.Rooms.admit(kb, DateTime.add(DateTime.utc_now(), -1, :second) |> DateTime.truncate(:second))
     ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
     assert_reply ref, :ok, %{seq: 3, epoch: 2}
 
@@ -95,6 +100,38 @@ defmodule DenWeb.RoomChannelTest do
 
     ref = push(a, "history", %{"after" => 0})
     assert_reply ref, :ok, %{messages: [%{seq: 1, epoch: 0, commit: true}, %{seq: 2, epoch: 1, commit: false}, %{seq: 3, epoch: 1, commit: true}]}
+  end
+
+  # A at epoch 1 with B in General, ready for A's commit removing B (remove.bin).
+  defp two_in_general do
+    %{"a" => ka, "b" => kb} = keys()
+    {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")
+    {:ok, _, b} = subscribe_and_join(device(kb), DenWeb.RoomChannel, "room:general")
+    ref = push(a, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :ok
+    ref = push(b, "relay", %{"bytes" => mls("join.bin")})
+    assert_reply ref, :ok, %{epoch: 1}
+    {a, ka, kb}
+  end
+
+  test "a live member is taken out of an open room only when kicked or banned, or by a moderator allowed to kick" do
+    {a, ka, kb} = two_in_general()
+    ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :error, %{reason: "only a moderator allowed to kick may take that member out of the room"}
+    owner = String.duplicate("0a", 32)
+    :ok = Den.Mod.set_owner(owner)
+    :ok = Den.Mod.kick(owner, kb, "test")
+    ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :ok, %{epoch: 2}
+
+    Den.Repo.delete_all("sanctions")
+    Den.Repo.delete_all("messages")
+    Den.Repo.update_all(Ecto.Query.from(r in Den.Rooms.Room, where: r.id == "general"), set: [public_state: nil, group_info: nil, epoch: 0, seq: 0, members: nil])
+    {a, _, _} = two_in_general()
+    {:ok, mod} = Den.Mod.role_save(owner, %{"name" => "Moderator", "position" => 5, "perms" => ["kick"]})
+    :ok = Den.Mod.role_give(owner, ka, mod.id)
+    ref = push(a, "relay", %{"bytes" => mls("remove.bin")})
+    assert_reply ref, :ok, %{epoch: 2}
   end
 
   test "a device's fresh keys (an MLS self-update) are ordered like any commit, by that device only" do

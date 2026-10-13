@@ -13,7 +13,7 @@ defmodule Den.Public do
   @doc "Start tracking a room from its first GroupInfo: {:ok, {state, room, epoch}}."
   def track(_group_info), do: :erlang.nif_error(:nif_not_loaded)
 
-  @doc "Check and apply a commit: {:ok, {state, epoch, signer_key_hex}}."
+  @doc "Check and apply a commit: {:ok, {state, epoch, signer_key_hex, removed_keys_hex}}."
   def commit(_state, _message), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Whether a GroupInfo describes the tracked state: {:ok, boolean}."

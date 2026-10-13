@@ -75,8 +75,10 @@ defmodule Den.Rooms do
 
   @doc "Make the configured rooms if they are not there (a moderator's name for one stays)."
   def seed do
+    named = Repo.all(from s in "settings", where: like(s.key, "named:%"), select: s.key)
+
     for {id, title} <- Application.fetch_env!(:den, :rooms) do
-      conflict = if Den.Mod.renamed?(id), do: :nothing, else: [set: [title: title]]
+      conflict = if "named:" <> id in named, do: :nothing, else: [set: [title: title]]
       Repo.insert!(%Room{id: id, title: title}, on_conflict: conflict, conflict_target: :id)
     end
 
@@ -274,9 +276,13 @@ defmodule Den.Rooms do
             # device whose session sent it: no commit-shaped bytes, and no
             # commits in another device's name.
             case Den.Public.commit(r.public_state, bytes) do
-              {:ok, {state, epoch, ^sender}} when epoch == r.epoch + 1 ->
-                if byte_size(state) > state_max() or length(public_members(state, r.id)) > members_max(), do: Repo.rollback(:too_big), else: order(r, env, bytes, epoch, state, sender)
-              {:ok, {_, _, _}} -> Repo.rollback(:not_yours)
+              {:ok, {state, epoch, ^sender, removed}} when epoch == r.epoch + 1 ->
+                cond do
+                  byte_size(state) > state_max() or length(public_members(state, r.id)) > members_max() -> Repo.rollback(:too_big)
+                  r.kind != "private" and not Enum.all?(removed, &may_remove?(sender, &1)) -> Repo.rollback(:may_not_remove)
+                  true -> order(r, env, bytes, epoch, state, sender)
+                end
+              {:ok, {_, _, _, _}} -> Repo.rollback(:not_yours)
               {:error, why} -> Repo.rollback({:bad_commit, why})
             end
 
@@ -371,6 +377,21 @@ defmodule Den.Rooms do
     |> case do
       {:ok, {:rolled_back, epoch, seq}} -> {:ok, :rolled_back, epoch, seq}
       {:error, why} -> {:error, why}
+    end
+  end
+
+  # Who may take a member out of an open room: itself (a rejoin replacing
+  # its old seat); anyone, a device whose day ended or that was kicked or
+  # banned (members' pages do that housekeeping); otherwise only a device
+  # allowed to kick, above it. In a private room its members decide.
+  defp may_remove?(sender, key) do
+    key == sender or not live?(key) or Den.Mod.out?(key) or (Den.Mod.can?(sender, "kick") and Den.Mod.above?(sender, key))
+  end
+
+  defp live?(key) do
+    case device_until(key) do
+      %DateTime{} = until -> DateTime.compare(until, DateTime.utc_now()) == :gt
+      _ -> false
     end
   end
 
