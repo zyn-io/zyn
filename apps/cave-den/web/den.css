@@ -250,3 +250,5 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .den-warn { margin: 0; padding: 10px 14px; border-bottom: 1px solid #e88; background: rgba(120, 20, 20, 0.35); color: #f6c6c6; font: 14px/1.5 var(--sans); }
 .log .note { text-align: center; margin: 6px 0; color: var(--muted); font: 12.5px/1.4 var(--sans); }
 .log .note time { margin-left: 6px; color: var(--read-dim); }
+.invites .invite { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font: 13.5px/1.4 var(--sans); color: var(--read); }
+.invites .invite span { flex: 1; }

@@ -731,20 +731,66 @@ export class DenClient {
   }
 
   /// Welcomes in this device's inbox: into those private rooms.
+  /// Welcomes in this device's inbox wait, kept on this device, until its
+  /// member chooses to join or decline: nobody can pull a device into a room.
   async accept(welcomes) {
     const taken = [];
+    const waiting = (await this.kv.get('invites')) || [];
     for (const w of welcomes) {
+      if (typeof w.welcome === 'string' && !waiting.some((x) => x.welcome === w.welcome) && waiting.length < 50) {
+        waiting.push({ id: hex(rand(6)), welcome: w.welcome, at: Date.now() });
+      }
+      if (w.id) taken.push(w.id);
+    }
+    await this.kv.put('invites', waiting);
+    if (taken.length) await this.push(this.inbox, 'taken', { ids: taken }).catch(() => {});
+    this.on('invites', waiting);
+  }
+
+  async invites() {
+    return (await this.kv.get('invites')) || [];
+  }
+
+  /// Join the private room an invitation is for.
+  joinInvite(id) {
+    return this.lock(async () => {
+      const waiting = await this.invites();
+      const w = waiting.find((x) => x.id === id);
+      if (!w) return null;
+      await this.kv.put('invites', waiting.filter((x) => x.id !== id));
+      let room = null;
       try {
-        const room = this.den.accept(unb64(w.welcome));
+        room = this.den.accept(unb64(w.welcome));
         if (!this.rooms.has(room)) this.rooms.set(room, { id: room, title: '', kind: 'private' });
         await this.keepPrivate();
         this.joinRoom(room);
         this.on('rooms', [...this.rooms.values()]);
       } catch { /* already in it, or not for this device */ }
-      if (w.id) taken.push(w.id);
-    }
-    if (taken.length) await this.push(this.inbox, 'taken', { ids: taken }).catch(() => {});
-    await this.save();
+      await this.save();
+      this.on('invites', await this.invites());
+      return room;
+    });
+  }
+
+  async declineInvite(id) {
+    await this.kv.put('invites', (await this.invites()).filter((x) => x.id !== id));
+    this.on('invites', await this.invites());
+  }
+
+  /// Leave a private room: this device forgets it, and the members' devices
+  /// take it out once they see it gone.
+  leave(room) {
+    return this.lock(async () => {
+      this.channels.get(room)?.leave();
+      this.channels.delete(room);
+      this.joined.delete(room);
+      try { this.den.forget(room); } catch { /* not in it */ }
+      this.rooms.delete(room);
+      await this.keepPrivate();
+      await this.kv.del(`log:${room}`);
+      await this.save();
+      this.on('rooms', [...this.rooms.values()]);
+    });
   }
 
   // ---- Leaving ---------------------------------------------------------------

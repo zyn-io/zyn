@@ -182,10 +182,14 @@ ok(await until(A.p, ([id]) => /1/.test(document.querySelector(`[data-room="${id}
 await A.p.click('#room-meta');
 await A.p.click(`[data-dm="${B.me.key}"]`);
 ok(await until(A.p, () => /^p-/.test(document.querySelector('[data-room][aria-current="true"]')?.dataset.room || ''), null, 30000), 'A is taken to the private room');
-ok(await until(B.p, () => [...document.querySelectorAll('[data-room^="p-"]')].length > 0, null, 30000), 'B is invited to the private room');
+ok(await until(B.p, () => document.querySelector('[data-join]'), null, 30000), 'B sees the invitation, waiting for B to choose');
+ok(!(await B.p.$('[data-room^="p-"]')), 'nobody is pulled into a room: B is not in it before choosing');
+await B.p.click('[data-join]');
+ok(await until(B.p, () => [...document.querySelectorAll('[data-room^="p-"]')].length > 0, null, 30000), 'B joins the private room');
 const pid = await B.p.$eval('[data-room^="p-"]', (b) => b.dataset.room);
 ok(!(await A.p.evaluate(async () => (await window.__den.push(window.__den.lobby, 'claim', { key: 'x' }).catch((e) => e.reason)) === undefined)), 'claims are answered only for real devices');
 await B.p.click(`[data-room="${pid}"]`);
+ok(await until(B.p, ([id]) => window.__den.inRoom(id) && window.__den.members(id).length >= 2 && window.__den.channels.get(id)?.state === 'joined', [pid], 20000), 'B is in the private room, kept there while its invitation waited');
 await B.p.fill('#say-text', 'Just us here.');
 await B.p.press('#say-text', 'Enter');
 await A.p.click(`[data-room="${pid}"]`);

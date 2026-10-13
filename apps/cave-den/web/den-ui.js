@@ -77,6 +77,9 @@ export function mountDen(den, el, me) {
   const counts = {};
   const typing = {};
   const urls = new Map();
+  // Rooms this device hears nothing from (kept in this browser).
+  const muted = new Set((() => { try { return JSON.parse(localStorage.getItem('den.muted') || '[]'); } catch { return []; } })());
+  const keepMuted = () => { try { localStorage.setItem('den.muted', JSON.stringify([...muted])); } catch { /* not kept */ } };
   const shown = [];
 
   const rooms = () => [...den.rooms.values()];
@@ -114,6 +117,13 @@ export function mountDen(den, el, me) {
   async function drawRooms() {
     const groups = [['open', 'Rooms', 'New room'], ['proposal', 'Proposals', null], ['private', 'Private', 'New private room']];
     const parts = [];
+    // Invitations to private rooms wait here until this device joins or declines.
+    const invites = await den.invites();
+    if (invites.length) {
+      parts.push(`<div class="group invites"><p class="group-head"><span>Invitations · ${invites.length}</span></p>
+        ${invites.map((i) => `<div class="invite"><span>A private room</span><button type="button" class="mini" data-join="${esc(i.id)}">Join</button><button type="button" class="mini ghost" data-decline="${esc(i.id)}">Decline</button></div>`).join('')}
+      </div>`);
+    }
     for (const [kind, label, add] of groups) {
       const list = rooms().filter((r) => r.kind === kind);
       if (!list.length && kind === 'proposal') continue;
@@ -138,6 +148,8 @@ export function mountDen(den, el, me) {
     }
     el('rooms').innerHTML = parts.join('');
     el('rooms').querySelectorAll('[data-room]').forEach((b) => { b.onclick = () => go(b.dataset.room); });
+    el('rooms').querySelectorAll('[data-join]').forEach((b) => { b.onclick = async () => { b.disabled = true; const r = await den.joinInvite(b.dataset.join); drawRooms(); if (r) go(r); }; });
+    el('rooms').querySelectorAll('[data-decline]').forEach((b) => { b.onclick = async () => { await den.declineInvite(b.dataset.decline); drawRooms(); }; });
     el('rooms').querySelectorAll('[data-new]').forEach((b) => { b.onclick = () => (b.dataset.new === 'open' ? newRoom() : pickMembers('New private room', 'Make room', true, (keys, name) => den.startPrivate(keys, name).then(go))); });
     const t = el('rooms').querySelector('[data-toggle]');
     if (t) t.onclick = () => { propsOpen = !propsOpen; try { localStorage.setItem('den.props', propsOpen ? 'open' : 'closed'); } catch { /* not kept */ } drawRooms(); };
@@ -153,9 +165,27 @@ export function mountDen(den, el, me) {
     el('voice-go').hidden = !den.inRoom(room) || !!den.voice;
     el('say-text').placeholder = den.inRoom(room) ? `Message ${title(r) || room}` : 'Joining the room…';
     document.title = `${title(r) || 'Chat'} · Members' chat`;
+    // Mute (no notifications from the room) and, for a private room, Leave.
+    const acts = document.querySelector('.head-acts');
+    if (acts && !el('room-mute')) {
+      acts.insertAdjacentHTML('beforeend', '<button type="button" class="pill" id="room-mute" aria-pressed="false">Mute</button><button type="button" class="pill" id="room-leave" hidden>Leave</button>');
+      el('room-mute').onclick = () => { muted.has(room) ? muted.delete(room) : muted.add(room); keepMuted(); drawHead(); };
+      el('room-leave').onclick = async () => {
+        if (!(await ask({ heading: 'Leave this room?', text: 'This device forgets the room and its words. A member can invite it again.', yes: 'Leave', danger: true }))) return;
+        const left = room;
+        await den.leave(left);
+        go('general');
+      };
+    }
+    if (el('room-mute')) {
+      el('room-mute').textContent = muted.has(room) ? 'Unmute' : 'Mute';
+      el('room-mute').setAttribute('aria-pressed', String(muted.has(room)));
+    }
+    if (el('room-leave')) el('room-leave').hidden = r?.kind !== 'private';
   }
 
   function go(id, focus = null) {
+    if (id !== room) forgetImages();
     room = id;
     reply = null;
     editing = null;
@@ -362,14 +392,45 @@ export function mountDen(den, el, me) {
     li.classList.add('flash');
   }
 
-  async function showImage(img, m) {
+  // An image is fetched and opened only when it comes into view, checked for
+  // its real size before it is drawn (a few kilobytes can claim 40000 × 40000
+  // pixels), and its decrypted copy is let go when the room is left.
+  const MAX_PIXELS = 40_000_000;
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      seen.unobserve(e.target);
+      reveal(e.target, e.target._den);
+    }
+  }, { rootMargin: '400px 0px' });
+
+  function showImage(img, m) {
     if (!m?.file) return;
+    img._den = m;
+    seen.observe(img);
+  }
+
+  async function reveal(img, m) {
+    const refuse = (text) => img.closest('.att')?.replaceWith(Object.assign(document.createElement('em'), { className: 'body', textContent: text }));
     try {
-      if (!urls.has(m.id)) urls.set(m.id, URL.createObjectURL(await den.openFile(m.file)));
+      if (!urls.has(m.id)) {
+        const blob = await den.openFile(m.file);
+        const bmp = await createImageBitmap(blob).catch(() => null);
+        if (!bmp) return refuse('This image could not be opened.');
+        const pixels = bmp.width * bmp.height;
+        bmp.close();
+        if (pixels > MAX_PIXELS) return refuse('This image is too large to show here. Download it instead.');
+        urls.set(m.id, URL.createObjectURL(blob));
+      }
       const stay = nearBottom();
       img.onload = () => { if (stay) toBottom(); };
       img.src = urls.get(m.id);
-    } catch (e) { img.closest('.att')?.replaceWith(Object.assign(document.createElement('em'), { className: 'body', textContent: e.message })); }
+    } catch (e) { refuse(e.message); }
+  }
+
+  function forgetImages() {
+    for (const u of urls.values()) URL.revokeObjectURL(u);
+    urls.clear();
   }
 
   async function download(m) {
@@ -631,6 +692,7 @@ export function mountDen(den, el, me) {
   function ping(room_, m, mention) {
     if (!document.hidden || notify === 'off' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const priv = den.rooms.get(room_)?.kind === 'private';
+    if (muted.has(room_)) return;
     if (notify === 'mentions' && !mention && !priv) return;
     const n = new Notification(plain(roomTitle(room_)), { body: plain(`${m.from}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_ });
     n.onclick = () => { window.focus(); go(room_); n.close(); };
@@ -682,7 +744,7 @@ export function mountDen(den, el, me) {
   }
 
   den.on = (event, d) => {
-    if (event === 'rooms') drawRooms();
+    if (event === 'rooms' || event === 'invites') drawRooms();
     if (event === 'ready' || event === 'members') {
       counts[d.room] = d.members.length;
       if (d.room === room) { drawComposer(); if (!el('members').hidden) drawMembers(); }

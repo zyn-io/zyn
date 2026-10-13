@@ -176,7 +176,15 @@ defmodule Den.Rooms do
   @doc "Device keys in a room whose day has not ended."
   def present(room) do
     now = now()
-    Repo.all(from rd in RoomDevice, join: d in Device, on: d.key == rd.key, where: rd.room == ^room and d.until > ^now, select: rd.key)
+    seated = Repo.all(from rd in RoomDevice, join: d in Device, on: d.key == rd.key, where: rd.room == ^room and d.until > ^now, select: rd.key)
+    # A member invited but not yet in (its invitation waiting on its device)
+    # is not gone: any member whose day has not ended counts as present.
+    keys = case get(room) do
+      %Room{} = r -> members(r)
+      _ -> []
+    end
+    admitted = if keys == [], do: [], else: Repo.all(from d in Device, where: d.key in ^keys and d.until > ^now, select: d.key)
+    Enum.uniq(seated ++ admitted)
   end
 
   @doc """
