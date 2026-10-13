@@ -185,7 +185,7 @@ export function mountDen(den, el, me) {
   }
 
   function go(id, focus = null) {
-    if (id !== room) forgetImages();
+    if (id !== room) { forgetImages(); drawn = 300; }
     room = id;
     reply = null;
     editing = null;
@@ -340,6 +340,7 @@ export function mountDen(den, el, me) {
   const nearBottom = () => { const b = el('log'); return b.scrollHeight - b.scrollTop - b.clientHeight < 120; };
   const toBottom = () => { const b = el('log'); b.scrollTop = b.scrollHeight; el('jump').hidden = true; };
 
+  let drawn = 300;
   async function drawLog(focus = null) {
     const log = await den.log(room);
     readFrom = den.lastRead(room);
@@ -347,10 +348,17 @@ export function mountDen(den, el, me) {
     shown.push(...log);
     const b = el('log');
     const priv = den.rooms.get(room)?.kind === 'private';
+    // The latest messages are drawn, earlier ones on asking (or when a search
+    // result or a reply points at one): a long room stays quick to open.
+    const want = focus ? log.findIndex((m) => m.id === focus) : -1;
+    const from = Math.max(0, Math.min(log.length - drawn, want >= 0 ? want - 20 : Infinity));
+    const more = from > 0 ? `<li class="earlier"><button type="button" class="mini ghost" id="earlier">Show earlier messages</button></li>` : '';
     b.innerHTML = log.length
-      ? log.map((m, i) => line(m, log[i - 1], log)).join('')
+      ? more + log.slice(from).map((m, i) => line(m, log[from + i - 1], log)).join('')
       : `<li class="empty"><b class="${priv ? 'plain' : ''}">${esc(roomTitle(room))}</b><span>${!den.inRoom(room) && priv ? 'Waiting for the invitation to arrive.' : 'No messages yet.'}</span></li>`;
     for (const img of b.querySelectorAll('img[data-blob]')) showImage(img, log.find((m) => m.id === img.dataset.blob));
+    const earlier = el('earlier');
+    if (earlier) earlier.onclick = () => { drawn += 300; const first = log[from]?.id; drawLog(first); };
     if (focus) flash(focus); else toBottom();
     den.markRead(room);
     drawRooms();

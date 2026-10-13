@@ -255,3 +255,4 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .invites .invite span { flex: 1; }
 .side-foot .keep { display: flex; align-items: center; gap: 6px; }
 .side-foot #forget { margin: 6px 0 10px; }
+.log .earlier { text-align: center; margin: 8px 0; }
