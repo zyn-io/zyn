@@ -322,6 +322,16 @@ export function mountAdmin(den, el, ui) {
 
   // ---- One member: their roles, and what a moderator may do to them ---------------
 
+  /// What the card says of an agent: whose it is, and, on its owner's
+  /// device, a way to take that back.
+  function agentLine(key) {
+    if (!den.isAgent(key)) return '';
+    const owner = den.agentOwner(key);
+    const mine = den.myAgents.includes(key);
+    const yours = owner && den.isMe(owner);
+    return `<p class="agent-line">${owner ? (yours ? `Your agent. It takes orders from you only.${mine ? '' : ' It was added on your other device; remove it there.'}` : `Agent of ${esc(den.nickFor(owner) || `m-${owner.slice(0, 20)}`)}.`) : 'Says it is an agent. No member has confirmed it as theirs.'}${mine ? ' <button type="button" class="mini" id="m-disown">Remove as your agent</button>' : ''}</p>`;
+  }
+
   function member(key) {
     const d = el('member');
     const roles = den.rolesOf(key);
@@ -330,6 +340,7 @@ export function mountAdmin(den, el, ui) {
     const givable = den.mod.roles.filter((r) => r.id !== 'everyone' && (den.isOwner() || r.position < den.top(den.me.key))).sort((a, b) => b.position - a.position);
     const manage = den.can('manage_roles') && (den.isMe(key) || den.above(key));
     el('member-card').innerHTML = `<div class="card-head">${mark(key, 40)}<div><p>${whoHtml(key)}</p><small>m-${esc(key.slice(0, 20))}${den.isOwner(key) ? ' · Owner' : ''}</small></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
+      ${agentLine(key)}
       ${roles.length ? `<div class="chips">${roles.map((r) => `<span class="role-chip"><i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</span>`).join('')}</div>` : ''}
       ${s ? `<p class="sanction">${s.kind === 'ban' ? 'Banned' : s.kind === 'kick' ? `Kicked until ${when(s.until)}` : `Timed out until ${when(s.until)}`}</p>` : ''}
       ${manage && givable.length ? `<fieldset class="perms"><legend>Roles</legend>${givable.map((r) => `<label class="check"><input type="checkbox" data-give="${esc(r.id)}" ${roles.some((x) => x.id === r.id) ? 'checked' : ''} /> <i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</label>`).join('')}</fieldset>` : ''}
@@ -341,6 +352,8 @@ export function mountAdmin(den, el, ui) {
     el('member-card').querySelectorAll('[data-give]').forEach((c) => { c.onchange = () => act(() => den.onPerson(c.checked ? 'role_give' : 'role_take', key, { id: c.dataset.give }), c.checked ? 'Role given.' : 'Role taken.'); });
     const to = el('to-form');
     if (to) to.onsubmit = (e) => { e.preventDefault(); act(() => den.onPerson('timeout', key, { seconds: Number(to.elements.s.value), reason: to.elements.reason.value }), 'Timed out.'); };
+    const disown = el('m-disown');
+    if (disown) disown.onclick = () => act(() => den.disown(key), 'No longer your agent.');
     const lift = el('to-lift');
     if (lift) lift.onclick = () => act(() => den.onPerson('untimeout', key), 'Timeout removed.');
     const reasoned = async (heading, text, yes) => ask({ heading, text, field: 'Reason (moderators see it)', yes, danger: true, empty: true });

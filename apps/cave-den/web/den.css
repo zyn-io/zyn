@@ -285,6 +285,8 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .members .member-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; padding: 0; text-align: left; background: none; border: 0; cursor: pointer; }
 .members .member-name:hover .who { text-decoration: underline; text-underline-offset: 3px; }
 .tag-out { font: 10.5px var(--sans); color: #ec8a78; }
+.tag-agent { margin-left: 6px; padding: 0 5px; font: 10.5px var(--sans); color: var(--read); border: 1px solid var(--line); cursor: help; }
+.agent-line { margin: 8px 0 0; font: 13px var(--sans); color: var(--read); }
 .dot { display: inline-block; width: 10px; height: 10px; flex: none; border-radius: 50%; background: rgba(240, 238, 230, 0.3); }
 .role-chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 8px; font: 12px var(--sans); color: var(--read); border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); }
 
@@ -365,5 +367,5 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
   .room-topic { display: none; }
 }
 .members .member-name .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.members .member-name .id, .tag-out { flex: none; }
+.members .member-name .id, .tag-out, .tag-agent { flex: none; }
 .members { grid-template-columns: minmax(0, 1fr); }

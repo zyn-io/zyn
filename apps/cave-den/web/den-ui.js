@@ -101,7 +101,13 @@ export function mountDen(den, el, me) {
   const whoHtml = (key, cls = 'who') => {
     const nick = den.nickFor(key);
     const c = den.colourOf(key);
-    return `<b class="${cls}"${c ? ` data-c="${esc(c)}"` : ''} title="${esc(`${nameOf(key)}\n${fingerprint(key)}`)}">${esc(nick || nameOf(key))}</b>${nick ? `<span class="id">${esc(short(key))}</span>` : ''}`;
+    return `<b class="${cls}"${c ? ` data-c="${esc(c)}"` : ''} title="${esc(`${nameOf(key)}\n${fingerprint(key)}`)}">${esc(nick || nameOf(key))}</b>${nick ? `<span class="id">${esc(short(key))}</span>` : ''}${agentTag(key)}`;
+  };
+  /// An agent says it is one; its owner's name only when the owner confirms it.
+  const agentTag = (key) => {
+    if (!den.isAgent(key)) return '';
+    const owner = den.agentOwner(key);
+    return `<span class="tag-agent" title="${esc(owner ? `Agent of ${display(owner)} (${nameOf(owner)})` : 'Says it is an agent. No member has confirmed it as theirs.')}">agent</span>`;
   };
   // Role colours: the page's rules allow no style attributes in markup, so
   // each [data-c] is painted here, once drawn (a colour is only ever #rrggbb).
@@ -903,6 +909,7 @@ export function mountDen(den, el, me) {
       el('say').hidden = true;
     }
     if (event === 'linked') status('Linked: members now see these devices as one person.');
+    if (event === 'owned') status(`${display(d.key)} is now your agent. It takes orders from you only.`);
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
@@ -928,6 +935,14 @@ export function mountDen(den, el, me) {
     linkGo.onclick = async () => {
       const code = den.startLink();
       await ask({ heading: 'Link another device', text: `On the other device, enter this den with its own invite, choose “Enter a link code” and type ${code} within ten minutes. Members then see both as you.`, yes: 'Done' });
+    };
+  }
+  // An agent of this member's (epeaky-agent): a code shown here, given to it there.
+  const agentGo = el('add-agent');
+  if (agentGo) {
+    agentGo.onclick = async () => {
+      const code = den.startOwn();
+      await ask({ heading: 'Add an agent', text: `On the agent's machine, within ten minutes, run: epeaky-agent owner ${code}  (add --agent NAME if you run several). The agent must be in this den. It then takes orders from you and your linked devices only.`, yes: 'Done' });
     };
   }
   const linkUse = el('link-code');

@@ -48,6 +48,8 @@ export const PERMS = ['administrator', 'manage_server', 'manage_channels', 'mana
 /// Slow mode choices, in seconds (0: off).
 export const SLOW = [0, 5, 10, 15, 30, 60, 120, 300, 600, 3600, 21600];
 const OWNER_TOP = 1_000_000;
+/// An open room's id (a host's, or r- and a slug) or a private one (p- and hex).
+const ROOM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /// Whether a moderated room hides this message: a second message or file
 /// from the same device inside the room's slow mode window, by the den's
@@ -159,6 +161,10 @@ export class DenClient {
     this.read = {};
     this.nicks = {}; // device key → { name, at }: the names members gave themselves
     this.claims = {}; // device key → the device keys it says are the same person's
+    this.claimsAt = {}; // device key → when (its clock) it last said which devices are its member's
+    this.agentAt = {}; // device key → when it last said what it is as an agent, or whose agents
+    this.agentClaims = {}; // device key → what it says of itself as an agent: its owner's key, or true
+    this.ownerClaims = {}; // device key → the agents it says are its member's
     this.typingAt = 0;
     // The den's roles, who holds them, timeouts and bans in force, its name.
     this.mod = { owner: null, roles: [], holders: {}, sanctions: [], den: { name: '', description: '', icon: false }, limits: {} };
@@ -182,7 +188,14 @@ export class DenClient {
     for (const r of (await this.kv.get('private')) || []) this.rooms.set(r.id, r);
     this.nicks = (await this.kv.get('nicks')) || {};
     this.claims = (await this.kv.get('claims')) || {};
+    this.claimsAt = (await this.kv.get('claimsAt')) || {};
+    this.agentAt = (await this.kv.get('agentAt')) || {};
     this.myLinks = (await this.kv.get('links')) || [];
+    this.agentClaims = (await this.kv.get('agentClaims')) || {};
+    this.ownerClaims = (await this.kv.get('ownerClaims')) || {};
+    this.myAgents = (await this.kv.get('agents')) || [];
+    // An agent (epeaky-agent): it says so, and names its owner once confirmed.
+    this.agent = (await this.kv.get('agent')) ? { owner: (await this.kv.get('owner')) || null, since: (await this.kv.get('ownerSince')) || null } : null;
     this.me = { name: this.den.name(), key: this.den.key(), nick: (await this.kv.get('nick')) || '' };
     // Leaving the page: what was read since the last write, written.
     if (typeof addEventListener === 'function') addEventListener('pagehide', () => { if (this.saveTimer) this.save().catch(() => {}); });
@@ -404,7 +417,22 @@ export class DenClient {
     }));
   }
 
+  /// A new session (a new day): the old socket closed, every room joined
+  /// again on the new one. This device's MLS state stays as it is.
+  reconnect(session) {
+    try { this.socket?.disconnect(); } catch { /* gone */ }
+    clearTimeout(this.refillTimer);
+    // The den publishes keys some days ahead: a process that runs for weeks
+    // asks again (each day's key stays pinned).
+    this.keys = undefined;
+    this.channels.clear();
+    this.joined.clear();
+    this.connect(session);
+  }
+
   addRoom(r) {
+    // A room's id as dens make them; anything else from a den is not taken.
+    if (typeof r?.id !== 'string' || !ROOM_ID.test(r.id)) return;
     this.rooms.set(r.id, { ...this.rooms.get(r.id), ...r });
     this.on('rooms', [...this.rooms.values()]);
     this.joinRoom(r.id);
@@ -546,7 +574,7 @@ export class DenClient {
           await this.publishInfo(room);
         }
         await this.save();
-        if (this.me.nick || this.myLinks.length) this.soonProfile(room);
+        if (this.hasProfile()) this.soonProfile(room);
       } catch (e) {
         // Someone moved the room first: start again from where it is now.
         try { this.den.forget(room); } catch { /* not in it */ }
@@ -647,7 +675,7 @@ export class DenClient {
     for (const k of before) if (!now.has(k)) lines.push([k, 'left']);
     if (!lines.length) return;
     // Someone new does not know the names members gave themselves: tell them.
-    if ((this.me.nick || this.myLinks.length) && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
+    if (this.hasProfile() && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
     const log = await this.log(room);
     for (const [who, act] of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', who, act, text: `m-${who.slice(0, 20)} ${act}`, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
@@ -723,8 +751,11 @@ export class DenClient {
     // claim, sealed by MLS to the sender's key: shown beside that key's own
     // name, never instead of it where it matters.
     if (!mine && typeof m.key === 'string' && 'nick' in m) await this.learnNick(m.key, m.nick, m.at);
-    if (!mine && typeof m.key === 'string' && Array.isArray(m.links)) await this.learnClaims(m.key, m.links);
+    if (!mine && typeof m.key === 'string' && Array.isArray(m.links)) await this.learnClaims(m.key, m.links, m.at);
+    if (!mine && typeof m.key === 'string') this.on('doc', { room, key: m.key, t: m.t });
+    if (!mine && typeof m.key === 'string' && m.t === 'profile') await this.learnAgent(m.key, m.agent, m.agents, m.at);
     if (m.t === 'link-ask' || m.t === 'link') { if (!mine) await this.onLink(room, m); return; }
+    if (m.t === 'own-ask' || m.t === 'own') { if (!mine) await this.onOwn(room, m); return; }
     if (m.t === 'profile') return;
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
@@ -1053,11 +1084,14 @@ export class DenClient {
       await this.kv.put('invites', waiting.filter((x) => x.id !== id));
       let room = null;
       try {
-        room = this.den.accept(unb64(w.welcome));
+        const got = this.den.accept(unb64(w.welcome));
+        // A private room's id, as dens make them, or none of it.
+        if (!/^p-[0-9a-f]{32}$/.test(got)) { try { this.den.forget(got); } catch { /* not kept */ } throw new Error('not a room'); }
+        room = got;
         if (!this.rooms.has(room)) this.rooms.set(room, { id: room, title: '', kind: 'private' });
         await this.keepPrivate();
         this.joinRoom(room);
-        if (this.me.nick || this.myLinks.length) this.soonProfile(room);
+        if (this.hasProfile()) this.soonProfile(room);
         this.on('rooms', [...this.rooms.values()]);
       } catch { /* already in it, or not for this device */ }
       await this.save();
@@ -1176,7 +1210,13 @@ export class DenClient {
     return key === this.me?.key || this.linkedTo(this.me?.key).includes(key);
   }
 
-  async learnClaims(key, links) {
+  async learnClaims(key, links, at = Date.now()) {
+    // The newest claim by its sender's clock wins: an old profile read late
+    // (another room's, caught up after) does not bring back a link undone.
+    const when = sent(at);
+    if ((this.claimsAt[key] || 0) > when) return;
+    this.claimsAt[key] = when;
+    await this.kv.put('claimsAt', this.claimsAt);
     const keys = [...new Set(links.filter((k) => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k) && k !== key))].slice(0, 10);
     const had = this.claims[key] || [];
     if (had.length === keys.length && had.every((k) => keys.includes(k))) return;
@@ -1285,10 +1325,149 @@ export class DenClient {
     for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
   }
 
-  /// What this device says of itself in a room: its member's name, and the
-  /// devices it says are the same member's.
+  /// What this device says of itself in a room: its member's name, the
+  /// devices it says are the same member's, and the agents it says are its
+  /// member's (or, on an agent, that it is one, and whose).
   profile() {
-    return { t: 'profile', nick: this.me.nick, links: this.myLinks };
+    return { t: 'profile', nick: this.me.nick, links: this.myLinks, ...(this.myAgents.length ? { agents: this.myAgents } : {}), ...(this.agent ? { agent: this.agent.owner || true } : {}) };
+  }
+
+  /// Whether this device has anything to say of itself in a room.
+  hasProfile() {
+    return !!(this.me.nick || this.myLinks.length || this.myAgents.length || this.agent);
+  }
+
+  // ---- Agents ------------------------------------------------------------------
+
+  /// What a profile says of its sender as an agent, or of the agents its
+  /// member has. Each is that device's own claim, sealed to its key by MLS.
+  async learnAgent(key, agent, agents, at = Date.now()) {
+    const when = sent(at);
+    if ((this.agentAt[key] || 0) > when) return;
+    this.agentAt[key] = when;
+    await this.kv.put('agentAt', this.agentAt);
+    const owner = typeof agent === 'string' && /^[0-9a-f]{64}$/.test(agent) ? agent : agent === true ? true : null;
+    const keys = Array.isArray(agents) ? [...new Set(agents.filter((k) => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k) && k !== key))].slice(0, 50) : [];
+    const before = JSON.stringify([this.agentClaims[key] ?? null, this.ownerClaims[key] || []]);
+    if (owner) this.agentClaims[key] = owner; else delete this.agentClaims[key];
+    if (keys.length) this.ownerClaims[key] = keys; else delete this.ownerClaims[key];
+    if (JSON.stringify([this.agentClaims[key] ?? null, this.ownerClaims[key] || []]) === before) return;
+    await this.kv.put('agentClaims', this.agentClaims);
+    await this.kv.put('ownerClaims', this.ownerClaims);
+    this.on('nicks', { key });
+  }
+
+  /// Whether a device says it is an agent.
+  isAgent(key) {
+    return key === this.me?.key ? !!this.agent : !!this.agentClaims[key];
+  }
+
+  /// The agents a device says are its member's: that device's own word,
+  /// which only it can take back.
+  agentsOf(key) {
+    return key === this.me?.key ? this.myAgents : this.ownerClaims[key] || [];
+  }
+
+  /// An agent's owner, when both sides say so: the agent names the owner's
+  /// device, and that device (or one linked to it) names the agent. Null
+  /// otherwise.
+  agentOwner(key) {
+    const owner = key === this.me?.key ? this.agent?.owner : this.agentClaims[key];
+    if (typeof owner !== 'string') return null;
+    return this.agentsOf(owner).includes(key) ? owner : null;
+  }
+
+  /// On an agent: whether words from `key` carry its owner's authority. The
+  /// owner's device, or one mutually linked to it, while the owner's side
+  /// still names this agent.
+  fromOwner(key) {
+    const owner = this.agentOwner(this.me?.key);
+    return !!owner && (key === owner || this.linkedTo(owner).includes(key));
+  }
+
+  /// A code for an agent of this member's: shown here, given to the agent
+  /// (epeaky-agent owner CODE) within ten minutes.
+  startOwn() {
+    // 26 of 32 letters and digits (no i, l, o or 0), 130 bits: it is pasted, not typed,
+    // and only its hash crosses the room, so it must not be guessed offline.
+    const abc = 'abcdefghjkmnpqrstuvwxyz123456789';
+    const code = [...rand(26)].map((x) => abc[x & 31]).join('');
+    this.ownCode = { code, until: Date.now() + 10 * 60_000 };
+    return code.match(/.{1,6}/g).join('-');
+  }
+
+  /// On the agent: its owner's code. The rooms hear a hash of it with this
+  /// device's key, which only the owner's device can check.
+  async useOwn(typed) {
+    if (!this.agent) throw new Error('Only an agent takes an owner.');
+    const code = String(typed || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (code.length !== 26) throw new Error('An owner code is 26 letters and digits, as the page shows it.');
+    this.ownAsk = { code, until: Date.now() + 10 * 60_000 };
+    const tag = await sha(`den-own-ask|${code}|${this.me.key}`);
+    // One open room is enough: the owner's page hears every room it is in.
+    const room = this.den.rooms().find((r) => this.rooms.get(r)?.kind !== 'private');
+    if (!room) throw new Error('Enter a room first.');
+    await this.send(room, { t: 'own-ask', tag });
+  }
+
+  /// On the agent: stop waiting for an owner's answer.
+  cancelOwn() {
+    this.ownAsk = null;
+  }
+
+  /// An agent's hash of this page's code (here), or the owner's answer (on
+  /// the agent). Checked inside the room's lock; what follows is sent after.
+  async onOwn(room, m) {
+    const later = (f) => setTimeout(() => f().catch(() => {}), 0);
+    if (m.t === 'own-ask' && this.ownCode && Date.now() < this.ownCode.until && typeof m.tag === 'string') {
+      const { code } = this.ownCode;
+      if (m.tag !== await sha(`den-own-ask|${code}|${m.key}`)) return;
+      this.ownCode = null;
+      const tag = await sha(`den-own-ok|${code}|${this.me.key}|${m.key}`);
+      later(async () => {
+        await this.send(room, { t: 'own', to: m.key, tag });
+        await this.setAgents([...this.myAgents.filter((k) => k !== m.key), m.key].slice(-50));
+        this.on('owned', { key: m.key });
+      });
+    }
+    if (m.t === 'own' && this.agent && m.to === this.me.key && this.ownAsk && Date.now() < this.ownAsk.until && typeof m.tag === 'string') {
+      const { code } = this.ownAsk;
+      if (m.tag !== await sha(`den-own-ok|${code}|${m.key}|${this.me.key}`)) return;
+      this.ownAsk = null;
+      later(async () => {
+        await this.setOwner(m.key);
+        this.on('owned', { key: m.key });
+      });
+    }
+  }
+
+  /// The agents this member says are theirs, said in every room.
+  async setAgents(keys) {
+    this.myAgents = keys;
+    await this.kv.put('agents', keys);
+    this.on('nicks', { key: this.me.key });
+    for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
+  }
+
+  /// No longer this member's agent: it carries no authority from here.
+  disown(key) {
+    return this.setAgents(this.myAgents.filter((k) => k !== key));
+  }
+
+  /// On an agent: this device is one (said in every room from now on).
+  async becomeAgent() {
+    await this.kv.put('agent', true);
+    this.agent ??= { owner: (await this.kv.get('owner')) || null, since: (await this.kv.get('ownerSince')) || null };
+  }
+
+  /// On an agent: its owner's device, or none.
+  async setOwner(key) {
+    if (!this.agent) throw new Error('Only an agent takes an owner.');
+    this.agent.owner = key || null;
+    this.agent.since = key ? Date.now() : null;
+    if (key) { await this.kv.put('owner', key); await this.kv.put('ownerSince', this.agent.since); } else { await this.kv.del('owner'); await this.kv.del('ownerSince'); }
+    this.on('nicks', { key: this.me.key });
+    for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
   }
 
   /// A room's newcomers hear this device's name a little after they arrive,
@@ -1298,7 +1477,7 @@ export class DenClient {
     if (this.profileSoon[room]) return;
     this.profileSoon[room] = setTimeout(() => {
       delete this.profileSoon[room];
-      if (this.inRoom(room) && (this.me.nick || this.myLinks.length)) this.send(room, this.profile()).catch(() => {});
+      if (this.inRoom(room) && this.hasProfile()) this.send(room, this.profile()).catch(() => {});
     }, 2000 + Math.random() * 8000);
   }
 
@@ -1316,7 +1495,7 @@ export class DenClient {
 
   markRead(room) {
     this.read[room] = this.seq[room] || 0;
-    this.kv.put('read', this.read);
+    this.kv.put('read', this.read).catch(() => {});
   }
 
   /// Search the words this device keeps, in every room.

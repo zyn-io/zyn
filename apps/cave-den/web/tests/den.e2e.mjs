@@ -68,6 +68,9 @@ async function person(name, url) {
 const inside = (p, ms = 20000) => p.waitForSelector('#den:not([hidden])', { timeout: ms }).then(() => true, () => false);
 const meOf = (p) => p.evaluate(() => window.__den.me);
 
+// A den with no owner yet, whatever an earlier run left.
+host(':ok = Den.Mod.set_owner(nil); IO.puts("ok")');
+
 // A: an invite link.
 const invite = host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))');
 const a = await person('A', `${DEN}/#invite=${invite}`);
