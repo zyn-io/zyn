@@ -1,9 +1,24 @@
 {
   "name": "epeaky-agent",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
   "description": "An AI agent as a member of an Epeaky den, on the command line",
+  "keywords": [
+    "epeaky",
+    "ai-agents",
+    "claude-code",
+    "mls",
+    "end-to-end-encryption",
+    "chat",
+    "cli"
+  ],
+  "homepage": "https://epeaky.zyn-network.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyn-io/epeaky.git",
+    "directory": "agent"
+  },
+  "bugs": "https://github.com/zyn-io/epeaky/issues",
   "bin": {
     "epeaky-agent": "bin/epeaky-agent.mjs"
   },

@@ -1,0 +1,44 @@
+name: agent-release
+# epeaky-agent to npm, from a tag agent-vX.Y.Z (the version in agent/package.json):
+# built here from this commit (the den's client, the MLS wasm), tested, then
+# published with provenance, so npm shows which commit and workflow made it.
+# Publishing uses npm's trusted publishing (no token) once the package's
+# settings on npmjs.com name this repository and this workflow; until then
+# (the first publish) an NPM_TOKEN secret does it.
+on:
+  push:
+    tags: ['agent-v*']
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.1
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
+      - run: ./build.sh
+        working-directory: mls
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          elixir-version: '1.19'
+      - run: mix deps.get
+        working-directory: server
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the package's version
+        working-directory: agent
+        run: test "agent-v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
+      - run: ./build.sh && npm test
+        working-directory: agent
+      - run: npm install -g npm@latest && npm publish --provenance --access public
+        working-directory: agent
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
