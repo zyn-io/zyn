@@ -1,5 +1,6 @@
 name: agent-release
-# epeaky-agent to npm, from a tag agent-vX.Y.Z (the version in agent/package.json):
+# epeaky-agent to npm, from a tag agent-vX.Y.Z (the version in agent/package.json);
+# epeaky-mcp from mcp-vX.Y.Z and epeaky-librarian from librarian-vX.Y.Z (agents/):
 # built here from this commit (the den's client, the MLS wasm), tested, then
 # published with provenance, so npm shows which commit and workflow made it.
 # Publishing uses npm's trusted publishing (no token) once the package's
@@ -8,12 +9,13 @@ name: agent-release
 # pinned to exact versions: this job can publish.
 on:
   push:
-    tags: ['agent-v*']
+    tags: ['agent-v*', 'mcp-v*', 'librarian-v*']
 permissions:
   contents: read
   id-token: write
 jobs:
   publish:
+    if: startsWith(github.ref_name, 'agent-v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -41,5 +43,28 @@ jobs:
         working-directory: agent
       - run: npm install -g npm@12.2.0 && npm publish --provenance --access public
         working-directory: agent
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The agents built on epeaky-agent: no build, their tests, then npm.
+  publish-agents:
+    if: startsWith(github.ref_name, 'mcp-v') || startsWith(github.ref_name, 'librarian-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Which package, and the tag is its version
+        id: pkg
+        run: |
+          case "$GITHUB_REF_NAME" in mcp-v*) dir=agents/mcp ;; librarian-v*) dir=agents/librarian ;; esac
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          test "${GITHUB_REF_NAME%%-v*}-v$(node -p "require('./$dir/package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm install --no-save epeaky-agent@"$(node -p "require('./package.json').dependencies['epeaky-agent']")" && node --test tests/*.test.mjs
+        working-directory: ${{ steps.pkg.outputs.dir }}
+      - run: npm install -g npm@12.2.0 && npm publish --provenance --access public
+        working-directory: ${{ steps.pkg.outputs.dir }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

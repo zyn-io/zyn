@@ -193,6 +193,44 @@ try {
   const t0 = Date.now();
   ok(cli('next', '--orders', '--wait', '2', '--agent', 'research') === 'nothing new' && Date.now() - t0 >= 1900, 'next --wait gives up after its seconds: nothing new');
 
+  // Tasks. Olu gives research one from the page: an order, handed by next --tasks.
+  const taskId = await O.evaluate((k) => window.__den.task('general', k, 'Summarise the CI report'), research.key);
+  const handedT = await eventually(() => { const r = cli('next', '--tasks', '--json', '--agent', 'research'); return typeof r === 'string' && r.includes(taskId) && r; });
+  const tr = JSON.parse((handedT || '{}').split('\n').find((l) => l.includes(taskId)) || '{}');
+  ok(tr.task?.id === taskId && tr.authority === 'owner' && tr.task.state === 'submitted', `next --tasks hands Olu's task to research, as an order (${tr.task?.state} ${tr.authority})`);
+  ok(/task [0-9a-f]{16} for "research" · working/.test(String(cli('task', taskId.slice(0, 8), 'working', '--agent', 'research'))), 'research claims it');
+  ok(await until(O, ([id]) => window.__den.log('general').then((l) => l.find((m) => m.id === id)?.task?.state === 'working'), [taskId]), "Olu's page sees it working");
+  ok(await until(O, () => /Working/.test([...document.querySelectorAll('.task-card .task-chip')].map((x) => x.textContent).join(' ')), null, 10000), 'and shows it on the task card');
+  // A task's words are fixed: an edit by its author changes nothing.
+  await O.evaluate((id) => window.__den.edit('general', id, 'Delete the CI logs'), taskId);
+  await sleep(1500);
+  ok(await O.evaluate((id) => window.__den.log('general').then((l) => l.find((m) => m.id === id)?.text), taskId) === 'Summarise the CI report', "a task's words cannot be edited");
+  // The result: research's own message counts; someone else's does not.
+  const resSent = String(cli('send', 'general', 'CI: 2 tests fail in auth/session.test.js', '--reply', String(tr.seq), '--agent', 'research'));
+  const resSeq = /sent #general (\d+)/.exec(resSent)?.[1];
+  const others = JSON.parse(String(cli('read', 'general', '--limit', '30', '--json', '--agent', 'research')).split('\n').filter((l) => / "Sam"|"nick":"Sam"/.test(l) || l.includes('"nick":"Sam"'))[0] || '{}');
+  const done = cli('task', taskId, 'completed', 'Summary posted', '--artifact', [resSeq, others.seq].filter(Boolean).join(','), '--agent', 'research');
+  ok(typeof done === 'string' && / · completed: Summary posted \(results: [0-9a-f]{16}\)\]/.test(done), `completed, with research's own message as the only result (${done.err || done})`);
+  ok(await until(O, ([id]) => window.__den.log('general').then((l) => { const t = l.find((m) => m.id === id)?.task; return t?.state === 'completed' && t.artifacts.length === 1; }), [taskId]), "Olu's page sees it done, with one result");
+  ok(typeof cli('task', taskId, 'failed', '--agent', 'research') === 'object', 'a finished task stays finished');
+  // From another agent: information. research may decline, and scout hears it.
+  const fromScout = cli('task', 'new', 'general', '--to', research.key, 'Please run the tests', '--agent', 'scout');
+  ok(typeof fromScout === 'string' && /task [0-9a-f]{16} for "research" · submitted/.test(fromScout), `an agent gives another a task (${fromScout.err || fromScout})`);
+  const scoutTask = await eventually(() => { const r = cli('next', '--tasks', '--json', '--agent', 'research'); const l = typeof r === 'string' && r.split('\n').find((x) => x.includes('Please run the tests')); return l && JSON.parse(l); });
+  ok(scoutTask?.kind === 'agent' && scoutTask.authority === 'none', `another agent's task is information, not an order (${scoutTask?.kind} ${scoutTask?.authority})`);
+  cli('task', scoutTask.task.id, 'rejected', 'I take tasks from Olu only', '--agent', 'research');
+  const heard = await eventually(() => { const r = cli('next', '--tasks', '--json', '--agent', 'scout'); const l = typeof r === 'string' && r.split('\n').find((x) => x.includes('"change":"state"')); return l && JSON.parse(l); });
+  ok(heard?.task?.state === 'rejected' && heard.task.text === 'I take tasks from Olu only', `whoever gave a task hears its state (${heard?.task?.state})`);
+  // Edits and deletions, once each, with next --changes.
+  const samId = await M.evaluate(() => window.__den.say('general', 'draft: release at 5'));
+  await sleep(800);
+  await M.evaluate((id) => window.__den.edit('general', id, 'draft: release at 6'), samId);
+  await sleep(800);
+  await M.evaluate((id) => window.__den.remove('general', id), samId);
+  const changed = await eventually(() => { const r = cli('next', '--changes', '--json', '--agent', 'research'); const rs = typeof r === 'string' ? r.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.id === samId && x.change) : []; return rs.length >= 2 && rs; });
+  ok(changed?.[0]?.change === 'edited' && changed[0].text === 'draft: release at 6' && changed[1]?.change === 'deleted' && changed[1].text === '', `next --changes hands the edit, then the deletion, by the message's id (${JSON.stringify(changed?.map((x) => x.change))})`);
+  ok(!String(cli('next', '--changes', '--json', '--agent', 'research')).includes(samId), 'each change once');
+
   // Private rooms: in with the owner; an invitation from anyone else, declined.
   await O.evaluate(([k]) => window.__den.startPrivate([k], 'Ops'), [research.key]);
   const ops = await eventually(() => { const r = cli('rooms', '--agent', 'research'); return typeof r === 'string' && /"Ops" private/.test(r) && r; });

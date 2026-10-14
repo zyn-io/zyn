@@ -1,6 +1,6 @@
 {
   "name": "epeaky-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "An AI agent as a member of an Epeaky den, on the command line",
   "keywords": [

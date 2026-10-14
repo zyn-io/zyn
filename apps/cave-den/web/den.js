@@ -22,6 +22,9 @@ import { Socket } from './den/phoenix.mjs';
 import init, { Den, token_blind as tokenBlind, token_finalize as tokenFinalize } from './den/den_mls.js';
 
 const KEEP = 1000;
+/// A task's states (A2A's, without auth-required); the last four are final.
+export const TASK_STATES = ['working', 'input-required', 'completed', 'failed', 'canceled', 'rejected'];
+const FINAL = new Set(['completed', 'failed', 'canceled', 'rejected']);
 const INVITATIONS = 5;
 export const VOICE_LABEL = 'den voice';
 
@@ -836,7 +839,9 @@ export class DenClient {
       const file = m.t === 'file' ? fileMeta(m.file) : null;
       if (m.t === 'file' && !file) return;
       // As the sender's page caps it: a longer message from a modified client is cut.
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {} };
+      // A task: words for one member (an agent) to do, its state kept here.
+      const task = m.t === 'msg' && m.task && typeof m.task.to === 'string' && /^[0-9a-f]{64}$/.test(m.task.to) && m.task.to !== m.key ? { to: m.task.to, state: 'submitted', text: '', artifacts: [], updated: m.at || Date.now(), by: null } : null;
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {}, ...(task ? { task } : {}) };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
@@ -853,8 +858,22 @@ export class DenClient {
     } else if (m.t === 'edit' || m.t === 'del') {
       const i = at(m.to);
       if (i < 0 || !m.key || log[i].key !== m.key) return;
+      // A task's words are fixed once given: its author cancels and asks again.
+      if (m.t === 'edit' && log[i].task) return;
       if (m.t === 'edit') Object.assign(log[i], { text: String(m.text || '').slice(0, 4000), edited: true });
       else Object.assign(log[i], { text: '', file: null, deleted: true });
+      if (m.t === 'del' && log[i].task && !FINAL.has(log[i].task.state)) Object.assign(log[i].task, { state: 'canceled', text: '', updated: m.at || Date.now(), by: m.key });
+      shown = log[i];
+    } else if (m.t === 'task-state') {
+      // A task's state, from the member it is for; "canceled" from its author.
+      // Once final it stays (the first final state the den ordered wins).
+      const i = at(m.task);
+      const t = i >= 0 ? log[i].task : null;
+      if (!t || !m.key || FINAL.has(t.state) || !TASK_STATES.includes(m.state)) return;
+      if (m.state === 'canceled' ? m.key !== log[i].key : m.key !== t.to) return;
+      // Results only from the member that did the work.
+      const artifacts = Array.isArray(m.artifacts) ? m.artifacts.filter((a) => typeof a === 'string' && log.some((x) => x.id === a && x.key === t.to)).slice(0, 20) : [];
+      Object.assign(t, { state: m.state, text: typeof m.text === 'string' ? m.text.slice(0, 2000) : '', artifacts, updated: m.at || Date.now(), by: m.key });
       shown = log[i];
     } else if (m.t === 'seen') {
       // A roommate's fingerprint of the door key the den showed it for a day,
@@ -962,6 +981,18 @@ export class DenClient {
     return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}) });
   }
   react(room, to, emoji) { return this.send(room, { t: 'react', to, emoji }); }
+  /// A task for one member (an agent): words, sealed like any message, that
+  /// it reports on with taskState. Its id is the message's.
+  task(room, to, text, reply = null) {
+    this.typingAt = 0;
+    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), task: { to }, ...(reply ? { reply } : {}) });
+  }
+  /// A task's new state: working, input-required, completed, failed or
+  /// rejected (by the member it is for), canceled (by its author).
+  taskState(room, task, state, text = '', artifacts = []) {
+    if (!TASK_STATES.includes(state)) return Promise.reject(new Error(`A task's state is one of ${TASK_STATES.join(', ')}.`));
+    return this.send(room, { t: 'task-state', task, state, ...(text ? { text: String(text).slice(0, 2000) } : {}), ...(artifacts.length ? { artifacts } : {}) });
+  }
   /// Pin a message for the room: its words, sent by this device (so sealed to
   /// the pinner's key), and sent again by it to everyone who joins later.
   pin(room, msg) {

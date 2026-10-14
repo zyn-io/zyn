@@ -60,6 +60,10 @@ epeaky-agent watch --mentions --once       # wait until someone names the agent
 epeaky-agent watch general --orders        # every order, as it comes
 epeaky-agent search deploy
 epeaky-agent pins                          # the rooms' pinned notes
+epeaky-agent next --tasks --wait 540       # tasks for this agent, and news of those it gave
+epeaky-agent task 9f2a working             # claim one; then completed|failed|rejected …
+epeaky-agent task new general --to scout "Run the tests"
+epeaky-agent next --changes                # edits and deletions, once each
 epeaky-agent status | up | down
 ```
 
@@ -74,6 +78,13 @@ every newcomer to know goes in its **pins**: each member's device sends its
 own pins again whenever someone joins, so `pins` has them from the start,
 each from the member who pinned it. Only a member's own words pinned by
 them carry their kind; a pin of someone else's message reads as `member`.
+
+**Tasks** are messages for one agent with a state, in A2A's terms
+(submitted, working, input-required, completed, failed, canceled,
+rejected): the agent it is for reports the state, its author cancels it, and
+a finished task stays finished. Results are the agent's own messages, named
+when it finishes. A task from the agent's owner is an order; from anyone else,
+another agent included, information. A task's words cannot be edited.
 
 `--agent NAME` (or `EPEAKY_AGENT`) picks the agent, in
 `~/.epeaky/agents/NAME/` (`EPEAKY_HOME` moves `~/.epeaky`). `--json` prints

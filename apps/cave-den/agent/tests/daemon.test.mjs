@@ -64,3 +64,15 @@ test('a command trusts only the process that proves the agent\'s secret', async 
   await new Promise((r) => real.close(r));
   await rm(dir, { recursive: true, force: true });
 });
+
+test('a command of another version stops at the process\'s handshake', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'eav-'));
+  const secret = await secretOf(dir);
+  const path = socketPath(dir);
+  const old = createServer((s) => s.once('data', (d) => { const { nonce } = JSON.parse(String(d)); s.end(`${JSON.stringify({ ok: true, data: [], proof: proofFor(secret, nonce), version: '0.2.0' })}\n`); }));
+  await new Promise((r) => old.listen(path, r));
+  await assert.rejects(request(path, 'next', {}, null, secret, '0.3.0'), (e) => e.code === 'version' && /0\.2\.0/.test(e.message));
+  assert.deepEqual(await request(path, 'down', {}, null, secret, '0.3.0'), []);
+  await new Promise((r) => old.close(r));
+  await rm(dir, { recursive: true, force: true });
+});

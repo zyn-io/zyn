@@ -125,6 +125,17 @@ export class Agent {
       const r = this.recordOf(d.room, d.message, d.mention);
       for (const f of this.listeners) f(r);
     }
+    // An edit (by its author) or a deletion (by its author, or a moderator in
+    // an open room): kept, numbered, for next --changes.
+    if (ev === 'message' && d.message && !d.mine && (d.kind === 'edit' || d.kind === 'del') && this.visible(d.room)) {
+      this.changing = (this.changing || Promise.resolve()).then(() => this.noteChange(d.room, d.message, d.kind)).catch((e) => this.log(`change: ${e.message}`));
+    }
+    // A task's state, for next --tasks: on a task this agent gave (its
+    // worker's word), or its own task being canceled by whoever gave it.
+    const t = d?.message?.task;
+    if (ev === 'message' && t && !d.mine && this.visible(d.room) && ((d.kind === 'task-state' && (d.message.key === this.me.key || (t.to === this.me.key && t.state === 'canceled'))) || (d.kind === 'del' && t.to === this.me.key))) {
+      this.changing = (this.changing || Promise.resolve()).then(() => this.noteChange(d.room, d.message, 'state')).catch((e) => this.log(`change: ${e.message}`));
+    }
     for (const f of this.listeners) f.event?.(ev, d);
   }
 
@@ -188,6 +199,7 @@ export class Agent {
     const r = record(room, m, { kind, nick: key ? this.den.nickFor(key) : '', name: m.from || (key ? `m-${key.slice(0, 20)}` : ''), replySeq, mention: mention ?? (kind !== 'self' && names(m.text, { name: this.me.name, nick: this.me.nick })) });
     if (m.t === 'note') r.text = m.text || '';
     if (!r.mention && kind !== 'self' && names(m.text, { name: this.me.name, nick: this.me.nick })) r.mention = true;
+    if (r.task) r.task.to_nick = this.den.nickFor(r.task.to) || '';
     return r;
   }
 
@@ -259,9 +271,41 @@ export class Agent {
   /// from the first this agent holds. With nothing there, waits up to `wait` seconds
   /// for the first that comes. Its place in each room is kept, so a loop of
   /// `next` misses nothing between calls, nor across a restart.
-  async next({ room = null, orders = false, mentions = false, wait = 0, limit = 50 } = {}) {
+  /// One edit or deletion, numbered in the order this agent saw them, kept
+  /// (the last 2000) so each is handed once, across restarts.
+  async noteChange(room, m, kind) {
+    const j = (await this.den.kv.get('changes')) || { n: 0, list: [] };
+    j.n += 1;
+    // As it stood then: an edit's words, a task's state.
+    const then = kind === 'edit' ? { text: m.text } : kind === 'state' ? { task: { ...m.task } } : {};
+    j.list = [...j.list, { n: j.n, room, id: m.id, kind, ct: Date.now(), ...then }].slice(-2000);
+    await this.den.kv.put('changes', j);
+    const r = await this.changeRecord(j.list.at(-1));
+    if (r) for (const f of this.listeners) f(r);
+  }
+
+  /// A change as a record: the message as it now stands, with its original
+  /// id and number, `edited` or `deleted`, and the change's own number.
+  async changeRecord(c) {
+    const log = await this.den.log(c.room);
+    const m = log.find((x) => x.id === c.id);
+    if (!m) return null;
+    const r = this.recordOf(c.room, { ...m, ...(c.kind === 'edit' ? { text: c.text ?? m.text, deleted: false } : {}), ...(c.task ? { task: c.task } : {}) }, null, log);
+    const what = c.kind === 'del' ? 'deleted' : c.kind === 'edit' ? 'edited' : 'state';
+    return { ...r, ...(what === 'deleted' ? { deleted: true, text: '' } : what === 'edited' ? { edited: true } : {}), change: what, change_n: c.n, changed_at: new Date(c.ct).toISOString() };
+  }
+
+  async next({ room = null, orders = false, mentions = false, changes = false, tasks = false, wait = 0, limit = 50 } = {}) {
     const only = room ? this.room(room).id : null;
-    const fits = (r) => r.kind !== 'self' && r.kind !== 'den' && (!only || r.room === only) && (!orders || r.authority === 'owner') && (!mentions || r.mention);
+    // A change passes by its kind (edits and deletions with --changes, task
+    // states with --tasks); a message by the filters, and with --tasks only
+    // as a task for this agent.
+    const fits = (r) => {
+      if (only && r.room !== only) return false;
+      if (r.change) return r.change === 'state' ? tasks : changes;
+      if (r.kind === 'self' || r.kind === 'den') return false;
+      return (!tasks || r.task?.to === this.me.key) && (!orders || r.authority === 'owner') && (!mentions || r.mention);
+    };
     const came = [];
     let woke = null;
     const f = (r) => { if (fits(r)) { came.push(r); woke?.(); } };
@@ -280,18 +324,100 @@ export class Agent {
           }
         }
       }
+      if (changes || tasks) {
+        this.handedChange ??= (await this.den.kv.get('handedChange')) || 0;
+        const j = (await this.den.kv.get('changes')) || { n: 0, list: [] };
+        for (const c of j.list) {
+          if (c.n <= this.handedChange || (only && c.room !== only) || !this.visible(c.room)) continue;
+          const rec = await this.changeRecord(c);
+          if (rec && fits(rec)) out.push(rec);
+        }
+      }
       if (!out.length && wait > 0) {
         if (!came.length) await new Promise((resolve) => { woke = resolve; setTimeout(resolve, wait * 1000); });
         out = came.slice(0, 1);
       }
-      out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+      // In the order things happened: a message when it was sent, a change when it was made.
+      const when = (r) => r.changed_at || r.at;
+      out.sort((a, b) => (when(a) < when(b) ? -1 : when(a) > when(b) ? 1 : 0));
       out = out.slice(0, Math.max(1, Math.min(1000, limit)));
-      for (const r of out) this.handed[r.room] = Math.max(this.handed[r.room] ?? 0, r.seq);
-      if (out.length) await this.den.kv.put('handed', this.handed);
+      for (const r of out) {
+        if (r.change) this.handedChange = Math.max(this.handedChange || 0, r.change_n);
+        else this.handed[r.room] = Math.max(this.handed[r.room] ?? 0, r.seq);
+      }
+      if (out.some((r) => !r.change)) await this.den.kv.put('handed', this.handed);
+      if (out.some((r) => r.change)) await this.den.kv.put('handedChange', this.handedChange);
       return out;
     } finally {
       this.listeners.delete(f);
     }
+  }
+
+  /// Tasks for or from this agent, in every room (or one); open ones only
+  /// with `open`.
+  async tasks({ room = null, open = false } = {}) {
+    const ids = room ? [this.room(room).id] : [...this.den.rooms.values()].filter((r) => this.visible(r.id)).map((r) => r.id);
+    const out = [];
+    for (const id of ids) {
+      const log = await this.den.log(id);
+      for (const m of log) {
+        if (!m.task || (m.task.to !== this.me.key && m.key !== this.me.key)) continue;
+        if (open && ['completed', 'failed', 'canceled', 'rejected'].includes(m.task.state)) continue;
+        out.push(this.recordOf(id, m, null, log));
+      }
+    }
+    return out;
+  }
+
+  /// The room a task (by its id, or the start of it) is in, and the task.
+  async findTask(q) {
+    const want = String(q || '').toLowerCase();
+    if (!/^[0-9a-f]{4,16}$/.test(want)) throw Object.assign(new Error('A task is named by its id (hex, as `tasks` shows it).'), { code: 'task' });
+    const hits = [];
+    for (const r of this.den.rooms.values()) {
+      if (!this.visible(r.id)) continue;
+      for (const m of await this.den.log(r.id)) if (m.task && m.id.startsWith(want)) hits.push({ room: r.id, m });
+    }
+    if (hits.length !== 1) throw Object.assign(new Error(hits.length ? `More than one task starts with ${q}.` : `No task ${q} on this agent. See: epeaky-agent tasks`), { code: 'task' });
+    return hits[0];
+  }
+
+  /// Report on a task given to this agent, or cancel one it gave.
+  async taskState(q, state, text = '', artifacts = []) {
+    const { room, m } = await this.findTask(q);
+    if (state === 'canceled' ? m.key !== this.me.key : m.task.to !== this.me.key) throw Object.assign(new Error(state === 'canceled' ? 'Only whoever gave a task cancels it.' : 'This task is not for this agent.'), { code: 'task' });
+    if (['completed', 'failed', 'canceled', 'rejected'].includes(m.task.state)) throw Object.assign(new Error(`This task is ${m.task.state} already.`), { code: 'task' });
+    const log = await this.den.log(room);
+    const ids = artifacts.map((a) => { const hit = /^\d+$/.test(a) ? log.find((x) => x.seq === Number(a)) : log.find((x) => x.id === a); if (!hit) throw Object.assign(new Error(`No message ${a} in #${room} on this agent.`), { code: 'task' }); return hit.id; });
+    await this.den.taskState(room, m.id, state, text, ids);
+    const after = (await this.den.log(room)).find((x) => x.id === m.id);
+    return this.recordOf(room, after, null, await this.den.log(room));
+  }
+
+  /// Give a task to a member of the room (another agent): by its nickname,
+  /// device name or key.
+  async newTask(q, toQ, text, reply = null) {
+    const r = this.room(q);
+    const want = String(toQ || '').replace(/^@/, '').toLowerCase();
+    const members = this.den.members(r.id).filter((x) => x.key !== this.me.key);
+    let hits = members.filter((x) => x.key === want || x.name.toLowerCase() === want || (want.startsWith('m-') && x.name.toLowerCase().startsWith(want)) || (this.den.nickFor(x.key) || '').toLowerCase() === want);
+    // A name several share: the one with this agent's owner, if just one has.
+    const owner = this.den.agent?.owner;
+    if (hits.length > 1 && owner && hits.filter((x) => this.den.agentOwner(x.key) === owner).length === 1) hits = hits.filter((x) => this.den.agentOwner(x.key) === owner);
+    if (hits.length !== 1) throw Object.assign(new Error(hits.length ? `More than one member is ${toQ} here: give its device name (m- and its first digits).` : `No member ${toQ} in #${r.id}.`), { code: 'task' });
+    const words = String(text ?? '').trim();
+    if (!words) throw Object.assign(new Error('A task needs words.'), { code: 'empty' });
+    let replyId = null;
+    if (reply !== null && reply !== undefined && reply !== '') {
+      const log = await this.den.log(r.id);
+      const hit = /^\d+$/.test(String(reply)) ? log.find((m) => m.seq === Number(reply)) : log.find((m) => m.id === reply);
+      if (!hit) throw Object.assign(new Error(`No message ${reply} in #${r.id} on this agent.`), { code: 'reply' });
+      replyId = hit.id;
+    }
+    if (!this.den.mayPost(r.id)) throw Object.assign(new Error(`This agent may not write in #${r.id}.`), { code: 'no_post' });
+    const id = await this.den.task(r.id, hits[0].key, words, replyId);
+    const log = await this.den.log(r.id);
+    return this.recordOf(r.id, log.find((m) => m.id === id), null, log);
   }
 
   /// The pins of every room (or one), each as a line from its pinner: with

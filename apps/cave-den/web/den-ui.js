@@ -58,10 +58,13 @@ export function mark(key, px = 28) {
 /// apart two devices whose short names happen to match.
 const fingerprint = (key) => (/^[0-9a-f]{64}$/.test(String(key)) ? `Key ${key.match(/.{4}/g).join(' ')}` : '');
 
+// A task's state, as the page says it (A2A's names underneath).
+const TASK_LABEL = { submitted: 'Asked', working: 'Working', 'input-required': 'Needs input', completed: 'Done', failed: 'Failed', canceled: 'Canceled', rejected: 'Declined' };
 const ICON = {
   reply: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h7a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   react: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 9.5c1.3 1.6 3.7 1.6 5 0" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 6h.01M10 6h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   edit: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 13 1-4 7-7 3 3-7 7-4 1Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  task: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m5.5 8 2 2 3-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   pin: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6 6 2ZM8 8.5V14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
   del: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6L11.5 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z M9 1.5V5h3.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
@@ -70,6 +73,8 @@ const ICON = {
 export function mountDen(den, el, me) {
   let room = 'general';
   let reply = null;
+  // The next message is a task for this agent's key, when set.
+  let taskFor = null;
   // The side panel: 'members' or 'pins'; and each room's pins, as last read.
   let side = 'members';
   const pinCache = {};
@@ -381,6 +386,13 @@ export function mountDen(den, el, me) {
         ? `<button type="button" class="att" data-view="${esc(m.id)}" aria-label="Open ${esc(m.file.name)}"><img data-blob="${esc(m.id)}" alt="${esc(m.file.name)}" /></button>`
         : `<button type="button" class="file" data-file="${esc(m.id)}">${ICON.file}<span><b>${esc(m.file.name)}</b><small>${size(m.file.size)} · Download</small></span></button>`;
     }
+    // A task: for whom, and where it stands, from that member's own reports.
+    if (m.task) {
+      const t = m.task;
+      const done = ['completed', 'failed', 'canceled', 'rejected'].includes(t.state);
+      const results = (t.artifacts || []).map((a, n) => `<button type="button" class="task-result" data-jump="${esc(a)}">Result ${n + 1}</button>`).join('');
+      body += `<div class="task-card s-${esc(t.state)}"><span class="task-chip">${esc(TASK_LABEL[t.state] || t.state)}</span><span class="task-for">Task for ${whoHtml(t.to)}</span>${t.text ? `<span class="task-text">${esc(t.text)}</span>` : ''}${results}${own && !done ? '<button type="button" class="mini" data-act="task-cancel">Cancel task</button>' : ''}</div>`;
+    }
     // Reactions are kept by the reactor's key; shown by name.
     const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(display).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
     const ping = !den.isMe(m.key) && ([me.key, ...den.linkedTo(me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`)) || den.everyone(room, m));
@@ -391,7 +403,7 @@ export function mountDen(den, el, me) {
         <button type="button" data-act="reply" aria-label="Reply" title="Reply">${ICON.reply}</button>
         <button type="button" data-act="react" aria-label="React" title="React" aria-expanded="false">${ICON.react}</button>
         ${den.mayPost(room) ? (() => { const on = (pinCache[room] || []).some((p) => p.of === m.id && p.by === me.key); return `<button type="button" data-act="pin" aria-label="${on ? 'Unpin' : 'Pin'}" title="${on ? 'Unpin' : 'Pin for everyone, also who joins later'}" aria-pressed="${on}">${ICON.pin}</button>`; })() : ''}
-        ${own && !m.file ? `<button type="button" data-act="edit" aria-label="Edit" title="Edit">${ICON.edit}</button>` : ''}
+        ${own && !m.file && !m.task ? `<button type="button" data-act="edit" aria-label="Edit" title="Edit">${ICON.edit}</button>` : ''}
         ${own ? `<button type="button" data-act="del" aria-label="Delete" title="Delete">${ICON.del}</button>` : ''}
         ${!own && den.can('manage_messages') && den.rooms.get(room)?.kind !== 'private' ? `<button type="button" data-act="moddel" aria-label="Delete (moderator)" title="Delete (moderator)">${ICON.del}</button>` : ''}
       </div>
@@ -540,6 +552,7 @@ export function mountDen(den, el, me) {
     if (!m || !t.dataset.act) return;
     if (t.dataset.act === 'reply') { reply = m; editing = null; drawComposer(); el('say-text').focus(); }
     if (t.dataset.act === 'edit') startEdit(m);
+    if (t.dataset.act === 'task-cancel') den.taskState(room, m.id, 'canceled').then(() => status('Task canceled.'), (err) => status(err.message));
     if (t.dataset.act === 'pin') {
       const had = (pinCache[room] || []).find((p) => p.of === m.id && p.by === me.key);
       try {
@@ -595,10 +608,16 @@ export function mountDen(den, el, me) {
 
   function drawComposer() {
     const banner = el('say-banner');
-    banner.hidden = !reply && !editing;
-    banner.innerHTML = reply
+    banner.hidden = !reply && !editing && !taskFor;
+    banner.innerHTML = taskFor
+      ? `<span>Task for <b>${esc(display(taskFor))}</b> · it reports back here${reply ? `, in reply to <b>${esc(display(reply.key))}</b>` : ''}</span><button type="button" class="x" id="say-cancel" aria-label="Not a task">×</button>`
+      : reply
       ? `<span>Replying to <b>${esc(display(reply.key))}</b> <q>${esc((reply.text || reply.file?.name || '').slice(0, 90))}</q></span><button type="button" class="x" id="say-cancel" aria-label="Cancel reply">×</button>`
       : editing ? '<span>Editing your message · <kbd>Esc</kbd> to cancel</span><button type="button" class="x" id="say-cancel" aria-label="Cancel editing">×</button>' : '';
+    // Ask an agent: only where the room has one, and not while editing.
+    const agents = den.inRoom(room) ? den.members(room).filter((x) => !den.isMe(x.key) && den.isAgent(x.key)) : [];
+    askGo.hidden = !agents.length || !!editing;
+    askGo.setAttribute('aria-pressed', String(!!taskFor));
     const c = el('say-cancel');
     if (c) c.onclick = cancelCompose;
     const r = den.rooms.get(room);
@@ -632,11 +651,40 @@ export function mountDen(den, el, me) {
 
   function cancelCompose() {
     if (editing) el('say-text').value = '';
-    reply = null;
-    editing = null;
+    // The banner's ×: a task first stops being one, then the reply goes.
+    if (taskFor) taskFor = null;
+    else { reply = null; editing = null; }
     drawComposer();
     grow();
   }
+
+  // Ask an agent: the next message goes as a task for an agent in the room.
+  const askGo = document.createElement('button');
+  askGo.type = 'button';
+  askGo.id = 'ask-agent';
+  askGo.hidden = true;
+  askGo.setAttribute('aria-label', 'Ask an agent');
+  askGo.title = 'Give an agent in this room a task: it reports back here';
+  askGo.innerHTML = ICON.task;
+  el('attach').after(askGo);
+  askGo.onclick = async () => {
+    if (taskFor) { taskFor = null; return drawComposer(); }
+    // Your own agents first; a name two agents share is shown with its device name.
+    const mine = (k) => [me.key, ...den.linkedTo(me.key)].includes(den.agentOwner(k));
+    const agents = den.members(room).filter((x) => !den.isMe(x.key) && den.isAgent(x.key)).sort((a, b) => Number(mine(b.key)) - Number(mine(a.key)));
+    if (agents.length === 1) { taskFor = agents[0].key; drawComposer(); return el('say-text').focus(); }
+    const label = (x) => (agents.filter((y) => display(y.key) === display(x.key)).length > 1 ? `${display(x.key)} (${short(x.key)})` : display(x.key));
+    const pick = await ask({ heading: 'Ask an agent', text: `Agents here: ${agents.map((x) => `${label(x)}${mine(x.key) ? ', yours' : ''}`).join('; ')}.`, field: 'Which one (its name, or m- and its first digits)', yes: 'Ask' });
+    if (!pick) return;
+    const want = pick.trim().toLowerCase();
+    let hits = agents.filter((x) => display(x.key).toLowerCase() === want || label(x).toLowerCase() === want || (want.startsWith('m-') && x.name.startsWith(want)));
+    // The same name for several: yours, if one of them is.
+    if (hits.length > 1 && hits.filter((x) => mine(x.key)).length === 1) hits = hits.filter((x) => mine(x.key));
+    if (hits.length !== 1) return status(hits.length ? `Several agents are called ${pick}: give its device name (m- and its first digits).` : `No agent ${pick} in this room.`);
+    taskFor = hits[0].key;
+    drawComposer();
+    el('say-text').focus();
+  };
 
   el('say').onsubmit = async (e) => {
     e.preventDefault();
@@ -645,18 +693,20 @@ export function mountDen(den, el, me) {
     el('say-text').value = '';
     grow();
     closeMentions();
-    const was = { reply, editing };
+    const was = { reply, editing, taskFor };
     reply = null;
     editing = null;
+    taskFor = null;
     drawComposer();
     try {
       if (was.editing) await den.edit(room, was.editing.id, text);
+      else if (was.taskFor) await den.task(room, was.taskFor, text, was.reply?.id || null);
       else await den.say(room, text, was.reply?.id || null);
       drawSlow();
     } catch (err) {
       if (err.code === 'slow') drawSlow();
       status(err.message);
-      ({ reply, editing } = was);
+      ({ reply, editing, taskFor } = was);
       el('say-text').value = text;
       drawComposer();
       grow();
@@ -993,7 +1043,7 @@ export function mountDen(den, el, me) {
     if (event === 'message') {
       if (d.room === room) onMessage(d).then(drawRooms);
       else drawRooms();
-      if (!d.mine && d.kind !== 'react' && d.kind !== 'note' && d.kind !== 'title') ping(d.room, d.message, d.mention);
+      if (!d.mine && d.kind !== 'react' && d.kind !== 'note' && d.kind !== 'title' && d.kind !== 'task-state') ping(d.room, d.message, d.mention);
       if (d.room === room && !d.mine) { delete typing[d.message.key]; drawTyping(); }
     }
     if (event === 'typing' && d.room === room) {
@@ -1003,7 +1053,7 @@ export function mountDen(den, el, me) {
     }
     if (event === 'nicks') {
       clearTimeout(nickTimer);
-      nickTimer = setTimeout(() => { for (const r of Object.keys(counts)) if (den.inRoom(r)) counts[r] = people(den.members(r)); drawMe(); drawRooms(); drawLog(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
+      nickTimer = setTimeout(() => { for (const r of Object.keys(counts)) if (den.inRoom(r)) counts[r] = people(den.members(r)); drawMe(); drawRooms(); drawLog(); drawComposer(); if (!el('members').hidden) drawMembers(); if (den.voice) drawVoice(); }, 300);
     }
     if (event === 'mod') {
       clearTimeout(modTimer);

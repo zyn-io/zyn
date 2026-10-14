@@ -45,6 +45,7 @@ export function record(room, m, { kind, nick, name, mention = false, replySeq = 
     mention: !!mention,
     ...(m.edited ? { edited: true } : {}),
     ...(m.deleted ? { deleted: true } : {}),
+    ...(m.task ? { task: { id: m.id, to: m.task.to, state: m.task.state, text: m.task.text || '', artifacts: m.task.artifacts || [], updated: new Date(m.task.updated || m.at || 0).toISOString(), by: m.task.by || null } } : {}),
   };
 }
 
@@ -53,7 +54,9 @@ export function record(room, m, { kind, nick, name, mention = false, replySeq = 
 export function line(r, now = Date.now()) {
   const who = r.kind === 'den' ? 'den' : `${r.kind} ${r.from}${r.nick ? ` ${quoted(r.nick)}` : ''}`;
   const reply = r.reply ? ` ↩${Number(r.reply) || 0}` : '';
-  const words = r.deleted ? '(deleted)' : `${oneLine(r.text)}${r.edited ? ' (edited)' : ''}`;
+  const task = r.task ? `[task ${oneLine(r.task.id)} for ${r.task.to_nick ? quoted(r.task.to_nick) : `m-${String(r.task.to).slice(0, 20)}`} · ${oneLine(r.task.state)}${r.task.text ? `: ${oneLine(r.task.text)}` : ''}${r.task.artifacts?.length ? ` (results: ${r.task.artifacts.map(oneLine).join(', ')})` : ''}] ` : '';
+  const change = r.change === 'edited' ? ' (edited)' : r.change === 'state' ? ' (task changed)' : '';
+  const words = r.deleted ? `${task}(deleted)` : `${task}${oneLine(r.text)}${r.edited && r.change !== 'edited' ? ' (edited)' : ''}${change}`;
   return `#${oneLine(r.room).replace(/\s/g, '')} ${Number(r.seq) || 0} ${when(r.at, now)} ${who}${reply}: ${words}`;
 }
 

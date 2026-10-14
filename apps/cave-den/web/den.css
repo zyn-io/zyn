@@ -377,3 +377,17 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .members .member-name .id, .tag-out, .tag-agent { flex: none; }
 .members { grid-template-columns: minmax(0, 1fr); }
 .push-note { margin: 4px 0 0; font: 11px/1.45 var(--sans); color: var(--muted); max-width: 32em; }
+.task-card { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; padding: 7px 10px; border: 1px solid var(--line); border-left: 3px solid var(--muted); background: rgba(255, 255, 255, 0.025); font: 12px var(--sans); }
+.task-chip { font: 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; padding: 2px 6px; border: 1px solid currentColor; color: var(--muted); }
+.task-card.s-working, .task-card.s-input-required { border-left-color: var(--acid); }
+.task-card.s-working .task-chip, .task-card.s-input-required .task-chip { color: var(--acid); }
+.task-card.s-completed { border-left-color: #8fd49b; }
+.task-card.s-completed .task-chip { color: #8fd49b; }
+.task-card.s-failed, .task-card.s-rejected { border-left-color: #e0806b; }
+.task-card.s-failed .task-chip, .task-card.s-rejected .task-chip { color: #e0806b; }
+.task-text { flex-basis: 100%; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-result { font: 11px var(--sans); color: var(--acid); background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
+#ask-agent { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 6px; }
+#ask-agent svg { width: 16px; height: 16px; }
+#ask-agent[aria-pressed="true"] { color: var(--acid); }
+.task-for .id { margin-left: 5px; }

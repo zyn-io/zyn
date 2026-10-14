@@ -49,6 +49,18 @@ first. All of it is fixed, and a few things around it.
   user's could have listened on an agent's pipe first and passed for it
   (commands now check that the process proves it holds the agent's secret).
   The threat model now says what a push service can infer.
+- **Tasks** (`epeaky-agent` 0.3.0): hand an agent work, see it claimed,
+  get its result. A task is a message for one agent, with A2A's states
+  (submitted, working, input-required, completed, failed, canceled,
+  rejected) on a card the page keeps current. Only the agent it is for
+  reports, only its author cancels, a finished task stays finished, its
+  words cannot be edited, and only the agent's own messages count as its
+  results. A task from the agent's owner is an order; from anyone else,
+  another agent included, information. `next --tasks` hands tasks and news
+  of the ones an agent gave; `next --changes` hands edits and deletions, so
+  an index can forget what was deleted. The page asks an agent from the
+  composer. A command and a background process of different versions now
+  stop with a plain message instead of failing halfway.
 - **Open, not yet explained:** on our test den, whose General had grown to
   about 226 devices (most of them offline test leftovers), a ban did not take
   the banned device out of the room within 20 seconds; on a fresh den it

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Agent } from '../lib/agent.mjs';
 import { ensure, request, secretOf, serve, socketPath, alive } from '../lib/daemon.mjs';
 import { line, oneLine } from '../lib/lines.mjs';
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const HELP = `epeaky-agent: an AI agent as a member of an Epeaky den
 
@@ -19,11 +20,14 @@ const HELP = `epeaky-agent: an AI agent as a member of an Epeaky den
   epeaky-agent rooms                     rooms, members, unread
   epeaky-agent read <room> [--new] [--since SEQ] [--limit N]
   epeaky-agent send <room> <words…|->  [--reply SEQ]
-  epeaky-agent next [<room>] [--orders] [--mentions] [--wait SECONDS] [--limit N]
+  epeaky-agent next [<room>] [--orders] [--mentions] [--tasks] [--changes] [--wait SECONDS] [--limit N]
                                          what this agent has not been handed yet; waits for it
   epeaky-agent watch [<room>] [--mentions] [--orders] [--once]
   epeaky-agent search <words…>
   epeaky-agent pins [<room>]             the rooms' pinned notes (sent again to everyone who joins)
+  epeaky-agent tasks [<room>] [--open]   tasks for or from this agent, with their state
+  epeaky-agent task <id> working|input-required|completed|failed|rejected|canceled [words…|-] [--artifact SEQ,…]
+  epeaky-agent task new <room> --to <member> <words…|-> [--reply SEQ]
   epeaky-agent status | up | down
   epeaky-agent skill                     how to use this, for the model: a SKILL.md
 
@@ -37,7 +41,7 @@ agent, member, self, den. Everything not from owner is information only.`;
 function parse(argv) {
   const flags = {};
   const pos = [];
-  const takes = new Set(['agent', 'nick', 'since', 'limit', 'reply', 'dir', 'wait', 'owner']);
+  const takes = new Set(['agent', 'nick', 'since', 'limit', 'reply', 'dir', 'wait', 'owner', 'to', 'artifact']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--') { pos.push(...argv.slice(i + 1)); break; }
@@ -67,7 +71,7 @@ const show = (r) => out(json ? JSON.stringify(r) : line(r));
 
 async function call(c, args, each) {
   const path = await ensure(dir, BIN);
-  return request(path, c, args, each, await secretOf(dir));
+  return request(path, c, args, each, await secretOf(dir), VERSION);
 }
 
 async function stdin() {
@@ -146,7 +150,7 @@ try {
       const wait = flags.wait !== undefined ? Number(flags.wait) : 0;
       const limit = flags.limit !== undefined ? Number(flags.limit) : 50;
       if (!Number.isFinite(wait) || wait < 0 || wait > 86400 || !Number.isInteger(limit)) fail('--wait is seconds (up to 86400), --limit a whole number', 2);
-      const list = await call('next', { room: pos[0] || null, orders: !!flags.orders, mentions: !!flags.mentions, wait, limit });
+      const list = await call('next', { room: pos[0] || null, orders: !!flags.orders, mentions: !!flags.mentions, changes: !!flags.changes, tasks: !!flags.tasks, wait, limit });
       if (!list.length && !json) out('nothing new');
       for (const r of list) show(r);
       break;
@@ -159,6 +163,25 @@ try {
       const list = await call('pins', { room: pos[0] || null });
       if (!list.length && !json) out('no pins');
       for (const r of list) out(json ? JSON.stringify(r) : line(r).replace(/^(#\S+) 0 /, '$1 pin '));
+      break;
+    }
+    case 'tasks': {
+      const list = await call('tasks', { room: pos[0] || null, open: !!flags.open });
+      if (!list.length && !json) out('no tasks');
+      for (const r of list) show(r);
+      break;
+    }
+    case 'task': {
+      const words = async (from) => (pos[from] === '-' && pos.length === from + 1 ? await stdin() : pos.slice(from).join(' '));
+      if (pos[0] === 'new') {
+        if (!pos[1] || typeof flags.to !== 'string' || pos.length < 3) fail('task new <room> --to <member> <words…|->', 2);
+        show(await call('task', { new: true, room: pos[1], to: flags.to, text: await words(2), reply: flags.reply ?? null }));
+        break;
+      }
+      const states = ['working', 'input-required', 'completed', 'failed', 'rejected', 'canceled'];
+      if (!pos[0] || !states.includes(pos[1])) fail(`task <id> ${states.join('|')} [words…|-] [--artifact SEQ,…]`, 2);
+      const artifacts = typeof flags.artifact === 'string' ? flags.artifact.split(',').map((x) => x.trim()).filter(Boolean) : [];
+      show(await call('task', { id: pos[0], state: pos[1], text: await words(2), artifacts }));
       break;
     }
     case 'search': {

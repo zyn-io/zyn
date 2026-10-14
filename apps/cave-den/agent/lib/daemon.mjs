@@ -4,7 +4,7 @@
 // Only this process touches the agent's MLS state.
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { createWriteStream, lstatSync, mkdirSync } from 'node:fs';
+import { createWriteStream, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { link, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { connect, createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
@@ -39,6 +39,10 @@ export async function secretOf(dir) {
   try { await writeFile(file, s, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
   return (await readFile(file, 'utf8')).trim();
 }
+/// This package's version: the background process says it with its proof,
+/// so a command of another version stops before it asks for what that
+/// process does not know.
+export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export const proofFor = (secret, nonce) => createHmac('sha256', secret).update(`epeaky-agent|${nonce}`).digest('hex');
 
 /// One process per agent: a lock file named for it, made only if there is
@@ -104,7 +108,7 @@ function talk(agent, sock, stop, secret) {
   // first answer carries the proof that this is the agent's own process.
   const send = (o) => {
     if (sock.destroyed) return;
-    if (proof) { o = { ...o, proof }; proof = null; }
+    if (proof) { o = { ...o, proof, version: VERSION }; proof = null; }
     sock.write(`${JSON.stringify(o)}\n`);
     if (sock.writableLength > 4 << 20) sock.destroy();
   };
@@ -141,6 +145,8 @@ async function answer(agent, cmd, a) {
     case 'search': return agent.search(a.q);
     case 'next': return agent.next(a);
     case 'pins': return agent.pins(a.room);
+    case 'tasks': return agent.tasks(a);
+    case 'task': return a.new ? agent.newTask(a.room, a.to, a.text, a.reply) : agent.taskState(a.id, a.state, a.text || '', a.artifacts || []);
     case 'owner':
       if (a.clear) { await agent.clearOwner(); return null; }
       if (a.code) return agent.own(a.code);
@@ -193,7 +199,7 @@ export async function ensure(dir, bin) {
 
 /// One request to the background process: its answer, or, for watch, each
 /// line to `each` until the process or the caller ends it.
-export function request(path, cmd, args, each = null, secret = null) {
+export function request(path, cmd, args, each = null, secret = null, version = null) {
   return new Promise((resolve, reject) => {
     const s = connect(path);
     const nonce = randomBytes(16).toString('hex');
@@ -213,6 +219,10 @@ export function request(path, cmd, args, each = null, secret = null) {
           if (secret && !(typeof o.proof === 'string' && o.proof.length === want.length && timingSafeEqual(Buffer.from(o.proof), want))) {
             s.destroy();
             return reject(Object.assign(new Error("Something other than this agent's background process answered on its socket. Stop it, and check who else can run programs on this machine."), { code: 'impostor' }));
+          }
+          if (version && o.version !== version && cmd !== 'down') {
+            s.destroy();
+            return reject(Object.assign(new Error(`This agent's background process runs epeaky-agent ${o.version || 'older than 0.3'}; this command is ${version}. Keep one version: run \`epeaky-agent down --agent …\` with either, then the command again with the one you keep.`), { code: 'version' }));
           }
           if (!o.ok) return reject(Object.assign(new Error(o.error), { code: o.code }));
           if (!each) return resolve(o.data);
