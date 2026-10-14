@@ -12,12 +12,14 @@ defmodule Den.PushTest do
     :ets.delete_all_objects(Push)
     me = self()
     Application.put_env(:den, :push_deliver, fn s, body -> send(me, {:pushed, s.endpoint, body}) end)
+    Application.put_env(:den, :push_jitter_ms, 0)
 
     on_exit(fn ->
       File.rm(file)
       :persistent_term.erase({Push, :keys})
       Application.delete_env(:den, :push_key_file)
       Application.delete_env(:den, :push_deliver)
+      Application.delete_env(:den, :push_jitter_ms)
     end)
 
     :ok
@@ -38,8 +40,10 @@ defmodule Den.PushTest do
         do: assert(Push.endpoint_ok(ep) == :ok, ep)
 
     for ep <- ~w(http://fcm.googleapis.com/x https://fcm.googleapis.com.evil.example/x https://evil.example/push.apple.com
-                 https://localhost/x https://fcm.googleapis.com:8443/x https://169.254.169.254/latest),
-        do: assert(Push.endpoint_ok(ep) == {:error, :push_service}, ep)
+                 https://localhost/x https://fcm.googleapis.com:8443/x https://169.254.169.254/latest
+                 https://user@fcm.googleapis.com/x https://evil.example%2f.push.apple.com/x https://FCM.googleapis.com/x) ++
+                 ["https://evil.example\\.push.apple.com/x", "https://fcm.googleapis.com/x\n", 42],
+        do: assert(Push.endpoint_ok(ep) == {:error, :push_service}, inspect(ep))
   end
 
   test "the message decrypts as RFC 8291 says, for the browser alone" do
@@ -58,7 +62,10 @@ defmodule Den.PushTest do
     # Another browser's key opens nothing.
     {_, other_priv} = :crypto.generate_key(:ecdh, :secp256r1)
     wrong = :crypto.compute_key(:ecdh, as_pub, other_priv, :secp256r1)
-    refute wrong == secret
+    wprk = hmac.(salt, hmac.(hmac.(auth, wrong), "WebPush: info" <> <<0>> <> ua_pub <> as_pub <> <<1>>))
+    wcek = binary_part(hmac.(wprk, "Content-Encoding: aes128gcm" <> <<0, 1>>), 0, 16)
+    wnonce = binary_part(hmac.(wprk, "Content-Encoding: nonce" <> <<0, 1>>), 0, 12)
+    assert :crypto.crypto_one_time_aead(:aes_128_gcm, wcek, wnonce, ct, <<>>, tag, false) == :error
   end
 
   test "the den's token is signed with its key, for the push service's origin" do
@@ -82,6 +89,18 @@ defmodule Den.PushTest do
     assert Push.subscribe(k, %{"endpoint" => "https://fcm.googleapis.com/fcm/send/x", "p256dh" => "AAAA", "auth" => keys["auth"]}) == {:error, :push_key}
     for i <- 1..7, do: assert(Push.subscribe(k, Map.put(keys, "endpoint", "https://fcm.googleapis.com/fcm/send/#{i}")) == :ok)
     assert Repo.aggregate(from(s in "push_subs", where: s.key == ^k), :count) == 5
+    # Another device cannot take one over.
+    assert Push.subscribe(key(), Map.put(keys, "endpoint", "https://fcm.googleapis.com/fcm/send/7")) == {:error, :push_taken}
+    assert Repo.one(from s in "push_subs", where: s.endpoint == "https://fcm.googleapis.com/fcm/send/7", select: s.key) == k
+  end
+
+  test "who was pushed when is kept only while it holds the next push back" do
+    now = System.monotonic_time(:second)
+    :ets.insert(Push, {{"https://fcm.googleapis.com/fcm/send/old", "r"}, now - 500})
+    :ets.insert(Push, {{"https://fcm.googleapis.com/fcm/send/new", "r"}, now})
+    Push.sweep()
+    assert :ets.lookup(Push, {"https://fcm.googleapis.com/fcm/send/old", "r"}) == []
+    assert [_] = :ets.lookup(Push, {"https://fcm.googleapis.com/fcm/send/new", "r"})
   end
 
   test "a push goes to members not connected, by their mode, once in a while" do

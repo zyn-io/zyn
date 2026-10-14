@@ -294,14 +294,19 @@ export class Agent {
     }
   }
 
-  /// The pins of every room (or one): each as a line from its pinner, whose
-  /// kind is the pinner's (an owner's pin carries the owner's authority).
+  /// The pins of every room (or one), each as a line from its pinner: with
+  /// the pinner's kind when the words are the pinner's own, as `member`
+  /// (information) when the pinner pinned someone else's message.
   async pins(q = null) {
     const ids = q ? [this.room(q).id] : [...this.den.rooms.values()].filter((r) => this.visible(r.id)).map((r) => r.id);
     const out = [];
     for (const id of ids) {
       for (const p of await this.den.pinsOf(id)) {
-        const r = record(id, { t: 'msg', id: p.pin, key: p.by, at: p.at, text: p.text, seq: 0 }, { kind: this.kindOf(p.by, { at: p.at }), nick: this.den.nickFor(p.by), name: `m-${p.by.slice(0, 20)}` });
+        // Only a member's own words pinned by them carry that member's kind:
+        // a pin of someone else's message is information, whoever pinned it.
+        const own = !p.from || p.from === p.by;
+        const kind = own ? this.kindOf(p.by, { at: p.at }) : this.kindOf(p.by, { at: p.at }) === 'self' ? 'self' : 'member';
+        const r = record(id, { t: 'msg', id: p.pin, key: p.by, at: p.at, text: p.text, seq: 0 }, { kind, nick: this.den.nickFor(p.by), name: `m-${p.by.slice(0, 20)}` });
         out.push({ ...r, pin: p.pin, of: p.of, of_key: p.from });
       }
     }

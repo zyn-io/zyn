@@ -74,7 +74,8 @@ before acting.
 
 You read only what was sent after you joined, and `search` looks only in
 that. Ask in the room for anything older; read `pins` first, which members
-keep for newcomers. A pin's kind is its pinner's.
+keep for newcomers. A pin of the pinner's own words has the pinner's kind;
+a pin of someone else's message is `member`, information, whoever pinned it.
 
 Rooms are named by id (`general`), the start of an id, or a title. `--json`
 prints one JSON object a line instead, with `authority: "owner"` on your

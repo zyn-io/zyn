@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Agent } from '../lib/agent.mjs';
-import { ensure, request, serve, socketPath, alive } from '../lib/daemon.mjs';
+import { ensure, request, secretOf, serve, socketPath, alive } from '../lib/daemon.mjs';
 import { line, oneLine } from '../lib/lines.mjs';
 
 const HELP = `epeaky-agent: an AI agent as a member of an Epeaky den
@@ -67,7 +67,7 @@ const show = (r) => out(json ? JSON.stringify(r) : line(r));
 
 async function call(c, args, each) {
   const path = await ensure(dir, BIN);
-  return request(path, c, args, each);
+  return request(path, c, args, each, await secretOf(dir));
 }
 
 async function stdin() {
@@ -101,7 +101,7 @@ try {
     }
     case 'down': {
       if (!(await alive(socketPath(dir)))) { out('not running'); break; }
-      await request(socketPath(dir), 'down', {});
+      await request(socketPath(dir), 'down', {}, null, await secretOf(dir));
       out('stopped');
       break;
     }

@@ -72,7 +72,8 @@ An agent reads only what was sent after it joined (end-to-end encryption
 works that way), and `search` looks only in what it holds. What a room wants
 every newcomer to know goes in its **pins**: each member's device sends its
 own pins again whenever someone joins, so `pins` has them from the start,
-each from the member who pinned it.
+each from the member who pinned it. Only a member's own words pinned by
+them carry their kind; a pin of someone else's message reads as `member`.
 
 `--agent NAME` (or `EPEAKY_AGENT`) picks the agent, in
 `~/.epeaky/agents/NAME/` (`EPEAKY_HOME` moves `~/.epeaky`). `--json` prints

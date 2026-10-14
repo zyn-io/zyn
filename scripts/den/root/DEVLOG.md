@@ -2,6 +2,57 @@
 
 Newest first. What changed, why, and what we found along the way.
 
+## 14 October 2026: after the first film
+
+Filming two real Claude Code agents in a den showed what a newcomer hits
+first. All of it is fixed, and a few things around it.
+
+- **Add an agent in one step.** A member who may make invites gets one
+  command from the page: a new single-use invite and the owner code,
+  `epeaky-agent join '<link>' --owner <code>`. Nobody has to make an invite
+  on the server. Others still get the code for an agent already in.
+- **The page says when the agent took the code.** It used to say so under the
+  dialog's shade, where nobody could read it; the dialog now changes to
+  "Agent added".
+- **The tag names the owner**: "Olu's agent", or "your agent" to the owner,
+  instead of only "agent" with the owner on hover.
+- **An agent asks for its owner in every open room it is in**, once it is in
+  one. A brand-new agent used to ask in the first open room, which on a den
+  with several rooms could be one the owner's page had not entered yet.
+- **`epeaky-agent next`** hands each message once, in every room, and keeps
+  its place across calls and restarts (`--wait` waits for the next one).
+  `watch` between two calls could miss an order; a loop of `next` cannot.
+- **A skill for the model** (`agent/skill/epeaky/SKILL.md`, `epeaky-agent
+  skill`): setting up, who may give orders, the commands, a loop that waits
+  for orders, and what each refusal means.
+- **Pins.** A new member cannot read what came before it joined: that is how
+  MLS works. A pin is what a room wants every newcomer to know. Each pinner's
+  device sends its own pins again whenever someone joins, so a pin always
+  comes from its pinner's key and nobody can pass on someone else's.
+- **The page installs**, on a phone's home screen or as a desktop app.
+  Installed, Safari no longer clears a device's keys after a week unused.
+- **Notifications with the page closed** (Web Push). The push is encrypted
+  for the browser and says the den's name and the room, never the words.
+  The den sends only to the browsers' own push services, and the setting
+  says what those services see. Pages now mark which documents are words,
+  so only words push: that is one thing the den learns that it did not.
+- **`epeaky-agent` on Windows**: a named pipe instead of a Unix socket. Its
+  plumbing is tested on Windows in CI; the whole agent has not yet been run
+  against a den there.
+- **Found in review and fixed before release:** the push request followed
+  redirects, which would have let a member point the den at an address of
+  their own (now never); the table holding pushes back grew without end;
+  one device could take over another's push address; a pin could be shadowed
+  by someone else's pin with the same id, and an owner's pin of someone
+  else's message read as the owner's order (a pin of someone else's words is
+  now information, whoever pinned it); on Windows, a program of another
+  user's could have listened on an agent's pipe first and passed for it
+  (commands now check that the process proves it holds the agent's secret).
+  The threat model now says what a push service can infer.
+- **Ready for npm** (`epeaky-agent` 0.2.0, published from a tag with
+  provenance), and [AUDIT.md](AUDIT.md), the scope of the independent audit
+  Epeaky has not had yet.
+
 ## 14 October 2026: agents
 
 A den can now be where your AI agents work: they report, coordinate and take

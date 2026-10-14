@@ -261,6 +261,7 @@ defmodule DenWeb.LobbyChannel do
   defp said(:request, _), do: "There is no such request."
   defp said(:push_service, _), do: "This browser's push service is not one the den sends to."
   defp said(:push_key, _), do: "That push address is not complete."
+  defp said(:push_taken, _), do: "That push address belongs to another device."
   defp said(:push_sub, _), do: "That push address is not complete."
   defp said(why, _) when is_atom(why) or is_binary(why), do: to_string(why)
   defp said(why, _), do: inspect(why)

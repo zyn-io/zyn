@@ -31,10 +31,19 @@ defmodule Den.Push do
 
   # ---- The den's key ---------------------------------------------------------------
 
-  defp key_file, do: Application.get_env(:den, :push_key_file) || Path.join(Path.dirname(Den.Keys.dir()), "push.key")
+  # Beside the day keys (backed up with them; Den.Keys reads only its PEMs).
+  defp key_file, do: Application.get_env(:den, :push_key_file) || Path.join(Den.Keys.dir(), "push.key")
 
   @doc "The den's push key pair {public (65 bytes), private (32)}, made once."
   def keys do
+    case :persistent_term.get({__MODULE__, :keys}, nil) do
+      nil -> :global.trans({__MODULE__, :keys}, &make_keys/0)
+      k -> k
+    end
+  end
+
+  # One at a time, so two first pushes cannot each make a key.
+  defp make_keys do
     case :persistent_term.get({__MODULE__, :keys}, nil) do
       nil ->
         priv =
@@ -42,9 +51,14 @@ defmodule Den.Push do
             {:ok, b64} -> Base.decode64!(String.trim(b64))
             _ ->
               {_, priv} = :crypto.generate_key(:ecdh, :secp256r1)
+              # Made private before it holds the key, then moved into place.
               File.mkdir_p!(Path.dirname(key_file()))
-              File.write!(key_file(), Base.encode64(priv))
-              File.chmod(key_file(), 0o600)
+              tmp = key_file() <> ".#{System.unique_integer([:positive])}.tmp"
+              {:ok, f} = File.open(tmp, [:write, :exclusive])
+              :ok = File.chmod(tmp, 0o600)
+              :ok = IO.binwrite(f, Base.encode64(priv))
+              :ok = File.close(f)
+              :ok = File.rename(tmp, key_file())
               priv
           end
 
@@ -71,7 +85,13 @@ defmodule Den.Push do
          true <- (byte_size(pk) == 65 and binary_part(pk, 0, 1) == <<4>>) || {:error, :push_key},
          {:ok, auth} <- unb64u(a),
          true <- byte_size(auth) == 16 || {:error, :push_key} do
-      Repo.delete_all(from s in "push_subs", where: s.endpoint == ^ep)
+      # An address another device signed up stays theirs.
+      case Repo.one(from s in "push_subs", where: s.endpoint == ^ep, select: s.key) do
+        nil -> :ok
+        ^key -> Repo.delete_all(from s in "push_subs", where: s.endpoint == ^ep)
+        _ -> throw(:taken)
+      end
+
       Repo.insert_all("push_subs", [%{endpoint: ep, key: key, p256dh: p, auth: a, mode: mode, made_at: Rooms.now()}])
       # The newest few a device: an old one it lost is dropped.
       old =
@@ -81,6 +101,8 @@ defmodule Den.Push do
       if old != [], do: Repo.delete_all(from s in "push_subs", where: s.endpoint in ^old)
       :ok
     end
+  catch
+    :taken -> {:error, :push_taken}
   end
 
   def subscribe(_, _), do: {:error, :push_sub}
@@ -89,20 +111,24 @@ defmodule Den.Push do
   def unsubscribe(_, _), do: :ok
 
   @doc "Only the push services' own addresses, over https."
-  def endpoint_ok(ep) do
-    case URI.parse(ep) do
-      %URI{scheme: "https", host: host, port: 443} when is_binary(host) and byte_size(ep) <= 1024 ->
-        if host in @hosts or Enum.any?(@suffixes, &String.ends_with?(host, &1)), do: :ok, else: {:error, :push_service}
-
-      _ ->
-        {:error, :push_service}
+  def endpoint_ok(ep) when is_binary(ep) and byte_size(ep) <= 1024 do
+    with true <- String.printable?(ep) and not String.contains?(ep, ["\\", " ", "@"]),
+         %{scheme: "https", host: host} = u when not is_map_key(u, :userinfo) and (not is_map_key(u, :port) or :erlang.map_get(:port, u) == 443) <- :uri_string.parse(ep),
+         true <- Regex.match?(~r/\A[a-z0-9.-]+\z/, host),
+         true <- host in @hosts or Enum.any?(@suffixes, &String.ends_with?(host, &1)) do
+      :ok
+    else
+      _ -> {:error, :push_service}
     end
   end
+
+  def endpoint_ok(_), do: {:error, :push_service}
 
   # ---- Sending --------------------------------------------------------------------------
 
   @doc "A message landed in `room` from `sender`: push to its members not connected."
   def notify(room, sender) do
+    # At most 50 rooms' pushes at once; past that, a push is skipped.
     if Process.whereis(Den.Push.Tasks), do: Task.Supervisor.start_child(Den.Push.Tasks, fn -> run(room, sender) end)
     :ok
   end
@@ -117,7 +143,14 @@ defmodule Den.Push do
 
       body = payload(room)
       send = Application.get_env(:den, :push_deliver, &deliver/2)
-      for s <- subs, s.mode == "all" or room.kind == "private", due?(s.endpoint, room_id), do: send.(s, body)
+      jitter = Application.get_env(:den, :push_jitter_ms, 15_000)
+
+      # A few at a time, each after its own short wait, so pushes to a room's
+      # members do not all leave at the same moment.
+      subs
+      |> Enum.filter(&((&1.mode == "all" or room.kind == "private") and due?(&1.endpoint, room_id)))
+      |> Task.async_stream(fn s -> if(jitter > 0, do: Process.sleep(:rand.uniform(jitter))); send.(s, body) end, max_concurrency: 8, timeout: jitter + 20_000, on_timeout: :kill_task)
+      |> Stream.run()
     end
 
     :ok
@@ -134,7 +167,8 @@ defmodule Den.Push do
 
     case :ets.lookup(__MODULE__, {endpoint, room}) do
       [{_, t}] when now - t < @every -> false
-      _ -> :ets.insert(__MODULE__, {{endpoint, room}, now}) && true
+      [{_, t}] -> :ets.select_replace(__MODULE__, [{{{endpoint, room}, t}, [], [{{{{endpoint, room}}, now}}]}]) == 1
+      [] -> :ets.insert_new(__MODULE__, {{endpoint, room}, now})
     end
   end
 
@@ -153,9 +187,10 @@ defmodule Den.Push do
 
     ssl = [verify: :verify_peer, cacerts: :public_key.cacerts_get(), customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]]
 
-    case :httpc.request(:post, {String.to_charlist(s.endpoint), headers, ~c"application/octet-stream", body}, [ssl: ssl, timeout: 10_000, connect_timeout: 5_000], []) do
-      # Gone: the browser dropped it.
-      {:ok, {{_, code, _}, _, _}} when code in [404, 410] -> Repo.delete_all(from x in "push_subs", where: x.endpoint == ^s.endpoint)
+    # Never a redirect: only the push service's own address is ever called.
+    case :httpc.request(:post, {String.to_charlist(s.endpoint), headers, ~c"application/octet-stream", body}, [ssl: ssl, timeout: 10_000, connect_timeout: 5_000, autoredirect: false], []) do
+      # Gone (the browser dropped it), or signed by a key this den no longer has.
+      {:ok, {{_, code, _}, _, _}} when code in [401, 403, 404, 410] -> Repo.delete_all(from x in "push_subs", where: x.endpoint == ^s.endpoint)
       _ -> :ok
     end
   rescue
@@ -165,6 +200,12 @@ defmodule Den.Push do
   @doc "Push addresses not refreshed in 60 days: their page is gone."
   def sweep do
     Repo.delete_all(from s in "push_subs", where: s.made_at < ^DateTime.add(Rooms.now(), -60 * 86_400, :second))
+    # Who was pushed when: only as long as it holds the next one back.
+    if :ets.whereis(__MODULE__) != :undefined do
+      old = System.monotonic_time(:second) - @every
+      :ets.select_delete(__MODULE__, [{{:_, :"$1"}, [{:<, :"$1", old}], [true]}])
+    end
+
     :ok
   end
 

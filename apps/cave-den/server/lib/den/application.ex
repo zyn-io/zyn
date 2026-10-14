@@ -36,7 +36,7 @@ defmodule Den.Application do
       {Registry, keys: :duplicate, name: Den.Voice.Peers},
       {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one},
       # Pushes go out off the channel's process (Den.Push).
-      {Task.Supervisor, name: Den.Push.Tasks}
+      {Task.Supervisor, name: Den.Push.Tasks, max_children: 50}
     ] ++
       # A host's add-on processes (`DEN_EXTRA_CHILDREN`), compiled in from extra/.
       Application.get_env(:den, :extra_children, []) ++

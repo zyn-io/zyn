@@ -822,10 +822,10 @@ export function mountDen(den, el, me) {
     const pins = await den.pinsOf(r);
     if (r !== room || side !== 'pins') return;
     el('members').innerHTML = `<div class="members-head"><h3>Pins · ${pins.length}</h3><button type="button" class="x" data-close aria-label="Close pins">×</button></div>
-      ${pins.length ? `<ul class="pins">${pins.slice().reverse().map((p) => `<li><p class="pin-text">${esc(p.text)}</p><p class="pin-by">Pinned by ${whoHtml(p.by)} · ${time(p.at)}</p>${p.by === me.key || den.can('manage_messages') ? `<button type="button" class="mini" data-unpin="${esc(p.pin)}">Unpin</button>` : ''}</li>`).join('')}</ul>` : '<p class="none">Nothing pinned yet. Pin a message from its menu: everyone who joins later gets it too.</p>'}`;
+      ${pins.length ? `<ul class="pins">${pins.slice().reverse().map((p) => `<li><p class="pin-text">${esc(p.text)}</p><p class="pin-by">Pinned by ${whoHtml(p.by)} · ${time(p.at)}</p>${p.by === me.key || (den.can('manage_messages') && den.rooms.get(r)?.kind !== 'private') ? `<button type="button" class="mini" data-unpin="${esc(p.pin)}" data-by="${esc(p.by)}">Unpin</button>` : ''}</li>`).join('')}</ul>` : '<p class="none">Nothing pinned yet. Pin a message from its menu: everyone who joins later gets it too.</p>'}`;
     paint(el('members'));
     el('members').querySelector('[data-close]').onclick = () => toggleSide('pins');
-    el('members').querySelectorAll('[data-unpin]').forEach((b) => { b.onclick = () => den.unpin(room, b.dataset.unpin).then(() => status('Unpinned.'), (e) => status(e.message)); });
+    el('members').querySelectorAll('[data-unpin]').forEach((b) => { b.onclick = () => den.unpin(room, b.dataset.unpin, b.dataset.by).then(() => status('Unpinned.'), (e) => status(e.message)); });
   }
 
   // The room list as a drawer, on a phone.
@@ -861,7 +861,7 @@ export function mountDen(den, el, me) {
     syncPush();
   };
   // What a push is, said where the choice is made.
-  el('notify').closest('label')?.insertAdjacentHTML('afterend', '<p class="push-note">With this page closed, notifications come through your browser’s push service (Apple, Google, Mozilla or Microsoft). It sees when one arrives, not what it says; a push names the room, never the words. With “Mentions and private”, a closed page hears of private rooms only: the den cannot see mentions.</p>');
+  el('notify').closest('label')?.insertAdjacentHTML('afterend', '<p class="push-note">With this page closed, notifications come through your browser’s push service (Apple, Google, Mozilla or Microsoft). It sees when one arrives, from which den, and which of its users get pushes from that den around the same time; a push names the room, never the words. With “Mentions and private”, a closed page hears of private rooms only: the den cannot see mentions.</p>');
 
   // Installed on the home screen: its own window, notifications on iPhone, and
   // this device's keys kept (Safari clears a site's data after a week unused).
@@ -899,11 +899,12 @@ export function mountDen(den, el, me) {
         if (sub) { await den.pushOff(sub.endpoint).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
         return;
       }
-      if (!sub) {
-        const key = await den.pushKey();
-        const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
-        sub = await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
-      }
+      const key = await den.pushKey();
+      const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      // Made for another key (the den's was replaced): sign up again.
+      const had = sub?.options?.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+      if (sub && had && (had.length !== raw.length || had.some((b, i) => b !== raw[i]))) { await sub.unsubscribe().catch(() => {}); sub = null; }
+      if (!sub) sub = await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
       const j = sub.toJSON();
       await den.pushSub({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, mode: notify === 'all' ? 'all' : 'private' });
     } catch (e) {
@@ -1016,6 +1017,7 @@ export function mountDen(den, el, me) {
     if (event === 'linked') status('Linked: members now see these devices as one person.');
     if (event === 'owned') {
       const said = `${display(d.key)} is now your agent. It takes orders from you only.`;
+      agentInvite = null;
       status(said);
       // The dialog that showed the code says so too, where the member is looking.
       const a = el('ask');
@@ -1060,6 +1062,7 @@ export function mountDen(den, el, me) {
       await ask({ heading: 'Link another device', text: `On the other device, enter this den with its own invite, choose “Enter a link code” and type ${code} within ten minutes. Members then see both as you.`, yes: 'Done' });
     };
   }
+  let agentInvite = null;
   // An agent of this member's (epeaky-agent): a code shown here, given to it there.
   const agentGo = el('add-agent');
   if (agentGo) {
@@ -1067,13 +1070,16 @@ export function mountDen(den, el, me) {
       const code = den.startOwn();
       // A member who may make invites gets one command that brings the agent
       // in and makes it theirs; anyone else, the code for an agent already in.
-      let link = null;
-      if (den.can('manage_invites')) {
+      // One invite until an agent takes it: closing the dialog and opening it
+      // again within the hour shows the same one, not a new one each time.
+      let link = agentInvite && Date.now() - agentInvite.at < 3_600_000 ? agentInvite.link : null;
+      if (!link && den.can('manage_invites')) {
         try { link = (await den.modDo('invite_make', { n: 1, days: 1 })).links?.[0] || null; } catch { link = null; }
+        if (link) agentInvite = { link, at: Date.now() };
       }
       el('ask').dataset.kind = 'own';
       await ask(link
-        ? { heading: 'Add an agent', text: 'Run this on the agent’s machine within ten minutes. The agent joins the den with a new invite and takes orders from you and your linked devices only. Add --agent NAME to run more than one there.', field: 'Command', value: `epeaky-agent join '${link}' --owner ${code}`, readonly: true, yes: 'Done' }
+        ? { heading: 'Add an agent', text: 'Run this on the agent’s machine within ten minutes. The agent joins the den with a new invite and takes orders from you and your linked devices only. Whoever runs it first becomes your agent: give it to your agent alone. Add --agent NAME to run more than one there.', field: 'Command', value: `epeaky-agent join '${link}' --owner ${code}`, readonly: true, yes: 'Done' }
         : { heading: 'Add an agent', text: 'For an agent already in this den: run this on its machine within ten minutes. It then takes orders from you and your linked devices only. A new agent first needs an invite from the den’s host or a moderator.', field: 'Command', value: `epeaky-agent owner ${code}`, readonly: true, yes: 'Done' });
       delete el('ask').dataset.kind;
     };

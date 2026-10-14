@@ -673,36 +673,58 @@ export class DenClient {
     return (await this.kv.get(`pins:${room}`)) || [];
   }
 
-  /// A pin or an unpin. Pins are taken from their pinner only; an unpin from
-  /// the pinner or a member who may manage messages.
+  /// A pin, a pinner's pins again ('pins'), or an unpin. A pin is known by its
+  /// pinner and its id, so nobody's pin can stand in for another's; an unpin
+  /// comes from the pinner, or from a member who may manage messages (in an
+  /// open room, as for deleting).
   async applyPin(room, m, mine) {
     const by = mine ? this.me.key : m.key;
-    if (typeof by !== 'string' || typeof m.pin !== 'string' || !/^[0-9a-f]{16}$/.test(m.pin)) return;
+    if (typeof by !== 'string') return;
+    if (m.t === 'pins') {
+      if (!Array.isArray(m.pins)) return;
+      for (const p of m.pins.slice(0, 20)) if (p && typeof p === 'object') await this.applyPin(room, { ...p, t: 'pin', key: by }, false);
+      return;
+    }
+    if (typeof m.pin !== 'string' || !/^[0-9a-f]{16}$/.test(m.pin)) return;
     const pins = await this.pinsOf(room);
-    const i = pins.findIndex((p) => p.pin === m.pin);
     if (m.t === 'pin') {
-      if (i >= 0 || typeof m.text !== 'string' || !m.text.trim()) return;
-      if (pins.filter((p) => p.by === by).length >= 20 || pins.length >= 100) return;
-      pins.push({ pin: m.pin, text: m.text.slice(0, 4000), of: typeof m.of === 'string' ? m.of : null, from: typeof m.from === 'string' ? m.from : null, by, at: sent(m.at) });
+      if (pins.some((p) => p.pin === m.pin && p.by === by) || typeof m.text !== 'string' || !m.text.trim()) return;
+      if (pins.filter((p) => p.by === by).length >= 20 || pins.length >= 200) return;
+      // When it was pinned (the pinner's clock), kept as it is sent again.
+      // `author`: whose message it was, as the pinner says (`from` is every
+      // document's sender name, so not that).
+      pins.push({ pin: m.pin, text: m.text.slice(0, 4000), of: typeof m.of === 'string' ? m.of : null, from: typeof m.author === 'string' ? m.author : null, by, at: sent(m.pat ?? m.at) });
     } else {
-      if (i < 0 || (pins[i].by !== by && !this.can('manage_messages', by))) return;
+      const pinner = typeof m.owner === 'string' ? m.owner : by;
+      const i = pins.findIndex((p) => p.pin === m.pin && p.by === pinner);
+      const mod = this.can('manage_messages', by) && this.rooms.get(room)?.kind !== 'private';
+      if (i < 0 || (pinner !== by && !mod)) return;
       pins.splice(i, 1);
     }
     await this.kv.put(`pins:${room}`, pins);
     this.on('pins', { room });
   }
 
-  /// Someone joined: this device sends its own pins again, so they have them
-  /// (they cannot read anything sent before they joined).
+  /// Someone joined: this device sends its own pins again, as few documents
+  /// as fit, so they have them (they cannot read anything sent before they
+  /// joined). Not in rooms of more than 300.
   soonPins(room) {
     (this.pinsSoon ||= {});
     if (this.pinsSoon[room]) return;
     this.pinsSoon[room] = setTimeout(async () => {
       delete this.pinsSoon[room];
-      if (!this.inRoom(room)) return;
-      for (const p of (await this.pinsOf(room)).filter((x) => x.by === this.me.key)) {
-        await this.send(room, { t: 'pin', pin: p.pin, of: p.of, from: p.from, text: p.text }).catch(() => {});
+      if (!this.inRoom(room) || this.members(room).length > 300) return;
+      const mine = (await this.pinsOf(room)).filter((x) => x.by === this.me.key).map((p) => ({ pin: p.pin, of: p.of, author: p.from, text: p.text, pat: p.at }));
+      let batch = [];
+      let size = 0;
+      const flush = async () => { if (batch.length) await this.send(room, { t: 'pins', pins: batch }).catch(() => {}); batch = []; size = 0; };
+      for (const p of mine) {
+        const n = JSON.stringify(p).length;
+        if (size + n > 60_000) await flush();
+        batch.push(p);
+        size += n;
       }
+      await flush();
     }, 1500 + Math.random() * 3000);
   }
 
@@ -800,7 +822,7 @@ export class DenClient {
     if (m.t === 'link-ask' || m.t === 'link') { if (!mine) await this.onLink(room, m); return; }
     if (m.t === 'own-ask' || m.t === 'own') { if (!mine) await this.onOwn(room, m); return; }
     if (m.t === 'profile') return;
-    if (m.t === 'pin' || m.t === 'unpin') { await this.applyPin(room, m, mine); return; }
+    if (m.t === 'pin' || m.t === 'pins' || m.t === 'unpin') { await this.applyPin(room, m, mine); return; }
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
@@ -945,9 +967,11 @@ export class DenClient {
   pin(room, msg) {
     const text = msg.file ? `[file] ${msg.file.name}${msg.text ? ` ${msg.text}` : ''}` : msg.text;
     if (!String(text || '').trim()) return Promise.reject(new Error('Nothing to pin.'));
-    return this.send(room, { t: 'pin', pin: hex(rand(8)), of: msg.id, from: msg.key, text: String(text).slice(0, 4000) });
+    return this.send(room, { t: 'pin', pin: hex(rand(8)), of: msg.id, author: msg.key, text: String(text).slice(0, 4000), pat: Date.now() });
   }
-  unpin(room, pin) { return this.send(room, { t: 'unpin', pin }); }
+  /// Take a pin back: one's own, or (a member who may manage messages)
+  /// anyone's in an open room.
+  unpin(room, pin, owner = this.me.key) { return this.send(room, { t: 'unpin', pin, ...(owner !== this.me.key ? { owner } : {}) }); }
 
   /// Pushes to this device while its page is closed (Den.Push): the den's
   /// key to subscribe with, then this browser's push address and which rooms.
