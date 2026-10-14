@@ -71,22 +71,19 @@ try {
   await until(O, () => window.__den.inRoom('general') && window.__den.mod.owner === window.__den.me.key, null, 30000);
 
   // "Add an agent": the one command the page shows, run as the agent.
-  // The page keeps one invite until it learns it was used: wait for a new one.
-  const used = new Set();
+  // "Add an agent" fills the dialog's command; read it only once it differs
+  // from the last one read (the previous dialog's value lingers until then).
+  let lastShown = '';
   const addAgent = async (name) => {
-    for (let i = 0; ; i++) {
-      await O.click('#add-agent');
-      await O.waitForFunction(() => /--owner /.test(document.querySelector('#ask input')?.value || ''), null, { timeout: 15000 });
-      const shown = await O.inputValue('#ask input');
-      if (process.env.E2E_DEBUG) console.log(`add ${name}: ${shown.replace(/invite=[0-9a-f]{12}[0-9a-f]+/, (m) => m.slice(0, 19) + '…')}`);
-      await O.click('#ask [data-yes]').catch(() => {});
-      const link = /join '([^']+)'/.exec(shown)?.[1];
-      const code = /--owner (\S+)$/.exec(shown)?.[1];
-      if (used.has(link) && i < 10) { await new Promise((r) => setTimeout(r, 2000)); continue; }
-      used.add(link);
-      execFileSync(process.execPath, [AGENT_BIN, 'join', link, '--owner', code, '--agent', name, '--nick', name], { env, encoding: 'utf8', timeout: 120000 });
-      return;
-    }
+    await O.click('#add-agent');
+    await O.waitForFunction((was) => { const v = document.querySelector('#ask input')?.value || ''; return /--owner /.test(v) && v !== was; }, lastShown, { timeout: 15000 });
+    const shown = await O.inputValue('#ask input');
+    lastShown = shown;
+    if (process.env.E2E_DEBUG) console.log(`add ${name}: ${shown.replace(/invite=[0-9a-f]{12}[0-9a-f]+/, (m) => m.slice(0, 19) + '…')}`);
+    await O.click('#ask [data-yes]').catch(() => {});
+    const link = /join '([^']+)'/.exec(shown)?.[1];
+    const code = /--owner (\S+)$/.exec(shown)?.[1];
+    execFileSync(process.execPath, [AGENT_BIN, 'join', link, '--owner', code, '--agent', name, '--nick', name], { env, encoding: 'utf8', timeout: 120000 });
   };
   await addAgent('scribe');
 
