@@ -1548,13 +1548,15 @@ export class DenClient {
   }
 
   /// A code for an agent of this member's: shown here, given to the agent
-  /// (epeaky-agent owner CODE) within ten minutes.
+  /// (epeaky-agent owner CODE) within ten minutes. Each code shown in that
+  /// time stays good, once: "Add an agent" opened again does not void the
+  /// command an earlier one showed.
   startOwn() {
     // 26 of 32 letters and digits (no i, l, o or 0), 130 bits: it is pasted, not typed,
     // and only its hash crosses the room, so it must not be guessed offline.
     const abc = 'abcdefghjkmnpqrstuvwxyz123456789';
     const code = [...rand(26)].map((x) => abc[x & 31]).join('');
-    this.ownCode = { code, until: Date.now() + 10 * 60_000 };
+    this.ownCodes = [...(this.ownCodes || []).filter((c) => Date.now() < c.until), { code, until: Date.now() + 10 * 60_000 }].slice(-5);
     return code.match(/.{1,6}/g).join('-');
   }
 
@@ -1582,10 +1584,11 @@ export class DenClient {
   /// the agent). Checked inside the room's lock; what follows is sent after.
   async onOwn(room, m) {
     const later = (f) => setTimeout(() => f().catch(() => {}), 0);
-    if (m.t === 'own-ask' && this.ownCode && Date.now() < this.ownCode.until && typeof m.tag === 'string') {
-      const { code } = this.ownCode;
-      if (m.tag !== await sha(`den-own-ask|${code}|${m.key}`)) return;
-      this.ownCode = null;
+    if (m.t === 'own-ask' && this.ownCodes?.length && typeof m.tag === 'string') {
+      let code = null;
+      for (const c of this.ownCodes) if (Date.now() < c.until && m.tag === await sha(`den-own-ask|${c.code}|${m.key}`)) code = c.code;
+      if (!code) return;
+      this.ownCodes = this.ownCodes.filter((c) => c.code !== code);
       const tag = await sha(`den-own-ok|${code}|${this.me.key}|${m.key}`);
       later(async () => {
         await this.send(room, { t: 'own', to: m.key, tag });
@@ -1961,7 +1964,8 @@ class Voice {
     this.io.port.onmessage = (e) => {
       const pcm = e.data;
       this.level = rms(pcm);
-      if (this.muted) return;
+      // A frame the worklet sent as voice stopped: the encoder is closed.
+      if (this.muted || this.enc.state !== 'configured') return;
       this.enc.encode(new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: pcm.length, numberOfChannels: 1, timestamp: at, data: pcm }));
       at += 20_000;
     };

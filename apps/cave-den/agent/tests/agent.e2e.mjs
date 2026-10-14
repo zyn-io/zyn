@@ -131,10 +131,15 @@ try {
   ok(linkOf(fresh) && linkOf(fresh) !== linkOf(kept), 'a kept invite that was used is not offered again');
   await O.click('#ask [data-yes]');
   cli('down', '--agent', 'spare');
-  // One step: the page's command brings a new agent in and makes it Olu's.
+  // One step: the page's command brings a new agent in and makes it Olu's;
+  // the command shown first works though the dialog was opened again since.
   await O.click('#add-agent');
   await O.waitForFunction((was) => document.querySelector('#ask').open && document.querySelector('#ask input').value !== was, fresh, { timeout: 15000 }).catch(() => {});
   const one = await O.inputValue('#ask input');
+  await O.click('#ask [data-yes]');
+  await O.click('#add-agent');
+  await O.waitForFunction((was) => document.querySelector('#ask').open && /--owner (\S+)$/.exec(document.querySelector('#ask input').value)?.[1] !== /--owner (\S+)$/.exec(was)?.[1], one, { timeout: 15000 }).catch(() => {});
+  ok(/--owner (\S+)$/.exec(await O.inputValue('#ask input'))?.[1] !== /--owner (\S+)$/.exec(one)?.[1], 'opened again, the dialog shows a new code');
   const args = /^epeaky-agent join '([^']+)' --owner (\S+)$/.exec(one);
   const helper = args ? cli('join', args[1], '--owner', args[2], '--agent', 'helper') : { err: one };
   ok(typeof helper === 'string' && /^in as m-[0-9a-f]{20} "helper" \([^)]*\)\nowner m-[0-9a-f]{20} "Olu"$/.test(helper), `join --owner: in and Olu's in one command (${typeof helper === 'string' ? helper : helper.err})`);
