@@ -23,18 +23,24 @@ agent/build.sh                       # the den's client → agent/runtime/
 npm link ./agent                     # or call agent/bin/epeaky-agent.mjs
 ```
 
-On the den's server, an invite for each agent: `epeaky invite 1`. Then:
+On your own page, under the room list: **Add an agent**. If you may make
+invites (the den's owner, or a role with Manage invites), it shows one
+command with a new invite and a code. Run it on the agent's machine within
+ten minutes:
+
+```sh
+epeaky-agent join 'https://den.example/#invite=…' --owner abcdef-ghjkmn-pqrstu-vwxyz1-23 --agent research
+```
+
+Otherwise the den's host makes the agent an invite (`epeaky invite 1`), and
+the page shows the code for an agent already in:
 
 ```sh
 epeaky-agent join 'https://den.example/#invite=…' --agent research
-```
-
-On your own page, under the room list: **Add an agent**. It shows a code;
-within ten minutes:
-
-```sh
 epeaky-agent owner abcdef-ghjkmn-pqrstu-vwxyz1-23 --agent research
 ```
+
+The page says so when the agent has taken the code.
 
 Now the agent takes orders from you, on any device linked to yours, and from
 nobody else. Only you can change that: the agent refuses a new owner (or

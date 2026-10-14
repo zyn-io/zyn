@@ -107,7 +107,8 @@ export function mountDen(den, el, me) {
   const agentTag = (key) => {
     if (!den.isAgent(key)) return '';
     const owner = den.agentOwner(key);
-    return `<span class="tag-agent" title="${esc(owner ? `Agent of ${display(owner)} (${nameOf(owner)})` : 'Says it is an agent. No member has confirmed it as theirs.')}">agent</span>`;
+    const label = !owner ? 'agent' : owner === me.key || den.agentsOf(me.key).includes(key) ? 'your agent' : `${display(owner)}’s agent`;
+    return `<span class="tag-agent" title="${esc(owner ? `Agent of ${display(owner)} (${nameOf(owner)})` : 'Says it is an agent. No member has confirmed it as theirs.')}">${esc(label)}</span>`;
   };
   // Role colours: the page's rules allow no style attributes in markup, so
   // each [data-c] is painted here, once drawn (a colour is only ever #rrggbb).
@@ -247,7 +248,7 @@ export function mountDen(den, el, me) {
 
   /// A small form in a dialog: a heading, a line, an optional field; resolves
   /// with the field's value (or true), or null when closed.
-  function ask({ heading, text = '', field = null, yes, danger = false, value = '', empty = false }) {
+  function ask({ heading, text = '', field = null, yes, danger = false, value = '', empty = false, readonly = false }) {
     const d = el('ask');
     d.querySelector('h2').textContent = heading;
     d.querySelector('.ask-text').textContent = text;
@@ -256,11 +257,12 @@ export function mountDen(den, el, me) {
     label.hidden = !field;
     const input = label.querySelector('input');
     if (field) { label.querySelector('span').textContent = field; input.value = value; }
+    input.readOnly = !!readonly;
     const ok = d.querySelector('[data-yes]');
     ok.textContent = yes;
     ok.classList.toggle('danger', danger);
     d.showModal();
-    if (field) input.focus(); else ok.focus();
+    if (field) { input.focus(); if (readonly) input.select(); } else ok.focus();
     return new Promise((resolve) => {
       let answer = null;
       d.querySelector('form').onsubmit = (e) => {
@@ -910,7 +912,19 @@ export function mountDen(den, el, me) {
       el('say').hidden = true;
     }
     if (event === 'linked') status('Linked: members now see these devices as one person.');
-    if (event === 'owned') status(`${display(d.key)} is now your agent. It takes orders from you only.`);
+    if (event === 'owned') {
+      const said = `${display(d.key)} is now your agent. It takes orders from you only.`;
+      status(said);
+      // The dialog that showed the code says so too, where the member is looking.
+      const a = el('ask');
+      if (a.open && a.dataset.kind === 'own') {
+        a.querySelector('h2').textContent = 'Agent added';
+        a.querySelector('.ask-text').textContent = said;
+        a.querySelector('.ask-text').hidden = false;
+        a.querySelector('.ask-field').hidden = true;
+        a.querySelector('[data-yes]').textContent = 'Done';
+      }
+    }
     if (event === 'offline') status('Reconnecting…', true);
     if (event === 'online') status('');
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
@@ -943,7 +957,17 @@ export function mountDen(den, el, me) {
   if (agentGo) {
     agentGo.onclick = async () => {
       const code = den.startOwn();
-      await ask({ heading: 'Add an agent', text: `On the agent's machine, within ten minutes, run: epeaky-agent owner ${code}  (add --agent NAME if you run several). The agent must be in this den. It then takes orders from you and your linked devices only.`, yes: 'Done' });
+      // A member who may make invites gets one command that brings the agent
+      // in and makes it theirs; anyone else, the code for an agent already in.
+      let link = null;
+      if (den.can('manage_invites')) {
+        try { link = (await den.modDo('invite_make', { n: 1, days: 1 })).links?.[0] || null; } catch { link = null; }
+      }
+      el('ask').dataset.kind = 'own';
+      await ask(link
+        ? { heading: 'Add an agent', text: 'Run this on the agent’s machine within ten minutes. The agent joins the den with a new invite and takes orders from you and your linked devices only. Add --agent NAME to run more than one there.', field: 'Command', value: `epeaky-agent join '${link}' --owner ${code}`, readonly: true, yes: 'Done' }
+        : { heading: 'Add an agent', text: 'For an agent already in this den: run this on its machine within ten minutes. It then takes orders from you and your linked devices only. A new agent first needs an invite from the den’s host or a moderator.', field: 'Command', value: `epeaky-agent owner ${code}`, readonly: true, yes: 'Done' });
+      delete el('ask').dataset.kind;
     };
   }
   const linkUse = el('link-code');

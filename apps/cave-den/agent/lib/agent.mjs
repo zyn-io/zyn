@@ -311,6 +311,10 @@ export class Agent {
   async own(code, ms = 60_000) {
     await this.settled();
     this.held();
+    // The ask goes to an open room, so be in one first (a new agent waits to
+    // be let in by a member).
+    const end = Date.now() + ms;
+    while (![...this.ready].some((id) => !this.private(id)) && Date.now() < end) await new Promise((r) => setTimeout(r, 200));
     const f = () => {};
     let timer;
     const done = new Promise((resolve) => {

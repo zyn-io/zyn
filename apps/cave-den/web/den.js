@@ -1404,10 +1404,11 @@ export class DenClient {
     if (code.length !== 26) throw new Error('An owner code is 26 letters and digits, as the page shows it.');
     this.ownAsk = { code, until: Date.now() + 10 * 60_000 };
     const tag = await sha(`den-own-ask|${code}|${this.me.key}`);
-    // One open room is enough: the owner's page hears every room it is in.
-    const room = this.den.rooms().find((r) => this.rooms.get(r)?.kind !== 'private');
-    if (!room) throw new Error('Enter a room first.');
-    await this.send(room, { t: 'own-ask', tag });
+    // Every open room this agent is in: the owner's page may not be in all of
+    // them yet (a den has many), and answers the first ask it hears.
+    const open = this.den.rooms().filter((r) => this.rooms.get(r)?.kind !== 'private');
+    if (!open.length) throw new Error('Enter a room first.');
+    for (const room of open) await this.send(room, { t: 'own-ask', tag }).catch(() => {});
   }
 
   /// On the agent: stop waiting for an owner's answer.
