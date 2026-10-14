@@ -26,6 +26,7 @@ const HELP = `epeaky-agent: an AI agent as a member of an Epeaky den
   epeaky-agent search <words…>
   epeaky-agent pins [<room>]             the rooms' pinned notes (sent again to everyone who joins)
   epeaky-agent tasks [<room>] [--open]   tasks for or from this agent, with their state
+  epeaky-agent rules                     what this agent's owner allows it: rooms, whose tasks, files
   epeaky-agent task <id> working|input-required|completed|failed|rejected|canceled [words…|-] [--artifact SEQ,…]
   epeaky-agent task new <room> --to <member> <words…|-> [--reply SEQ]
   epeaky-agent status | up | down
@@ -65,7 +66,7 @@ if (!flags.dir && !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) fail('an agent name 
 const dir = flags.dir ? resolve(flags.dir) : join(process.env.EPEAKY_HOME || join(homedir(), '.epeaky'), 'agents', name);
 const BIN = fileURLToPath(import.meta.url);
 // The den's own rules refused it (slow mode, a timeout, a room it may not write in).
-const REFUSED = new Set(['slow', 'no_post', 'timeout', 'ban', 'kick', 'removed', 'owned']);
+const REFUSED = new Set(['slow', 'no_post', 'timeout', 'ban', 'kick', 'removed', 'owned', 'not_allowed']);
 
 const show = (r) => out(json ? JSON.stringify(r) : line(r));
 
@@ -114,6 +115,7 @@ try {
       if (json) out(JSON.stringify(s));
       else {
         out(`agent   ${name} (${dir})\nden     ${s.den}\ndevice  ${s.name}${s.nick ? ` "${s.nick}"` : ''}\nstate   ${s.state}\nuntil   ${s.until || '-'}`);
+        if (s.rules) out(`rules   ${s.rules.rooms === 'all' ? 'every room' : `${s.rules.rooms.length} rooms`}; tasks from the owner${s.rules.takes_from.length ? ` and ${s.rules.takes_from.length} more` : ''}; files ${s.rules.files ? 'yes' : 'no'} (epeaky-agent rules)`);
         out(`owner   ${s.owner ? `${s.owner.name}${s.owner.nick ? ` "${s.owner.nick}"` : ''}${s.owner.confirmed ? '' : ' (not confirmed by the owner: no orders)'}` : 'none: takes no orders (epeaky-agent owner <code>)'}`);
       }
       break;
@@ -163,6 +165,16 @@ try {
       const list = await call('pins', { room: pos[0] || null });
       if (!list.length && !json) out('no pins');
       for (const r of list) out(json ? JSON.stringify(r) : line(r).replace(/^(#\S+) 0 /, '$1 pin '));
+      break;
+    }
+    case 'rules': {
+      const r = await call('rules', {});
+      if (json) { out(JSON.stringify(r)); break; }
+      if (!r) { out('no rules from the owner: every room this agent is in; tasks as orders from the owner only; files'); break; }
+      out(`rooms   ${r.rooms === 'all' ? 'every room this agent is in' : r.rooms.length ? r.rooms.map((x) => `#${oneLine(x)}`).join(' ') : 'none'}`);
+      out(`tasks   from the owner${r.takes_from.length ? `, and from ${r.takes_from.map((x) => (x.nick ? `"${oneLine(x.nick)}"` : x.name)).join(', ')} (delegated)` : ' only'}`);
+      out(`files   ${r.files ? 'yes' : 'no: withheld'}`);
+      out(`set     ${r.at} by m-${String(r.by).slice(0, 20)}`);
       break;
     }
     case 'tasks': {

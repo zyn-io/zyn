@@ -107,7 +107,9 @@ export class Agent {
     while (Date.now() < end) {
       const rooms = [...this.den.rooms.values()];
       if (this.state === 'removed') return;
-      if (rooms.length && rooms.every((r) => this.ready.has(r.id) || (r.kind === 'private' && !this.den.inRoom(r.id)))) return;
+      // Not waited for: a private room it is not in, a room its owner's rules
+      // leave out, and one it could not enter (it says so in its log).
+      if (rooms.length && rooms.every((r) => this.ready.has(r.id) || (r.kind === 'private' && !this.den.inRoom(r.id)) || !this.den.allowedHere(r.id) || this.failed?.has(r.id))) return;
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -116,6 +118,8 @@ export class Agent {
     if (ev === 'ready') { this.ready.add(d.room); this.state = 'in'; }
     if (ev === 'removed') { this.state = 'removed'; this.log('this agent was removed from the den by its moderators'); }
     if (ev === 'error' || ev === 'notice') this.log(`${d.room || ''}: ${d.error || d.text}`);
+    if (ev === 'error' && d?.room) (this.failed ||= new Set()).add(d.room);
+    if (ev === 'ready') this.failed?.delete(d.room);
     // One at a time: taking an invitation changes the list it came from.
     if (ev === 'invites') this.inviting = (this.inviting || Promise.resolve()).then(() => this.invited()).catch((e) => this.log(`invitation: ${e.message}`));
     // A private room is this agent's once its owner has said anything there.
@@ -144,8 +148,10 @@ export class Agent {
   }
 
   /// Open rooms, and private rooms its owner has spoken in.
+  /// A room this agent reads and acts in: open, or private with its owner
+  /// there; and one its owner's rules allow.
   visible(room) {
-    return !this.private(room) || this.trusted.has(room);
+    return (!this.private(room) || this.trusted.has(room)) && this.den.allowedHere(room);
   }
 
   async trust(room) {
@@ -200,6 +206,17 @@ export class Agent {
     if (m.t === 'note') r.text = m.text || '';
     if (!r.mention && kind !== 'self' && names(m.text, { name: this.me.name, nick: this.me.nick })) r.mention = true;
     if (r.task) r.task.to_nick = this.den.nickFor(r.task.to) || '';
+    const rules = this.den.rules();
+    // Delegated: a task for this agent from an agent its owner named, given
+    // after the owner did. Never ordinary words: those stay information.
+    if (rules && r.task?.to === this.me.key && kind === 'agent' && rules.takes_from.includes(key) && (m.at || 0) >= rules.at - 60_000) {
+      r.authority = 'delegated';
+      r.on_behalf_of = this.den.agent?.owner || null;
+    }
+    if (rules && rules.files === false && m.file) {
+      r.text = "(a file: your owner's rules keep files from this agent)";
+      r.file_withheld = true;
+    }
     return r;
   }
 
@@ -211,6 +228,9 @@ export class Agent {
     if (exact) return exact;
     const like = all.filter((r) => r.id.startsWith(want) || (r.title || '').toLowerCase() === want.toLowerCase());
     if (like.length === 1) return like[0];
+    // There, but not for this agent: its owner's rules leave it out.
+    const out = [...this.den.rooms.values()].find((r) => (r.id === want || (r.title || '').toLowerCase() === want.toLowerCase()) && (!this.private(r.id) || this.trusted.has(r.id)) && !this.den.allowedHere(r.id));
+    if (!like.length && out) throw Object.assign(new Error(`Your owner's rules keep this agent out of #${out.id}.`), { code: 'not_allowed' });
     throw Object.assign(new Error(like.length ? `More than one room matches ${q}: ${like.map((r) => r.id).join(', ')}` : `No room ${q} here. See: epeaky-agent rooms`), { code: 'room' });
   }
 
@@ -304,7 +324,7 @@ export class Agent {
       if (only && r.room !== only) return false;
       if (r.change) return r.change === 'state' ? tasks : changes;
       if (r.kind === 'self' || r.kind === 'den') return false;
-      return (!tasks || r.task?.to === this.me.key) && (!orders || r.authority === 'owner') && (!mentions || r.mention);
+      return (!tasks || r.task?.to === this.me.key) && (!orders || r.authority === 'owner' || r.authority === 'delegated') && (!mentions || r.mention);
     };
     const came = [];
     let woke = null;
@@ -487,6 +507,15 @@ export class Agent {
   async status() {
     const cfg = await this.config();
     const s = await this.den.kv.get('session');
-    return { den: cfg?.base, pid: process.pid, name: this.me.name, key: this.me.key, nick: this.me.nick, state: this.state, owner: this.ownerOf(), until: s?.until ? new Date(s.until * 1000).toISOString() : null, rooms: [...this.ready] };
+    return { den: cfg?.base, pid: process.pid, name: this.me.name, key: this.me.key, nick: this.me.nick, state: this.state, owner: this.ownerOf(), until: s?.until ? new Date(s.until * 1000).toISOString() : null, rooms: [...this.ready].filter((r) => this.visible(r)), rules: this.rulesNow() };
+  }
+
+  /// The rules this agent's owner set, as they stand: which rooms, whose tasks
+  /// it takes as orders, files; null when the owner set none.
+  rulesNow() {
+    const r = this.den.rules();
+    if (!r) return null;
+    const rooms = r.mode === 'all' ? 'all' : [...this.den.rooms.values()].filter((x) => this.den.allowedHere(x.id)).map((x) => x.id);
+    return { rooms, takes_from: r.takes_from.map((k) => ({ key: k, name: `m-${k.slice(0, 20)}`, nick: this.den.nickFor(k) })), files: r.files, by: r.by, at: new Date(r.at).toISOString() };
   }
 }

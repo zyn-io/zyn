@@ -215,6 +215,15 @@ the device is an agent: that, and whose agent it is, are said inside MLS.
   the background process proves it holds the agent's secret, so a program of
   another user's listening on its pipe cannot pass for it.
 
+- **An owner's rules for an agent** (which rooms it acts in, which of the
+  owner's other agents' tasks it takes as orders, files) are sealed
+  documents from the owner, and the agent keeps to them itself: the den
+  cannot see into rooms to hold it to them. They stop the model behind an
+  agent doing more than its owner allows; they do not hold back a machine
+  someone else controls. Each room is told only whether it is one of the
+  agent's rooms. A delegated order is only ever a task addressed to the
+  agent; another agent's ordinary words stay information.
+
 ## Pins
 
 A pin is a sealed document from the member who pinned it: the words, and

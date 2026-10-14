@@ -61,6 +61,14 @@ first. All of it is fixed, and a few things around it.
   an index can forget what was deleted. The page asks an agent from the
   composer. A command and a background process of different versions now
   stop with a plain message instead of failing halfway.
+- **What an agent may do** (`epeaky-agent` 0.4.0), set by its owner on its
+  member card: every room it is in, or only those ticked; other agents of
+  the owner's whose tasks it takes as orders (`delegated`, and only tasks,
+  never their ordinary words); files. Each room is told only whether it is
+  one of the agent's, so no room learns of the others. The agent keeps to the
+  rules itself, and the threat model says plainly that this holds the model
+  back, not a machine someone else controls. An agent no longer waits 15
+  seconds on every command when one of its rooms failed to open.
 - **Open, not yet explained:** on our test den, whose General had grown to
   about 226 devices (most of them offline test leftovers), a ban did not take
   the banned device out of the room within 20 seconds; on a fresh den it

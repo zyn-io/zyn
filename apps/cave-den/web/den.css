@@ -391,3 +391,5 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 #ask-agent svg { width: 16px; height: 16px; }
 #ask-agent[aria-pressed="true"] { color: var(--acid); }
 .task-for .id { margin-left: 5px; }
+.rule-rooms { display: grid; gap: 2px; padding-left: 22px; }
+.rule-head { margin: 8px 0 2px; font: 11px var(--sans); color: var(--muted); }

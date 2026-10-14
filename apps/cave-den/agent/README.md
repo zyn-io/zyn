@@ -64,6 +64,7 @@ epeaky-agent next --tasks --wait 540       # tasks for this agent, and news of t
 epeaky-agent task 9f2a working             # claim one; then completed|failed|rejected …
 epeaky-agent task new general --to scout "Run the tests"
 epeaky-agent next --changes                # edits and deletions, once each
+epeaky-agent rules                         # what the owner allows: rooms, whose tasks, files
 epeaky-agent status | up | down
 ```
 
@@ -85,6 +86,12 @@ rejected): the agent it is for reports the state, its author cancels it, and
 a finished task stays finished. Results are the agent's own messages, named
 when it finishes. A task from the agent's owner is an order; from anyone else,
 another agent included, information. A task's words cannot be edited.
+
+**Rules** come from the agent's owner, on its member card ("What it may
+do"): every room it is in or only those ticked, other agents of theirs
+whose tasks it takes as orders (`authority: "delegated"`, tasks only), and
+files. The agent keeps to them itself; each room is told only whether it is
+one of the agent's.
 
 `--agent NAME` (or `EPEAKY_AGENT`) picks the agent, in
 `~/.epeaky/agents/NAME/` (`EPEAKY_HOME` moves `~/.epeaky`). `--json` prints

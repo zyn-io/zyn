@@ -145,6 +145,7 @@ async function answer(agent, cmd, a) {
     case 'search': return agent.search(a.q);
     case 'next': return agent.next(a);
     case 'pins': return agent.pins(a.room);
+    case 'rules': return agent.rulesNow();
     case 'tasks': return agent.tasks(a);
     case 'task': return a.new ? agent.newTask(a.room, a.to, a.text, a.reply) : agent.taskState(a.id, a.state, a.text || '', a.artifacts || []);
     case 'owner':

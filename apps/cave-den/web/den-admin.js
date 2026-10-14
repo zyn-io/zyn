@@ -332,6 +332,25 @@ export function mountAdmin(den, el, ui) {
     return `<p class="agent-line">${owner ? (yours ? `Your agent. It takes orders from you only.${mine ? '' : ' It was added on your other device; remove it there.'}` : `Agent of ${esc(den.nickFor(owner) || `m-${owner.slice(0, 20)}`)}.`) : 'Says it is an agent. No member has confirmed it as theirs.'}${mine ? ' <button type="button" class="mini" id="m-disown">Remove as your agent</button>' : ''}</p>`;
   }
 
+  /// On its owner's card: what the agent may do. Rooms it is in, every one or
+  /// those ticked; the owner's other agents whose tasks it takes as orders;
+  /// files. The agent keeps to them itself (the den cannot see into rooms).
+  function rulesForm(key) {
+    const owner = den.agentOwner(key);
+    if (!owner || ![den.me.key, ...den.linkedTo(den.me.key)].includes(owner)) return '';
+    const r = den.agentRules[key] || { mode: 'all', rooms: [], takes_from: [], files: true };
+    const rooms = [...den.rooms.values()].filter((x) => den.inRoom(x.id) && den.members(x.id).some((m) => m.key === key));
+    const mates = [...new Set([...den.myAgents, ...[...den.rooms.keys()].flatMap((id) => (den.inRoom(id) ? den.members(id).map((m) => m.key) : []))])].filter((k) => k !== key && den.isAgent(k) && den.agentOwner(k) === owner);
+    const tip = 'The agent keeps to these itself: the den cannot see into rooms to hold it to them. They stop the model doing more than you allow; they do not protect a machine someone else controls. Each room is told only whether it is one of the agent\'s, never the others.';
+    return `<form class="set-form" id="m-rules"><fieldset class="perms"><legend>What it may do <button class="tip" type="button" data-tip="${esc(tip)}" aria-label="Explain">i</button></legend>
+      <label class="check"><input type="radio" name="mode" value="all" ${r.mode === 'all' ? 'checked' : ''} /> Every room it is in</label>
+      <label class="check"><input type="radio" name="mode" value="listed" ${r.mode === 'listed' ? 'checked' : ''} /> Only these rooms</label>
+      <div class="rule-rooms">${rooms.map((x) => `<label class="check"><input type="checkbox" name="room" value="${esc(x.id)}" ${r.mode === 'all' || r.rooms.includes(x.id) ? 'checked' : ''} /> ${esc(x.kind === 'private' ? x.title || 'Private room' : x.title || x.id)}</label>`).join('') || '<small>It is in no room this device is in.</small>'}</div>
+      ${mates.length ? `<p class="rule-head">Takes tasks as orders from</p>${mates.map((k) => `<label class="check"><input type="checkbox" name="from" value="${esc(k)}" ${r.takes_from.includes(k) ? 'checked' : ''} /> ${esc(display(k))}</label>`).join('')}` : ''}
+      <label class="check"><input type="checkbox" name="files" ${r.files ? 'checked' : ''} /> Files</label>
+      <button class="act small" type="submit">Save</button></fieldset></form>`;
+  }
+
   function member(key) {
     const d = el('member');
     const roles = den.rolesOf(key);
@@ -341,6 +360,7 @@ export function mountAdmin(den, el, ui) {
     const manage = den.can('manage_roles') && (den.isMe(key) || den.above(key));
     el('member-card').innerHTML = `<div class="card-head">${mark(key, 40)}<div><p>${whoHtml(key)}</p><small>m-${esc(key.slice(0, 20))}${den.isOwner(key) ? ' · Owner' : ''}</small></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
       ${agentLine(key)}
+      ${rulesForm(key)}
       ${roles.length ? `<div class="chips">${roles.map((r) => `<span class="role-chip"><i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</span>`).join('')}</div>` : ''}
       ${s ? `<p class="sanction">${s.kind === 'ban' ? 'Banned' : s.kind === 'kick' ? `Kicked until ${when(s.until)}` : `Timed out until ${when(s.until)}`}</p>` : ''}
       ${manage && givable.length ? `<fieldset class="perms"><legend>Roles</legend>${givable.map((r) => `<label class="check"><input type="checkbox" data-give="${esc(r.id)}" ${roles.some((x) => x.id === r.id) ? 'checked' : ''} /> <i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</label>`).join('')}</fieldset>` : ''}
@@ -352,6 +372,18 @@ export function mountAdmin(den, el, ui) {
     el('member-card').querySelectorAll('[data-give]').forEach((c) => { c.onchange = () => act(() => den.onPerson(c.checked ? 'role_give' : 'role_take', key, { id: c.dataset.give }), c.checked ? 'Role given.' : 'Role taken.'); });
     const to = el('to-form');
     if (to) to.onsubmit = (e) => { e.preventDefault(); act(() => den.onPerson('timeout', key, { seconds: Number(to.elements.s.value), reason: to.elements.reason.value }), 'Timed out.'); };
+    const rf = el('m-rules');
+    if (rf) {
+      rf.querySelector('.tip').onclick = (e) => { const b = e.currentTarget; const next = b.closest('legend').nextElementSibling; if (next?.classList.contains('bubble')) next.remove(); else b.closest('legend').insertAdjacentHTML('afterend', `<p class="bubble">${esc(b.dataset.tip)}</p>`); };
+      rf.onsubmit = (e) => {
+        e.preventDefault();
+        const f = rf.elements;
+        const listed = f.mode.value === 'listed';
+        const rooms = listed ? [...rf.querySelectorAll('[name=room]:checked')].map((x) => x.value) : null;
+        const from = [...rf.querySelectorAll('[name=from]:checked')].map((x) => x.value);
+        act(() => den.setAgentRules(key, { rooms, takes_from: from, files: f.files.checked }), listed ? `Saved: ${rooms.length} room${rooms.length === 1 ? '' : 's'}.` : 'Saved: every room.');
+      };
+    }
     const disown = el('m-disown');
     if (disown) disown.onclick = () => act(() => den.disown(key), 'No longer your agent.');
     const lift = el('to-lift');

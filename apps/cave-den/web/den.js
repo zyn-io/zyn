@@ -197,6 +197,10 @@ export class DenClient {
     this.agentClaims = (await this.kv.get('agentClaims')) || {};
     this.ownerClaims = (await this.kv.get('ownerClaims')) || {};
     this.myAgents = (await this.kv.get('agents')) || [];
+    // Rules this member set for their agents (this device's copy, for the
+    // card); and, on an agent, the rules its owner sent it, room by room.
+    this.agentRules = (await this.kv.get('agentRules')) || {};
+    this.myRules = (await this.kv.get('myRules')) || {};
     // An agent (epeaky-agent): it says so, and names its owner once confirmed.
     this.agent = (await this.kv.get('agent')) ? { owner: (await this.kv.get('owner')) || null, since: (await this.kv.get('ownerSince')) || null } : null;
     this.me = { name: this.den.name(), key: this.den.key(), nick: (await this.kv.get('nick')) || '' };
@@ -744,6 +748,11 @@ export class DenClient {
     // Someone new does not know the names members gave themselves: tell them.
     if (this.hasProfile() && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
     if (lines.some(([, act]) => act === 'joined')) this.soonPins(room);
+    // One of this member's agents came into a room: tell it the rules there.
+    for (const [k, act] of lines) {
+      const r = act === 'joined' && this.agentRules?.[k];
+      if (r) setTimeout(() => this.send(room, { t: 'agent-rules', to: k, mode: r.mode, here: r.mode === 'all' || r.rooms.includes(room), takes_from: r.takes_from, files: r.files }).catch(() => {}), 1000 + Math.random() * 2000);
+    }
     const log = await this.log(room);
     for (const [who, act] of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', who, act, text: `m-${who.slice(0, 20)} ${act}`, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
@@ -826,6 +835,7 @@ export class DenClient {
     if (m.t === 'own-ask' || m.t === 'own') { if (!mine) await this.onOwn(room, m); return; }
     if (m.t === 'profile') return;
     if (m.t === 'pin' || m.t === 'pins' || m.t === 'unpin') { await this.applyPin(room, m, mine); return; }
+    if (m.t === 'agent-rules') { if (!mine) await this.learnRules(room, m); return; }
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
@@ -1563,6 +1573,55 @@ export class DenClient {
     await this.kv.put('agents', keys);
     this.on('nicks', { key: this.me.key });
     for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
+  }
+
+  /// Rules for one of this member's agents: every room, or only those listed
+  /// (`rooms`); which of the owner's other agents' tasks it takes as orders
+  /// (`takes_from`); whether it handles files. Each room the agent is in is
+  /// told only whether it is one of them, so no room hears of the others.
+  async setAgentRules(agent, { rooms = null, takes_from = [], files = true } = {}) {
+    const owner = this.agentOwner(agent);
+    if (!owner || ![this.me.key, ...this.linkedTo(this.me.key)].includes(owner)) throw new Error('Only the owner of an agent sets its rules.');
+    const mode = Array.isArray(rooms) ? 'listed' : 'all';
+    const allowed = new Set(Array.isArray(rooms) ? rooms : []);
+    const from = [...new Set(takes_from.filter((k) => /^[0-9a-f]{64}$/.test(k) && k !== agent))].slice(0, 20);
+    this.agentRules[agent] = { mode, rooms: [...allowed], takes_from: from, files: !!files, at: Date.now() };
+    await this.kv.put('agentRules', this.agentRules);
+    for (const room of this.den.rooms()) {
+      if (!this.members(room).some((x) => x.key === agent)) continue;
+      await this.send(room, { t: 'agent-rules', to: agent, mode, here: mode === 'all' || allowed.has(room), takes_from: from, files: !!files }).catch(() => {});
+    }
+  }
+
+  /// An agent's rules, sent by its owner (or a device linked to them), room
+  /// by room: the latest in a room wins (by the den's order), and across rooms
+  /// the latest by the owner's clock says the mode, whose tasks, and files.
+  async learnRules(room, m) {
+    if (typeof m.to !== 'string' || !['all', 'listed'].includes(m.mode)) return;
+    const rule = { mode: m.mode, here: !!m.here, takes_from: Array.isArray(m.takes_from) ? m.takes_from.filter((k) => typeof k === 'string' && /^[0-9a-f]{64}$/.test(k)).slice(0, 20) : [], files: m.files !== false, at: sent(m.at), seq: m.seq || 0, by: m.key };
+    if (this.agent && m.to === this.me.key && this.fromOwner(m.key)) {
+      if ((this.myRules[room]?.seq || 0) > rule.seq) return;
+      this.myRules[room] = rule;
+      await this.kv.put('myRules', this.myRules);
+      this.on('rules', { room });
+    }
+  }
+
+  /// On an agent: the rules in force ({ mode, takes_from, files, by, at }),
+  /// or none (every room, no one's tasks but the owner's, files).
+  rules() {
+    const all = Object.values(this.myRules || {});
+    if (!all.length) return null;
+    const last = all.reduce((a, b) => (b.at > a.at ? b : a));
+    return { mode: last.mode, takes_from: last.takes_from, files: last.files, by: last.by, at: last.at };
+  }
+
+  /// On an agent: whether its owner's rules let it act in `room`. A room with
+  /// no word from the owner is out once the owner lists rooms.
+  allowedHere(room) {
+    const r = this.rules();
+    if (!r || r.mode === 'all') return true;
+    return !!this.myRules[room]?.here;
   }
 
   /// No longer this member's agent: it carries no authority from here.
