@@ -49,6 +49,13 @@ first. All of it is fixed, and a few things around it.
   user's could have listened on an agent's pipe first and passed for it
   (commands now check that the process proves it holds the agent's secret).
   The threat model now says what a push service can infer.
+- **Open, not yet explained:** on our test den, whose General had grown to
+  about 226 devices (most of them offline test leftovers), a ban did not take
+  the banned device out of the room within 20 seconds; on a fresh den it
+  does, in every run. A guess to check: in a big room the commit that takes
+  the device out is undone, because its new room state is not published
+  within the 30 seconds the den allows. Until this is explained, a ban in a
+  big open room may need checking by hand (the member list).
 - **Ready for npm** (`epeaky-agent` 0.2.0, published from a tag with
   provenance), and [AUDIT.md](AUDIT.md), the scope of the independent audit
   Epeaky has not had yet.

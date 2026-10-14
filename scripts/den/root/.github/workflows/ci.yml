@@ -86,3 +86,13 @@ jobs:
           node-version: 22
       - run: node --test tests/daemon.test.mjs tests/lines.test.mjs
         working-directory: agent
+  # The agents built on epeaky-agent (agents/): no dependencies, no build.
+  # The librarian needs node:sqlite (Node 22.13 or later).
+  agents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: (cd agents/mcp && node --test tests/*.test.mjs) && (cd agents/librarian && node --test tests/*.test.mjs)
