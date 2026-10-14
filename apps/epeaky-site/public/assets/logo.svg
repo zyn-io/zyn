@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="ground" cx="50%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#3a2a1f"/>
+      <stop offset=".55" stop-color="#1c1410"/>
+      <stop offset="1" stop-color="#0d0a08"/>
+    </radialGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6e2ad"/>
+      <stop offset=".28" stop-color="#d9b66c"/>
+      <stop offset=".55" stop-color="#a77d3c"/>
+      <stop offset=".78" stop-color="#d6ae62"/>
+      <stop offset="1" stop-color="#7c5a26"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ecd29a"/>
+      <stop offset=".5" stop-color="#9a7234"/>
+      <stop offset="1" stop-color="#d4ab60"/>
+    </linearGradient>
+    <linearGradient id="door" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2018"/>
+      <stop offset="1" stop-color="#130e0b"/>
+    </linearGradient>
+    <linearGradient id="slot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6d8"/>
+      <stop offset=".6" stop-color="#ffd36a"/>
+      <stop offset="1" stop-color="#f4a821"/>
+    </linearGradient>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#ffb938" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ffb938" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-200%" width="220%" height="500%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#000" flood-opacity=".55"/>
+    </filter>
+    <clipPath id="inside"><rect x="291" y="225" width="442" height="574" rx="221"/></clipPath>
+  </defs>
+
+  <!-- ground and coin rim -->
+  <circle cx="512" cy="512" r="494" fill="url(#ground)"/>
+  <circle cx="512" cy="512" r="486" fill="none" stroke="url(#rim)" stroke-width="16"/>
+  <circle cx="512" cy="512" r="458" fill="none" stroke="#c9a25b" stroke-opacity=".28" stroke-width="3"/>
+
+  <!-- the door -->
+  <g filter="url(#shadow)">
+    <rect x="270" y="204" width="484" height="616" rx="242" fill="url(#door)" stroke="url(#brass)" stroke-width="42"/>
+  </g>
+  <g clip-path="url(#inside)">
+    <ellipse cx="512" cy="429" rx="250" ry="150" fill="url(#halo)"/>
+    <rect x="291" y="225" width="442" height="574" rx="221" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="20"/>
+  </g>
+
+  <!-- light through the slot -->
+  <rect x="368" y="388" width="288" height="82" rx="41" fill="#ffc54d" opacity=".7" filter="url(#glow)"/>
+  <rect x="379" y="396" width="266" height="66" rx="33" fill="url(#slot)"/>
+</svg>
