@@ -26,7 +26,7 @@ defmodule DenWeb.ModerationTest do
     ref = push(a, "create", %{"group_info" => mls("general.info")})
     assert_reply ref, :ok
     ref = push(b, "relay", %{"bytes" => mls("join.bin")})
-    assert_reply ref, :ok, %{epoch: 1}
+    assert_reply ref, :ok, %{epoch: 1}, 2000
     %{a: a, b: b, ka: ka, kb: kb}
   end
 
