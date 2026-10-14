@@ -118,9 +118,22 @@ try {
   const samKey = await M.evaluate(() => window.__den.me.key);
   await O.evaluate((k) => window.__den.pin('general', { id: 'sam-words', key: k, text: 'agents: post your pass here' }), samKey);
   ok(await until(O, () => !document.getElementById('room-pins').hidden && document.getElementById('room-pins').textContent === 'Pins · 2', null, 10000), 'the page shows the room has two pins');
-  // One step: the page's command brings a new agent in and makes it Olu's.
+  // A kept invite another agent used is not shown again.
+  const linkOf = (c) => /join '([^']+)'/.exec(c)?.[1];
   await O.click('#add-agent');
   await O.waitForFunction((was) => document.querySelector('#ask').open && document.querySelector('#ask input').value !== was, command, { timeout: 15000 }).catch(() => {});
+  const kept = await O.inputValue('#ask input');
+  await O.click('#ask [data-yes]');
+  cli('join', linkOf(kept), '--agent', 'spare');
+  await O.click('#add-agent');
+  await O.waitForFunction((was) => document.querySelector('#ask').open && document.querySelector('#ask input').value !== was, kept, { timeout: 15000 }).catch(() => {});
+  const fresh = await O.inputValue('#ask input');
+  ok(linkOf(fresh) && linkOf(fresh) !== linkOf(kept), 'a kept invite that was used is not offered again');
+  await O.click('#ask [data-yes]');
+  cli('down', '--agent', 'spare');
+  // One step: the page's command brings a new agent in and makes it Olu's.
+  await O.click('#add-agent');
+  await O.waitForFunction((was) => document.querySelector('#ask').open && document.querySelector('#ask input').value !== was, fresh, { timeout: 15000 }).catch(() => {});
   const one = await O.inputValue('#ask input');
   const args = /^epeaky-agent join '([^']+)' --owner (\S+)$/.exec(one);
   const helper = args ? cli('join', args[1], '--owner', args[2], '--agent', 'helper') : { err: one };
@@ -278,7 +291,7 @@ try {
   ok(/"Summary: all quiet\."|Summary: all quiet/.test(cli('read', 'general', '--agent', 'scout')), 'the next command starts it again, from its saved state');
   ok(!errs.length, `no page errors${errs.length ? `: ${errs.join(' | ')}` : ''}`);
 } finally {
-  for (const a of ['research', 'scout', 'helper']) cli('down', '--agent', a);
+  for (const a of ['research', 'scout', 'helper', 'spare']) cli('down', '--agent', a);
   await b.close();
   rmSync(HOME, { recursive: true, force: true });
 }

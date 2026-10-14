@@ -1123,6 +1123,19 @@ export function mountDen(den, el, me) {
       // One invite until an agent takes it: closing the dialog and opening it
       // again within the hour shows the same one, not a new one each time.
       let link = agentInvite && Date.now() - agentInvite.at < 3_600_000 ? agentInvite.link : null;
+      // Still unused? The den lists invites by the SHA-256 of their code; an
+      // agent may have used this one before it said so here.
+      if (link) {
+        try {
+          const code = new URLSearchParams(new URL(link).hash.slice(1)).get('invite') || '';
+          const bytes = Uint8Array.from(code.match(/../g) || [], (h) => parseInt(h, 16));
+          const id = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+          const { invites } = await den.modDo('invites');
+          const i = invites.find((x) => x.id === id);
+          if (!i || i.used_at || i.revoked_at || (i.expires_at && i.expires_at * 1000 < Date.now())) link = null;
+        } catch { link = null; }
+        if (!link) agentInvite = null;
+      }
       if (!link && den.can('manage_invites')) {
         try { link = (await den.modDo('invite_make', { n: 1, days: 1 })).links?.[0] || null; } catch { link = null; }
         if (link) agentInvite = { link, at: Date.now() };
