@@ -75,7 +75,7 @@ try {
   const shown = await O.inputValue('#ask input');
   await O.click('#ask [data-yes]').catch(() => {});
   execFileSync(process.execPath, [AGENT_BIN, 'join', /join '([^']+)'/.exec(shown)[1], '--owner', /--owner (\S+)$/.exec(shown)[1], '--agent', 'librarian', '--nick', 'librarian'], { env, timeout: 120000 });
-  lib = spawn(process.execPath, [LIB, '--agent', 'librarian', '--every', '8'], { env, stdio: ['ignore', 'inherit', 'inherit'] });
+  lib = spawn(process.execPath, [LIB, '--agent', 'librarian'], { env, stdio: ['ignore', 'inherit', 'inherit'] });
 
   await O.evaluate((t) => window.__den.say('general', `release ${t}: we deploy on friday after the audit`), tag);
   await O.evaluate(([r, t]) => window.__den.say(r, `ops ${t}: the vault keys rotate in november`), [other.id, tag]);
@@ -91,12 +91,16 @@ try {
   const a3 = await ask(O, 'general', `@librarian everywhere vault ${tag} please`);
   ok(a3 && a3.includes('november') && a3.includes(`#${other.id}`), `its owner may search every room (${a3?.slice(0, 90)})`);
 
-  // A deletion reaches the index at the next pass over the rooms.
+  // A deletion and an edit reach the index as changes, at once.
   const id = await O.evaluate(async (t) => (await window.__den.log('general')).find((m) => m.text?.includes(`release ${t}`))?.id, tag);
   await O.evaluate((x) => window.__den.remove('general', x), id);
-  await new Promise((r) => setTimeout(r, 20000));
+  const opsId = await O.evaluate(async ([r, t]) => (await window.__den.log(r)).find((m) => m.text?.includes(`ops ${t}`))?.id, [other.id, tag]);
+  await O.evaluate(([r, x, t]) => window.__den.edit(r, x, `ops ${t}: the vault keys rotate in december`), [other.id, opsId, tag]);
+  await new Promise((r) => setTimeout(r, 3000));
   const a4 = await ask(M, 'general', `@librarian deploy ${tag} again`);
   ok(a4 && !a4.includes('friday after the audit') && /Nothing I hold matches/.test(a4), `a deleted message is forgotten (${a4?.slice(0, 90)})`);
+  const a5 = await ask(O, 'general', `@librarian everywhere vault ${tag} rotate`);
+  ok(a5 && a5.includes('december') && !a5.includes('november'), `an edit replaces the words it holds (${a5?.slice(0, 90)})`);
 } catch (e) {
   ok(false, `stopped: ${e.message}`);
 } finally {

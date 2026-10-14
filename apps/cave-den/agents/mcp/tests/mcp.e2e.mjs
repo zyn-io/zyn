@@ -106,6 +106,33 @@ try {
   ok(!sent.isError, `epeaky_send: posted (${sent.content[0].text.slice(0, 80)})`);
   ok(await until(O, () => [...document.querySelectorAll('#log li')].some((li) => /summary by noon/.test(li.textContent)), null, 30000), "the owner's page shows the agent's answer, words intact");
 
+  // A task from the owner: handed as an order, reported on, seen on the page.
+  const me = status.structuredContent.records[0];
+  const given = await O.evaluate((k) => window.__den.task('general', k, 'list the open issues'), me.key);
+  let task = null;
+  for (let i = 0; i < 6 && !task; i++) {
+    const r = await mcp.tool('epeaky_next', { tasks: true, wait_seconds: 20 });
+    task = (r.structuredContent?.records || []).find((x) => /open issues/.test(x.text || ''));
+  }
+  ok(task?.authority === 'owner' && task?.task?.to === me.key && task?.task?.state === 'submitted', `the owner's task comes as an order (${task?.authority}/${task?.task?.state})`);
+  const tid = task?.task?.id || given?.id;
+  ok(!(await mcp.tool('epeaky_task_update', { task: tid, state: 'working' })).isError, 'epeaky_task_update: working');
+  const res = await mcp.tool('epeaky_send', { room: 'general', text: 'Open issues: #12, #15.', reply_to: task?.seq });
+  const resSeq = res.structuredContent?.records?.[0]?.seq;
+  const done = await mcp.tool('epeaky_task_update', { task: tid, state: 'completed', text: 'Two open.', artifacts: resSeq ? [resSeq] : [] });
+  ok(!done.isError, `epeaky_task_update: completed (${done.content[0].text.slice(0, 80)})`);
+  const seen = await (async () => {
+    for (let i = 0; i < 60; i++) {
+      const t = await O.evaluate(async () => (await window.__den.log('general')).find((m) => m.text === 'list the open issues')?.task);
+      if (t?.state === 'completed') return t;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return null;
+  })();
+  ok(seen && seen.artifacts.length === 1, `the owner's page shows it completed, with its result (${seen?.state}, ${seen?.artifacts?.length} artifact)`);
+  const open = await mcp.tool('epeaky_tasks', { open: true });
+  ok(!open.isError && !(open.structuredContent.records || []).some((r) => r.task?.id === tid), 'epeaky_tasks: a finished task is no longer open');
+
   const found = await mcp.tool('epeaky_search', { query: 'summarise' });
   ok(!found.isError && (found.structuredContent.records || []).length >= 1, 'epeaky_search finds the order');
   const bad = await mcp.tool('epeaky_read', {});

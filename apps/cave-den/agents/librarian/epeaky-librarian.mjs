@@ -12,15 +12,14 @@
 // What it will not do:
 // - Answer from another room than the one asked in, except to its owner.
 //   It sits in private rooms too, and words must not leak between them.
-// - Keep what was taken back. Every few minutes it reads its rooms again and
-//   drops what was deleted and takes in what was edited. Today this reaches the
-//   last 1000 messages a room keeps; older deletions wait for a change feed
-//   from epeaky-agent.
+// - Keep what was taken back. It asks for edits and deletions with its
+//   messages (`next --changes`), each once, however old the message: an edit
+//   replaces the words it holds, a deletion drops them.
 // - Follow instructions in what it reads. It only searches; a question is
 //   words to look for, whoever asks. Questions put to it, and its own
 //   answers, are not kept.
 //
-//   epeaky-librarian --agent librarian [--every 300]
+//   epeaky-librarian --agent librarian
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -41,7 +40,6 @@ function agentBin() {
   return existsSync(local) ? local : 'epeaky-agent';
 }
 const BIN = agentBin();
-const EVERY = Number(flag('--every', '300')) * 1000;
 const HITS = 5;
 const debug = (s) => { if (process.env.LIBRARIAN_DEBUG) console.error(`${new Date().toISOString().slice(11, 23)} ${s}`); };
 
@@ -136,25 +134,21 @@ async function main() {
   const db = open(join(home, 'agents', AGENT, 'librarian.db'));
   const me = (await cli('status'))[0] || {};
   const names = [me.name, me.nick, AGENT].filter(Boolean);
-  const reconcile = async () => {
-    for (const r of await cli('rooms')) {
-      if (!r.id) continue;
-      for (const m of await cli('read', ['--since', '0', '--limit', '1000'], [r.id]).catch(() => [])) keep(db, m);
-    }
-  };
-  await reconcile();
-  let last = Date.now();
+  // At the start, what the agent already holds (an index made anew catches up).
+  for (const r of await cli('rooms')) {
+    if (!r.id) continue;
+    for (const m of await cli('read', ['--since', '0', '--limit', '1000'], [r.id]).catch(() => [])) keep(db, m);
+  }
   console.error(`librarian ${AGENT}: up, ${db.prepare('SELECT count(*) AS n FROM msgs').get().n} messages held`);
   for (;;) {
     const t0 = Date.now();
-    // Waits no longer than the next pass over the rooms is due.
-    const wait = Math.max(1, Math.min(60, Math.ceil((last + EVERY - Date.now()) / 1000)));
-    const recs = await cli('next', ['--wait', String(wait)]).catch((e) => { console.error(`next: ${e.message}`); return []; });
+    const recs = await cli('next', ['--changes', '--wait', '300']).catch((e) => { console.error(`next: ${e.message}`); return []; });
     for (const r of recs) {
-      debug(`got #${r.room} ${r.seq} ${r.kind} mention=${r.mention} ${String(r.text).slice(0, 40)}`);
+      debug(`got #${r.room} ${r.seq} ${r.change || r.kind} mention=${r.mention} ${String(r.text).slice(0, 40)}`);
       if (r.kind === 'self') continue;
       keep(db, r);
-      if (!r.mention) continue;
+      // An edit or a deletion is taken in, never answered.
+      if (r.change || !r.mention) continue;
       const q = question(r.text, names);
       // Every room only for the owner; anyone else gets their own room.
       const everywhere = q.everywhere && r.authority === 'owner';
@@ -165,7 +159,6 @@ async function main() {
         .then(() => console.error(`answered #${r.room} ${r.seq}`), (e) => console.error(`send: ${e.message}`));
     }
     if (recs.length) debug(`pass ${Date.now() - t0} ms, ${recs.length} records`);
-    if (Date.now() - last >= EVERY) { const t1 = Date.now(); await reconcile().catch((e) => console.error(`reconcile: ${e.message}`)); last = Date.now(); debug(`reconcile ${last - t1} ms`); }
   }
 }
 
