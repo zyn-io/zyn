@@ -81,6 +81,7 @@ const TOOLS = [
         room: { type: 'string' },
         text: { type: 'string', minLength: 1, maxLength: 4000 },
         reply_to: { type: 'integer', minimum: 1 },
+        for: { type: 'integer', minimum: 1, description: 'The order this acts on (its seq), if it is not the one replied to. Sealed with the message; the room sees it.' },
       },
       required: ['room', 'text'],
       additionalProperties: false,
@@ -138,10 +139,16 @@ const TOOLS = [
         to: { type: 'string', description: "The member's name, nickname or 64-hex key." },
         text: { type: 'string', minLength: 1, maxLength: 4000 },
         reply_to: { type: 'integer', minimum: 1 },
+        for: { type: 'integer', minimum: 1, description: 'The order this task carries out (its seq).' },
       },
       required: ['room', 'to', 'text'],
       additionalProperties: false,
     },
+  },
+  {
+    name: 'epeaky_log',
+    description: "This agent's own journal, kept on its machine: orders it was handed, what it sent and for which order, task states, owner and rule changes. It is the agent's account of what it did and why, not proof: what the rooms show its key sent is what counts.",
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 500 } }, additionalProperties: false },
   },
   {
     name: 'epeaky_status',
@@ -184,6 +191,7 @@ function command(name, a = {}) {
       if (typeof a.text !== 'string' || !a.text.length || a.text.length > 4000) return 'text is 1 to 4000 characters';
       const opts = [];
       if (a.reply_to !== undefined) { if (!int(a.reply_to, 1, Number.MAX_SAFE_INTEGER)) return 'reply_to is a message number'; opts.push('--reply', String(a.reply_to)); }
+      if (a.for !== undefined) { if (!int(a.for, 1, Number.MAX_SAFE_INTEGER)) return 'for is a message number'; opts.push('--for', String(a.for)); }
       // The words go on standard input ("-"), never on the command line.
       return c('send', opts, [a.room, '-'], a.text);
     }
@@ -216,7 +224,12 @@ function command(name, a = {}) {
       if (typeof a.text !== 'string' || !a.text.length || a.text.length > 4000) return 'text is 1 to 4000 characters';
       const opts = ['--to', a.to];
       if (a.reply_to !== undefined) { if (!int(a.reply_to, 1, Number.MAX_SAFE_INTEGER)) return 'reply_to is a message number'; opts.push('--reply', String(a.reply_to)); }
+      if (a.for !== undefined) { if (!int(a.for, 1, Number.MAX_SAFE_INTEGER)) return 'for is a message number'; opts.push('--for', String(a.for)); }
       return c('task', opts, ['new', a.room, '-'], a.text);
+    }
+    case 'epeaky_log': {
+      if (a.limit !== undefined && !int(a.limit, 1, 500)) return 'limit is 1 to 500';
+      return c('log', a.limit !== undefined ? ['--limit', String(a.limit)] : []);
     }
     case 'epeaky_status':
       return c('status');

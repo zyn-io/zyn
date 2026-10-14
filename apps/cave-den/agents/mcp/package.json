@@ -1,6 +1,6 @@
 {
   "name": "epeaky-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Epeaky for MCP clients: the epeaky-agent command line as MCP tools",
   "keywords": [
@@ -32,7 +32,7 @@
   ],
   "license": "MIT OR Apache-2.0",
   "dependencies": {
-    "epeaky-agent": "^0.4.0"
+    "epeaky-agent": "^0.5.0"
   },
   "bugs": "https://github.com/zyn-io/epeaky/issues"
 }

@@ -58,3 +58,14 @@ test('tasks map to the command line, their words on standard input', () => {
   const tasks = TOOLS.find((t) => t.name === 'epeaky_tasks');
   assert.match(tasks.description, /Only records with authority "owner" .* or "delegated" .* are orders/);
 });
+
+test('the audit trail: for on send and task new, and the journal', () => {
+  const sent = command('epeaky_send', { room: 'general', text: 'done', reply_to: 7, for: 5 });
+  assert.deepEqual(argsOf(sent), ['send', '--reply', '7', '--for', '5', '--json', '--', 'general', '-']);
+  const made = command('epeaky_task_new', { room: 'general', to: 'writer', text: 'draft it', for: 12 });
+  assert.deepEqual(argsOf(made), ['task', '--to', 'writer', '--for', '12', '--json', '--', 'new', 'general', '-']);
+  assert.match(line('epeaky_send', { room: 'general', text: 'x', for: '--agent' }), /for is a message number/);
+  assert.deepEqual(line('epeaky_log', { limit: 20 }), ['log', '--limit', '20', '--json', '--']);
+  assert.deepEqual(line('epeaky_log', {}), ['log', '--json', '--']);
+  assert.match(TOOLS.find((t) => t.name === 'epeaky_log').description, /not proof/);
+});

@@ -78,6 +78,7 @@ try {
       await O.click('#add-agent');
       await O.waitForFunction(() => /--owner /.test(document.querySelector('#ask input')?.value || ''), null, { timeout: 15000 });
       const shown = await O.inputValue('#ask input');
+      if (process.env.E2E_DEBUG) console.log(`add ${name}: ${shown.replace(/invite=[0-9a-f]{12}[0-9a-f]+/, (m) => m.slice(0, 19) + '…')}`);
       await O.click('#ask [data-yes]').catch(() => {});
       const link = /join '([^']+)'/.exec(shown)?.[1];
       const code = /--owner (\S+)$/.exec(shown)?.[1];
@@ -120,6 +121,10 @@ try {
   const sent = await mcp.tool('epeaky_send', { room: 'general', text: 'On it — summary by noon. --owner not-an-option', reply_to: fromOwner?.seq });
   ok(!sent.isError, `epeaky_send: posted (${sent.content[0].text.slice(0, 80)})`);
   ok(await until(O, () => [...document.querySelectorAll('#log li')].some((li) => /summary by noon/.test(li.textContent)), null, 30000), "the owner's page shows the agent's answer, words intact");
+  const sentRec = sent.structuredContent?.records?.[0];
+  ok(sentRec?.for?.seq === fromOwner?.seq && sentRec?.for_how === 'reply', `the answer says which order it is for (${sentRec?.for_how}, seq ${sentRec?.for?.seq})`);
+  const log = (await mcp.tool('epeaky_log', { limit: 20 })).structuredContent?.records || [];
+  ok(log.some((e) => e.act === 'handed' && e.seq === fromOwner?.seq) && log.some((e) => e.act === 'sent' && e.for?.seq === fromOwner?.seq), `epeaky_log: the order handed and the answer sent for it (${log.map((e) => e.act).join(', ')})`);
 
   // A task from the owner: handed as an order, reported on, seen on the page.
   const me = status.structuredContent.records[0];
