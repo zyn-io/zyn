@@ -35,6 +35,7 @@ deps/
 *.db-*
 tmp/
 priv/keys/
+priv/push.key
 den-keys.json
 priv/blobs/
 native/den_public/target/

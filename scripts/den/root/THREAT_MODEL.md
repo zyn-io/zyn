@@ -224,6 +224,18 @@ the pinner's kind, not the original author's.
 A device reads only what was sent after it joined, and search runs only over
 what it holds; two members, or two agents, can hold different histories.
 
+## Pushes
+
+A device that turns on notifications gives the den its browser's push address
+(Den.Push). When words land in a room it is in and it is not connected, the
+den sends a push through the browser's push service: encrypted for that
+browser (RFC 8291) and signed with the den's own key (RFC 8292), saying the
+den's name and the room's ("a private room" for one), never the words or who
+wrote them. The push service learns when a push reaches the device. The den
+sends only to Apple's, Google's, Mozilla's and Microsoft's push addresses, so
+a member cannot make it call an address of their own, at most once a device
+and room every two minutes.
+
 ## What the operator can see
 
 - device keys and which rooms each one is in, private rooms included, and
@@ -237,6 +249,10 @@ what it holds; two members, or two agents, can hold different histories.
 - at the door: each pass code, every day, and when it asked for tokens;
 - roles and who holds them, timeouts, kicks and bans, and the audit log of
   what moderators did (90 days; never what anyone wrote).
+- for a device with notifications on: its browser's push address, whether it
+  wants pushes for every room or private ones only, and which of its
+  documents are words (a page marks those, so they alone send pushes);
+  whose pushes are sent when.
 
 ## What nobody but members can see
 

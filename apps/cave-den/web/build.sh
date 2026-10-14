@@ -13,6 +13,8 @@ OUT=${1:-$WEB/../server/priv/page}
 ADDON=${2:-}
 rm -rf "$OUT" && mkdir -p "$OUT/den"
 cp "$WEB"/{index.html,base.css,den.css,app.js,gate.js,den.js,den-ui.js,den-admin.js,config.json} "$OUT/"
+cp "$WEB"/{manifest.webmanifest,sw.js} "$OUT/"
+cp -R "$WEB/icons" "$OUT/icons"
 cp "$WEB/voice-worker.js" "$OUT/den/voice-worker.js"
 cp "$WEB/voice-io.js" "$OUT/den/voice-io.js"
 for f in den_mls.js den_mls_bg.wasm; do

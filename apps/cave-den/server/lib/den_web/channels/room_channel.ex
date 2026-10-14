@@ -131,7 +131,7 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  defp handle("relay", %{"bytes" => b64}, socket) when is_binary(b64) do
+  defp handle("relay", %{"bytes" => b64} = p, socket) when is_binary(b64) do
     with {:ok, bytes} <- decode(b64),
          :ok <- may_write(bytes, socket),
          true <- Den.Limits.disk_ok?() || {:error, :disk},
@@ -139,6 +139,9 @@ defmodule DenWeb.RoomChannel do
          {:ok, m} <- Rooms.relay(socket.assigns.room, bytes, socket.assigns.key) do
       broadcast_from!(socket, "msg", %{seq: m.seq, epoch: m.epoch, commit: m.commit, bytes: b64, at: at(m)})
       if m.commit and socket.assigns.kind == "private", do: Rooms.announce_members(socket.assigns.room)
+      # The sender's page marks words (not reactions, profiles or pins): those
+      # wake its members' closed pages (Den.Push).
+      if not m.commit and p["notify"] == true, do: Den.Push.notify(socket.assigns.room, socket.assigns.key)
       {:reply, {:ok, %{seq: m.seq, epoch: if(m.commit, do: m.epoch + 1, else: m.epoch), at: at(m)}}, socket}
     else
       {:error, {:epoch, e}} -> {:reply, {:error, %{reason: "epoch", epoch: e}}, socket}

@@ -18,6 +18,7 @@ defmodule Den.Application do
     with {:ok, sup} <- :application.get_supervisor(:ex_ice), do: Supervisor.terminate_child(sup, ExICE.Priv.MDNS.Resolver)
 
     Den.Mod.init()
+    Den.Push.init()
 
     children = [
       DenWeb.Telemetry,
@@ -33,7 +34,9 @@ defmodule Den.Application do
       {Registry, keys: :duplicate, name: Den.Online},
       # Every voice connection, for the den-wide cap.
       {Registry, keys: :duplicate, name: Den.Voice.Peers},
-      {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one}
+      {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one},
+      # Pushes go out off the channel's process (Den.Push).
+      {Task.Supervisor, name: Den.Push.Tasks}
     ] ++
       # A host's add-on processes (`DEN_EXTRA_CHILDREN`), compiled in from extra/.
       Application.get_env(:den, :extra_children, []) ++

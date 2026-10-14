@@ -376,3 +376,4 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .members .member-name .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .members .member-name .id, .tag-out, .tag-agent { flex: none; }
 .members { grid-template-columns: minmax(0, 1fr); }
+.push-note { margin: 4px 0 0; font: 11px/1.45 var(--sans); color: var(--muted); max-width: 32em; }

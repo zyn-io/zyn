@@ -36,6 +36,7 @@ defmodule Den.Sweeper do
     {by_room, ended} = Den.Rooms.sweep()
     Den.Mod.sweep()
     Den.Mod.slow_sweep()
+    Den.Push.sweep()
 
     for {room, keys} <- by_room do
       DenWeb.Endpoint.broadcast("room:" <> room, "expired", %{keys: keys})

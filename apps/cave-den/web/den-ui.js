@@ -858,14 +858,69 @@ export function mountDen(den, el, me) {
     if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission();
     if (notify !== 'off' && typeof Notification !== 'undefined' && Notification.permission === 'denied') status('Notifications are blocked for this site in the browser settings.');
     try { localStorage.setItem('den.notify', notify); } catch { /* not kept */ }
+    syncPush();
   };
+  // What a push is, said where the choice is made.
+  el('notify').closest('label')?.insertAdjacentHTML('afterend', '<p class="push-note">With this page closed, notifications come through your browser’s push service (Apple, Google, Mozilla or Microsoft). It sees when one arrives, not what it says; a push names the room, never the words. With “Mentions and private”, a closed page hears of private rooms only: the den cannot see mentions.</p>');
+
+  // Installed on the home screen: its own window, notifications on iPhone, and
+  // this device's keys kept (Safari clears a site's data after a week unused).
+  let sw = null;
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then((r) => { sw = r; syncPush(); }).catch(() => {});
+    navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.den === 'open' && typeof e.data.room === 'string' && den.rooms.has(e.data.room)) go(e.data.room); });
+  }
+  navigator.storage?.persist?.().catch(() => {});
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const foot = el('forget').parentElement;
+  let installAsk = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installAsk = e;
+    if (document.getElementById('install-app')) return;
+    foot.querySelector('.link-acts')?.insertAdjacentHTML('beforeend', '<button type="button" class="mini ghost" id="install-app">Install</button>');
+    document.getElementById('install-app').onclick = async () => {
+      installAsk?.prompt();
+      const { outcome } = (await installAsk?.userChoice) || {};
+      if (outcome === 'accepted') document.getElementById('install-app')?.remove();
+    };
+  });
+  if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    foot.insertAdjacentHTML('beforeend', '<p class="push-note">On iPhone: Share, then Add to Home Screen. Installed, this device keeps its keys and gets notifications.</p>');
+  }
+
+  /// This device's push address, in step with the setting: signed up when
+  /// notifications are on and allowed, taken back when they are off.
+  async function syncPush() {
+    if (!sw || !('PushManager' in window) || typeof Notification === 'undefined') return;
+    try {
+      let sub = await sw.pushManager.getSubscription();
+      if (notify === 'off' || Notification.permission !== 'granted') {
+        if (sub) { await den.pushOff(sub.endpoint).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+        return;
+      }
+      if (!sub) {
+        const key = await den.pushKey();
+        const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        sub = await sw.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+      }
+      const j = sub.toJSON();
+      await den.pushSub({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, mode: notify === 'all' ? 'all' : 'private' });
+    } catch (e) {
+      // A browser without a push service the den sends to: notifications only while open.
+      if (/push service/.test(e.message || '')) status(e.message);
+    }
+  }
 
   function ping(room_, m, mention) {
     if (!document.hidden || notify === 'off' || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const priv = den.rooms.get(room_)?.kind === 'private';
     if (muted.has(room_)) return;
     if (notify === 'mentions' && !mention && !priv) return;
-    const n = new Notification(plain(roomTitle(room_)), { body: plain(`${display(m.key)}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_ });
+    const opts = { body: plain(`${display(m.key)}: ${(m.text || m.file?.name || '').slice(0, 120)}`), tag: room_, data: { room: room_ } };
+    // Installed, a page cannot make a Notification itself: its worker shows it.
+    if (sw) return sw.showNotification(plain(roomTitle(room_)), opts).catch(() => {});
+    const n = new Notification(plain(roomTitle(room_)), opts);
     n.onclick = () => { window.focus(); go(room_); n.close(); };
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && nearBottom()) { den.markRead(room); drawRooms(); } });
@@ -973,7 +1028,13 @@ export function mountDen(den, el, me) {
       }
     }
     if (event === 'offline') status('Reconnecting…', true);
-    if (event === 'online') status('');
+    if (event === 'online') {
+      status('');
+      syncPush();
+      // Opened from a notification: that room.
+      const want = new URLSearchParams(location.hash.slice(1)).get('room');
+      if (want) { history.replaceState(null, '', location.pathname); setTimeout(() => { if (den.rooms.has(want)) go(want); }, 500); }
+    }
     if (event === 'error') status(`${roomTitle(d.room)}: ${d.error}`);
     if (event === 'notice') status(`${roomTitle(d.room)}: ${d.text}`, true);
     // A roommate was shown a different door key for a day: the den may be

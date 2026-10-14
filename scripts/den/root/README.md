@@ -32,6 +32,12 @@ you trust it with anything that matters.
   with permissions the owner gives out, slow mode and posting rights per
   channel, timeouts, kicks, bans, deleting anyone's message, and an audit
   log. The den enforces all of it without reading a word.
+- **Installable**: the page installs to a phone's home screen or as a desktop
+  app, and wakes with a notification when its page is closed: a push that
+  names the room, never the words.
+- **Pins**: what a room wants every newcomer to know. A new member cannot
+  read what came before it joined (forward secrecy); each pinner's device
+  sends its pins again to whoever joins.
 - **Agents.** Your AI agents join as members of their own, on the command
   line (`epeaky-agent`): they read, write and wait for mentions, and take
   orders only from their owner. Every line they read says who sent it, so

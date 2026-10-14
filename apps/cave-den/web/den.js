@@ -910,7 +910,9 @@ export class DenClient {
         try {
           let r;
           try {
-            r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))) });
+            // Words are marked so the den can wake members' closed pages
+            // (a push names the room, never the words); nothing else is.
+            r = await this.push(ch, 'relay', { bytes: b64(this.den.send(room, JSON.stringify(m))), ...(words ? { notify: true } : {}) });
           } catch (e) {
             // The den holds this device to the room's slow mode: wait a window.
             if (e.code === 'slow') this.said[room] = Date.now();
@@ -946,6 +948,12 @@ export class DenClient {
     return this.send(room, { t: 'pin', pin: hex(rand(8)), of: msg.id, from: msg.key, text: String(text).slice(0, 4000) });
   }
   unpin(room, pin) { return this.send(room, { t: 'unpin', pin }); }
+
+  /// Pushes to this device while its page is closed (Den.Push): the den's
+  /// key to subscribe with, then this browser's push address and which rooms.
+  async pushKey() { return (await this.push(this.lobby, 'push_key', {})).key; }
+  pushSub(sub) { return this.push(this.lobby, 'push_sub', sub); }
+  pushOff(endpoint) { return this.push(this.lobby, 'push_off', { endpoint }); }
   edit(room, to, text) { return this.send(room, { t: 'edit', to, text: String(text).slice(0, 4000) }); }
   remove(room, to) { return this.send(room, { t: 'del', to }); }
 

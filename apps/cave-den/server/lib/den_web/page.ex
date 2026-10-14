@@ -44,6 +44,7 @@ defmodule DenWeb.Page do
         "default-src 'none'",
         "script-src 'self' 'wasm-unsafe-eval'",
         "worker-src 'self'",
+        "manifest-src 'self'",
         "style-src 'self'",
         "img-src 'self' data: blob:",
         "media-src 'self' blob:",

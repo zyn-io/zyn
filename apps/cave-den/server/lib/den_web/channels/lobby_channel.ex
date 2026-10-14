@@ -13,7 +13,11 @@ defmodule DenWeb.LobbyChannel do
   the order of roles: "role_save", "role_delete", "role_give", "role_take",
   "timeout", "untimeout", "kick", "ban", "unban", "bans", "room_save",
   "room_delete", "settings_save", "audit", "invite_make", "invites",
-  "invite_withdraw", "requests", "approve", "decline", "owner_pass". After a
+  "invite_withdraw", "requests", "approve", "decline", "owner_pass".
+
+  Pushes (Den.Push): "push_key" → the den's public push key; "push_sub"
+  {endpoint, p256dh, auth, mode} → this device's push address; "push_off"
+  {endpoint} → no more pushes there. After a
   change everyone is sent "mod" (roles, holders, sanctions, the den's name),
   "room" or "room_gone".
   """
@@ -192,6 +196,17 @@ defmodule DenWeb.LobbyChannel do
     end
   end
 
+  defp handle("push_key", _, socket), do: {:reply, {:ok, %{key: Den.Push.public_key()}}, socket}
+
+  defp handle("push_sub", p, socket) when is_map(p) do
+    case Den.Push.subscribe(socket.assigns.key, p) do
+      :ok -> {:reply, {:ok, %{}}, socket}
+      {:error, why} -> {:reply, {:error, %{reason: said(why, "push")}}, socket}
+    end
+  end
+
+  defp handle("push_off", %{"endpoint" => ep}, socket), do: (Den.Push.unsubscribe(socket.assigns.key, ep); {:reply, {:ok, %{}}, socket})
+
   defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
   defp me(socket), do: socket.assigns.key
@@ -244,6 +259,9 @@ defmodule DenWeb.LobbyChannel do
   defp said(:invite, _), do: "There is no such invite."
   defp said(:ambiguous, _), do: "Several invites start like that; give more of the id."
   defp said(:request, _), do: "There is no such request."
+  defp said(:push_service, _), do: "This browser's push service is not one the den sends to."
+  defp said(:push_key, _), do: "That push address is not complete."
+  defp said(:push_sub, _), do: "That push address is not complete."
   defp said(why, _) when is_atom(why) or is_binary(why), do: to_string(why)
   defp said(why, _), do: inspect(why)
 end
