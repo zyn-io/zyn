@@ -21,14 +21,25 @@ const BIN = new URL('../bin/epeaky-agent.mjs', import.meta.url).pathname;
 const HOME = mkdtempSync(join(tmpdir(), 'ea-'));
 const env = { ...process.env, EPEAKY_HOME: HOME };
 
-const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
+// DEN_ENV: an .exs that points the host's commands at another den's database
+// (a fresh den on another port, say), evaluated first.
+const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `${process.env.DEN_ENV ? `Code.eval_file(${JSON.stringify(process.env.DEN_ENV)}); ` : ''}Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
 const invite = () => `${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))')}`;
 /// The command line: its output, or { code, err } when it fails.
 const cli = (...args) => {
   try { return execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8', timeout: 90_000 }).trim(); } catch (e) { return { code: e.status, err: String(e.stderr || '').trim(), out: String(e.stdout || '').trim() }; }
 };
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
-const until = (p, f, arg, ms = 30000) => p.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);
+// Polled from here, not with waitForFunction: that returns at once when the
+// condition is async (a Promise is truthy), so such a check would pass unseen.
+async function until(p, f, arg, ms = 30000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try { if (await p.evaluate(f, arg)) return true; } catch { /* navigating: try again */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function eventually(f, ms = 30000) {
   const end = Date.now() + ms;

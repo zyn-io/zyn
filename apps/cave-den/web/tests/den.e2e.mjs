@@ -22,7 +22,9 @@ const ISSUER_TOKEN = process.env.ISSUER_TOKEN || 'dev-issuer-token-not-for-any-r
 const SERVER = new URL('../../server/', import.meta.url).pathname;
 
 // What the host runs on the den's server (Den.Gate.Members), against its database.
-const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
+// DEN_ENV: an .exs that points the host's commands at another den's database
+// (a fresh den on another port, say), evaluated first.
+const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `${process.env.DEN_ENV ? `Code.eval_file(${JSON.stringify(process.env.DEN_ENV)}); ` : ''}Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
 
 // A stand-in for the host's issuer. Its page reads the hash the den's page
 // put after "#", its server registers that hash with the den (the host's
@@ -55,7 +57,16 @@ const b = await chromium.launch({ executablePath: CHROME, headless: true, args: 
 const errs = [];
 const csp = [];
 const ok = (c, w) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
-const until = (p, f, arg, ms = 30000) => p.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);
+// Polled from here, not with waitForFunction: that returns at once when the
+// condition is async (a Promise is truthy), so such a check would pass unseen.
+async function until(p, f, arg, ms = 30000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try { if (await p.evaluate(f, arg)) return true; } catch { /* navigating: try again */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
 async function person(name, url) {
   const ctx = await b.newContext({ viewport: { width: 1300, height: 900 }, permissions: ['microphone'] });
   const p = await ctx.newPage();
@@ -218,7 +229,11 @@ const nw = await B.p.evaluate(() => window.__den.push(window.__den.lobby, 'open_
 ok(await until(A.p, ([id]) => document.querySelector(`[data-room="${id}"]`), [nw.id]), 'A sees the room B made');
 await A.p.click(`[data-room="${nw.id}"]`);
 ok(await until(A.p, () => /Members · ([2-9]|\d\d)/.test(document.querySelector('#room-meta')?.textContent || ''), null, 30000), 'both are in it');
-ok(await until(B.p, async ([id, n]) => (await window.__den.log(id)).some((m) => m.t === 'note' && m.text === `${n} joined`), [nw.id, A.me.name], 15000), 'the room tells B that A joined');
+// Whoever entered first made the room's group; the other's arrival is a line.
+const joinedLine = async (P, id, n) => P.p.evaluate(async ([r, who]) => (await window.__den.log(r)).some((m) => m.t === 'note' && m.text === `${who} joined`), [id, n]);
+let told = false;
+for (let i = 0; i < 60 && !told; i++) { told = (await joinedLine(B, nw.id, A.me.name)) || (await joinedLine(A, nw.id, B.me.name)); if (!told) await sleep(250); }
+ok(told, 'the room tells one of them that the other joined');
 
 // Unread counts.
 await A.p.click('[data-room="general"]');
@@ -464,7 +479,8 @@ await A.p.click(`[data-member="${Ev.me.key}"]`);
 await A.p.click('#m-ban');
 await A.p.fill('#ask [name=value]', 'spam bot');
 await A.p.click('#ask [data-yes]');
-ok(await until(A.p, ([k]) => !window.__den.members('general').some((m) => m.key === k), [Ev.me.key], 20000), "the ban takes E's device out of General (members' pages remove it)");
+const banned = await until(A.p, ([k]) => !window.__den.members('general').some((m) => m.key === k), [Ev.me.key], 20000);
+ok(banned, `the ban takes E's device out of General (members' pages remove it)${banned ? '' : ` (${await A.p.evaluate(([k]) => JSON.stringify({ still: window.__den.members('general').some((m) => m.key === k), n: window.__den.members('general').length, out: window.__den.sanctionOf?.(k) || null }), [Ev.me.key])})`}`);
 await A.p.click('#member [data-close]');
 await Ev.p.reload({ waitUntil: 'networkidle' });
 ok(await until(Ev.p, () => /removed from the den/.test((document.querySelector('#chat-out')?.textContent || '') + (document.querySelector('#den-status')?.textContent || '')), null, 20000), 'E, banned, is told so and not let back in');
