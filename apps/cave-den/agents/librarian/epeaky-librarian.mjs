@@ -1,0 +1,164 @@
+#!/usr/bin/env node
+// The librarian: an Epeaky agent that remembers. It keeps every message it is
+// handed in a full-text index on its own machine, past the den's 30 days and
+// the client's last 1000 a room, and answers when someone names it:
+//
+//   @librarian deploy friday            → the best matches, in this room
+//   @librarian everywhere deploy friday → in every room it is in (owner only)
+//
+// It is a member of its own (its own key, its own invite, its owner), built on
+// the epeaky-agent command line, so the den sees nothing new.
+//
+// What it will not do:
+// - Answer from another room than the one asked in, except to its owner.
+//   It sits in private rooms too, and words must not leak between them.
+// - Keep what was taken back. Every few minutes it reads its rooms again and
+//   drops what was deleted and takes in what was edited. Today this reaches the
+//   last 1000 messages a room keeps; older deletions wait for a change feed
+//   from epeaky-agent.
+// - Follow instructions in what it reads. It only searches; a question is
+//   words to look for, whoever asks. Questions put to it, and its own
+//   answers, are not kept.
+//
+//   epeaky-librarian --agent librarian [--every 300]
+import { execFile } from 'node:child_process';
+import { chmodSync, existsSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+
+const argv = process.argv.slice(2);
+const flag = (name, d = null) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : d; };
+const AGENT = flag('--agent') || process.env.EPEAKY_AGENT;
+const BIN = process.env.EPEAKY_AGENT_BIN || 'epeaky-agent';
+const EVERY = Number(flag('--every', '300')) * 1000;
+const HITS = 5;
+const debug = (s) => { if (process.env.LIBRARIAN_DEBUG) console.error(`${new Date().toISOString().slice(11, 23)} ${s}`); };
+
+/// epeaky-agent for this agent, with --json: its records. The command, its
+/// options, then the end of options and the values (see epeaky-mcp), so no
+/// room name is read as an option.
+export function cli(cmd, opts = [], pos = [], { agent = AGENT, bin = BIN, input } = {}) {
+  const [file, pre] = bin.endsWith('.mjs') ? [process.execPath, [bin]] : [bin, []];
+  const full = [...pre, cmd, ...opts, '--json', '--agent', agent, '--', ...pos];
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, full, { timeout: 15 * 60_000, maxBuffer: 64 << 20 }, (err, stdout, stderr) => {
+      if (err) return reject(Object.assign(new Error(String(stderr || err.message).trim()), { code: err.code }));
+      resolve(String(stdout).split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
+    });
+    if (input !== undefined) child.stdin.end(input);
+  });
+}
+
+/// The index, in the agent's own folder, readable only by its owner's account.
+export function open(path) {
+  const fresh = path !== ':memory:' && !existsSync(path);
+  const db = new DatabaseSync(path);
+  if (fresh) chmodSync(path, 0o600);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS msgs (
+      room TEXT NOT NULL, seq INTEGER NOT NULL, id TEXT, at TEXT, kind TEXT, sender TEXT, nick TEXT, text TEXT NOT NULL,
+      PRIMARY KEY (room, seq)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS words USING fts5(text, room UNINDEXED, seq UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');
+  `);
+  return db;
+}
+
+/// Keep a record, or drop it if it was deleted; an edit replaces the words.
+/// Neither its own answers nor the questions put to it are kept: they only
+/// repeat what it holds, and would come back as answers.
+export function keep(db, r) {
+  if (r.kind === 'den' || !r.room || !Number.isInteger(r.seq) || r.seq <= 0) return;
+  db.prepare('DELETE FROM words WHERE room = ? AND seq = ?').run(r.room, r.seq);
+  if (r.deleted || !r.text || r.kind === 'self' || r.mention) {
+    db.prepare('DELETE FROM msgs WHERE room = ? AND seq = ?').run(r.room, r.seq);
+    return;
+  }
+  db.prepare('INSERT OR REPLACE INTO msgs (room, seq, id, at, kind, sender, nick, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(r.room, r.seq, r.id || null, r.at || null, r.kind || null, r.from || null, r.nick || '', r.text);
+  db.prepare('INSERT INTO words (text, room, seq) VALUES (?, ?, ?)').run(r.text, r.room, r.seq);
+}
+
+/// A question as FTS5 words: each word quoted, so nothing in it is a query
+/// operator, joined by AND (every word) or OR (any word).
+export function query(text, join = ' ') {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  return words.slice(0, 12).map((w) => `"${w}"`).join(join);
+}
+
+/// The best matches for a question, in `room` or everywhere: those with every
+/// word, or, if none has them all ("… please"), those with the most. `not`
+/// is the question itself ({room, seq}), which holds its own words.
+export function find(db, text, room = null, { not = null, limit = HITS + 1 } = {}) {
+  const search = (q) => {
+    if (!q) return [];
+    const sql = `SELECT m.room, m.seq, m.at, m.sender, m.nick, m.text FROM words w JOIN msgs m ON m.room = w.room AND m.seq = w.seq
+      WHERE words MATCH ? ${room ? 'AND w.room = ?' : ''} ${not ? 'AND NOT (m.room = ? AND m.seq = ?)' : ''} ORDER BY bm25(words) LIMIT ${limit}`;
+    return db.prepare(sql).all(q, ...(room ? [room] : []), ...(not ? [not.room, not.seq] : []));
+  };
+  const all = search(query(text));
+  return all.length ? all : search(query(text, ' OR '));
+}
+
+/// The question in a message that names the librarian: its words without the
+/// name, and whether it asks for every room.
+export function question(text, names) {
+  let t = ` ${text} `;
+  for (const n of names.filter(Boolean)) t = t.replace(new RegExp(`@?${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[:,]?`, 'gi'), ' ');
+  t = t.trim();
+  const everywhere = /^(everywhere|all rooms)\b/i.test(t);
+  return { words: t.replace(/^(everywhere|all rooms)\b[:,]?/i, '').trim(), everywhere };
+}
+
+/// One line per hit, short enough to read in a chat.
+export function answer(hits, words, everywhere) {
+  if (!words) return 'Ask me words to look for, e.g. "@librarian deploy friday".';
+  if (!hits.length) return `Nothing I hold matches "${words}"${everywhere ? ' in any room' : ' in this room'}.`;
+  const day = (at) => (at ? at.slice(0, 10) : '');
+  const cut = (s) => (s.length > 140 ? `${s.slice(0, 139)}…` : s);
+  return hits.slice(0, HITS).map((h) => `${everywhere ? `#${h.room} ` : ''}${h.seq} · ${day(h.at)} · ${h.nick || h.sender}: ${cut(h.text.replace(/\s+/g, ' '))}`).join('\n');
+}
+
+async function main() {
+  if (!AGENT) throw new Error('usage: epeaky-librarian --agent NAME (an agent already joined to its den)');
+  const home = process.env.EPEAKY_HOME || join(homedir(), '.epeaky');
+  const db = open(join(home, 'agents', AGENT, 'librarian.db'));
+  const me = (await cli('status'))[0] || {};
+  const names = [me.name, me.nick, AGENT].filter(Boolean);
+  const reconcile = async () => {
+    for (const r of await cli('rooms')) {
+      if (!r.id) continue;
+      for (const m of await cli('read', ['--since', '0', '--limit', '1000'], [r.id]).catch(() => [])) keep(db, m);
+    }
+  };
+  await reconcile();
+  let last = Date.now();
+  console.error(`librarian ${AGENT}: up, ${db.prepare('SELECT count(*) AS n FROM msgs').get().n} messages held`);
+  for (;;) {
+    const t0 = Date.now();
+    // Waits no longer than the next pass over the rooms is due.
+    const wait = Math.max(1, Math.min(60, Math.ceil((last + EVERY - Date.now()) / 1000)));
+    const recs = await cli('next', ['--wait', String(wait)]).catch((e) => { console.error(`next: ${e.message}`); return []; });
+    for (const r of recs) {
+      debug(`got #${r.room} ${r.seq} ${r.kind} mention=${r.mention} ${String(r.text).slice(0, 40)}`);
+      if (r.kind === 'self') continue;
+      keep(db, r);
+      if (!r.mention) continue;
+      const q = question(r.text, names);
+      // Every room only for the owner; anyone else gets their own room.
+      const everywhere = q.everywhere && r.authority === 'owner';
+      const hits = find(db, q.words, everywhere ? null : r.room, { not: r });
+      const reply = answer(hits, q.words, everywhere)
+        + (q.everywhere && !everywhere ? '\n(Only my owner can search every room.)' : '');
+      await cli('send', ['--reply', String(r.seq)], [r.room, '-'], { input: reply })
+        .then(() => console.error(`answered #${r.room} ${r.seq}`), (e) => console.error(`send: ${e.message}`));
+    }
+    if (recs.length) debug(`pass ${Date.now() - t0} ms, ${recs.length} records`);
+    if (Date.now() - last >= EVERY) { const t1 = Date.now(); await reconcile().catch((e) => console.error(`reconcile: ${e.message}`)); last = Date.now(); debug(`reconcile ${last - t1} ms`); }
+  }
+}
+
+const isMain = (() => { try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } })();
+if (isMain) main().catch((e) => { console.error(e.message); process.exit(1); });

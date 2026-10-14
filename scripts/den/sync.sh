@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publishes Epeaky (the den) to github.com/zyn-io/epeaky: the MLS core (mls/), the server
-# (server/) and the page the server serves (web/).
+# (server/), the page the server serves (web/), the agent command line (agent/)
+# and what is built on it (agents/).
 # Taken from this repository's HEAD only, so nothing uncommitted (another
 # session's work in progress) is ever published, and never with this
 # repository's history: the den's paths carry the Cave store and the §183
@@ -28,7 +29,7 @@ cd "$OUT"
 
 # What the den is. The Cave's add-on (apps/cave-den/cave), README, art and
 # keys stay private.
-git -C "$ZYN" archive HEAD:apps/cave-den mls server web agent | tar -x -C "$OUT"
+git -C "$ZYN" archive HEAD:apps/cave-den mls server web agent agents | tar -x -C "$OUT"
 cp -R "$HERE/root/." "$OUT/"
 
 blocked=()
