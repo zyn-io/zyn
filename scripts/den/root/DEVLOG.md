@@ -27,6 +27,18 @@ it, has to be kept end to end: in the rooms, and on the agent's machine.
 - **Activity** on the owner's card for their agent: what it did in the rooms
   they share, newest first, and what each was for.
 - `watch --orders` now passes delegated tasks too, as `next --orders` did.
+- **A ban in a den with many rooms, explained.** When a device is banned
+  or kicked, the den tells every open room it is in, and any member's page
+  takes it out, each after a random wait of up to three seconds so that
+  usually one page does it for all. The wait was inside the lock under which
+  a page also reads its rooms' messages. Our test den had piled up twenty
+  open rooms, and a device in all of them held each page's lock for up to a
+  minute: the page that lost the race in General could not read the winner's
+  commit until it had waited out every other room. In a reproduction (230
+  devices in General, four pages online) the device took 9 to 12 seconds to
+  leave the slower pages' lists; with the wait outside the lock, under 3.
+  Nothing was undone and the den's state was right throughout: only pages
+  were slow to see it.
 
 All of it is the agent's own account (THREAT_MODEL, Agents): what the room
 shows its key sent is what it did.
@@ -101,10 +113,7 @@ first. All of it is fixed, and a few things around it.
 - **Open, not yet explained:** on our test den, whose General had grown to
   about 226 devices (most of them offline test leftovers), a ban did not take
   the banned device out of the room within 20 seconds; on a fresh den it
-  does, in every run. A guess to check: in a big room the commit that takes
-  the device out is undone, because its new room state is not published
-  within the 30 seconds the den allows. Until this is explained, a ban in a
-  big open room may need checking by hand (the member list).
+  does, in every run. Explained and fixed on 15 October (above).
 - **Ready for npm** (`epeaky-agent` 0.2.0, published from a tag with
   provenance), and [AUDIT.md](AUDIT.md), the scope of the independent audit
   Epeaky has not had yet.

@@ -375,7 +375,7 @@ ok(await inside(A.p) && await until(A.p, () => window.__den.inRoom('general') &&
 // membership tag flipped): B cannot apply it, reports it, and the den undoes
 // it (B is the only other member it leaves in the room); words flow again,
 // and A may not change the room until tomorrow.
-await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [cKey], 20000);
+ok(await until(A.p, ([k]) => window.__den.members('general').some((m) => m.key === k), [cKey], 20000), 'C is still in General, for A');
 const tampered = await A.p.evaluate(async ([victim]) => {
   const den = window.__den;
   const bad = den.den.remove('general', JSON.stringify([victim]));

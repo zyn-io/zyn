@@ -548,7 +548,7 @@ export class DenClient {
     this.channels.set(room, ch);
     ch.on('msg', (m) => this.lock(() => this.take(room, m)));
     ch.on('rolled_back', (r) => this.lock(() => this.rolledBack(room, r)));
-    ch.on('expired', ({ keys }) => this.lock(() => this.removeStale(room, keys, true)));
+    ch.on('expired', ({ keys }) => this.expired(room, keys));
     ch.on('typing', ({ key }) => this.on('typing', { room, key }));
     ch.on('deleted', ({ seq }) => this.lock(() => this.deleted(room, seq)));
     this.joined.set(room, new Promise((resolve) => {
@@ -602,7 +602,7 @@ export class DenClient {
     this.soonRefresh(room);
     const present = (await this.push(ch, 'state', {})).present || [];
     const stale = this.members(room).map((m) => m.key).filter((k) => k !== this.den.key() && !present.includes(k));
-    if (stale.length) await this.removeStale(room, stale, false);
+    if (stale.length) await this.removeStale(room, stale);
   }
 
   async publishInfo(room) {
@@ -1296,14 +1296,27 @@ export class DenClient {
 
   /// Take out devices whose day ended. Every member's device tries; the den
   /// keeps the first commit, the others step back.
-  async removeStale(room, keys, wait) {
+  /// The den says devices are out of an open room (their day ended, or a
+  /// moderator took them out). Any member's page may commit that; each waits
+  /// a moment of its own first, so one usually does it for all. The wait is
+  /// outside the lock: the room's messages, another page's commit among them,
+  /// go on being read meanwhile (with the lock held, a page in many rooms
+  /// read nothing for as long as all its waits together).
+  async expired(room, keys) {
+    await new Promise((r) => setTimeout(r, Math.random() * 3000));
+    return this.lock(() => this.removeStale(room, keys));
+  }
+
+  async removeStale(room, keys) {
     if (!this.inRoom(room)) return;
     // In a private room the den's word that someone's day ended is not enough
     // to take them out: there, only a member decides. (A device whose day
     // ended cannot reach the room's messages without a new token anyway.)
     if (this.rooms.get(room)?.kind === 'private' || /^p-[0-9a-f]{32}$/.test(room)) return;
-    if (wait) await new Promise((r) => setTimeout(r, Math.random() * 3000));
-    const ours = keys.filter((k) => k !== this.den.key());
+    // Only those still in: another page may have taken them out already.
+    const now = new Set(this.members(room).map((m) => m.key));
+    const ours = keys.filter((k) => k !== this.den.key() && now.has(k));
+    if (!ours.length) return;
     const commit = this.den.remove(room, JSON.stringify(ours));
     if (!commit) return;
     try {
