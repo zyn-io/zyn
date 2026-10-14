@@ -119,6 +119,7 @@ export class Agent {
     if (ev === 'removed') { this.state = 'removed'; this.log('this agent was removed from the den by its moderators'); }
     if (ev === 'error' || ev === 'notice') this.log(`${d.room || ''}: ${d.error || d.text}`);
     if (ev === 'error' && d?.room) (this.failed ||= new Set()).add(d.room);
+    if (ev === 'rules') this.noteRules();
     if (ev === 'ready') this.failed?.delete(d.room);
     // One at a time: taking an invitation changes the list it came from.
     if (ev === 'invites') this.inviting = (this.inviting || Promise.resolve()).then(() => this.invited()).catch((e) => this.log(`invitation: ${e.message}`));
@@ -126,8 +127,13 @@ export class Agent {
     if (ev === 'doc' && this.private(d.room) && !this.trusted.has(d.room) && this.den.fromOwner(d.key)) this.trust(d.room);
     if ((ev === 'members' || ev === 'ready') && this.private(d.room) && this.den.inRoom(d.room)) this.ownerStill(d.room);
     if (ev === 'message' && d.message && !d.mine && (d.kind === 'msg' || d.kind === 'file') && this.visible(d.room)) {
-      const r = this.recordOf(d.room, d.message, d.mention);
-      for (const f of this.listeners) f(r);
+      // In the order they came; with the room's log when the message points
+      // to another (its reply, what it was sent for).
+      this.feeding = (this.feeding || Promise.resolve()).then(async () => {
+        const log = d.message.reply || d.message.for ? await this.den.log(d.room) : null;
+        const r = this.recordOf(d.room, d.message, d.mention, log);
+        for (const f of this.listeners) f(r);
+      }).catch((e) => this.log(`message: ${e.message}`));
     }
     // An edit (by its author) or a deletion (by its author, or a moderator in
     // an open room): kept, numbered, for next --changes.
@@ -198,7 +204,7 @@ export class Agent {
     return 'member';
   }
 
-  recordOf(room, m, mention = null, log = null) {
+  recordOf(room, m, mention = null, log = null, inner = false) {
     const key = m.key || null;
     const kind = m.t === 'note' ? 'den' : this.kindOf(key, m);
     const replySeq = m.reply && log ? log.find((x) => x.id === m.reply)?.seq || null : null;
@@ -217,7 +223,104 @@ export class Agent {
       r.text = "(a file: your owner's rules keep files from this agent)";
       r.file_withheld = true;
     }
+    // What its sender says it was sent for: a message of this room, with
+    // that message's own kind and authority (an order, or information).
+    if (m.for && !inner) {
+      const of = log?.find((x) => x.id === m.for && (x.t === 'msg' || x.t === 'file'));
+      if (of) {
+        const o = this.recordOf(room, of, null, log, true);
+        r.for = { id: of.id, seq: of.seq || 0, key: of.key || null, kind: o.kind, authority: o.authority };
+      } else r.for = null;
+    }
     return r;
+  }
+
+  /// A message of this room's log by its number or id: words or a file.
+  static find(log, q) {
+    return /^\d+$/.test(String(q)) ? log.find((m) => m.seq === Number(q) && (m.t === 'msg' || m.t === 'file')) : log.find((m) => m.id === q && (m.t === 'msg' || m.t === 'file'));
+  }
+
+  /// What an action in `room` is for, and how that is known: `given` (the
+  /// caller named it), `reply` (the order it answers), `task` (the task it
+  /// reports on), or `last`: the order last handed in this room within the
+  /// hour, or anywhere within ten minutes. `last` is a guess: the journal
+  /// keeps it, marked; the room is never told it.
+  causeOf(room, log, { given = null, replyId = null, taskId = null } = {}) {
+    const as = (m, how) => {
+      const r = this.recordOf(room, m, null, log, true);
+      return { room, id: m.id, seq: m.seq || 0, key: m.key || null, kind: r.kind, authority: r.authority, on_behalf_of: r.on_behalf_of || null, how };
+    };
+    if (given !== null && given !== undefined && given !== '') {
+      const hit = Agent.find(log, given);
+      if (!hit) throw Object.assign(new Error(`No message ${given} in #${room} on this agent.`), { code: 'for' });
+      return as(hit, 'given');
+    }
+    if (taskId) { const t = log.find((x) => x.id === taskId); if (t) return as(t, 'task'); }
+    if (replyId) {
+      const hit = log.find((x) => x.id === replyId);
+      if (hit) { const c = as(hit, 'reply'); if (c.authority !== 'none') return c; }
+    }
+    const now = Date.now();
+    const here = this.lastOrder?.[room];
+    if (here && now - here.t < 3_600_000) return { ...here.cause, how: 'last' };
+    const any = Object.values(this.lastOrder || {}).filter((x) => now - x.t < 600_000).sort((a, b) => b.t - a.t)[0];
+    return any ? { ...any.cause, how: 'last' } : null;
+  }
+
+  /// The cause the room is told: only one that was named, replied to or
+  /// reported on.
+  static sealed(cause) {
+    return cause && cause.how !== 'last' ? cause.id : null;
+  }
+
+  // ---- The journal ------------------------------------------------------------------
+
+  /// What this agent was told and what it did, kept on its own machine (in
+  /// its folder, as its keys are): orders it was handed, what it sent, tasks
+  /// it gave and reported on, its owner and rules changing. The last 5000.
+  /// Its own account: the room shows what this agent's key actually sent.
+  journal(entries) {
+    const list = [].concat(entries);
+    if (!list.length) return this.journaling;
+    this.journaling = (this.journaling || Promise.resolve()).then(async () => {
+      const j = (await this.den.kv.get('journal')) || { n: 0, list: [] };
+      for (const e of list) { j.n += 1; j.list.push({ n: j.n, at: new Date().toISOString(), ...e }); }
+      j.list = j.list.slice(-5000);
+      await this.den.kv.put('journal', j);
+    }).catch((e) => this.log(`journal: ${e.message}`));
+    return this.journaling;
+  }
+
+  /// The journal's last `limit` entries, oldest first.
+  async journalOf({ limit = 100 } = {}) {
+    await this.journaling;
+    const j = (await this.den.kv.get('journal')) || { n: 0, list: [] };
+    return j.list.slice(-Math.max(1, Math.min(5000, limit)));
+  }
+
+  /// Orders as they are handed (by next or watch): each once in the journal,
+  /// and the last in each room kept for causeOf's guess.
+  async handedOrders(records) {
+    if (!this.handedIds) {
+      const j = (await this.den.kv.get('journal')) || { list: [] };
+      this.handedIds = new Set(j.list.filter((e) => e.act === 'handed').map((e) => e.id));
+    }
+    const fresh = records.filter((r) => !r.change && (r.authority === 'owner' || r.authority === 'delegated') && !this.handedIds.has(r.id));
+    for (const r of fresh) {
+      this.handedIds.add(r.id);
+      (this.lastOrder ||= {})[r.room] = { t: Date.now(), cause: { room: r.room, id: r.id, seq: r.seq, key: r.key, kind: r.kind, authority: r.authority, on_behalf_of: r.on_behalf_of || null } };
+    }
+    if (this.handedIds.size > 6000) this.handedIds = new Set([...this.handedIds].slice(-5000));
+    await this.journal(fresh.map((r) => ({ act: 'handed', room: r.room, seq: r.seq, id: r.id, key: r.key, kind: r.kind, authority: r.authority, on_behalf_of: r.on_behalf_of || null, ...(r.task ? { task: true } : {}), text: String(r.text || '').slice(0, 2000) })));
+  }
+
+  /// The owner's rules, in the journal when they change.
+  noteRules() {
+    const now = this.rulesNow();
+    const s = JSON.stringify(now);
+    if (s === this.rulesSeen) return;
+    this.rulesSeen = s;
+    this.journal({ act: 'rules', rules: now });
   }
 
   /// A room by its id, the start of its id, or its title.
@@ -255,7 +358,7 @@ export class Agent {
     return list.map((m) => this.recordOf(r.id, m, null, log));
   }
 
-  async send(q, text, reply = null) {
+  async send(q, text, reply = null, given = null) {
     const r = this.room(q);
     const words = String(text ?? '').trim();
     if (!words) throw Object.assign(new Error('Nothing to send.'), { code: 'empty' });
@@ -269,9 +372,12 @@ export class Agent {
     if (!this.den.mayPost(r.id)) throw Object.assign(new Error(`This agent may not write in #${r.id}.`), { code: 'no_post' });
     const s = this.den.sanctionOf(this.me.key);
     if (s) throw Object.assign(new Error(s.kind === 'timeout' ? `This agent is timed out until ${new Date(s.until * 1000).toISOString()}.` : 'This agent was removed from the den.'), { code: s.kind });
-    const id = await this.den.say(r.id, words.slice(0, 4000), replyId);
+    const cause = this.causeOf(r.id, await this.den.log(r.id), { given, replyId });
+    const id = await this.den.say(r.id, words.slice(0, 4000), replyId, Agent.sealed(cause));
     const sent = (await this.den.log(r.id)).find((m) => m.id === id);
-    return { room: r.id, id, seq: sent?.seq || null };
+    const { how, ...of } = cause || {};
+    await this.journal({ act: 'sent', room: r.id, seq: sent?.seq || null, id, for: cause ? of : null, for_how: how || null });
+    return { room: r.id, id, seq: sent?.seq || null, for: cause ? of : null, for_how: how || null };
   }
 
   async search(q) {
@@ -366,6 +472,7 @@ export class Agent {
         else this.handed[r.room] = Math.max(this.handed[r.room] ?? 0, r.seq);
       }
       if (out.some((r) => !r.change)) await this.den.kv.put('handed', this.handed);
+      await this.handedOrders(out);
       if (out.some((r) => r.change)) await this.den.kv.put('handedChange', this.handedChange);
       return out;
     } finally {
@@ -411,12 +518,14 @@ export class Agent {
     const ids = artifacts.map((a) => { const hit = /^\d+$/.test(a) ? log.find((x) => x.seq === Number(a)) : log.find((x) => x.id === a); if (!hit) throw Object.assign(new Error(`No message ${a} in #${room} on this agent.`), { code: 'task' }); return hit.id; });
     await this.den.taskState(room, m.id, state, text, ids);
     const after = (await this.den.log(room)).find((x) => x.id === m.id);
+    const { how, ...of } = this.causeOf(room, log, { taskId: m.id }) || {};
+    await this.journal({ act: 'task-state', room, seq: m.seq || 0, id: m.id, state, for: of, for_how: how });
     return this.recordOf(room, after, null, await this.den.log(room));
   }
 
   /// Give a task to a member of the room (another agent): by its nickname,
   /// device name or key.
-  async newTask(q, toQ, text, reply = null) {
+  async newTask(q, toQ, text, reply = null, given = null) {
     const r = this.room(q);
     const want = String(toQ || '').replace(/^@/, '').toLowerCase();
     const members = this.den.members(r.id).filter((x) => x.key !== this.me.key);
@@ -435,9 +544,13 @@ export class Agent {
       replyId = hit.id;
     }
     if (!this.den.mayPost(r.id)) throw Object.assign(new Error(`This agent may not write in #${r.id}.`), { code: 'no_post' });
-    const id = await this.den.task(r.id, hits[0].key, words, replyId);
+    const cause = this.causeOf(r.id, await this.den.log(r.id), { given, replyId });
+    const id = await this.den.task(r.id, hits[0].key, words, replyId, Agent.sealed(cause));
     const log = await this.den.log(r.id);
-    return this.recordOf(r.id, log.find((m) => m.id === id), null, log);
+    const made = log.find((m) => m.id === id);
+    const { how, ...of } = cause || {};
+    await this.journal({ act: 'task-new', room: r.id, seq: made?.seq || 0, id, to: hits[0].key, for: cause ? of : null, for_how: how || null });
+    return { ...this.recordOf(r.id, made, null, log), for_how: how || null };
   }
 
   /// The pins of every room (or one), each as a line from its pinner: with
@@ -491,7 +604,9 @@ export class Agent {
       await this.den.useOwn(code);
       const key = await done;
       if (!key) throw Object.assign(new Error('No answer. Is the page that shows the code still open, in this den, and the code less than ten minutes old?'), { code: 'no_answer' });
-      return this.ownerOf();
+      const o = this.ownerOf();
+      await this.journal({ act: 'owner', key: o?.key || null, confirmed: !!o?.confirmed });
+      return o;
     } finally {
       clearTimeout(timer);
       this.listeners.delete(f);
@@ -502,6 +617,7 @@ export class Agent {
   async clearOwner() {
     this.held();
     await this.den.setOwner(null);
+    await this.journal({ act: 'owner', key: null });
   }
 
   async status() {

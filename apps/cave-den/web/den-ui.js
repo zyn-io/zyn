@@ -377,6 +377,10 @@ export function mountDen(den, el, me) {
       parts.push(`<li class="msg gone${cont ? ' cont' : ''}" data-id="${esc(m.id)}">${gutter}<div class="msg-main">${cont ? '' : head}<p class="body"><em>${m.byMod ? 'Message deleted by a moderator' : 'Message deleted'}</em></p></div></li>`);
       return parts.join('');
     }
+    // What its sender (an agent) says it sent this for: an order, a task, or
+    // just someone's message.
+    const c = den.causeOf(m, log);
+    const because = c ? `<button type="button" class="because" data-jump="${esc(c.id)}">${c.how === 'order' ? `For ${esc(display(c.key))}` : c.how === 'task' ? `For ${esc(display(c.key))}'s task` : `Re ${esc(display(c.key))}'s message`}</button>` : '';
     const quoted = m.reply && log.find((x) => x.id === m.reply);
     const q = m.reply ? `<button type="button" class="quote" data-jump="${esc(m.reply)}">${quoted ? `<b>${esc(display(quoted.key))}</b> ${esc(quoted.deleted ? 'Message deleted' : (quoted.text || quoted.file?.name || '').slice(0, 140))}` : 'An earlier message'}</button>` : '';
     let body = `<div class="body">${words(m.text)}${m.edited && cont ? ' <span class="edited">edited</span>' : ''}</div>`;
@@ -391,14 +395,15 @@ export function mountDen(den, el, me) {
       const t = m.task;
       const done = ['completed', 'failed', 'canceled', 'rejected'].includes(t.state);
       const results = (t.artifacts || []).map((a, n) => `<button type="button" class="task-result" data-jump="${esc(a)}">Result ${n + 1}</button>`).join('');
-      body += `<div class="task-card s-${esc(t.state)}"><span class="task-chip">${esc(TASK_LABEL[t.state] || t.state)}</span><span class="task-for">Task for ${whoHtml(t.to)}</span>${t.text ? `<span class="task-text">${esc(t.text)}</span>` : ''}${results}${own && !done ? '<button type="button" class="mini" data-act="task-cancel">Cancel task</button>' : ''}</div>`;
+      const steps = (t.history || []).length > 1 ? `<details class="task-history"><summary>History</summary><ol>${t.history.map((h) => `<li>${esc(TASK_LABEL[h.state] || h.state)} <span>${esc(display(h.by))}</span> <time datetime="${new Date(h.at).toISOString()}">${time(h.at)}</time></li>`).join('')}</ol></details>` : '';
+      body += `<div class="task-card s-${esc(t.state)}"><span class="task-chip">${esc(TASK_LABEL[t.state] || t.state)}</span><span class="task-for">Task for ${whoHtml(t.to)}</span>${t.text ? `<span class="task-text">${esc(t.text)}</span>` : ''}${results}${own && !done ? '<button type="button" class="mini" data-act="task-cancel">Cancel task</button>' : ''}${steps}</div>`;
     }
     // Reactions are kept by the reactor's key; shown by name.
     const reactions = Object.entries(m.reactions || {}).map(([e, who]) => `<button type="button" class="chip${who.includes(me.key) ? ' on' : ''}" data-react="${esc(m.id)}" data-emoji="${esc(e)}" title="${esc(who.map(display).join(', '))}" aria-pressed="${who.includes(me.key)}">${esc(e)} <span>${who.length}</span></button>`).join('');
     const ping = !den.isMe(m.key) && ([me.key, ...den.linkedTo(me.key)].some((k) => (m.text || '').includes(`@m-${k.slice(0, 20)}`)) || den.everyone(room, m));
     parts.push(`<li class="msg${own ? ' mine' : ''}${ping ? ' ping' : ''}${cont ? ' cont' : ''}" data-id="${esc(m.id)}">
       ${gutter}
-      <div class="msg-main">${cont ? '' : head}${q}${body}${reactions ? `<div class="chips">${reactions}</div>` : ''}</div>
+      <div class="msg-main">${cont ? '' : head}${because}${q}${body}${reactions ? `<div class="chips">${reactions}</div>` : ''}</div>
       <div class="tools" role="toolbar" aria-label="Message actions">
         <button type="button" data-act="reply" aria-label="Reply" title="Reply">${ICON.reply}</button>
         <button type="button" data-act="react" aria-label="React" title="React" aria-expanded="false">${ICON.react}</button>

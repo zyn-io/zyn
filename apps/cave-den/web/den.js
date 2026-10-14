@@ -25,6 +25,10 @@ const KEEP = 1000;
 /// A task's states (A2A's, without auth-required); the last four are final.
 export const TASK_STATES = ['working', 'input-required', 'completed', 'failed', 'canceled', 'rejected'];
 const FINAL = new Set(['completed', 'failed', 'canceled', 'rejected']);
+/// A task's states as they came, oldest first: who set each, and when.
+function noteState(t, state, by, at) {
+  t.history = [...(Array.isArray(t.history) ? t.history : []), { state, by, at: at || Date.now() }].slice(-50);
+}
 const INVITATIONS = 5;
 export const VOICE_LABEL = 'den voice';
 
@@ -850,8 +854,11 @@ export class DenClient {
       if (m.t === 'file' && !file) return;
       // As the sender's page caps it: a longer message from a modified client is cut.
       // A task: words for one member (an agent) to do, its state kept here.
-      const task = m.t === 'msg' && m.task && typeof m.task.to === 'string' && /^[0-9a-f]{64}$/.test(m.task.to) && m.task.to !== m.key ? { to: m.task.to, state: 'submitted', text: '', artifacts: [], updated: m.at || Date.now(), by: null } : null;
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {}, ...(task ? { task } : {}) };
+      const task = m.t === 'msg' && m.task && typeof m.task.to === 'string' && /^[0-9a-f]{64}$/.test(m.task.to) && m.task.to !== m.key ? { to: m.task.to, state: 'submitted', text: '', artifacts: [], updated: m.at || Date.now(), by: null, history: [{ state: 'submitted', by: m.key, at: m.at || Date.now() }] } : null;
+      // What it was sent for: an earlier message of this room (the order an
+      // agent acts on), as its sender says.
+      const cause = typeof m.for === 'string' && /^[0-9a-f]{16}$/.test(m.for) && m.for !== m.id ? m.for : null;
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {}, ...(task ? { task } : {}), ...(cause ? { for: cause } : {}) };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
@@ -872,7 +879,10 @@ export class DenClient {
       if (m.t === 'edit' && log[i].task) return;
       if (m.t === 'edit') Object.assign(log[i], { text: String(m.text || '').slice(0, 4000), edited: true });
       else Object.assign(log[i], { text: '', file: null, deleted: true });
-      if (m.t === 'del' && log[i].task && !FINAL.has(log[i].task.state)) Object.assign(log[i].task, { state: 'canceled', text: '', updated: m.at || Date.now(), by: m.key });
+      if (m.t === 'del' && log[i].task && !FINAL.has(log[i].task.state)) {
+        Object.assign(log[i].task, { state: 'canceled', text: '', updated: m.at || Date.now(), by: m.key });
+        noteState(log[i].task, 'canceled', m.key, m.at);
+      }
       shown = log[i];
     } else if (m.t === 'task-state') {
       // A task's state, from the member it is for; "canceled" from its author.
@@ -884,6 +894,7 @@ export class DenClient {
       // Results only from the member that did the work.
       const artifacts = Array.isArray(m.artifacts) ? m.artifacts.filter((a) => typeof a === 'string' && log.some((x) => x.id === a && x.key === t.to)).slice(0, 20) : [];
       Object.assign(t, { state: m.state, text: typeof m.text === 'string' ? m.text.slice(0, 2000) : '', artifacts, updated: m.at || Date.now(), by: m.key });
+      noteState(t, m.state, m.key, m.at);
       shown = log[i];
     } else if (m.t === 'seen') {
       // A roommate's fingerprint of the door key the den showed it for a day,
@@ -985,17 +996,18 @@ export class DenClient {
     });
   }
 
-  say(room, text, reply = null) {
+  /// `cause`: the message of this room it is sent for (an agent's order).
+  say(room, text, reply = null, cause = null) {
     // A new message after this one: others see the writing again at once.
     this.typingAt = 0;
-    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}) });
+    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}), ...(cause ? { for: cause } : {}) });
   }
   react(room, to, emoji) { return this.send(room, { t: 'react', to, emoji }); }
   /// A task for one member (an agent): words, sealed like any message, that
   /// it reports on with taskState. Its id is the message's.
-  task(room, to, text, reply = null) {
+  task(room, to, text, reply = null, cause = null) {
     this.typingAt = 0;
-    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), task: { to }, ...(reply ? { reply } : {}) });
+    return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), task: { to }, ...(reply ? { reply } : {}), ...(cause ? { for: cause } : {}) });
   }
   /// A task's new state: working, input-required, completed, failed or
   /// rejected (by the member it is for), canceled (by its author).
@@ -1328,6 +1340,18 @@ export class DenClient {
   linkedTo(key) {
     const says = (k) => (k === this.me?.key ? this.myLinks : this.claims[k] || []);
     return says(key).filter((k) => k !== key && says(k).includes(key));
+  }
+
+  /// What a message says it was sent for, as this page reads it: `order`
+  /// (words of its sender's owner), `task` (a task given to its sender), or
+  /// `re` (anyone else's message: information). Null when it says none, or
+  /// names a message this page does not hold. Its sender's own account.
+  causeOf(m, log) {
+    const of = m?.for && log.find((x) => x.id === m.for && (x.t === 'msg' || x.t === 'file'));
+    if (!of) return null;
+    const owner = this.agentOwner(m.key);
+    const how = owner && [owner, ...this.linkedTo(owner)].includes(of.key) ? 'order' : of.task?.to === m.key ? 'task' : 're';
+    return { how, id: of.id, key: of.key };
   }
 
   /// This device's own, and those linked to it: "you".

@@ -141,13 +141,14 @@ async function answer(agent, cmd, a) {
     case 'status': return agent.status();
     case 'rooms': return agent.rooms();
     case 'read': return agent.read(a.room, a);
-    case 'send': return agent.send(a.room, a.text, a.reply);
+    case 'send': return agent.send(a.room, a.text, a.reply, a.for ?? null);
     case 'search': return agent.search(a.q);
     case 'next': return agent.next(a);
     case 'pins': return agent.pins(a.room);
     case 'rules': return agent.rulesNow();
     case 'tasks': return agent.tasks(a);
-    case 'task': return a.new ? agent.newTask(a.room, a.to, a.text, a.reply) : agent.taskState(a.id, a.state, a.text || '', a.artifacts || []);
+    case 'task': return a.new ? agent.newTask(a.room, a.to, a.text, a.reply, a.for ?? null) : agent.taskState(a.id, a.state, a.text || '', a.artifacts || []);
+    case 'log': return agent.journalOf(a);
     case 'owner':
       if (a.clear) { await agent.clearOwner(); return null; }
       if (a.code) return agent.own(a.code);
@@ -166,7 +167,8 @@ async function watch(agent, sock, a, send) {
   const f = (r) => {
     if (room && r.room !== room) return;
     if (a.mentions && !r.mention) return;
-    if (a.orders && r.authority !== 'owner') return;
+    if (a.orders && r.authority !== 'owner' && r.authority !== 'delegated') return;
+    agent.handedOrders([r]).catch(() => {});
     send({ message: r });
     if (a.once) { agent.listeners.delete(f); sock.end(); }
   };

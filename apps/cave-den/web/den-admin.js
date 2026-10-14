@@ -351,6 +351,33 @@ export function mountAdmin(den, el, ui) {
       <button class="act small" type="submit">Save</button></fieldset></form>`;
   }
 
+  const ownAgent = (key) => { const o = den.agentOwner(key); return !!o && [den.me.key, ...den.linkedTo(den.me.key)].includes(o); };
+  const TASK_DONE = { working: 'Working on', 'input-required': 'Needs input on', completed: 'Done with', failed: 'Failed', canceled: 'Canceled', rejected: 'Declined' };
+  const short = (t) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > 120 ? `${s.slice(0, 120)}…` : s; };
+
+  /// What one of this member's agents did in the rooms this page holds, and
+  /// what for, newest first: its messages, tasks it gave, its task reports.
+  async function activity(key) {
+    const out = [];
+    for (const r of den.rooms.values()) {
+      if (!den.inRoom(r.id) || !den.members(r.id).some((m) => m.key === key)) continue;
+      const log = await den.log(r.id);
+      const where = r.kind === 'private' ? r.title || 'Private room' : `#${r.title || r.id}`;
+      for (const m of log) {
+        if ((m.t === 'msg' || m.t === 'file') && m.key === key && !m.deleted) {
+          const c = den.causeOf(m, log);
+          const what = m.task ? `Gave ${display(m.task.to)} a task: ${short(m.text)}` : m.file ? `Sent ${m.file.name}` : `Wrote: ${short(m.text)}`;
+          out.push({ at: m.at, id: m.id, where, what, why: c ? (c.how === 'order' ? `For ${display(c.key)}` : c.how === 'task' ? `For ${display(c.key)}'s task` : `Re ${display(c.key)}'s message`) : '' });
+        }
+        for (const h of m.task?.to === key ? m.task.history || [] : []) {
+          if (h.by !== key) continue;
+          out.push({ at: h.at, id: m.id, where, what: `${TASK_DONE[h.state] || h.state} a task: ${short(m.text)}`, why: `For ${display(m.key)}'s task` });
+        }
+      }
+    }
+    return out.sort((a, b) => b.at - a.at).slice(0, 50);
+  }
+
   function member(key) {
     const d = el('member');
     const roles = den.rolesOf(key);
@@ -361,6 +388,7 @@ export function mountAdmin(den, el, ui) {
     el('member-card').innerHTML = `<div class="card-head">${mark(key, 40)}<div><p>${whoHtml(key)}</p><small>m-${esc(key.slice(0, 20))}${den.isOwner(key) ? ' · Owner' : ''}</small></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
       ${agentLine(key)}
       ${rulesForm(key)}
+      ${ownAgent(key) ? `<section class="activity" id="m-activity"><p class="rule-head">Activity <button class="tip" type="button" data-tip="${esc('What your agent did in the rooms you share with it, and what it says each was for. Its own account: the den cannot check it. The agent keeps a fuller record on its machine: epeaky-agent log.')}" aria-label="Explain">i</button></p><ol><li>Loading…</li></ol></section>` : ''}
       ${roles.length ? `<div class="chips">${roles.map((r) => `<span class="role-chip"><i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</span>`).join('')}</div>` : ''}
       ${s ? `<p class="sanction">${s.kind === 'ban' ? 'Banned' : s.kind === 'kick' ? `Kicked until ${when(s.until)}` : `Timed out until ${when(s.until)}`}</p>` : ''}
       ${manage && givable.length ? `<fieldset class="perms"><legend>Roles</legend>${givable.map((r) => `<label class="check"><input type="checkbox" data-give="${esc(r.id)}" ${roles.some((x) => x.id === r.id) ? 'checked' : ''} /> <i class="dot" data-c="${esc(r.colour || '')}"></i>${esc(r.name)}</label>`).join('')}</fieldset>` : ''}
@@ -383,6 +411,13 @@ export function mountAdmin(den, el, ui) {
         const from = [...rf.querySelectorAll('[name=from]:checked')].map((x) => x.value);
         act(() => den.setAgentRules(key, { rooms, takes_from: from, files: f.files.checked }), listed ? `Saved: ${rooms.length} room${rooms.length === 1 ? '' : 's'}.` : 'Saved: every room.');
       };
+    }
+    const act$ = el('m-activity');
+    if (act$) {
+      act$.querySelector('.tip').onclick = (e) => { const b = e.currentTarget; const next = b.parentElement.nextElementSibling; if (next?.classList.contains('bubble')) next.remove(); else b.parentElement.insertAdjacentHTML('afterend', `<p class="bubble">${esc(b.dataset.tip)}</p>`); };
+      activity(key).then((list) => {
+        act$.querySelector('ol').innerHTML = list.length ? list.map((a) => `<li><small>${esc(new Date(a.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${esc(a.where)}</small><b>${esc(a.what)}</b>${a.why ? `<small>${esc(a.why)}</small>` : ''}</li>`).join('') : '<li>Nothing yet in the rooms you share.</li>';
+      }).catch(() => { act$.querySelector('ol').innerHTML = '<li>Could not read the rooms.</li>'; });
     }
     const disown = el('m-disown');
     if (disown) disown.onclick = () => act(() => den.disown(key), 'No longer your agent.');

@@ -133,6 +133,17 @@ button.group-head:hover { color: var(--ink); }
 .quote { display: block; max-width: 100%; margin: 1px 0 4px; padding: 1px 0 1px 9px; border: 0; border-left: 2px solid rgba(240, 238, 230, 0.25); background: none; text-align: left; font: 13px/1.45 var(--sans); color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .quote b { font: 12px ui-monospace, Menlo, monospace; color: var(--read); font-weight: 400; margin-right: 4px; }
 .quote:hover { color: var(--read); border-left-color: var(--acid); }
+.because { display: block; margin: 1px 0 3px; padding: 0; border: 0; background: none; font: 12px var(--sans); color: var(--muted); cursor: pointer; text-align: left; }
+.because::before { content: '↳ '; }
+.because:hover { color: var(--read); }
+.task-history { flex-basis: 100%; color: var(--muted); }
+.task-history summary { cursor: pointer; width: max-content; }
+.task-history ol { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.task-history span { color: var(--read); }
+.activity { margin: 10px 0 0; }
+.activity ol { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.activity li { display: grid; gap: 1px; font: 12px/1.4 var(--sans); color: var(--muted); }
+.activity li b { color: var(--ink); font-weight: 400; overflow-wrap: anywhere; }
 .att { display: block; padding: 0; margin: 4px 0 2px; max-width: min(400px, 100%); border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); cursor: zoom-in; }
 .att img { display: block; max-width: 100%; max-height: 300px; min-width: 64px; min-height: 48px; object-fit: contain; }
 .file { display: inline-flex; gap: 10px; align-items: center; max-width: 100%; margin: 4px 0 2px; padding: 10px 16px 10px 12px; text-align: left; color: var(--ink); background: rgba(0, 0, 0, 0.4); border: 1px solid var(--line); cursor: pointer; }

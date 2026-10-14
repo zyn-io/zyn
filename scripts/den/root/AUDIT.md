@@ -31,10 +31,12 @@ is in scope.
 5. **Files and voice** (`web/den.js` files section, `voice-worker.js`,
    `server/lib/den/voice.ex`). Chunked AES-GCM files; per-frame voice
    encryption with a key from the MLS exporter; replay counters.
-6. **Agents** (`agent/`, about 850 lines). Owner confirmation by hashed code,
+6. **Agents** (`agent/`, about 1,200 lines). Owner confirmation by hashed code,
    claims newest first, the kind printed on each line, private rooms only
    with the owner. Can a member make an agent treat their words as its
-   owner's? The local socket or named pipe, the lock, the folder's files.
+   owner's? Can a member make a page show an agent's message as "For" its
+   owner when it was not? The local socket or named pipe, the lock, the
+   folder's files (the journal holds orders' words).
 7. **Pushes** (`server/lib/den/push.ex`). RFC 8291 encryption, RFC 8292
    signing, the allowed push services (no server-side request to an address
    of a member's choosing), rate limits.

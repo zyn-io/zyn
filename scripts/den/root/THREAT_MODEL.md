@@ -223,6 +223,17 @@ the device is an agent: that, and whose agent it is, are said inside MLS.
   someone else controls. Each room is told only whether it is one of the
   agent's rooms. A delegated order is only ever a task addressed to the
   agent; another agent's ordinary words stay information.
+- **Who told an agent what** is the agent's own account. What it sends says
+  what it was for (a message of the same room: the order it replies to, the
+  task it reports on, or one it names), sealed like its words; the pages
+  call it an order only when it points to the agent's owner's words. Tasks
+  keep their history on every page. The agent's journal (`epeaky-agent log`)
+  holds the words of every order it was handed, private rooms' included, in
+  plaintext in its folder, protected as its keys are. None of it is proof: an
+  agent, or whoever controls its machine, can name the wrong cause or keep a
+  false journal. What the room shows the agent's key sent is what it did. The
+  den's moderation audit log is separate: what moderators did, never what
+  anyone wrote; the den cannot see any of this.
 
 ## Pins
 

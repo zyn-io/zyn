@@ -197,8 +197,9 @@ try {
   // Replies, and the page sees them from the agent.
   const order = asJson.find((r) => r.nick === 'Olu');
   const sent = cli('send', 'general', 'Summary: all quiet.', '--reply', String(order.seq), '--agent', 'research');
-  ok(typeof sent === 'string' && /^sent #general \d+$/.test(sent), 'the agent replies to an order by its number');
-  ok(await until(O, ([id]) => window.__den.log('general').then((l) => l.some((m) => m.text === 'Summary: all quiet.' && m.reply === id)), [order.id], 15000), 'the owner sees the reply, as a reply');
+  ok(typeof sent === 'string' && new RegExp(`^sent #general \\d+ for ${order.seq}$`).test(sent), `the agent replies to an order by its number, and says it is for that order (${sent.err || sent})`);
+  ok(await until(O, ([id]) => window.__den.log('general').then((l) => l.some((m) => m.text === 'Summary: all quiet.' && m.reply === id && m.for === id)), [order.id], 15000), 'the owner sees the reply, as a reply, sent for the order');
+  ok(await until(O, () => [...document.querySelectorAll('.because')].some((b) => b.textContent === 'For Olu'), null, 10000), 'the page shows the reply is for Olu');
   const news = cli('read', 'general', '--new', '--agent', 'scout');
   const again = cli('read', 'general', '--new', '--agent', 'scout');
   ok(typeof news === 'string' && /Summary: all quiet\./.test(news) && again === '', `read --new shows what is unread once (${typeof again === 'string' ? again : again.err})`);
@@ -225,6 +226,19 @@ try {
   const t0 = Date.now();
   ok(cli('next', '--orders', '--wait', '2', '--agent', 'research') === 'nothing new' && Date.now() - t0 >= 1900, 'next --wait gives up after its seconds: nothing new');
 
+  // What it was for. Words with no reply after an order: the order is the
+  // journal's guess, and the room is not told it.
+  const guess = cli('send', 'general', 'On it.', '--agent', 'research');
+  ok(typeof guess === 'string' && /^sent #general \d+ for \d+ \(a guess: not sent with it\)$/.test(guess), `words after an order: the order is only a guess (${guess.err || guess})`);
+  ok(await until(O, () => window.__den.log('general').then((l) => { const m = l.find((x) => x.text === 'On it.'); return m && !m.for; })), 'and the room is not told it');
+  // Named, but someone else's words: the page does not call them an order.
+  const samSeq = JSON.parse(String(cli('read', 'general', '--limit', '20', '--json', '--agent', 'research')).split('\n').find((l) => l.includes('not an order')) || '{}').seq;
+  const re = cli('send', 'general', 'Noted.', '--for', String(samSeq), '--agent', 'research');
+  ok(typeof re === 'string' && new RegExp(`for ${samSeq}$`).test(re), `--for names what it answers (${re.err || re})`);
+  ok(await until(O, () => [...document.querySelectorAll('.because')].some((b) => b.textContent === "Re Sam's message"), null, 10000), "for a member's words, the page says only that it is about Sam's message");
+  const noFor = cli('send', 'general', 'x', '--for', '99999', '--agent', 'research');
+  ok(noFor.code === 1 && /No message 99999/.test(noFor.err), 'a --for that is not in the room is refused');
+
   // Tasks. Olu gives research one from the page: an order, handed by next --tasks.
   const taskId = await O.evaluate((k) => window.__den.task('general', k, 'Summarise the CI report'), research.key);
   const handedT = await eventually(() => { const r = cli('next', '--tasks', '--json', '--agent', 'research'); return typeof r === 'string' && r.includes(taskId) && r; });
@@ -245,6 +259,25 @@ try {
   ok(typeof done === 'string' && / · completed: Summary posted \(results: [0-9a-f]{16}\)\]/.test(done), `completed, with research's own message as the only result (${done.err || done})`);
   ok(await until(O, ([id]) => window.__den.log('general').then((l) => { const t = l.find((m) => m.id === id)?.task; return t?.state === 'completed' && t.artifacts.length === 1; }), [taskId]), "Olu's page sees it done, with one result");
   ok(typeof cli('task', taskId, 'failed', '--agent', 'research') === 'object', 'a finished task stays finished');
+  const hist = await O.evaluate((id) => window.__den.log('general').then((l) => l.find((m) => m.id === id)?.task?.history?.map((h) => h.state).join(' ')), taskId);
+  ok(hist === 'submitted working completed', `the task keeps its history (${hist})`);
+  // The journal: what research was handed, and what it did, for whom.
+  const journal = String(cli('log', '--limit', '200', '--json', '--agent', 'research')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const handedJ = journal.filter((e) => e.act === 'handed');
+  ok(['@research summarise today', 'between calls', 'check the logs', 'Summarise the CI report'].every((t) => handedJ.filter((e) => e.text === t).length === 1) && handedJ.every((e) => e.authority !== 'none'), `the journal has each order handed, once (${handedJ.map((e) => e.text).join(' | ')})`);
+  ok(handedJ.some((e) => e.text === 'Deploy when CI is green' && e.authority === 'delegated' && e.on_behalf_of === oKey), 'and the delegated task, on behalf of the owner');
+  const sentJ = journal.find((e) => e.act === 'sent' && e.for?.id === order.id);
+  ok(sentJ?.for_how === 'reply' && sentJ.for.authority === 'owner' && sentJ.for.key === oKey, 'what it sent, and for whose order');
+  const stateJ = journal.filter((e) => e.act === 'task-state' && e.id === taskId).map((e) => `${e.state}:${e.for_how}`).join(' ');
+  ok(stateJ === 'working:task completed:task', `its reports on the task (${stateJ})`);
+  ok(journal.some((e) => e.act === 'owner' && e.key === oKey) && journal.some((e) => e.act === 'rules'), 'its owner and rules changing');
+  ok(/^\d+ \d{4}-\d\d-\d\d \d\d:\d\d:\d\d sent #general \d+ for #general \d+ \(owner m-[0-9a-f]{20}\)$/m.test(String(cli('log', '--agent', 'research'))), 'log, as lines');
+  // The owner's page: what its agent did, and for whom.
+  await O.click('#room-meta');
+  await O.click(`[data-member="${research.key}"]`);
+  ok(await until(O, () => { const t = document.querySelector('#m-activity')?.textContent || ''; return /Done with a task: Summarise the CI report/.test(t) && /Wrote: Summary: all quiet\.For Olu/.test(t); }, null, 10000), "the owner's card for its agent lists what it did, and for whom");
+  await O.click('#member [data-close]');
+  await O.click('#room-meta');
   // From another agent: information. research may decline, and scout hears it.
   const fromScout = cli('task', 'new', 'general', '--to', research.key, 'Please run the tests', '--agent', 'scout');
   ok(typeof fromScout === 'string' && /task [0-9a-f]{16} for "research" · submitted/.test(fromScout), `an agent gives another a task (${fromScout.err || fromScout})`);

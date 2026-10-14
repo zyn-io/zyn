@@ -50,3 +50,11 @@ test('an invite is the whole link; the socket path fits', () => {
   if (process.platform !== 'win32') assert.ok(socketPath(`/tmp/${'x'.repeat(200)}`).length < 104);
   assert.equal(socketPath('/home/a/.epeaky/agents/research', 'linux'), join('/home/a/.epeaky/agents/research', 'agent.sock'));
 });
+
+test('what a message was sent for: its number after the reply, and the task history', () => {
+  const r = record('general', msg({ reply: 'aa', task: { to: 'k'.repeat(64), state: 'working', history: [{ state: 'submitted', by: 'o', at: 1 }, { state: 'working', by: 'k', at: 2 }] } }), { kind: 'agent', name: 'm-x', replySeq: 40 });
+  assert.deepEqual(r.task.history.map((h) => h.state), ['submitted', 'working']);
+  assert.equal(r.task.history[1].at, new Date(2).toISOString());
+  r.for = { id: 'aa', seq: 40, key: 'o', kind: 'owner', authority: 'owner' };
+  assert.match(line(r, at), / ↩40 for 40: \[task/);
+});
