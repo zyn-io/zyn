@@ -1,22 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { command, TOOLS } from '../epeaky-mcp.mjs';
+import { argsOf, command, TOOLS } from '../epeaky-mcp.mjs';
 
-test('every tool maps to the command line, or says why not', () => {
-  assert.deepEqual(command('epeaky_next', { orders: true, wait_seconds: 60 }), ['next', '--orders', '--wait', '60']);
-  assert.deepEqual(command('epeaky_next', { room: 'ops', mentions: true, limit: 5 }), ['next', 'ops', '--mentions', '--limit', '5']);
-  assert.match(command('epeaky_next', { wait_seconds: 9999 }), /wait_seconds/);
-  assert.deepEqual(command('epeaky_read', { room: 'general', since: 120 }), ['read', 'general', '--since', '120']);
-  assert.match(command('epeaky_read', {}), /room is required/);
-  assert.deepEqual(command('epeaky_search', { query: ' deploy  red ' }), ['search', 'deploy', 'red']);
-  assert.deepEqual(command('epeaky_pins', {}), ['pins']);
-  assert.match(command('epeaky_nope', {}), /no tool/);
+const line = (name, a) => { const c = command(name, a); return typeof c === 'string' ? c : argsOf(c); };
+
+test('every tool maps to the command line, the client\'s values after --', () => {
+  assert.deepEqual(line('epeaky_next', { orders: true, wait_seconds: 60 }), ['next', '--orders', '--wait', '60', '--json', '--', ]);
+  assert.deepEqual(line('epeaky_next', { room: 'ops', mentions: true, limit: 5 }), ['next', '--mentions', '--limit', '5', '--json', '--', 'ops']);
+  assert.match(line('epeaky_next', { wait_seconds: 9999 }), /wait_seconds/);
+  assert.deepEqual(line('epeaky_read', { room: 'general', since: 120 }), ['read', '--since', '120', '--json', '--', 'general']);
+  assert.match(line('epeaky_read', {}), /room is required/);
+  assert.deepEqual(line('epeaky_search', { query: ' deploy  red ' }), ['search', '--json', '--', 'deploy', 'red']);
+  assert.deepEqual(line('epeaky_pins', {}), ['pins', '--json', '--']);
+  assert.match(line('epeaky_nope', {}), /no tool/);
+});
+
+test('nothing from the client is read as an option', () => {
+  for (const room of ['--agent', '-x', '--owner']) {
+    assert.match(line('epeaky_read', { room }), /room/, room);
+    assert.match(line('epeaky_send', { room, text: 'hi' }), /room/, room);
+    assert.match(line('epeaky_pins', { room }), /room/, room);
+  }
+  // Search words that look like options are values, after the end of options.
+  const s = line('epeaky_search', { query: '--agent other --json' });
+  assert.deepEqual(s.slice(s.indexOf('--') + 1), ['--agent', 'other', '--json']);
+  assert.equal(s.indexOf('--'), s.length - 4, 'every word comes after --');
 });
 
 test('words are sent on standard input, never as options', () => {
   const c = command('epeaky_send', { room: 'general', text: '--agent evil --owner x', reply_to: 7 });
-  assert.deepEqual(c, { args: ['send', 'general', '-', '--reply', '7'], input: '--agent evil --owner x' });
-  assert.match(command('epeaky_send', { room: 'general', text: '' }), /1 to 4000/);
+  assert.equal(c.input, '--agent evil --owner x');
+  assert.deepEqual(argsOf(c), ['send', '--reply', '7', '--json', '--', 'general', '-']);
 });
 
 test('the tools that hand back messages say only the owner gives orders', () => {

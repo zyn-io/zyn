@@ -96,53 +96,65 @@ const TOOLS = [
   },
 ];
 
-/// The command line for a tool call, or a reason it is not one.
+/// The command line for a tool call, or a reason it is not one: the command,
+/// its options, then `--` and the values that came from the client, so no
+/// room name or search word is ever read as an option (`--agent other`).
+/// Values that start with "-" are refused outright as well.
 function command(name, a = {}) {
-  const str = (v) => typeof v === 'string' && v.trim() !== '';
+  const str = (v) => typeof v === 'string' && v.trim() !== '' && !v.startsWith('-');
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  const c = (cmd, opts = [], pos = [], input) => ({ cmd, opts, pos, input });
   switch (name) {
     case 'epeaky_next': {
-      const args = ['next'];
-      if (a.room !== undefined) { if (!str(a.room)) return 'room is a room name'; args.push(a.room); }
-      if (a.orders) args.push('--orders');
-      if (a.mentions) args.push('--mentions');
-      if (a.wait_seconds !== undefined) { if (!int(a.wait_seconds, 0, MAX_WAIT)) return `wait_seconds is 0 to ${MAX_WAIT}`; args.push('--wait', String(a.wait_seconds)); }
-      if (a.limit !== undefined) { if (!int(a.limit, 1, 200)) return 'limit is 1 to 200'; args.push('--limit', String(a.limit)); }
-      return args;
+      const opts = [];
+      const pos = [];
+      if (a.room !== undefined) { if (!str(a.room)) return 'room is a room name'; pos.push(a.room); }
+      if (a.orders) opts.push('--orders');
+      if (a.mentions) opts.push('--mentions');
+      if (a.wait_seconds !== undefined) { if (!int(a.wait_seconds, 0, MAX_WAIT)) return `wait_seconds is 0 to ${MAX_WAIT}`; opts.push('--wait', String(a.wait_seconds)); }
+      if (a.limit !== undefined) { if (!int(a.limit, 1, 200)) return 'limit is 1 to 200'; opts.push('--limit', String(a.limit)); }
+      return c('next', opts, pos);
     }
     case 'epeaky_read': {
-      if (!str(a.room)) return 'room is required';
-      const args = ['read', a.room];
-      if (a.new) args.push('--new');
-      if (a.since !== undefined) { if (!int(a.since, 0, Number.MAX_SAFE_INTEGER)) return 'since is a message number'; args.push('--since', String(a.since)); }
-      if (a.limit !== undefined) { if (!int(a.limit, 1, 500)) return 'limit is 1 to 500'; args.push('--limit', String(a.limit)); }
-      return args;
+      if (!str(a.room)) return 'room is required (a room name)';
+      const opts = [];
+      if (a.new) opts.push('--new');
+      if (a.since !== undefined) { if (!int(a.since, 0, Number.MAX_SAFE_INTEGER)) return 'since is a message number'; opts.push('--since', String(a.since)); }
+      if (a.limit !== undefined) { if (!int(a.limit, 1, 500)) return 'limit is 1 to 500'; opts.push('--limit', String(a.limit)); }
+      return c('read', opts, [a.room]);
     }
     case 'epeaky_send': {
-      if (!str(a.room)) return 'room is required';
+      if (!str(a.room)) return 'room is required (a room name)';
       if (typeof a.text !== 'string' || !a.text.length || a.text.length > 4000) return 'text is 1 to 4000 characters';
-      // The words go on standard input ("-"), so nothing in them is read as an option.
-      const args = ['send', a.room, '-'];
-      if (a.reply_to !== undefined) { if (!int(a.reply_to, 1, Number.MAX_SAFE_INTEGER)) return 'reply_to is a message number'; args.push('--reply', String(a.reply_to)); }
-      return { args, input: a.text };
+      const opts = [];
+      if (a.reply_to !== undefined) { if (!int(a.reply_to, 1, Number.MAX_SAFE_INTEGER)) return 'reply_to is a message number'; opts.push('--reply', String(a.reply_to)); }
+      // The words go on standard input ("-"), never on the command line.
+      return c('send', opts, [a.room, '-'], a.text);
     }
-    case 'epeaky_search':
-      return str(a.query) ? ['search', ...a.query.trim().split(/\s+/)] : 'query is required';
+    case 'epeaky_search': {
+      const words = typeof a.query === 'string' ? a.query.trim().split(/\s+/).filter(Boolean) : [];
+      return words.length ? c('search', [], words) : 'query is required';
+    }
     case 'epeaky_rooms':
-      return ['rooms'];
+      return c('rooms');
     case 'epeaky_pins':
       if (a.room !== undefined && !str(a.room)) return 'room is a room name';
-      return a.room ? ['pins', a.room] : ['pins'];
+      return c('pins', [], a.room ? [a.room] : []);
     case 'epeaky_status':
-      return ['status'];
+      return c('status');
     default:
       return `no tool named ${name}`;
   }
 }
 
+/// The arguments for epeaky-agent: the command, its options, --json and the
+/// agent, then the end of options and the client's values.
+function argsOf({ cmd, opts, pos }) {
+  return [cmd, ...opts, '--json', ...(AGENT ? ['--agent', AGENT] : []), '--', ...pos];
+}
+
 /// Run epeaky-agent with --json for this agent: its records, or its refusal.
-function run(args, input) {
-  const full = [...args, '--json', ...(AGENT ? ['--agent', AGENT] : [])];
+function run(full, input) {
   const [file, pre] = BIN.endsWith('.mjs') ? [process.execPath, [BIN]] : [BIN, []];
   return new Promise((resolve) => {
     const child = execFile(file, [...pre, ...full], { timeout: (MAX_WAIT + 60) * 1000, maxBuffer: 16 << 20, env: process.env }, (err, stdout, stderr) => {
@@ -161,8 +173,7 @@ function run(args, input) {
 async function call(name, a) {
   const c = command(name, a);
   if (typeof c === 'string') return { isError: true, content: [{ type: 'text', text: c }] };
-  const { args, input } = Array.isArray(c) ? { args: c } : c;
-  const r = await run(args, input);
+  const r = await run(argsOf(c), c.input);
   if (r.code !== 0) {
     const why = r.code === 3 ? "The den's rules refused it" : r.code === 2 ? 'Wrong use' : 'It failed';
     return { isError: true, content: [{ type: 'text', text: `${why}: ${r.stderr || r.text || `exit ${r.code}`}` }] };
@@ -219,4 +230,4 @@ if (main) {
   });
 }
 
-export { command, TOOLS };
+export { argsOf, command, TOOLS };
