@@ -605,6 +605,7 @@ export function mountDen(den, el, me) {
     const left = den.slowLeft(room);
     const send = el('say').querySelector('[type=submit]');
     send.disabled = left > 0 && !editing;
+    if (!note) return;
     if (blocked) { note.hidden = false; note.textContent = blocked; note.classList.add('block'); return; }
     note.classList.remove('block');
     note.hidden = !left;

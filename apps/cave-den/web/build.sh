@@ -25,12 +25,22 @@ cp "$PHX" "$OUT/den/phoenix.mjs"
 if [ -n "$ADDON" ]; then
   "$ADDON/build.sh" "$OUT"
   # An add-on's own page must keep every element the scripts look up that
-  # the core page has, or that part of the page silently goes missing.
-  used=$(grep -ohE "el\('[a-z0-9-]+'\)|getElementById\('[a-z0-9-]+'\)" "$WEB"/app.js "$WEB"/den-ui.js | grep -oE "'[a-z0-9-]+'" | tr -d "'" | sort -u)
+  # the core page has: most are used without a check, so one missing breaks
+  # the page. Only the ways in a den may leave out are optional.
+  optional=" way-ask ask-note way-invite enter "
+  used=$(grep -ohE "el\('[a-z0-9-]+'\)|getElementById\('[a-z0-9-]+'\)" "$WEB"/app.js "$WEB"/den-ui.js "$WEB"/den-admin.js | grep -oE "'[a-z0-9-]+'" | tr -d "'" | sort -u)
+  missing=()
   for id in $used; do
     if grep -q "id=\"$id\"" "$WEB/index.html" && ! grep -q "id=\"$id\"" "$OUT/index.html"; then
-      echo "warning: $ADDON/index.html has no #$id, which the core page has and the scripts use" >&2
+      case "$optional" in
+        *" $id "*) echo "note: $ADDON/index.html has no #$id (a way in this page does not offer)" >&2 ;;
+        *) missing+=("#$id") ;;
+      esac
     fi
   done
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "error: $ADDON/index.html is missing ${missing[*]}, which the core page has and the scripts use" >&2
+    exit 1
+  fi
 fi
 echo "page in $OUT"
