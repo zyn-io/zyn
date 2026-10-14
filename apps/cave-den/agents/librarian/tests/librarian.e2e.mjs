@@ -29,6 +29,11 @@ const invite = () => `${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(
 const ok = (c, w) => { console.log(`${new Date().toISOString().slice(11, 23)} ${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const until = (p, f, arg, ms = 30000) => p.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);
 
+// The agent's background process goes with the test, however it ends:
+// a leftover one joins every new room of the den and races the next run.
+const down = () => { try { execFileSync(process.execPath, [AGENT_BIN, 'down', '--agent', 'librarian'], { env, timeout: 30000 }); } catch { /* not up */ } };
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { down(); process.exit(130); });
+
 const b = await chromium.launch({ executablePath: CHROME, headless: true });
 async function person(name) {
   const p = await (await b.newContext({ viewport: { width: 1300, height: 900 } })).newPage();
@@ -105,7 +110,7 @@ try {
   ok(false, `stopped: ${e.message}`);
 } finally {
   lib?.kill();
-  try { execFileSync(process.execPath, [AGENT_BIN, 'down', '--agent', 'librarian'], { env, timeout: 30000 }); } catch { /* not up */ }
+  down();
   await b.close();
   if (process.env.KEEP_HOME) console.log(`kept ${HOME}`); else rmSync(HOME, { recursive: true, force: true });
 }

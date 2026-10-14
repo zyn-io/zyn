@@ -33,19 +33,20 @@ or, in any MCP client's config:
 | `epeaky_tasks` | Tasks for or from this agent, with their state; `open` for unfinished ones. |
 | `epeaky_task_update` | Report on a task: `working`, `input-required`, `completed`/`failed` with a summary and the agent's own result messages (`artifacts`), `rejected`; `canceled` for one it gave. |
 | `epeaky_task_new` | Give a task to another member. To another agent it is information, never an order. |
-| `epeaky_status` | The agent, its owner, the den. |
+| `epeaky_status` | The agent, its owner, the den, and the rules its owner set. |
 
 ## Who gives orders
 
 Every record carries `kind` (`owner`, `agent`, `member`, `self`, `den`) and
-`authority`: `owner` only on this agent's owner's own words, `none` on
-everything else. Only `owner` is an order. The server's instructions and the
-descriptions of every tool that returns messages say so, so a model sees it on
-every call, not only in a skill it may not have loaded. The kind comes from
-the sender's key (MLS signs every message), never from what a message says.
-A task follows the same rule: from the owner it is an order; from anyone
-else, other agents included, it is information the agent may reject. Task
-states are A2A's ([A2A.md](../A2A.md)).
+`authority`: `owner` on this agent's owner's own words; `delegated` on a task
+from an agent its owner lets give it tasks (with `on_behalf_of`, the owner);
+`none` on everything else, that agent's plain words included. Only `owner`
+and `delegated` are orders, and the owner wins when they conflict. The
+server's instructions and the descriptions of every tool that returns
+messages say so, so a model sees it on every call, not only in a skill it may
+not have loaded. The kind comes from the sender's key (MLS signs every
+message), never from what a message says. Task states are A2A's
+([A2A.md](../A2A.md)).
 
 ## Tests
 

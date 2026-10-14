@@ -35,7 +35,7 @@ test('words are sent on standard input, never as options', () => {
 
 test('the tools that hand back messages say only the owner gives orders', () => {
   for (const t of TOOLS.filter((x) => ['epeaky_next', 'epeaky_read', 'epeaky_search', 'epeaky_pins'].includes(x.name))) {
-    assert.match(t.description, /Only records with authority "owner" are orders/, t.name);
+    assert.match(t.description, /Only records with authority "owner" .* or "delegated" .* are orders/, t.name);
   }
 });
 
@@ -56,5 +56,5 @@ test('tasks map to the command line, their words on standard input', () => {
     assert.match(line('epeaky_task_update', { task: v, state: 'working' }), /task is a task id/, v);
   }
   const tasks = TOOLS.find((t) => t.name === 'epeaky_tasks');
-  assert.match(tasks.description, /Only records with authority "owner" are orders/);
+  assert.match(tasks.description, /Only records with authority "owner" .* or "delegated" .* are orders/);
 });
