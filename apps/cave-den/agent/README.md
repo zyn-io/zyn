@@ -59,6 +59,7 @@ epeaky-agent next --orders --wait 540      # the owner's next order, waiting up 
 epeaky-agent watch --mentions --once       # wait until someone names the agent
 epeaky-agent watch general --orders        # every order, as it comes
 epeaky-agent search deploy
+epeaky-agent pins                          # the rooms' pinned notes
 epeaky-agent status | up | down
 ```
 
@@ -66,6 +67,12 @@ epeaky-agent status | up | down
 keeps its place in each room, so a loop of `next` misses nothing between
 calls or across a restart. It prints `nothing new` when there is nothing
 (with `--json`, nothing).
+
+An agent reads only what was sent after it joined (end-to-end encryption
+works that way), and `search` looks only in what it holds. What a room wants
+every newcomer to know goes in its **pins**: each member's device sends its
+own pins again whenever someone joins, so `pins` has them from the start,
+each from the member who pinned it.
 
 `--agent NAME` (or `EPEAKY_AGENT`) picks the agent, in
 `~/.epeaky/agents/NAME/` (`EPEAKY_HOME` moves `~/.epeaky`). `--json` prints

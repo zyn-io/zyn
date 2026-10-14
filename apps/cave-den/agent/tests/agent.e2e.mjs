@@ -100,6 +100,10 @@ try {
   ok(await until(O, () => [...document.querySelectorAll('.tag-agent')].some((t) => t.textContent === 'your agent'), null, 15000), 'its owner sees "your agent"');
   await O.click('#room-meta');
 
+  // A pin, before the next agent joins: it cannot read what came before it,
+  // so Olu's device sends its pins again when it sees the agent join.
+  await O.evaluate(() => window.__den.pin('general', { id: 'note-thursdays', key: window.__den.me.key, text: 'Deploys go out on Thursdays' }));
+  ok(await until(O, () => !document.getElementById('room-pins').hidden && document.getElementById('room-pins').textContent === 'Pins · 1', null, 10000), 'the page shows the room has a pin');
   // One step: the page's command brings a new agent in and makes it Olu's.
   await O.click('#add-agent');
   await O.waitForFunction((was) => document.querySelector('#ask').open && document.querySelector('#ask input').value !== was, command, { timeout: 15000 }).catch(() => {});
@@ -109,6 +113,9 @@ try {
   ok(typeof helper === 'string' && /^in as m-[0-9a-f]{20} "helper" \([^)]*\)\nowner m-[0-9a-f]{20} "Olu"$/.test(helper), `join --owner: in and Olu's in one command (${typeof helper === 'string' ? helper : helper.err})`);
   ok(await until(O, () => document.querySelector('#ask').open && document.querySelector('#ask h2').textContent === 'Agent added' && /helper is now your agent/.test(document.querySelector('#ask .ask-text').textContent), null, 20000), 'the dialog that showed the command says the agent was added');
   await O.click('#ask [data-yes]');
+  const pinned = await eventually(() => { const r = cli('pins', '--agent', 'helper'); return typeof r === 'string' && r.includes('Thursdays') && r; }, 30000);
+  ok(/^#general pin \d\d:\d\d:\d\d owner m-[0-9a-f]{20} "Olu": Deploys go out on Thursdays$/.test(pinned || ''), `an agent that joined after the pin gets it, from its pinner, marked owner (${pinned})`);
+  ok(/Thursdays/.test(cli('pins', 'general', '--agent', 'research')), 'and so does an agent that was there');
   cli('down', '--agent', 'helper');
 
   // Orders: watch for the owner's words only.
@@ -142,7 +149,8 @@ try {
   ok(typeof sent === 'string' && /^sent #general \d+$/.test(sent), 'the agent replies to an order by its number');
   ok(await until(O, ([id]) => window.__den.log('general').then((l) => l.some((m) => m.text === 'Summary: all quiet.' && m.reply === id)), [order.id], 15000), 'the owner sees the reply, as a reply');
   const news = cli('read', 'general', '--new', '--agent', 'scout');
-  ok(typeof news === 'string' && /Summary: all quiet\./.test(news) && cli('read', 'general', '--new', '--agent', 'scout') === '', 'read --new shows what is unread once');
+  const again = cli('read', 'general', '--new', '--agent', 'scout');
+  ok(typeof news === 'string' && /Summary: all quiet\./.test(news) && again === '', `read --new shows what is unread once (${typeof again === 'string' ? again : again.err})`);
   ok(/Summary: all quiet/.test(cli('search', 'all quiet', '--agent', 'scout')), 'search finds words in what the agent holds');
   ok(cli('send', 'nowhere', 'x', '--agent', 'scout').code === 1, 'a room that is not there is an error');
 

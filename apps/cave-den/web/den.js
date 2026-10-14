@@ -664,6 +664,48 @@ export class DenClient {
     this.saveSoon();
   }
 
+  // ---- Pins: the room's notes, for everyone who joins later -----------------------
+
+  /// The room's pins, oldest first: { pin, text, of, from, by, at }. `by` is the
+  /// key that sent the pin (MLS-sealed); `from` is whose message it was, as
+  /// the pinner says.
+  async pinsOf(room) {
+    return (await this.kv.get(`pins:${room}`)) || [];
+  }
+
+  /// A pin or an unpin. Pins are taken from their pinner only; an unpin from
+  /// the pinner or a member who may manage messages.
+  async applyPin(room, m, mine) {
+    const by = mine ? this.me.key : m.key;
+    if (typeof by !== 'string' || typeof m.pin !== 'string' || !/^[0-9a-f]{16}$/.test(m.pin)) return;
+    const pins = await this.pinsOf(room);
+    const i = pins.findIndex((p) => p.pin === m.pin);
+    if (m.t === 'pin') {
+      if (i >= 0 || typeof m.text !== 'string' || !m.text.trim()) return;
+      if (pins.filter((p) => p.by === by).length >= 20 || pins.length >= 100) return;
+      pins.push({ pin: m.pin, text: m.text.slice(0, 4000), of: typeof m.of === 'string' ? m.of : null, from: typeof m.from === 'string' ? m.from : null, by, at: sent(m.at) });
+    } else {
+      if (i < 0 || (pins[i].by !== by && !this.can('manage_messages', by))) return;
+      pins.splice(i, 1);
+    }
+    await this.kv.put(`pins:${room}`, pins);
+    this.on('pins', { room });
+  }
+
+  /// Someone joined: this device sends its own pins again, so they have them
+  /// (they cannot read anything sent before they joined).
+  soonPins(room) {
+    (this.pinsSoon ||= {});
+    if (this.pinsSoon[room]) return;
+    this.pinsSoon[room] = setTimeout(async () => {
+      delete this.pinsSoon[room];
+      if (!this.inRoom(room)) return;
+      for (const p of (await this.pinsOf(room)).filter((x) => x.by === this.me.key)) {
+        await this.send(room, { t: 'pin', pin: p.pin, of: p.of, from: p.from, text: p.text }).catch(() => {});
+      }
+    }, 1500 + Math.random() * 3000);
+  }
+
   /// A line in the room's log for each device a commit added or took out.
   async noteMembers(room, members) {
     const now = new Set(members.map((m) => m.key));
@@ -676,6 +718,7 @@ export class DenClient {
     if (!lines.length) return;
     // Someone new does not know the names members gave themselves: tell them.
     if (this.hasProfile() && lines.some(([, act]) => act === 'joined') && now.size <= 100) this.soonProfile(room);
+    if (lines.some(([, act]) => act === 'joined')) this.soonPins(room);
     const log = await this.log(room);
     for (const [who, act] of lines) log.push({ id: `note-${hex(rand(6))}`, t: 'note', who, act, text: `m-${who.slice(0, 20)} ${act}`, at: Date.now(), seq: this.seq[room] || 0, reactions: {} });
     await this.kv.put(`log:${room}`, log.slice(-KEEP));
@@ -757,6 +800,7 @@ export class DenClient {
     if (m.t === 'link-ask' || m.t === 'link') { if (!mine) await this.onLink(room, m); return; }
     if (m.t === 'own-ask' || m.t === 'own') { if (!mine) await this.onOwn(room, m); return; }
     if (m.t === 'profile') return;
+    if (m.t === 'pin' || m.t === 'unpin') { await this.applyPin(room, m, mine); return; }
     const log = await this.log(room);
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
@@ -894,6 +938,14 @@ export class DenClient {
     return this.send(room, { t: 'msg', text: String(text).slice(0, 4000), ...(reply ? { reply } : {}) });
   }
   react(room, to, emoji) { return this.send(room, { t: 'react', to, emoji }); }
+  /// Pin a message for the room: its words, sent by this device (so sealed to
+  /// the pinner's key), and sent again by it to everyone who joins later.
+  pin(room, msg) {
+    const text = msg.file ? `[file] ${msg.file.name}${msg.text ? ` ${msg.text}` : ''}` : msg.text;
+    if (!String(text || '').trim()) return Promise.reject(new Error('Nothing to pin.'));
+    return this.send(room, { t: 'pin', pin: hex(rand(8)), of: msg.id, from: msg.key, text: String(text).slice(0, 4000) });
+  }
+  unpin(room, pin) { return this.send(room, { t: 'unpin', pin }); }
   edit(room, to, text) { return this.send(room, { t: 'edit', to, text: String(text).slice(0, 4000) }); }
   remove(room, to) { return this.send(room, { t: 'del', to }); }
 

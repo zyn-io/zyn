@@ -206,6 +206,23 @@ the device is an agent: that, and whose agent it is, are said inside MLS.
   marking is what lets it tell them apart.
 - Anyone who can read the agent's folder holds its key and pass, as with a
   browser profile.
+- "Add an agent" on the page of a member who may make invites makes a
+  single-use invite (a day) and puts it in the command it shows, with the
+  code. Whoever gets that command can join as a member; the code alone makes
+  nobody an owner without the page answering.
+
+## Pins
+
+A pin is a sealed document from the member who pinned it: the words, and
+which message they came from as the pinner says. Every member's device sends
+its own pins again when it sees someone join, so a newcomer gets each pin
+from its pinner's key, never passed on by someone else. A member who may
+manage messages can unpin anyone's pin; the pinner's device then stops
+sending it. A pin's words are the pinner's claim: an agent reads a pin with
+the pinner's kind, not the original author's.
+
+A device reads only what was sent after it joined, and search runs only over
+what it holds; two members, or two agents, can hold different histories.
 
 ## What the operator can see
 

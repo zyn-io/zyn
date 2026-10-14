@@ -62,6 +62,7 @@ const ICON = {
   reply: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 2 7l4 4M2 7h7a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   react: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 9.5c1.3 1.6 3.7 1.6 5 0" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 6h.01M10 6h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   edit: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 13 1-4 7-7 3 3-7 7-4 1Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  pin: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6 6 2ZM8 8.5V14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
   del: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6L11.5 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
   file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3.5 3.5v9.5H4z M9 1.5V5h3.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
 };
@@ -69,6 +70,9 @@ const ICON = {
 export function mountDen(den, el, me) {
   let room = 'general';
   let reply = null;
+  // The side panel: 'members' or 'pins'; and each room's pins, as last read.
+  let side = 'members';
+  const pinCache = {};
   let editing = null;
   let readFrom = 0;
   let mentionAt = -1;
@@ -201,6 +205,7 @@ export function mountDen(den, el, me) {
     el('room-title').classList.toggle('plain', r?.kind === 'private');
     el('room-kind').textContent = r?.kind === 'private' ? 'Private' : r?.kind === 'proposal' ? 'Proposal' : '';
     el('room-meta').textContent = counts[room] ? `Members · ${counts[room]}` : 'Members';
+    drawPinCount();
     el('room-topic').textContent = r?.kind === 'open' ? plain(r.topic || '') : '';
     const slow = den.slowOf(room);
     el('room-slow').hidden = !slow;
@@ -385,6 +390,7 @@ export function mountDen(den, el, me) {
       <div class="tools" role="toolbar" aria-label="Message actions">
         <button type="button" data-act="reply" aria-label="Reply" title="Reply">${ICON.reply}</button>
         <button type="button" data-act="react" aria-label="React" title="React" aria-expanded="false">${ICON.react}</button>
+        ${den.mayPost(room) ? (() => { const on = (pinCache[room] || []).some((p) => p.of === m.id && p.by === me.key); return `<button type="button" data-act="pin" aria-label="${on ? 'Unpin' : 'Pin'}" title="${on ? 'Unpin' : 'Pin for everyone, also who joins later'}" aria-pressed="${on}">${ICON.pin}</button>`; })() : ''}
         ${own && !m.file ? `<button type="button" data-act="edit" aria-label="Edit" title="Edit">${ICON.edit}</button>` : ''}
         ${own ? `<button type="button" data-act="del" aria-label="Delete" title="Delete">${ICON.del}</button>` : ''}
         ${!own && den.can('manage_messages') && den.rooms.get(room)?.kind !== 'private' ? `<button type="button" data-act="moddel" aria-label="Delete (moderator)" title="Delete (moderator)">${ICON.del}</button>` : ''}
@@ -534,6 +540,13 @@ export function mountDen(den, el, me) {
     if (!m || !t.dataset.act) return;
     if (t.dataset.act === 'reply') { reply = m; editing = null; drawComposer(); el('say-text').focus(); }
     if (t.dataset.act === 'edit') startEdit(m);
+    if (t.dataset.act === 'pin') {
+      const had = (pinCache[room] || []).find((p) => p.of === m.id && p.by === me.key);
+      try {
+        if (had) await den.unpin(room, had.pin); else await den.pin(room, m);
+        status(had ? 'Unpinned.' : 'Pinned. Everyone who joins later gets it too.');
+      } catch (err) { status(err.message); }
+    }
     if (t.dataset.act === 'moddel') {
       if (await ask({ heading: 'Delete message', text: `${display(m.key)}'s message is removed for everyone in the channel. Devices that already read it may keep their copy.`, yes: 'Delete', danger: true })) den.modDelete(room, m.seq).catch((err) => status(err.message));
     }
@@ -722,6 +735,7 @@ export function mountDen(den, el, me) {
   // ---- Members ----------------------------------------------------------------
 
   function drawMembers() {
+    if (side === 'pins') return drawPins();
     const all = den.members(room);
     // One row per person: devices linked to each other (each says so) are one.
     const seenKeys = new Set();
@@ -774,13 +788,45 @@ export function mountDen(den, el, me) {
     const inv = el('invite');
     if (inv) inv.onclick = () => pickMembers('Invite to this room', 'Invite', false, (keys) => den.invite(room, keys));
   }
-  function toggleMembers() {
-    const open = el('members').hidden;
+  function toggleMembers() { toggleSide('members'); }
+  /// The side panel shows the room's members or its pins.
+  function toggleSide(want) {
+    const open = el('members').hidden || side !== want;
+    side = want;
     el('members').hidden = !open;
-    el('room-meta').setAttribute('aria-expanded', String(open));
+    el('room-meta').setAttribute('aria-expanded', String(open && side === 'members'));
+    pinsGo.setAttribute('aria-expanded', String(open && side === 'pins'));
     if (open) drawMembers();
   }
   el('room-meta').onclick = toggleMembers;
+  // Pins: a button of their own beside Members, made here so every page has it.
+  const pinsGo = document.createElement('button');
+  pinsGo.type = 'button';
+  pinsGo.className = 'pill';
+  pinsGo.id = 'room-pins';
+  pinsGo.hidden = true;
+  pinsGo.setAttribute('aria-controls', 'members');
+  pinsGo.setAttribute('aria-expanded', 'false');
+  el('room-meta').before(pinsGo);
+  pinsGo.onclick = () => toggleSide('pins');
+  async function drawPinCount() {
+    const r = room;
+    const pins = await den.pinsOf(r);
+    if (r !== room) return;
+    pinCache[r] = pins;
+    pinsGo.hidden = !pins.length;
+    pinsGo.textContent = `Pins · ${pins.length}`;
+  }
+  async function drawPins() {
+    const r = room;
+    const pins = await den.pinsOf(r);
+    if (r !== room || side !== 'pins') return;
+    el('members').innerHTML = `<div class="members-head"><h3>Pins · ${pins.length}</h3><button type="button" class="x" data-close aria-label="Close pins">×</button></div>
+      ${pins.length ? `<ul class="pins">${pins.slice().reverse().map((p) => `<li><p class="pin-text">${esc(p.text)}</p><p class="pin-by">Pinned by ${whoHtml(p.by)} · ${time(p.at)}</p>${p.by === me.key || den.can('manage_messages') ? `<button type="button" class="mini" data-unpin="${esc(p.pin)}">Unpin</button>` : ''}</li>`).join('')}</ul>` : '<p class="none">Nothing pinned yet. Pin a message from its menu: everyone who joins later gets it too.</p>'}`;
+    paint(el('members'));
+    el('members').querySelector('[data-close]').onclick = () => toggleSide('pins');
+    el('members').querySelectorAll('[data-unpin]').forEach((b) => { b.onclick = () => den.unpin(room, b.dataset.unpin).then(() => status('Unpinned.'), (e) => status(e.message)); });
+  }
 
   // The room list as a drawer, on a phone.
   el('rooms-open').onclick = () => el('den').classList.toggle('drawer');
@@ -911,6 +957,7 @@ export function mountDen(den, el, me) {
       status('This device was removed from the den by its moderators.', true);
       el('say').hidden = true;
     }
+    if (event === 'pins' && d.room === room) { drawPinCount().then(() => { drawLog(); if (!el('members').hidden && side === 'pins') drawPins(); }); }
     if (event === 'linked') status('Linked: members now see these devices as one person.');
     if (event === 'owned') {
       const said = `${display(d.key)} is now your agent. It takes orders from you only.`;

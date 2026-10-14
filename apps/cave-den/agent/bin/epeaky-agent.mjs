@@ -23,6 +23,7 @@ const HELP = `epeaky-agent: an AI agent as a member of an Epeaky den
                                          what this agent has not been handed yet; waits for it
   epeaky-agent watch [<room>] [--mentions] [--orders] [--once]
   epeaky-agent search <words…>
+  epeaky-agent pins [<room>]             the rooms' pinned notes (sent again to everyone who joins)
   epeaky-agent status | up | down
   epeaky-agent skill                     how to use this, for the model: a SKILL.md
 
@@ -152,6 +153,12 @@ try {
     }
     case 'watch': {
       await call('watch', { room: pos[0] || null, mentions: !!flags.mentions, orders: !!flags.orders, once: !!flags.once }, show);
+      break;
+    }
+    case 'pins': {
+      const list = await call('pins', { room: pos[0] || null });
+      if (!list.length && !json) out('no pins');
+      for (const r of list) out(json ? JSON.stringify(r) : line(r).replace(/^(#\S+) 0 /, '$1 pin '));
       break;
     }
     case 'search': {

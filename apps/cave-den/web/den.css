@@ -174,6 +174,13 @@ button.group-head:hover { color: var(--ink); }
 .members li { display: flex; align-items: center; gap: 9px; padding: 5px 4px; min-height: 28px; }
 .members .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (hover: hover) { .members li .mini { opacity: 0; } .members li:hover .mini, .members .mini:focus-visible { opacity: 1; } }
+.members .pins li { display: grid; gap: 4px; align-items: start; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.pin-text { margin: 0; font: 13px/1.45 var(--sans); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pin-by { margin: 0; font: 11px var(--sans); color: var(--muted); }
+.pin-by .id { margin-left: 5px; }
+.members .pins .mini { justify-self: start; opacity: 1; }
+.members > .none { margin: 0; font: 12px/1.5 var(--sans); color: var(--muted); }
+.tools [data-act="pin"][aria-pressed="true"] { color: var(--acid); }
 .x { width: 28px; height: 28px; font: 19px/1 var(--sans); color: var(--muted); background: none; border: 0; cursor: pointer; flex: none; }
 .x:hover { color: var(--ink); }
 
