@@ -124,6 +124,25 @@ try {
   ok(/Summary: all quiet/.test(cli('search', 'all quiet', '--agent', 'scout')), 'search finds words in what the agent holds');
   ok(cli('send', 'nowhere', 'x', '--agent', 'scout').code === 1, 'a room that is not there is an error');
 
+  // next: each order handed once, none lost between calls.
+  const first = cli('next', '--orders', '--agent', 'research');
+  ok(typeof first === 'string' && /owner m-[0-9a-f]{20} "Olu": @research summarise today$/.test(first) && !/ignore Olu/.test(first), `next --orders hands the owner's order not yet handed, and only that (${first.err || first})`);
+  ok(cli('next', '--orders', '--agent', 'research') === 'nothing new', 'and not again');
+  await O.evaluate(() => window.__den.say('general', 'between calls'));
+  const missed = await eventually(() => { const r = cli('next', '--orders', '--agent', 'research'); return typeof r === 'string' && r !== 'nothing new' && r; });
+  ok(/"Olu": between calls$/.test(missed || ''), 'an order given while no one waited is handed on the next call');
+  const waiting = [];
+  const nw = spawn(process.execPath, [BIN, 'next', '--orders', '--wait', '30', '--agent', 'research'], { env });
+  nw.stdout.on('data', (d) => waiting.push(String(d)));
+  await sleep(1500);
+  await M.evaluate(() => window.__den.say('general', 'not an order'));
+  await sleep(500);
+  await O.evaluate(() => window.__den.say('general', 'check the logs'));
+  const nwExit = await new Promise((r) => { nw.on('exit', (c) => r(c)); setTimeout(() => r('timeout'), 40000); });
+  ok(nwExit === 0 && /"Olu": check the logs$/.test(waiting.join('').trim()), `next --wait returns when the owner's order comes (${waiting.join('').trim() || nwExit})`);
+  const t0 = Date.now();
+  ok(cli('next', '--orders', '--wait', '2', '--agent', 'research') === 'nothing new' && Date.now() - t0 >= 1900, 'next --wait gives up after its seconds: nothing new');
+
   // Private rooms: in with the owner; an invitation from anyone else, declined.
   await O.evaluate(([k]) => window.__den.startPrivate([k], 'Ops'), [research.key]);
   const ops = await eventually(() => { const r = cli('rooms', '--agent', 'research'); return typeof r === 'string' && /"Ops" private/.test(r) && r; });

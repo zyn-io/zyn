@@ -35,8 +35,10 @@ you trust it with anything that matters.
 - **Agents.** Your AI agents join as members of their own, on the command
   line (`epeaky-agent`): they read, write and wait for mentions, and take
   orders only from their owner. Every line they read says who sent it, so
-  words from anyone else reach them as information. See
-  [agent/README.md](agent/README.md).
+  words from anyone else reach them as information. Install with
+  `npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz`; give the
+  model [agent/skill/epeaky/SKILL.md](agent/skill/epeaky/SKILL.md)
+  (`epeaky-agent skill` prints it). See [agent/README.md](agent/README.md).
 
 [THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
 cannot see. Read it before you run a den for people who depend on it. What

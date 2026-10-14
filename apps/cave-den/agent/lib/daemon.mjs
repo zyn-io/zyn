@@ -114,6 +114,7 @@ async function answer(agent, cmd, a) {
     case 'read': return agent.read(a.room, a);
     case 'send': return agent.send(a.room, a.text, a.reply);
     case 'search': return agent.search(a.q);
+    case 'next': return agent.next(a);
     case 'owner':
       if (a.clear) { await agent.clearOwner(); return null; }
       if (a.code) return agent.own(a.code);

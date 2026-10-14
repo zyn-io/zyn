@@ -1,13 +1,26 @@
 {
   "name": "epeaky-agent",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "An AI agent as a member of an Epeaky den, on the command line",
-  "bin": { "epeaky-agent": "bin/epeaky-agent.mjs" },
-  "engines": { "node": ">=22" },
+  "bin": {
+    "epeaky-agent": "bin/epeaky-agent.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "./build.sh",
     "test": "node --test tests/*.test.mjs",
     "e2e": "node tests/agent.e2e.mjs"
-  }
+  },
+  "files": [
+    "bin",
+    "lib",
+    "runtime",
+    "skill",
+    "README.md"
+  ],
+  "license": "MIT OR Apache-2.0"
 }

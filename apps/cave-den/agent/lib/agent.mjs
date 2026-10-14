@@ -254,6 +254,46 @@ export class Agent {
     return out;
   }
 
+  /// What this agent has not been handed yet, oldest first, in every room (or
+  /// one): from where `next` last stopped in each room, or, the first time,
+  /// from the first this agent holds. With nothing there, waits up to `wait` seconds
+  /// for the first that comes. Its place in each room is kept, so a loop of
+  /// `next` misses nothing between calls, nor across a restart.
+  async next({ room = null, orders = false, mentions = false, wait = 0, limit = 50 } = {}) {
+    const only = room ? this.room(room).id : null;
+    const fits = (r) => r.kind !== 'self' && r.kind !== 'den' && (!only || r.room === only) && (!orders || r.authority === 'owner') && (!mentions || r.mention);
+    const came = [];
+    let woke = null;
+    const f = (r) => { if (fits(r)) { came.push(r); woke?.(); } };
+    this.listeners.add(f);
+    try {
+      this.handed ??= (await this.den.kv.get('handed')) || {};
+      let out = [];
+      for (const r of this.den.rooms.values()) {
+        if (!this.visible(r.id) || (only && r.id !== only)) continue;
+        const log = await this.den.log(r.id);
+        const from = this.handed[r.id] ?? 0;
+        for (const m of log) {
+          if ((m.seq || 0) > from && !m.mine && (m.t === 'msg' || m.t === 'file')) {
+            const rec = this.recordOf(r.id, m, null, log);
+            if (fits(rec)) out.push(rec);
+          }
+        }
+      }
+      if (!out.length && wait > 0) {
+        if (!came.length) await new Promise((resolve) => { woke = resolve; setTimeout(resolve, wait * 1000); });
+        out = came.slice(0, 1);
+      }
+      out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+      out = out.slice(0, Math.max(1, Math.min(1000, limit)));
+      for (const r of out) this.handed[r.room] = Math.max(this.handed[r.room] ?? 0, r.seq);
+      if (out.length) await this.den.kv.put('handed', this.handed);
+      return out;
+    } finally {
+      this.listeners.delete(f);
+    }
+  }
+
   ownerOf() {
     const o = this.den.agent?.owner || null;
     if (!o) return null;
