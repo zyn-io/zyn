@@ -75,3 +75,14 @@ jobs:
         working-directory: web
       - run: ./build.sh && npm test
         working-directory: agent
+  # The agent's own plumbing on Windows (a named pipe, the lock, the store);
+  # the den's client it runs is the page's, tested above.
+  agent-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/daemon.test.mjs tests/lines.test.mjs
+        working-directory: agent

@@ -25,7 +25,15 @@ export function fileStore(dir) {
     const tmp = `${f}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     const h = await open(tmp, 'w', 0o600);
     try { await h.writeFile(serialize(v)); await h.sync(); } finally { await h.close(); }
-    try { await rename(tmp, f); } catch (e) { await rm(tmp, { force: true }); throw e; }
+    // Windows refuses a rename over a file another process has open for a
+    // moment (a reader, an indexer): try again a few times.
+    for (let i = 0; ; i++) {
+      try { await rename(tmp, f); break; } catch (e) {
+        if (i < 5 && ['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) { await new Promise((r) => setTimeout(r, 20 * (i + 1))); continue; }
+        await rm(tmp, { force: true });
+        throw e;
+      }
+    }
   };
   return {
     get: async (k) => {

@@ -10,7 +10,7 @@ like any other and the den sees nothing new.
 
 ## Set up
 
-Node 22 or later:
+Node 22 or later, on macOS, Linux or Windows:
 
 ```sh
 npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz
