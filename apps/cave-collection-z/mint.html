@@ -17,6 +17,8 @@
     <link rel="icon" type="image/svg+xml" href="/assets/cave-mark.svg?v=1" />
     <link rel="stylesheet" href="/styles.css?v=20260925-ui1" />
     <style>    
+      /* One burn button per token, side by side where they fit. */
+      .burn-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 4px; }
       /* Links in the whitelist box: the page's gold, not the browser's blue. */
       .gate a { color: var(--zec); text-underline-offset: 3px; }
       .gate a:hover { color: var(--ink); }
@@ -404,21 +406,17 @@
             <div class="total" id="credit-budget-row" style="display: none"><span>Credit left in the sale</span><b id="credit-budget">—</b></div>
             <div id="burn-form">
               <label class="field">
-                <span>Token</span>
-                <select id="burn-token"></select>
-              </label>
-              <label class="field">
-                <span>Credit (ZEC)</span>
-                <input id="credit-in" type="number" min="0.001" step="0.001" value="0.01" />
+                <span>Items to pay for</span>
+                <input id="burn-items" type="number" min="1" max="20" step="1" value="1" />
               </label>
               <div class="total">
-                <span>To burn</span>
-                <b id="burn-total">—</b>
+                <span>Worth</span>
+                <b id="burn-worth">—</b>
               </div>
-              <button class="act ghost" id="burn-go" type="button">Burn</button>
+              <div class="burn-buttons" id="burn-buttons"></div>
               <p class="say small">
                 A burn cannot be undone. It is valued at the lower of the last hour's prices, so this page
-                burns 5% more than the credit asked for.
+                burns 5% more than the items cost.
                 Credit is spent only in this sale and is never paid out; what is unspent when the sale
                 ends is gone.
               </p>

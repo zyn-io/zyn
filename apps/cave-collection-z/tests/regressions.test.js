@@ -26,9 +26,8 @@ test('a burn asks for no more credit than the sale has left, and never shares a 
 });
 
 test('counts are whole numbers, checked before they reach BigInt or Nap', () => {
-  for (const id of ['mint-in']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
-  // Credit is a decimal of ZEC, read to WAD without a float.
-  assert.match(zstore, /if \(!\/\^\\d\*\\\.\?\\d\+\$\/\.test\(v \|\| ''\)\) return null;/);
+  // Mints and burns are counted in whole items (§187.12): no decimal reaches BigInt.
+  for (const id of ['mint-in', 'burn-items']) assert.match(zstore, new RegExp(`whole\\('${id}'`), `${id} is checked`);
   assert.doesNotMatch(zstore, /Math\.min\(20, Number\(el\('count-in'\)\.value\)\)/);
 });
 

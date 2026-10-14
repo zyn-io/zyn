@@ -592,14 +592,13 @@ async function mintPage() {
     const used = credit < total ? credit : total;
     return `${exact(total - used)} ZEC.zy (${exact(used)} from credit)`;
   };
-  const token = () => tokens.find((t) => t.key === el('burn-token')?.value) || tokens[0];
+  /// What a burn has to cover: that many items at this wallet's price, less
+  /// the credit it already holds. Null for a count that is not whole.
   const creditWanted = () => {
-    const v = el('credit-in')?.value.trim();
-    if (!/^\d*\.?\d+$/.test(v || '')) return null;
-    const [i, f = ''] = v.split('.');
-    if (f.length > 18) return null;
-    const w = BigInt(i || '0') * WAD + BigInt(f.padEnd(18, '0'));
-    return w > 0n ? w : null;
+    const n = whole('burn-items', Math.max(1, myLeft()));
+    if (!n) return null;
+    const want = myPrice() * BigInt(n) - (credit ?? 0n);
+    return want > 0n ? want : 0n;
   };
   const priceOf = async (t) => {
     const p = prices.get(t.key);
@@ -608,21 +607,32 @@ async function mintPage() {
     prices.set(t.key, { value, at: Date.now() });
     return value;
   };
+  let usdOfZec = null;
+  /// One button per token: how much of it pays for that many items now, at
+  /// the price the watcher will value it at (5% headroom for its lower median).
   const setBurnTotal = async () => {
-    const t = token();
-    if (!t || !el('burn-total')) return;
-    el('burn-go').textContent = t.chain === 'solana' ? 'Burn with a Solana wallet' : `Burn with an EVM wallet on ${chainName(t)}`;
+    const box = el('burn-buttons');
+    if (!box || !tokens.length || !sale) return;
     const want = creditWanted();
-    if (!want) { el('burn-total').textContent = 'enter the credit you want, in ZEC'; el('burn-go').disabled = true; return; }
-    try {
-      const price = await priceOf(t);
-      if (t !== token() || want !== creditWanted()) return;
-      el('burn-total').textContent = `about ${units(burnFor(want, price, t.decimals), t.decimals)} ${t.symbol}, with ${BURN_HEADROOM}% headroom`;
-      el('burn-go').disabled = false;
-    } catch (e) {
-      el('burn-total').textContent = e.message;
-      el('burn-go').disabled = true;
-    }
+    if (want === null) { el('burn-worth').textContent = `a whole number of items, 1 to ${Math.max(1, myLeft())}`; box.replaceChildren(); return; }
+    if (want === 0n) { el('burn-worth').textContent = 'your credit already covers that'; box.replaceChildren(); return; }
+    usdOfZec ??= zecUsd().catch(() => null);
+    const usd = await usdOfZec;
+    if (want !== creditWanted()) return;
+    el('burn-worth').textContent = `${zec(want)} ZEC${usd ? `, about $${((Number(want) / 1e18) * usd).toFixed(2)}` : ''}`;
+    const rows = await Promise.all(tokens.map(async (t) => {
+      try { return { t, amount: burnFor(want, await priceOf(t), t.decimals) }; } catch (e) { return { t, error: e.message }; }
+    }));
+    if (want !== creditWanted()) return;
+    box.replaceChildren(...rows.map(({ t, amount, error }) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'act ghost';
+      b.disabled = !!error;
+      b.textContent = error ? `${t.symbol}: ${error}` : `Burn ${units(amount, t.decimals)} ${t.symbol} on ${chainName(t)}`;
+      b.onclick = () => burnWith(t);
+      return b;
+    }));
   };
   const setMintTotal = () => {
     if (!sale || !el('mint')) return;
@@ -692,12 +702,6 @@ async function mintPage() {
     // .total sets display, which outranks [hidden]: say it in style.
     el('credit-budget-row').style.display = unbacked ? 'none' : '';
     el('burn-form').hidden = !unbacked && budget === 0n;
-    const select = el('burn-token');
-    if (select.options.length !== tokens.length) {
-      select.innerHTML = tokens.map((t) => `<option value="${esc(t.key)}">${esc(t.symbol)} · ${esc(chainName(t))}</option>`).join('');
-      // A first guess at the credit wanted: one item at this wallet's price.
-      el('credit-in').value = zec(myPrice());
-    }
     wireTips();
     setBurnTotal();
   };
@@ -753,10 +757,10 @@ async function mintPage() {
       el(out).classList.toggle('bad', e?.code !== 4001);
     } finally { if (el(button)) el(button).disabled = false; }
   };
-  el('credit-in').oninput = setBurnTotal;
-  el('burn-token').onchange = setBurnTotal;
+  el('burn-items').oninput = setBurnTotal;
   el('mint-in').oninput = setMintTotal;
-  el('burn-go').onclick = async () => {
+  /// Burn `t` for what the chosen items cost now.
+  const burnWith = async (t) => {
     if (!current) return pick();
     const out = el('out-burn');
     out.classList.remove('bad');
@@ -764,15 +768,15 @@ async function mintPage() {
     // The sale again, right before burning: the tokens are gone either way,
     // so nothing is burned for more credit than the sale has left.
     try { sale = await chainSale(); } catch (e) { return fail(e.message); }
-    const t = token();
     const want = creditWanted();
     const budget = BigInt(sale?.credit_budget || '0');
     if (gen !== generation || !t || !sale) return fail('Burning is closed.');
-    if (!want) return fail('Enter the credit you want, in ZEC.');
+    if (!want) return fail(want === 0n ? 'Your credit already covers that.' : 'Enter a whole number of items.');
     const unbacked = !!sale?.open_terms?.unbacked_credit;
     if (!unbacked && budget === 0n) return fail("The sale's credit is all taken.");
     if (!unbacked && want > budget) return fail(`Only ${exact(budget)} ZEC of credit is left in the sale. Ask for that much or less.`);
-    el('burn-go').disabled = true;
+    const buttons = [...el('burn-buttons').querySelectorAll('button')];
+    buttons.forEach((b) => { b.disabled = true; });
     try {
       prices.delete(t.key);
       const amount = burnFor(want, await priceOf(t), t.decimals);
@@ -783,7 +787,7 @@ async function mintPage() {
       for (const wait of [30000, 60000, 120000, 240000]) setTimeout(read, wait);
     } catch (e) {
       fail(e.code === 4001 || /reject|declin|cancel|denied/i.test(e.message) ? 'Not burned. Nothing left your wallet.' : e.message);
-    } finally { if (el('burn-go')) el('burn-go').disabled = false; }
+    } finally { buttons.forEach((b) => { b.disabled = false; }); }
   };
   el('mint').onclick = act('mint', 'out-mint', 'zyn_mintOpen', () => {
     const most = myLeft();
