@@ -26,7 +26,7 @@ Hold REGI on Arc? Sign with that wallet on cavebro.win/whitelist and get your co
 
 **Pay in ZEC, or burn**
 Pay in ZEC brought into Nap.
-Or burn ZCAVE on Solana or REGI on Arc: the burn becomes credit worth what you burned in USD, and the credit pays for your mints.
+Or burn ZCAVE on Solana or REGI on Arc: the burn becomes credit worth what you burned in USD, and the credit pays for your mints. One item is its ZEC price in USD — about $60, or $12 on the whitelist, at today's ZEC. Pick how many items on cavebro.win/mint and press "Burn ZCAVE" or "Burn REGI": the page works out the amount.
 
 **Who picks your item? Nobody.**
 The order is fixed once, at the opening, from a drand round and a Zcash block that don't exist yet when we announce them. Not us, not you, not a bot. Anyone can recompute the order from the public inputs, and the ledger only mints the next item in line.
