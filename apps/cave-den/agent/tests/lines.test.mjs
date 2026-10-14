@@ -45,6 +45,7 @@ test('an invite is the whole link; the socket path fits', () => {
   assert.deepEqual(parseInvite('https://den.example/#invite=3ae4af855986d1a40114765040e8c097b694b2f6da05b680ed7db7e991ca9a01'), { base: 'https://den.example', code: '3ae4af855986d1a40114765040e8c097b694b2f6da05b680ed7db7e991ca9a01' });
   assert.throws(() => parseInvite('3ae4af85'), /whole link/);
   assert.throws(() => parseInvite('javascript:alert(1)#invite=00112233445566778899'), /whole link/);
-  assert.ok(socketPath(`/tmp/${'x'.repeat(200)}`).length < 104);
-  assert.equal(socketPath('/home/a/.epeaky/agents/research'), '/home/a/.epeaky/agents/research/agent.sock');
+  // Unix sockets (Windows uses a named pipe: tests/daemon.test.mjs).
+  if (process.platform !== 'win32') assert.ok(socketPath(`/tmp/${'x'.repeat(200)}`).length < 104);
+  assert.equal(socketPath('/home/a/.epeaky/agents/research', 'linux'), '/home/a/.epeaky/agents/research/agent.sock');
 });
