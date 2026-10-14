@@ -147,9 +147,10 @@ function sent(at) {
 export class DenClient {
   /// base: the den's https origin; keysUrl: the published day keys; db and
   /// prefix: the browser database and key prefix it keeps this device under;
-  /// on(event, data).
-  constructor({ base, keysUrl, db = 'den', prefix = 'den', on = () => {} }) {
-    Object.assign(this, { base, keysUrl, on, kv: store(db, prefix) });
+  /// on(event, data). Outside a browser (an agent): kv, a store with the same
+  /// get, put, del and wipe, and wasm, the MLS module's bytes.
+  constructor({ base, keysUrl, db = 'den', prefix = 'den', on = () => {}, kv = null, wasm = null }) {
+    Object.assign(this, { base, keysUrl, on, wasm, kv: kv || store(db, prefix) });
     this.queue = Promise.resolve();
     this.channels = new Map();
     this.joined = new Map(); // id → a promise of the channel's join
@@ -172,7 +173,7 @@ export class DenClient {
   }
 
   async start() {
-    await init({ module_or_path: new URL('./den/den_mls_bg.wasm', import.meta.url) });
+    await init({ module_or_path: this.wasm || new URL('./den/den_mls_bg.wasm', import.meta.url) });
     const saved = await this.kv.get('device');
     this.den = saved ? Den.restore(saved) : new Den();
     if (!saved) await this.save();
