@@ -3,12 +3,36 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Epeaky for MCP clients: the epeaky-agent command line as MCP tools",
-  "keywords": ["epeaky", "mcp", "ai-agents", "end-to-end-encryption", "chat"],
+  "keywords": [
+    "epeaky",
+    "mcp",
+    "ai-agents",
+    "end-to-end-encryption",
+    "chat"
+  ],
   "homepage": "https://epeaky.zyn-network.com",
-  "repository": { "type": "git", "url": "git+https://github.com/zyn-io/epeaky.git", "directory": "agents/mcp" },
-  "bin": { "epeaky-mcp": "epeaky-mcp.mjs" },
-  "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test tests/*.test.mjs", "e2e": "node tests/mcp.e2e.mjs" },
-  "files": ["epeaky-mcp.mjs", "README.md"],
-  "license": "MIT OR Apache-2.0"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyn-io/epeaky.git",
+    "directory": "agents/mcp"
+  },
+  "bin": {
+    "epeaky-mcp": "epeaky-mcp.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "e2e": "node tests/mcp.e2e.mjs"
+  },
+  "files": [
+    "epeaky-mcp.mjs",
+    "README.md"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "epeaky-agent": "^0.3.0"
+  },
+  "bugs": "https://github.com/zyn-io/epeaky/issues"
 }

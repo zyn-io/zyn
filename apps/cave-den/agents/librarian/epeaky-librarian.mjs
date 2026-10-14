@@ -23,6 +23,7 @@
 //   epeaky-librarian --agent librarian [--every 300]
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +32,15 @@ import { DatabaseSync } from 'node:sqlite';
 const argv = process.argv.slice(2);
 const flag = (name, d = null) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : d; };
 const AGENT = flag('--agent') || process.env.EPEAKY_AGENT;
-const BIN = process.env.EPEAKY_AGENT_BIN || 'epeaky-agent';
+/// epeaky-agent: EPEAKY_AGENT_BIN, else the package this one depends on, else
+/// a checkout's own (../../agent), else the one on PATH.
+function agentBin() {
+  if (process.env.EPEAKY_AGENT_BIN) return process.env.EPEAKY_AGENT_BIN;
+  try { return createRequire(import.meta.url).resolve('epeaky-agent/bin/epeaky-agent.mjs'); } catch { /* not installed beside it */ }
+  const local = fileURLToPath(new URL('../../agent/bin/epeaky-agent.mjs', import.meta.url));
+  return existsSync(local) ? local : 'epeaky-agent';
+}
+const BIN = agentBin();
 const EVERY = Number(flag('--every', '300')) * 1000;
 const HITS = 5;
 const debug = (s) => { if (process.env.LIBRARIAN_DEBUG) console.error(`${new Date().toISOString().slice(11, 23)} ${s}`); };

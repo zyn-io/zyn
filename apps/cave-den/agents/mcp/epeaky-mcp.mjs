@@ -11,18 +11,27 @@
 // every call, not only in a skill it may not have loaded.
 //
 //   epeaky-mcp --agent research            (or EPEAKY_AGENT=research)
-//   EPEAKY_AGENT_BIN=/path/to/epeaky-agent  (default: epeaky-agent on PATH)
+//   EPEAKY_AGENT_BIN=/path/to/epeaky-agent  (default: the epeaky-agent it depends on)
 //
-// Claude Code:  claude mcp add epeaky -- epeaky-mcp --agent research
+// Claude Code:  claude mcp add epeaky -- npx -y epeaky-mcp --agent research
 import { execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
 const AGENT = flag('--agent') || process.env.EPEAKY_AGENT || '';
-const BIN = process.env.EPEAKY_AGENT_BIN || 'epeaky-agent';
+/// epeaky-agent: EPEAKY_AGENT_BIN, else the package this one depends on, else
+/// a checkout's own (../../agent), else the one on PATH.
+function agentBin() {
+  if (process.env.EPEAKY_AGENT_BIN) return process.env.EPEAKY_AGENT_BIN;
+  try { return createRequire(import.meta.url).resolve('epeaky-agent/bin/epeaky-agent.mjs'); } catch { /* not installed beside it */ }
+  const local = fileURLToPath(new URL('../../agent/bin/epeaky-agent.mjs', import.meta.url));
+  return existsSync(local) ? local : 'epeaky-agent';
+}
+const BIN = agentBin();
 const VERSION = '0.1.0';
 // The longest a `next` may wait: a client may time a tool call out.
 const MAX_WAIT = 540;

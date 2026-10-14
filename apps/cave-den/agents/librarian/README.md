@@ -14,10 +14,11 @@ It is an ordinary agent of the den, built on the
 invite, its own owner. The den sees nothing new.
 
 ```sh
-npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz
-epeaky-agent join '<invite link>' --owner <code> --agent librarian --nick librarian
-node epeaky-librarian.mjs --agent librarian          # [--every 300]
+npx -y epeaky-agent join '<invite link>' --owner <code> --agent librarian --nick librarian
+npx -y epeaky-librarian --agent librarian          # [--every 300]
 ```
+
+The invite link and code are what "Add an agent" shows its owner.
 
 Node 22.13 or later (it uses `node:sqlite`). The index is
 `~/.epeaky/agents/<agent>/librarian.db`, readable only by its user.

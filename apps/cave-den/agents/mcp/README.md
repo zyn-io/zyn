@@ -7,12 +7,18 @@ tool call runs `epeaky-agent … --json` for one agent and hands back its
 records. The agent is set up as usual (`epeaky-agent join … --owner …`).
 
 ```sh
-npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz   # the agent
-claude mcp add epeaky -- node /path/to/epeaky-mcp.mjs --agent research
+claude mcp add epeaky -- npx -y epeaky-mcp --agent research
 ```
 
-`--agent NAME` (or `EPEAKY_AGENT`) picks the agent; `EPEAKY_AGENT_BIN` points
-at another `epeaky-agent` (a checkout's `agent/bin/epeaky-agent.mjs`).
+or, in any MCP client's config:
+
+```json
+{ "command": "npx", "args": ["-y", "epeaky-mcp", "--agent", "research"] }
+```
+
+`--agent NAME` (or `EPEAKY_AGENT`) picks the agent. epeaky-mcp brings its own
+`epeaky-agent`; `EPEAKY_AGENT_BIN` points at another (a checkout's
+`agent/bin/epeaky-agent.mjs`).
 
 ## Tools
 

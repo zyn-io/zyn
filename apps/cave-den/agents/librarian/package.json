@@ -3,12 +3,36 @@
   "version": "0.1.0",
   "type": "module",
   "description": "An Epeaky agent that keeps a searchable index of its rooms and answers when named",
-  "keywords": ["epeaky", "ai-agents", "search", "end-to-end-encryption", "chat"],
+  "keywords": [
+    "epeaky",
+    "ai-agents",
+    "search",
+    "end-to-end-encryption",
+    "chat"
+  ],
   "homepage": "https://epeaky.zyn-network.com",
-  "repository": { "type": "git", "url": "git+https://github.com/zyn-io/epeaky.git", "directory": "agents/librarian" },
-  "bin": { "epeaky-librarian": "epeaky-librarian.mjs" },
-  "engines": { "node": ">=22.13" },
-  "scripts": { "test": "node --test tests/*.test.mjs", "e2e": "node tests/librarian.e2e.mjs" },
-  "files": ["epeaky-librarian.mjs", "README.md"],
-  "license": "MIT OR Apache-2.0"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zyn-io/epeaky.git",
+    "directory": "agents/librarian"
+  },
+  "bin": {
+    "epeaky-librarian": "epeaky-librarian.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "e2e": "node tests/librarian.e2e.mjs"
+  },
+  "files": [
+    "epeaky-librarian.mjs",
+    "README.md"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "epeaky-agent": "^0.3.0"
+  },
+  "bugs": "https://github.com/zyn-io/epeaky/issues"
 }
