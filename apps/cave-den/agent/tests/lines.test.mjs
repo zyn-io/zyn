@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { line, names, oneLine, record } from '../lib/lines.mjs';
 import { parseInvite } from '../lib/agent.mjs';
@@ -47,5 +48,5 @@ test('an invite is the whole link; the socket path fits', () => {
   assert.throws(() => parseInvite('javascript:alert(1)#invite=00112233445566778899'), /whole link/);
   // Unix sockets (Windows uses a named pipe: tests/daemon.test.mjs).
   if (process.platform !== 'win32') assert.ok(socketPath(`/tmp/${'x'.repeat(200)}`).length < 104);
-  assert.equal(socketPath('/home/a/.epeaky/agents/research', 'linux'), '/home/a/.epeaky/agents/research/agent.sock');
+  assert.equal(socketPath('/home/a/.epeaky/agents/research', 'linux'), join('/home/a/.epeaky/agents/research', 'agent.sock'));
 });
