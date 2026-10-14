@@ -22,7 +22,9 @@ const HOME = mkdtempSync(join(tmpdir(), 'elib-'));
 const env = { ...process.env, EPEAKY_HOME: HOME, EPEAKY_AGENT_BIN: AGENT_BIN };
 const tag = Math.random().toString(36).slice(2, 8);
 
-const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
+// DEN_ENV: an .exs that points the host's commands at another den's database
+// (a fresh den, e.g. DEN=http://localhost:4200 DEN_ENV=…/env.exs).
+const host = (expr) => execFileSync('mix', ['run', '--no-start', '-e', `${process.env.DEN_ENV ? `Code.eval_file(${JSON.stringify(process.env.DEN_ENV)}); ` : ''}Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); ${expr}`], { cwd: SERVER, encoding: 'utf8' }).trim().split('\n').at(-1);
 const invite = () => `${DEN}/#invite=${host('IO.puts(hd(Den.Gate.Members.invite(1, 1)))')}`;
 const ok = (c, w) => { console.log(`${new Date().toISOString().slice(11, 23)} ${c ? 'PASS' : 'FAIL'}  ${w}`); if (!c) process.exitCode = 1; };
 const until = (p, f, arg, ms = 30000) => p.waitForFunction(f, arg, { timeout: ms }).then(() => true, () => false);

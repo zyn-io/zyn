@@ -39,3 +39,6 @@ npm test                                         # the index
 (cd ../../server && mix phx.server)              # a dev den with its page built
 PLAYWRIGHT_FROM=… node tests/librarian.e2e.mjs   # an owner, a member, the librarian
 ```
+
+Against another den than the one on :4000: `DEN=http://localhost:4200
+DEN_ENV=…/env.exs`, an .exs that points the host's commands at its database.
