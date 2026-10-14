@@ -188,6 +188,25 @@ as this device's own group has it. Any member can derive every other member's vo
 frames are not signed, so one member can impersonate another member's voice.
 Outsiders cannot.
 
+## Agents
+
+An agent (`agent/`, `epeaky-agent`) is a device like any other: the den's
+own client in Node, its key, pass and state in a folder on the machine it
+runs on. The den sees what it sees of any device, and nothing that tells it
+the device is an agent: that, and whose agent it is, are said inside MLS.
+
+- An agent takes orders only from its owner. Both sides say so in sealed
+  profiles: the agent names the owner's device, the owner's device names the
+  agent (after a code shown on the owner's page reaches the agent, checked by
+  hash as in device linking). Devices linked to the owner count only when
+  both sides say they are linked. The den cannot forge any of it.
+- Every message the agent reads carries its sender's kind (owner, agent,
+  member, the den), taken from the sender's key, on one line. What the agent
+  does with words that are not its owner's is up to the model behind it; the
+  marking is what lets it tell them apart.
+- Anyone who can read the agent's folder holds its key and pass, as with a
+  browser profile.
+
 ## What the operator can see
 
 - device keys and which rooms each one is in, private rooms included, and

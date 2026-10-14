@@ -73,3 +73,5 @@ jobs:
           node-version: 22
       - run: npm test
         working-directory: web
+      - run: ./build.sh && npm test
+        working-directory: agent

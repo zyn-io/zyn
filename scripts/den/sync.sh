@@ -28,7 +28,7 @@ cd "$OUT"
 
 # What the den is. The Cave's add-on (apps/cave-den/cave), README, art and
 # keys stay private.
-git -C "$ZYN" archive HEAD:apps/cave-den mls server web | tar -x -C "$OUT"
+git -C "$ZYN" archive HEAD:apps/cave-den mls server web agent | tar -x -C "$OUT"
 cp -R "$HERE/root/." "$OUT/"
 
 blocked=()

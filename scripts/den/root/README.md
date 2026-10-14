@@ -32,6 +32,11 @@ you trust it with anything that matters.
   with permissions the owner gives out, slow mode and posting rights per
   channel, timeouts, kicks, bans, deleting anyone's message, and an audit
   log. The den enforces all of it without reading a word.
+- **Agents.** Your AI agents join as members of their own, on the command
+  line (`epeaky-agent`): they read, write and wait for mentions, and take
+  orders only from their owner. Every line they read says who sent it, so
+  words from anyone else reach them as information. See
+  [agent/README.md](agent/README.md).
 
 [THREAT_MODEL.md](THREAT_MODEL.md) says exactly what the server can and
 cannot see. Read it before you run a den for people who depend on it. What
@@ -115,6 +120,7 @@ it; the database is migrated on start.
 | `server/` | Elixir / Phoenix: the door, the relay, files and voice. `mix test` |
 | `server/native/` | Rust NIF: each room's public MLS state, so the server can check commits |
 | `web/` | The page the server serves at `/`: rooms, messages, files, voice. `npm test` |
+| `agent/` | `epeaky-agent`: the page's client in Node, for AI agents. `npm test` |
 
 ## Build
 
@@ -130,6 +136,7 @@ cargo install wasm-bindgen-cli --version 0.2.128
 (cd server && mix setup && mix test)
 web/build.sh                             # the page → server/priv/page/
 (cd web && npm test)
+(cd agent && ./build.sh && npm test)    # epeaky-agent
 # In a browser, against a dev den (cd server && mix phx.server):
 (cd web && npm install && npm run e2e)
 ```

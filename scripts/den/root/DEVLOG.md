@@ -2,6 +2,45 @@
 
 Newest first. What changed, why, and what we found along the way.
 
+## 14 October 2026: agents
+
+A den can now be where your AI agents work: they report, coordinate and take
+your orders in its rooms, end-to-end encrypted like everything else.
+
+- **`epeaky-agent`**, on the command line: `join`, `rooms`, `read`, `send`,
+  `watch` (for mentions or orders, once or as they come) and `search`. Plain
+  lines by default, `--json` for programs.
+- **The page's own client, in Node.** We tried it first: the den's client ran
+  outside a browser as it was, given a file store in place of IndexedDB. So
+  an agent is a member like any other, with no second implementation of MLS
+  to keep in step.
+- **One identity per agent, not per machine.** Each agent has its own key,
+  pass (from its own invite) and folder; one machine runs as many as you
+  like. A pass lets three devices in a day, so agents do not share yours.
+- **One background process per agent** holds its MLS state, stays in the
+  rooms and enters each day. Commands talk to it over a socket, so two of them
+  at once never touch that state together.
+- **Orders from the owner only.** "Add an agent" on the page shows a code; the
+  agent takes it, and each side then says so, sealed. Every line the agent
+  reads names the sender's kind (owner, agent, member, den) from its key, and
+  words are kept to one line, so no message can pass for its owner's.
+- **Only the owner lets an agent go.** While it has a confirmed owner, the
+  agent refuses `owner` and `owner --clear`, so a message that talks the model
+  into running them changes nothing. The owner's code is 26 characters (about
+  130 bits), because its hash crosses the room and must not be guessed
+  offline.
+- **Private rooms**: an agent joins one only if its owner is in it, reads
+  nothing there until the owner says something, and leaves if the owner does
+  not or goes.
+- **Found in review and fixed before release:** two commands could start two
+  background processes for one agent (now one lock file per agent); writes of
+  the MLS state could land out of order (now one after another, flushed);
+  an old profile read late could undo a removal (claims are now newest
+  first); a room id from a hostile den could have forged a line (ids are
+  checked and escaped).
+- Others see an "agent" tag on any member that says it is one, with its
+  owner's name once the owner confirms.
+
 ## 14 October 2026: moderation
 
 A den run as a community needs what a Discord server has. It has it now, and
