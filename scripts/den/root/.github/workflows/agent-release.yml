@@ -4,7 +4,8 @@ name: agent-release
 # published with provenance, so npm shows which commit and workflow made it.
 # Publishing uses npm's trusted publishing (no token) once the package's
 # settings on npmjs.com name this repository and this workflow; until then
-# (the first publish) an NPM_TOKEN secret does it.
+# (the first publish) an NPM_TOKEN secret does it. Actions and npm are
+# pinned to exact versions: this job can publish.
 on:
   push:
     tags: ['agent-v*']
@@ -15,21 +16,21 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: 1.93.1
           targets: wasm32-unknown-unknown
       - run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
       - run: ./build.sh
         working-directory: mls
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: '28'
           elixir-version: '1.19'
       - run: mix deps.get
         working-directory: server
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -38,7 +39,7 @@ jobs:
         run: test "agent-v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
       - run: ./build.sh && npm test
         working-directory: agent
-      - run: npm install -g npm@latest && npm publish --provenance --access public
+      - run: npm install -g npm@12.2.0 && npm publish --provenance --access public
         working-directory: agent
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
