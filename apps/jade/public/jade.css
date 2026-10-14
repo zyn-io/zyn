@@ -4,6 +4,7 @@
 
 @font-face { font-family: Archivo; src: url(/assets/fonts/Archivo-Variable.woff2) format('woff2'); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
 @font-face { font-family: Geist; src: url(/assets/fonts/Geist-Variable.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Young Serif'; src: url(/assets/fonts/YoungSerif-Regular.woff2) format('woff2'); font-weight: 400; font-display: swap; }
 @font-face { font-family: 'Geist Mono'; src: url(/assets/fonts/GeistMono-Variable.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
 
 :root {
@@ -71,7 +72,10 @@ kbd { display: inline-block; min-width: 17px; padding: 0 4px; border-radius: 4px
 .top { position: sticky; top: 0; z-index: 30; height: var(--top-h); display: grid; grid-template-columns: auto auto minmax(160px, 420px) 1fr; align-items: center; gap: 22px; padding: 0 var(--gutter) 0 calc(var(--gutter) + 2px); background: rgba(6, 17, 14, 0.9); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 var(--line); }
 .lockup { display: flex; align-items: center; gap: 9px; text-decoration: none; font: 850 17px/1 var(--display); font-stretch: 125%; letter-spacing: 0.02em; }
 .lockup img { width: 26px; height: 26px; }
-.lockup-app { font-weight: 500; font-stretch: 100%; letter-spacing: 0.01em; color: var(--steel); padding-left: 9px; border-left: 1px solid var(--line-2); }
+.lockup-app { display: flex; align-items: center; padding-left: 9px; border-left: 1px solid var(--line-2); }
+/* Jade's wordmark: Young Serif filled with jade stone, lit for a polished bevel (index.html). */
+.jade-word { display: block; height: 21px; width: auto; overflow: visible; }
+.jade-word text { font-family: 'Young Serif', Georgia, serif; font-size: 250px; font-weight: 400; }
 .tabs { display: flex; gap: 2px; font-size: 13.5px; }
 .tabs a { text-decoration: none; color: var(--steel); padding: 7px 11px; border-radius: 7px; transition: color .15s, background .15s; }
 .tabs a:hover { color: var(--mineral); background: var(--stone-1); }

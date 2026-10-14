@@ -11,14 +11,34 @@
     <title>Jade</title>
     <link rel="icon" href="/assets/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/jade.css?v=20261009-audit" />
+    <link rel="stylesheet" href="/jade.css?v=20261014-wordmark" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
     <header class="top">
       <a class="lockup" href="/" data-route="board" aria-label="Jade board">
         <img src="/assets/zyn-mark-alpha-96.webp" srcset="/assets/zyn-mark-alpha-96.webp 1x, /assets/zyn-mark-alpha-192.webp 2x" width="26" height="26" alt="" />
-        <span>ZYN</span><span class="lockup-app">Jade</span>
+        <span>ZYN</span><span class="lockup-app"><svg class="jade-word" viewBox="0 0 720 270" role="img" aria-label="Jade">
+          <defs>
+            <pattern id="jade-tex" patternUnits="objectBoundingBox" width="1" height="1" patternContentUnits="objectBoundingBox"><image href="/assets/jade-stone.webp" width="1" height="1" preserveAspectRatio="none" /></pattern>
+            <filter id="jade-stone" x="-8%" y="-25%" width="116%" height="160%" color-interpolation-filters="sRGB">
+              <feGaussianBlur in="SourceAlpha" stdDeviation="9" result="b" />
+              <feDiffuseLighting in="b" surfaceScale="7" diffuseConstant="1" lighting-color="#ffffff" result="diff"><feDistantLight azimuth="235" elevation="60" /></feDiffuseLighting>
+              <feSpecularLighting in="b" surfaceScale="7" specularConstant="0.85" specularExponent="40" lighting-color="#f2fff8" result="spec"><feDistantLight azimuth="235" elevation="52" /></feSpecularLighting>
+              <feComposite in="SourceGraphic" in2="diff" operator="arithmetic" k1="1" result="shaded" />
+              <feGaussianBlur in="SourceAlpha" stdDeviation="22" result="thick" />
+              <feFlood flood-color="#3fdc8e" /><feComposite in2="thick" operator="in" result="glow" />
+              <feComposite in="shaded" in2="glow" operator="arithmetic" k2="1" k3="0.25" result="sg" />
+              <feComposite in="spec" in2="SourceAlpha" operator="in" result="specIn" />
+              <feComposite in="sg" in2="specIn" operator="arithmetic" k2="1" k3="0.65" result="lit" />
+              <feComposite in="lit" in2="SourceAlpha" operator="in" result="face" />
+              <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="sb" /><feOffset in="sb" dy="16" result="so" />
+              <feFlood flood-color="#000000" flood-opacity="0.55" /><feComposite in2="so" operator="in" result="shadow" />
+              <feMerge><feMergeNode in="shadow" /><feMergeNode in="face" /></feMerge>
+            </filter>
+          </defs>
+          <text x="12" y="222" fill="url(#jade-tex)" filter="url(#jade-stone)">JADE</text>
+        </svg></span>
       </a>
       <nav class="tabs" aria-label="Primary navigation">
         <a href="/" data-route="board">Board</a>
