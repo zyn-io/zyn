@@ -73,6 +73,7 @@ function door(asking) {
 
 const enter = el('enter');
 if (enter) {
+  if (config.issuerLabel) enter.textContent = config.issuerLabel;
   enter.onclick = async () => {
     enter.disabled = true;
     try {

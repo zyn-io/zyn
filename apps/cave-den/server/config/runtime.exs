@@ -45,6 +45,18 @@ if v = System.get_env("DEN_ISSUER_TOKEN") do
   config :den, issuer_token: v
 end
 
+# The issuer's page, for a den on the stock page (otherwise config.json's
+# `issuer`), and the text of the button that opens it.
+if v = System.get_env("DEN_ISSUER") do
+  String.starts_with?(v, "https://") || raise "DEN_ISSUER must be an https:// address"
+  config :den, issuer: String.trim(v)
+end
+
+if v = System.get_env("DEN_ISSUER_LABEL") do
+  String.length(v) in 1..40 || raise "DEN_ISSUER_LABEL must be 1 to 40 characters"
+  config :den, issuer_label: String.trim(v)
+end
+
 # The public address of a den behind 1:1 NAT, for voice (Den.Voice.public_ip/0).
 if v = System.get_env("DEN_PUBLIC_IP") do
   case :inet.parse_address(String.to_charlist(String.trim(v))) do

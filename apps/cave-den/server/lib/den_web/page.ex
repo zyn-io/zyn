@@ -33,6 +33,23 @@ defmodule DenWeb.Page do
     end
   end
 
+  # The built config.json, with the issuer the host set (DEN_ISSUER) laid over it.
+  def call(%Plug.Conn{path_info: ["config.json"], method: m} = conn, _) when m in ["GET", "HEAD"] do
+    file = Application.app_dir(:den, "priv/page/config.json")
+    built = with {:ok, s} <- File.read(file), {:ok, %{} = c} <- Jason.decode(s), do: c, else: (_ -> %{})
+
+    set =
+      %{"issuer" => Application.get_env(:den, :issuer), "issuerLabel" => Application.get_env(:den, :issuer_label)}
+      |> Map.reject(fn {_, v} -> is_nil(v) end)
+
+    conn
+    |> secure()
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("cache-control", "no-cache")
+    |> send_resp(200, Jason.encode!(Map.merge(built, set)))
+    |> halt()
+  end
+
   def call(conn, static), do: Plug.Static.call(secure(conn), static)
 
   @doc "The page's policy, for this den's host and the extra origins it may reach."

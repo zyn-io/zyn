@@ -170,6 +170,8 @@ redirects every request that arrives without it.
 | `DEN_PAGE_CONNECT` | origins its page may fetch from besides the den, such as where the day keys are published |
 | `DEN_ENTRY` | the ways in: `invite`, `approval`, `external` (default `invite`) |
 | `DEN_ISSUER_TOKEN` | the host site's token for registering passes (`external`; 32+ characters) |
+| `DEN_ISSUER` | the issuer's page (`external`), for the stock page; `config.json`'s `issuer` otherwise |
+| `DEN_ISSUER_LABEL` | the text of the button that opens it (default "Enter") |
 | `DEN_ROOMS` | the rooms every member sees, as `id:Title,…` (default `general:General`) |
 | `DEN_GATE` | another gate module, compiled in from `extra/` |
 | `DEN_EXTRA_CHILDREN` | processes an add-on starts, by module name |
@@ -244,7 +246,7 @@ default):
 - **`approval`: the host lets people in.** Someone writes a short note and
   asks; the host approves or declines. The note is forgotten once decided.
 - **`external`: the host's own site decides.** A page on the host's site
-  (`config.json`'s `issuer`) checks whatever the host requires (a wallet, a
+  (`config.json`'s `issuer`, or `DEN_ISSUER` with the stock page) checks whatever the host requires (a wallet, a
   sign-in, a token). The den's page opens it in a window, having made the
   member's pass code itself, and gives it only the code's hash after `#`.
   The issuer registers that hash with `DEN_ISSUER_TOKEN` and answers the
