@@ -1,4 +1,4 @@
-// Epeaky access: connect a Solana wallet (Wallet Standard), buy EPEAKY with one
+// Epeaky access: connect a Solana wallet (Wallet Standard), buy $EPEAKY with one
 // of the fixed amounts, and have the buy let this device into the den. The den's
 // page opened this window with the device's pass hash after "#"; this page
 // never sees the pass code.
@@ -13,14 +13,16 @@ const WHY = {
   old: 'That buy is more than 15 minutes old.',
   payer: 'This wallet did not make that buy.',
   small: 'The buy was under the smallest amount.',
-  token: 'That transaction did not buy EPEAKY.',
+  token: 'That transaction did not buy $EPEAKY.',
   signed: 'The wallet did not sign the message for this device.',
   used: 'This buy already let a device in.',
   den: 'The buy is fine, but the den did not answer. Press Check again.',
-  pass: 'Open this window from the den\'s page.',
+  pass: 'Open this from the den\'s page: press Get access with $EPEAKY there.',
 };
 
-const pass = new URLSearchParams(location.hash.slice(1)).get('den-pass');
+// The pass hash rides after "#"; kept for this tab, so a reload of the window keeps it.
+let pass = new URLSearchParams(location.hash.slice(1)).get('den-pass');
+try { if (pass) sessionStorage.setItem('epeaky-access-pass', pass); else pass = sessionStorage.getItem('epeaky-access-pass'); } catch { /* private window */ }
 history.replaceState(null, '', location.pathname);
 let config = null;
 let wallet = null;
@@ -90,7 +92,7 @@ async function quotes() {
   await Promise.all([...document.querySelectorAll('.amount')].map(async (b) => {
     const q = await fetch(`/api/quote?sol=${b.dataset.sol}`).then((r) => r.json()).catch(() => null);
     b.querySelector('span').textContent = q?.out
-      ? `About ${tokens(q.out)} EPEAKY · price impact ${(q.impact * 100).toFixed(1)}%`
+      ? `About ${tokens(q.out)} $EPEAKY · price impact ${(q.impact * 100).toFixed(1)}%`
       : 'No quote right now';
   }));
 }
@@ -156,8 +158,10 @@ async function claim(c) {
       return;
     }
     if (r.error !== 'missing') {
-      say(WHY[r.error] || 'The check failed.', 'bad');
-      if (r.error === 'den') offerAgain();
+      // The den or this page's server failing keeps the buy, to check again.
+      const retry = r.error === 'den' || !WHY[r.error] || r.status >= 500;
+      say(WHY[r.error] || 'The check did not finish. Press Check again.', 'bad');
+      if (retry) offerAgain();
       else keep(null);
       return;
     }
@@ -186,7 +190,7 @@ if (!config) {
   el('buy').hidden = true;
   say(WHY.pass, 'bad');
 } else {
-  if (config.feeBps != null) el('fee-note').textContent = `EPEAKY takes a ${config.feeBps / 100}% fee on every transfer, so you receive less than the quote.`;
+  if (config.feeBps != null) el('fee-note').textContent = `$EPEAKY takes a ${config.feeBps / 100}% fee on every transfer, so you receive less than the quote.`;
   amounts();
   quotes();
   setInterval(quotes, 30_000);

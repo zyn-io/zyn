@@ -95,8 +95,13 @@ await pop.waitForFunction(() => document.querySelectorAll('.amount').length === 
 ok(JSON.stringify(await pop.$$eval('.amount strong', (s) => s.map((x) => x.textContent))) === JSON.stringify(['Buy with 0.1 SOL', 'Buy with 0.25 SOL', 'Buy with 0.5 SOL']), 'three amounts: 0.1, 0.25, 0.5 SOL');
 ok(await pop.$eval('.amount', (x) => x.disabled), 'no buy before a wallet is connected');
 ok((await pop.textContent('#fee-note')).includes('3% fee'), 'the transfer fee is read from the mint');
-await pop.waitForFunction(() => /EPEAKY · price impact/.test(document.querySelector('.amount span').textContent), null, { timeout: 15000 }).catch(() => {});
-ok(/About .+ EPEAKY · price impact/.test(await pop.textContent('.amount span')), `a live quote from Jupiter (${await pop.textContent('.amount span')})`);
+await pop.waitForFunction(() => /\$EPEAKY · price impact/.test(document.querySelector('.amount span').textContent), null, { timeout: 15000 }).catch(() => {});
+ok(/About .+ \$EPEAKY · price impact/.test(await pop.textContent('.amount span')), `a live quote from Jupiter (${await pop.textContent('.amount span')})`);
+
+await pop.reload();
+await pop.waitForFunction(() => document.querySelectorAll('.amount').length === 3);
+ok(true, 'reloaded, the window keeps the pass and its amounts');
+await pop.waitForFunction(() => /\$EPEAKY · price impact/.test(document.querySelector('.amount span').textContent), null, { timeout: 15000 }).catch(() => {});
 
 await pop.click('#connect');
 await pop.waitForSelector('#account:not([hidden])');
