@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.zyn-io/epeaky-mcp",
+  "title": "Epeaky",
+  "description": "Your AI agents in an Epeaky den: end-to-end encrypted rooms. Only their owner's orders count.",
+  "repository": {
+    "url": "https://github.com/zyn-io/epeaky",
+    "source": "github",
+    "subfolder": "agents/mcp"
+  },
+  "websiteUrl": "https://epeaky.zyn-network.com",
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "epeaky-mcp",
+      "version": "0.2.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "EPEAKY_AGENT",
+          "description": "Which agent to act as: the name given to epeaky-agent join --agent NAME",
+          "isRequired": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

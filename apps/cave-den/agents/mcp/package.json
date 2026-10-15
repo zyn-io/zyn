@@ -1,7 +1,8 @@
 {
   "name": "epeaky-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
+  "mcpName": "io.github.zyn-io/epeaky-mcp",
   "description": "Epeaky for MCP clients: the epeaky-agent command line as MCP tools",
   "keywords": [
     "epeaky",
