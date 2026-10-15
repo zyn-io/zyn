@@ -10,7 +10,8 @@
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { encode } from '../public/shared.mjs';
+import { execFileSync } from 'node:child_process';
+import { encode, moveMessage } from '../public/shared.mjs';
 
 const require = createRequire(process.env.PLAYWRIGHT_FROM ? `${process.env.PLAYWRIGHT_FROM.replace(/\/$/, '')}/package.json` : import.meta.url);
 const { chromium } = require('playwright-core');
@@ -18,6 +19,8 @@ const CHROME = process.env.CHROMIUM || '/Applications/Google Chrome.app/Contents
 const DEN = process.env.DEN || 'http://localhost:4300';
 const ACCESS = process.env.ACCESS || 'http://localhost:8788';
 const MINT = '6dkcEZs83NpCJmWveasCMu3Kmd2XkCzSVmNJJhQBLtx1';
+// DEN_ENV: the den's .exs, to count its members from here.
+const members = () => Number(execFileSync('mix', ['run', '--no-start', '-e', `Code.eval_file(${JSON.stringify(process.env.DEN_ENV)}); Application.ensure_all_started(:ecto_sqlite3); {:ok, _} = Den.Repo.start_link(); IO.puts(Den.Repo.aggregate("members", :count))`], { cwd: new URL('../../cave-den/server/', import.meta.url).pathname, encoding: 'utf8' }).trim().split('\n').at(-1));
 
 let failed = 0;
 const ok = (c, what) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${what}`); if (!c) failed++; };
@@ -54,7 +57,7 @@ const rpc = createServer((req, res) => {
 
 const b = await chromium.launch({ executablePath: CHROME, headless: true });
 const ctx = await b.newContext();
-await ctx.addInitScript(({ pkcs8, wallet, sig }) => {
+const INIT = ({ pkcs8, wallet, sig }) => {
   if (!location.port || location.port !== '8788') return;
   const raw = Uint8Array.from(atob(pkcs8), (c) => c.charCodeAt(0));
   const ABC = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -74,7 +77,8 @@ await ctx.addInitScript(({ pkcs8, wallet, sig }) => {
   };
   const register = ({ register }) => register(w);
   window.addEventListener('wallet-standard:app-ready', (e) => register(e.detail));
-}, { pkcs8: PKCS8, wallet: WALLET, sig: SIG });
+};
+await ctx.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG });
 
 // Opened on its own, the access page offers nothing to buy.
 const alone = await ctx.newPage();
@@ -118,6 +122,30 @@ const again = await fetch(`${ACCESS}/api/claim`, {
   body: JSON.stringify({ pass: 'cd'.repeat(32), signature: SIG, wallet: WALLET, signed: encode(new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, new TextEncoder().encode(`Epeaky access\npass: ${'cd'.repeat(32)}\ntx: ${SIG}`)))) }),
 }).then((r) => r.json());
 ok(again.error === 'used', 'the same buy cannot let in a second device');
+
+// A new device: the wallet that bought moves its access here, with no new buy.
+const before = members();
+const ctx2 = await b.newContext();
+await ctx2.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG });
+const den2 = await ctx2.newPage();
+await den2.goto(`${DEN}/`);
+await den2.waitForSelector('#enter:not([hidden])', { timeout: 20000 });
+const [pop2] = await Promise.all([den2.waitForEvent('popup'), den2.click('#enter')]);
+await pop2.waitForFunction(() => document.querySelectorAll('.amount').length === 3);
+ok(await pop2.isHidden('#moving'), 'the move is offered only once a wallet is connected');
+await pop2.click('#connect');
+await pop2.waitForSelector('#moving:not([hidden])');
+await pop2.click('#move');
+ok(await den2.waitForSelector('#den:not([hidden])', { timeout: 30000 }).then(() => true, () => false), 'the new device is let in by moving the access, with no new buy');
+ok(members() === before, `one pass in, one out: the den has as many members as before (${before})`);
+
+const at = Date.now();
+const p3 = '12'.repeat(32);
+const soon = await fetch(`${ACCESS}/api/move`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ pass: p3, wallet: WALLET, at, signed: encode(new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, new TextEncoder().encode(moveMessage(p3, WALLET, at))))) }),
+}).then((r) => r.json());
+ok(soon.error === 'soon' && soon.next > Date.now(), 'a second move the same day waits');
 
 await b.close();
 rpc.close();

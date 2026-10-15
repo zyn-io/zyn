@@ -90,3 +90,62 @@ test('the den refusing is passed on', async () => {
   const d = { ...deps(), register: async () => ({ error: 'closed' }) };
   assert.equal((await claim({ pass: PASS, signature: SIG, wallet: WALLET, signed: await sign(message(PASS, SIG)) }, d)).why, 'den');
 });
+
+// ---- Moving a bought access to a new device --------------------------------
+
+import { move } from '../lib/check.mjs';
+import { moveMessage } from '../public/shared.mjs';
+
+const DAY = 24 * 3600_000;
+function moves(row, log = []) {
+  return {
+    now: () => AT,
+    latest: async (w) => (w === WALLET ? row : null),
+    swap: async (s, pass, at) => { log.push(['swap', s, pass]); row.pass = pass; row.moved_at = at; },
+    unregister: async (pass) => { log.push(['unregister', pass]); return { ok: true }; },
+    register: async (pass) => { log.push(['register', pass]); return { ok: true }; },
+    log,
+  };
+}
+const NEW = 'ef'.repeat(32);
+
+test('the wallet that bought moves its access: old pass out, new pass in', async () => {
+  const d = moves({ signature: SIG, pass: PASS, moved_at: null });
+  const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
+  assert.deepEqual(r, { ok: true });
+  assert.deepEqual(d.log, [['register', NEW], ['swap', SIG, NEW], ['unregister', PASS]]);
+});
+
+test('a wallet that never bought has nothing to move', async () => {
+  const d = { ...moves(null), latest: async () => null };
+  assert.equal((await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d)).why, 'none');
+});
+
+test('another wallet cannot move it; an old signature cannot be sent again', async () => {
+  const d = moves({ signature: SIG, pass: PASS, moved_at: null });
+  assert.equal((await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage('00'.repeat(32), WALLET, AT)) }, d)).why, 'signed');
+  const old = AT - 10 * 60_000;
+  assert.equal((await move({ pass: NEW, wallet: WALLET, at: old, signed: await sign(moveMessage(NEW, WALLET, old)) }, d)).why, 'stale');
+  assert.deepEqual(d.log, []);
+});
+
+test('once a day: a second move within 24 hours waits', async () => {
+  const d = moves({ signature: SIG, pass: PASS, moved_at: AT - DAY / 2 });
+  const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
+  assert.equal(r.why, 'soon');
+  assert.equal(r.next, AT + DAY / 2);
+  assert.deepEqual(d.log, []);
+});
+
+test('moving to the device that already has it changes nothing', async () => {
+  const d = moves({ signature: SIG, pass: NEW, moved_at: null });
+  assert.deepEqual(await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d), { ok: true });
+  assert.deepEqual(d.log, []);
+});
+
+test('the den failing to take the new pass leaves the record as it was', async () => {
+  const d = { ...moves({ signature: SIG, pass: PASS, moved_at: null }), register: async () => ({ error: 503 }) };
+  const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
+  assert.equal(r.why, 'den');
+  assert.deepEqual(d.log, [], 'the old device keeps its access');
+});

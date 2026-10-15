@@ -27,3 +27,7 @@ export function encode(bytes) {
 /// What the buyer's wallet signs: it ties this buy to this device's pass, so a
 /// buy seen on chain cannot be claimed by anyone but the wallet that made it.
 export const message = (pass, signature) => `Epeaky access\npass: ${pass}\ntx: ${signature}`;
+
+/// What a wallet that bought before signs to move its access to this device.
+/// `at` (ms) keeps an old signature from being sent again later.
+export const moveMessage = (pass, wallet, at) => `Epeaky access\nmove to: ${pass}\nwallet: ${wallet}\nat: ${at}`;

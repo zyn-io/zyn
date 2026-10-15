@@ -1,8 +1,8 @@
 // Whether a finished buy lets a device in. Pure: the chain, the claims table
 // and the den come in as `deps`, so tests run on recorded transactions.
-import { decode, message } from '../public/shared.mjs';
+import { decode, message, moveMessage } from '../public/shared.mjs';
 
-export { message };
+export { message, moveMessage };
 
 const PASS = /^[0-9a-f]{64}$/;
 
@@ -40,4 +40,26 @@ export async function claim({ pass, signature, wallet, signed }, deps) {
   if ((await deps.record(signature, pass, wallet)) === 'other') return { ok: false, why: 'used', status: 409 };
   const den = await deps.register(pass);
   return den?.ok ? { ok: true } : { ok: false, why: 'den', status: 502 };
+}
+
+/// Moves a wallet's bought access to a new device, once a day: the new pass
+/// goes in first and the old one out last, so a den that fails halfway locks
+/// nobody out. deps: latest(wallet) → {signature, pass, moved_at} | null,
+/// register(pass), swap(signature, pass, at), unregister(pass), now.
+export const MOVE_EVERY = 24 * 3600_000;
+export async function move({ pass, wallet, at, signed }, deps) {
+  if (!PASS.test(pass || '')) return { ok: false, why: 'pass', status: 400 };
+  if (typeof wallet !== 'string' || typeof signed !== 'string' || !Number.isSafeInteger(at)) return { ok: false, why: 'signed', status: 400 };
+  const now = deps.now?.() ?? Date.now();
+  if (Math.abs(now - at) > 5 * 60_000) return { ok: false, why: 'stale', status: 403 };
+  if (!(await verifySigned(wallet, moveMessage(pass, wallet, at), signed))) return { ok: false, why: 'signed', status: 403 };
+  const row = await deps.latest(wallet);
+  if (!row) return { ok: false, why: 'none', status: 404 };
+  if (row.pass === pass) return { ok: true };
+  if (row.moved_at && now - row.moved_at < MOVE_EVERY) return { ok: false, why: 'soon', next: row.moved_at + MOVE_EVERY, status: 429 };
+  const old = row.pass;
+  if (!(await deps.register(pass))?.ok) return { ok: false, why: 'den', status: 502 };
+  await deps.swap(row.signature, pass, now);
+  await deps.unregister(old);
+  return { ok: true };
 }

@@ -3,5 +3,7 @@ CREATE TABLE IF NOT EXISTS claims (
   signature TEXT PRIMARY KEY,
   pass TEXT NOT NULL,
   wallet TEXT NOT NULL,
-  at INTEGER NOT NULL
+  at INTEGER NOT NULL,
+  moved_at INTEGER
 );
+CREATE INDEX IF NOT EXISTS claims_wallet ON claims (wallet, at);

@@ -64,3 +64,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .say.good { color: var(--brass-hi); font-weight: 600; }
 
 @media (prefers-reduced-motion: no-preference) { .amount { transition: border-color 0.15s; } }
+.moving { margin-top: 14px; padding: 12px 16px; border: 1px dashed var(--line); border-radius: 10px; }
+.moving p { margin: 0; }
+.moving .small { margin-top: 4px; color: var(--muted); font-size: 0.85rem; }
+.link { padding: 0; border: 0; background: none; color: var(--brass-hi); font-weight: 600; text-decoration: underline; }

@@ -2,7 +2,7 @@
 // of the fixed amounts, and have the buy let this device into the den. The den's
 // page opened this window with the device's pass hash after "#"; this page
 // never sees the pass code.
-import { encode, message } from './shared.mjs';
+import { encode, message, moveMessage } from './shared.mjs';
 
 const el = (id) => document.getElementById(id);
 const CHAIN = 'solana:mainnet';
@@ -18,6 +18,8 @@ const WHY = {
   used: 'This buy already let a device in.',
   den: 'The buy is fine, but the den did not answer. Press Check again.',
   pass: 'Open this from the den\'s page: press Get access with $EPEAKY there.',
+  none: 'This wallet has no earlier buy here.',
+  stale: 'The signature took too long. Try again.',
 };
 
 // The pass hash rides after "#"; kept for this tab, so a reload of the window keeps it.
@@ -67,6 +69,7 @@ async function use(w) {
   el('account').innerHTML = '';
   el('account').append('Connected: ', Object.assign(document.createElement('b'), { textContent: short(a.address) }), ` (${w.name})`);
   for (const b of document.querySelectorAll('.amount')) b.disabled = busy;
+  el('moving').hidden = false;
   say('');
 }
 
@@ -115,6 +118,7 @@ function amounts() {
 function lock(on) {
   busy = on;
   for (const b of document.querySelectorAll('.amount')) b.disabled = on || !account;
+  el('move').disabled = on;
 }
 
 // ---- Buying and getting in ------------------------------------------------
@@ -177,6 +181,32 @@ function offerAgain() {
   el('again').hidden = false;
   el('again').onclick = () => claim(c);
 }
+
+// A wallet that bought before: its access moves here, with no new buy.
+el('move').onclick = async () => {
+  if (busy || !account) return;
+  lock(true);
+  try {
+    const at = Date.now();
+    say('Sign the message in your wallet to move access to this device.');
+    const [m] = await wallet.features['solana:signMessage'].signMessage({ account, message: new TextEncoder().encode(moveMessage(pass, account.address, at)) });
+    say('Moving access…');
+    const r = await fetch('/api/move', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pass, wallet: account.address, at, signed: encode(m.signature) }) })
+      .then(async (x) => ({ status: x.status, ...(await x.json().catch(() => ({}))) }))
+      .catch(() => ({}));
+    if (r.ok) {
+      say('You\'re in. This window closes now.', 'good');
+      tell({ registered: true });
+      setTimeout(() => close(), 1500);
+    } else if (r.error === 'soon') {
+      say(`This wallet moved its access less than a day ago. Try again after ${new Date(r.next).toLocaleString()}.`, 'bad');
+    } else {
+      say(WHY[r.error] || 'The move did not finish. Try again.', 'bad');
+    }
+  } catch (e) {
+    say(/reject|declin|cancel|denied/i.test(e?.message || '') ? 'Not signed in the wallet.' : e?.message || 'The move did not finish.', 'bad');
+  } finally { lock(false); }
+};
 
 el('cancel').onclick = () => { tell({ error: true, cancelled: true }); close(); };
 
