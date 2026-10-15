@@ -426,3 +426,5 @@ main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spaci
 .next { margin-top: 64px; padding-top: 28px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 14px; }
 .doc .agent-term { margin-top: 20px; }
 .doc ul + p, .doc ol + p, .doc figure + p, .doc .table + p { margin-top: 18px; }
+.table.nums td, .table.nums th { white-space: nowrap; }
+.doc .term + p, .doc .disclose + .next { margin-top: 16px; }
