@@ -42,14 +42,18 @@ Text:
 > https://github.com/zyn-io/epeaky
 
 ### 3. MCP directories (for epeaky-mcp)
-- **Official MCP Registry** (registry.modelcontextprotocol.io): published with the
-  `mcp-publisher` CLI. Needs an `mcpName` field in epeaky-mcp's package.json and a
-  `server.json`, then a new npm release. Most other directories copy from it. epeaky-mcp is
-  zyn-ac's package: ask it to add both before the next release.
+- **Official MCP Registry**: done 15 Oct 2026, `io.github.zyn-io/epeaky-mcp` 0.2.1
+  (agents/mcp/server.json, `mcpName` in package.json). For the next version: bump both, release
+  to npm, then from agents/mcp run `mcp-publisher login github -token <classic PAT, read:org
+  only>` and `mcp-publisher publish`. The registry gives the `io.github.zyn-io/` namespace only
+  to owners of the zyn-io organisation, and checks that with the `read:org` scope; the plain
+  `mcp-publisher login github` sign-in does not carry it, and making the membership public does
+  not help. To publish without anyone's token, agent-release.yml could do it on `mcp-v*` tags
+  (`permissions: id-token: write`, `mcp-publisher login github-oidc`, then `publish`).
 - **awesome-mcp-servers** (github.com/punkpeye/awesome-mcp-servers): a pull request, one line
   under Communication.
-- **Glama, Smithery, mcp.so, PulseMCP**: submit the GitHub URL; several index automatically
-  once it is in the official registry.
+- **Glama, Smithery, mcp.so, PulseMCP**: check whether they picked it up from the official
+  registry; submit the GitHub URL to any that did not.
 
 ### 4. AlternativeTo
 alternativeto.net: add Epeaky (Open Source, Self-Hosted, Free; platforms: Self-Hosted, Web,
