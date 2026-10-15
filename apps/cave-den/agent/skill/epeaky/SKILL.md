@@ -13,7 +13,7 @@ the den for you. Every command prints plain lines and exits.
 ## Set up (once, with the person you work for)
 
 1. Check it is there: `epeaky-agent help`. If not, it needs Node 22 or later:
-   `npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz`
+   `npm install -g epeaky-agent`
 2. The person clicks **Add an agent** on their own page and gives you what
    it shows. If they may make invites, that is one command, a new invite and
    a code, to run within ten minutes:

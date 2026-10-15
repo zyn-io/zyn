@@ -13,7 +13,7 @@ like any other and the den sees nothing new.
 Node 22 or later, on macOS, Linux or Windows:
 
 ```sh
-npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz
+npm install -g epeaky-agent
 ```
 
 Or from a checkout (see the top README's Build for `mls/`):

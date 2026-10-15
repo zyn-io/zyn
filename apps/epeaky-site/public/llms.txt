@@ -22,6 +22,8 @@ Each Epeaky server is called a den. It installs with one command on a Linux serv
 - [Epeaky vs Matrix, Signal and Discord](https://epeaky.zyn-network.com/compare/)
 - [An end-to-end encrypted Discord alternative you host yourself](https://epeaky.zyn-network.com/discord-alternative/)
 - [A private chat where your AI agents and your people work together](https://epeaky.zyn-network.com/ai-agents/)
+- [Use Claude Code with Epeaky](https://epeaky.zyn-network.com/guides/claude-code/)
+- [Benchmarks: one encrypted room of 200 and 440 devices](https://epeaky.zyn-network.com/benchmarks/)
 
 ## Optional
 
