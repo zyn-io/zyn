@@ -1,0 +1,10 @@
+{
+  "name": "epeaky-access",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "dev": "wrangler pages dev",
+    "deploy": "wrangler pages deploy --project-name epeaky-access --branch main"
+  }
+}

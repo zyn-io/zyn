@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Epeaky access</title>
+  <link rel="icon" href="/assets/coin.png">
+  <link rel="stylesheet" href="/access.css">
+  <script type="module" src="/access.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="/assets/coin.png" alt="" width="56" height="56">
+      <h1>Epeaky access</h1>
+    </header>
+    <p class="lead">Buy EPEAKY with one of these amounts to let this device into the den.</p>
+
+    <section id="wallet">
+      <button type="button" class="act" id="connect">Connect wallet</button>
+      <div id="wallets" class="choices" hidden></div>
+      <p id="account" class="account" hidden></p>
+    </section>
+
+    <section id="buy" aria-label="Amounts">
+      <div id="amounts" class="amounts"></div>
+      <ul class="notes">
+        <li>A market buy through Jupiter, not a payment to the den. No refunds.</li>
+        <li id="fee-note">EPEAKY takes a fee on every transfer, so you receive less than the quote.</li>
+        <li>Liquidity is small, so the price can move a lot between buys.</li>
+        <li>Your wallet asks twice: once for the buy, once to sign a message that ties the buy to this device.</li>
+        <li>This page's server sees your wallet address and which device it let in. The den does not see your wallet.</li>
+      </ul>
+    </section>
+
+    <p id="say" class="say" role="status" aria-live="polite"></p>
+    <button type="button" class="act" id="again" hidden>Check again</button>
+    <button type="button" class="quiet" id="cancel">Cancel</button>
+  </main>
+</body>
+</html>

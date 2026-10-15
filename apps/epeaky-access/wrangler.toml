@@ -1,0 +1,14 @@
+name = "epeaky-access"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+[vars]
+MINT = "6dkcEZs83NpCJmWveasCMu3Kmd2XkCzSVmNJJhQBLtx1"
+AMOUNTS = "0.1,0.25,0.5"
+DEN_URL = "https://159-69-252-109.sslip.io"
+SOLANA_RPC = "https://api.mainnet-beta.solana.com"
+
+[[d1_databases]]
+binding = "CLAIMS"
+database_name = "epeaky-access"
+database_id = "local"
