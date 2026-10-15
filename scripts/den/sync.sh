@@ -30,7 +30,7 @@ cd "$OUT"
 # What the den is. The Cave's add-on (apps/cave-den/cave), README, art and
 # keys stay private.
 git -C "$ZYN" archive HEAD:apps/cave-den mls server web agent agents | tar -x -C "$OUT"
-cp -R "$HERE/root/." "$OUT/"
+git -C "$ZYN" archive HEAD:scripts/den/root | tar -x -C "$OUT"
 
 blocked=()
 
