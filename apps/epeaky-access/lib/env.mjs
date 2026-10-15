@@ -15,15 +15,23 @@ export function isWallet(s) {
   try { return typeof s === 'string' && decode(s).length === 32; } catch { return false; }
 }
 
+/// SOLANA_RPC is a comma-separated list, tried in order: public nodes refuse
+/// some requests from Cloudflare, so one that fails hands over to the next.
 export async function rpc(env, method, params) {
-  const r = await fetch(env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const a = await r.json();
-  if (a.error) throw new Error(a.error.message || 'rpc');
-  return a.result;
+  let last = new Error('rpc');
+  for (const url of String(env.SOLANA_RPC || 'https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com').split(',')) {
+    try {
+      const r = await fetch(url.trim(), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+      const a = await r.json();
+      if (!a.error) return a.result;
+      last = new Error(a.error.message || 'rpc');
+    } catch (e) { last = e; }
+  }
+  throw last;
 }
 
 /// Jupiter's quote for one of the fixed amounts; anything else is refused.
