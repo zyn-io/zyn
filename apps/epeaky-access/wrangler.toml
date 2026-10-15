@@ -5,7 +5,7 @@ compatibility_date = "2026-10-01"
 [vars]
 MINT = "6dkcEZs83NpCJmWveasCMu3Kmd2XkCzSVmNJJhQBLtx1"
 AMOUNTS = "0.1,0.25,0.5"
-DEN_URL = "https://159-69-252-109.sslip.io"
+DEN_URL = "https://gen-epeaky.zyn-network.com"
 SOLANA_RPC = "https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com"
 
 [[d1_databases]]
