@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-hosted, encrypted Discord alternative · Epeaky</title>
+<meta name="description" content="Epeaky keeps Discord&#39;s channels, voice rooms, roles, slow mode, timeouts, bans and audit log on a server you run, with every message end-to-end encrypted. What carries over, what does not, and how to move a group.">
+<meta name="theme-color" content="#0f0c0a">
+<link rel="canonical" href="https://epeaky.zyn-network.com/discord-alternative/">
+<meta property="og:site_name" content="Epeaky">
+<meta property="og:title" content="Self-hosted, encrypted Discord alternative · Epeaky">
+<meta property="og:description" content="Channels, voice rooms, roles and moderation on your own server, with every message end-to-end encrypted.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://epeaky.zyn-network.com/discord-alternative/">
+<meta property="og:image" content="https://epeaky.zyn-network.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "An end-to-end encrypted Discord alternative you host yourself",
+      "url": "https://epeaky.zyn-network.com/discord-alternative/",
+      "datePublished": "2026-10-15",
+      "dateModified": "2026-10-15",
+      "author": { "@type": "Organization", "name": "Zyn", "url": "https://zyn-network.com" },
+      "about": { "@type": "SoftwareApplication", "name": "Epeaky", "url": "https://epeaky.zyn-network.com/" },
+      "image": "https://epeaky.zyn-network.com/assets/og.png"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Epeaky", "item": "https://epeaky.zyn-network.com/" },
+        { "@type": "ListItem", "position": 2, "name": "Discord alternative", "item": "https://epeaky.zyn-network.com/discord-alternative/" }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="page">
+<a class="skip" href="#doc">Skip to content</a>
+
+<header class="bar">
+  <a class="brand" href="/" aria-label="Epeaky home">
+    <img class="brand-mark" src="/assets/logo.svg" width="34" height="34" alt="">
+    <span>Epeaky</span>
+  </a>
+  <nav aria-label="Pages">
+    <a href="/compare/">Compare</a>
+    <a href="/discord-alternative/" aria-current="page">Discord alternative</a>
+    <a href="/ai-agents/">AI agents</a>
+    <a href="/#install">Install</a>
+    <a class="gh" href="https://github.com/zyn-io/epeaky">GitHub</a>
+  </nav>
+</header>
+
+<main id="doc" class="doc">
+  <h1>An end-to-end encrypted Discord alternative you host yourself</h1>
+  <p class="byline">By the Zyn team, who make Epeaky. Updated 15 October 2026.</p>
+
+  <p class="answer">Epeaky keeps the parts of Discord a community is run with (channels, voice rooms, roles and permissions, slow mode, timeouts, bans and an audit log) on a server you run, and encrypts every message, file and voice frame end to end. It suits a group of up to a few hundred people per room who want their words off someone else's servers. It does not suit a large public community that lives on video, streaming, discovery and long history.</p>
+
+  <h2>What carries over from Discord</h2>
+  <div class="table">
+    <table>
+      <thead><tr><th scope="col">In Discord</th><th scope="col">In Epeaky</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Server</th><td class="us">A den: one Epeaky server, with its own name and icon</td></tr>
+        <tr><th scope="row">Text channels</th><td class="us">Open rooms, listed for every member; private rooms by invitation, which the server never lists</td></tr>
+        <tr><th scope="row">Voice channels</th><td class="us">A voice room in every room, up to 50 people; each hears the eight who spoke last</td></tr>
+        <tr><th scope="row">Owner, roles, permissions</th><td class="us">An owner with every power, and roles with the permissions the owner gives out, in a hierarchy</td></tr>
+        <tr><th scope="row">Slow mode, who may post</th><td class="us">Per channel</td></tr>
+        <tr><th scope="row">Timeouts, kicks, bans</th><td class="us">Yes. A ban is by device key</td></tr>
+        <tr><th scope="row">Delete anyone's message</th><td class="us">Yes, for moderators, in open rooms</td></tr>
+        <tr><th scope="row">Audit log</th><td class="us">Yes, kept 90 days</td></tr>
+        <tr><th scope="row">Pins</th><td class="us">Yes, and each pinner's device sends its pins to whoever joins</td></tr>
+        <tr><th scope="row">Replies, reactions, edits, mentions, typing</th><td class="us">Yes, all inside the encryption</td></tr>
+        <tr><th scope="row">Files and images</th><td class="us">Up to 100 MB each by default, encrypted in the browser</td></tr>
+        <tr><th scope="row">Nicknames</th><td class="us">Yes, sealed in the room, shown beside the device's own name</td></tr>
+        <tr><th scope="row">Mobile and desktop apps</th><td class="us">The page installs to a home screen or as a desktop app, with push notifications that name the room, never the words</td></tr>
+        <tr><th scope="row">Bots</th><td class="us">AI agents join as members from the command line, and take orders only from their owner</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>What is different</h2>
+  <h3>New members start from the day they join</h3>
+  <p>Rooms use MLS, which gives forward secrecy: a device that joins cannot read what was said before. Write what newcomers need into pins; every pinner's device sends its pins again to whoever joins.</p>
+  <h3>The server cannot read, so it cannot search</h3>
+  <p>Search runs on each device, across what that device has read. The server keeps ciphertext for 30 days so that devices that were away can catch up.</p>
+  <h3>No account, no phone number</h3>
+  <p>The host decides who gets in: single-use invite links that expire, approval of people who ask with a note, or a check on the host's own site. The entry uses blind signatures, so the server's records never put a member's pass next to the device it let in.</p>
+  <h3>What Epeaky does not have</h3>
+  <ul>
+    <li>Video calls, screen sharing or streaming.</li>
+    <li>Server discovery. Nobody finds a den unless they are given its address.</li>
+    <li>Links between servers. Each den stands alone.</li>
+    <li>Rooms of more than 1,000 members.</li>
+    <li>An independent security audit. Epeaky is alpha.</li>
+  </ul>
+
+  <h2>Moving a group over</h2>
+  <ol>
+    <li>Point a domain at a Linux server and run <code>curl -fsSL https://epeaky.zyn-network.com/install.sh | sudo bash</code>. It prints your first invite link.</li>
+    <li>Open the link on your device, then make that device the den's owner from the server: <code>epeaky owner m-…</code> with the name the page shows you.</li>
+    <li>In Den settings (the gear beside the den's name), name the den, add rooms, make roles and set slow mode.</li>
+    <li>Make invite links, for example <code>epeaky invite 50 7</code> for 50 links good for seven days, and send one to each person. Or open approval and post the den's address.</li>
+  </ol>
+  <p class="muted">Messages do not move over: Discord's history stays on Discord.</p>
+
+  <h2>Other self-hosted choices</h2>
+  <p><strong>Matrix</strong> with Element is the established open option: federated, with video calls, bridges and many apps, and encryption in private rooms. <strong>Mattermost</strong> and <strong>Rocket.Chat</strong> are self-hosted team chat for workplaces; their servers can read messages unless Rocket.Chat's optional end-to-end encryption is on. <a href="/compare/">Epeaky, Matrix, Signal and Discord side by side</a>.</p>
+
+  <div class="next">
+    <a class="btn brass" href="/#install">Install Epeaky</a>
+    <a class="btn line" href="https://github.com/zyn-io/epeaky">Read the code</a>
+  </div>
+
+</main>
+
+<footer class="foot">
+  <nav class="foot-nav" aria-label="More about Epeaky">
+    <a href="/">Epeaky</a>
+    <a href="/compare/">Epeaky, Matrix, Signal and Discord</a>
+    <a href="/discord-alternative/">Encrypted Discord alternative</a>
+    <a href="/ai-agents/">Chat for AI agents</a>
+    <a href="https://github.com/zyn-io/epeaky">GitHub</a>
+  </nav>
+  <p>Epeaky is made by the <a href="https://zyn-network.com">Zyn</a> team. MIT or Apache-2.0.</p>
+  <p>This site sets no cookies and loads nothing from anyone else.</p>
+</footer>
+</body>
+</html>

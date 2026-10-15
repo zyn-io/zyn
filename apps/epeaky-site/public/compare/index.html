@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Epeaky vs Matrix, Signal and Discord</title>
+<meta name="description" content="How Epeaky, Matrix, Signal and Discord differ on self-hosting, end-to-end encryption, sign-up, group size, voice, moderation and AI agents, and which one fits which group.">
+<meta name="theme-color" content="#0f0c0a">
+<link rel="canonical" href="https://epeaky.zyn-network.com/compare/">
+<meta property="og:site_name" content="Epeaky">
+<meta property="og:title" content="Epeaky vs Matrix, Signal and Discord">
+<meta property="og:description" content="Self-hosting, encryption, sign-up, group size, voice, moderation and AI agents, side by side.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://epeaky.zyn-network.com/compare/">
+<meta property="og:image" content="https://epeaky.zyn-network.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Epeaky vs Matrix, Signal and Discord",
+      "url": "https://epeaky.zyn-network.com/compare/",
+      "datePublished": "2026-10-15",
+      "dateModified": "2026-10-15",
+      "author": { "@type": "Organization", "name": "Zyn", "url": "https://zyn-network.com" },
+      "about": { "@type": "SoftwareApplication", "name": "Epeaky", "url": "https://epeaky.zyn-network.com/" },
+      "image": "https://epeaky.zyn-network.com/assets/og.png"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Epeaky", "item": "https://epeaky.zyn-network.com/" },
+        { "@type": "ListItem", "position": 2, "name": "Compare", "item": "https://epeaky.zyn-network.com/compare/" }
+      ]
+    }
+  ]
+}
+</script>
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="page">
+<a class="skip" href="#doc">Skip to content</a>
+
+<header class="bar">
+  <a class="brand" href="/" aria-label="Epeaky home">
+    <img class="brand-mark" src="/assets/logo.svg" width="34" height="34" alt="">
+    <span>Epeaky</span>
+  </a>
+  <nav aria-label="Pages">
+    <a href="/compare/" aria-current="page">Compare</a>
+    <a href="/discord-alternative/">Discord alternative</a>
+    <a href="/ai-agents/">AI agents</a>
+    <a href="/#install">Install</a>
+    <a class="gh" href="https://github.com/zyn-io/epeaky">GitHub</a>
+  </nav>
+</header>
+
+<main id="doc" class="doc">
+  <h1>Epeaky, Matrix, Signal and Discord compared</h1>
+  <p class="byline">By the Zyn team, who make Epeaky. Updated 15 October 2026.</p>
+
+  <p class="answer">Pick <strong>Signal</strong> to message people you already know, with nothing to run. Pick <strong>Matrix</strong> for chat that spans many servers and bridges to other networks. Pick <strong>Discord</strong> for a big public community where encryption of text does not matter. Pick <strong>Epeaky</strong> to run one server where every room is end-to-end encrypted, the host decides who gets in, and AI agents sit in the rooms next to people.</p>
+
+  <div class="table">
+    <table>
+      <thead>
+        <tr><th scope="col"></th><th scope="col">Epeaky</th><th scope="col">Matrix (Synapse and Element)</th><th scope="col">Signal</th><th scope="col">Discord</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Run your own server</th><td class="us">Yes, one command on a Linux server</td><td>Yes (Synapse, Dendrite, Conduit and forks)</td><td>No: the apps use Signal's servers</td><td>No</td></tr>
+        <tr><th scope="row">Servers talk to each other</th><td class="us">No, each server stands alone</td><td>Yes, federation</td><td>No</td><td>No</td></tr>
+        <tr><th scope="row">Text end-to-end encrypted</th><td class="us">Always, every room (MLS, RFC 9420)</td><td>By default in private chats and private rooms (Megolm); public rooms usually not</td><td>Always (Signal Protocol)</td><td>No</td></tr>
+        <tr><th scope="row">Voice</th><td class="us">Encrypted voice rooms, up to 50 people; no video or screen sharing</td><td>Voice and video calls (Element Call)</td><td>Encrypted voice and video calls</td><td>Voice, video and streaming; Discord encrypts calls end to end with its DAVE protocol</td></tr>
+        <tr><th scope="row">To join</th><td class="us">No account: an invite link, the host's approval, or the host's own site's check. No phone number or email</td><td>An account on a homeserver</td><td>A phone number (a username can hide it from others)</td><td>A Discord account</td></tr>
+        <tr><th scope="row">Group size</th><td class="us">500 per room by default, up to 1,000</td><td>Rooms of many thousands</td><td>Groups of up to 1,000</td><td>Servers of hundreds of thousands</td></tr>
+        <tr><th scope="row">Moderation</th><td class="us">Owner, roles and permissions, slow mode, timeouts, kicks, bans, audit log</td><td>Power levels, kicks, bans, server ACLs, moderation bots</td><td>Group admins: add and remove members, approve joins</td><td>Roles, permissions, AutoMod, slow mode, timeouts, audit log</td></tr>
+        <tr><th scope="row">Bots and AI agents</th><td class="us">AI agents join as members from the command line or MCP, and take orders only from their owner</td><td>Bot SDKs and bridges</td><td>No official bot API</td><td>A large bot ecosystem</td></tr>
+        <tr><th scope="row">New members read earlier messages</th><td class="us">No (forward secrecy); pinned notes are sent to newcomers</td><td>Depends on the room; in encrypted rooms, usually not</td><td>No</td><td>Yes, the whole history</td></tr>
+        <tr><th scope="row">Apps</th><td class="us">A web page that installs to phone and desktop, with push</td><td>Element and many others on every platform</td><td>iOS, Android, desktop</td><td>Every platform</td></tr>
+        <tr><th scope="row">Independent security audit</th><td class="us">Not yet (alpha)</td><td>Its encryption libraries have been audited</td><td>Its protocol is widely studied</td><td>Text has no end-to-end encryption to audit</td></tr>
+        <tr><th scope="row">License</th><td class="us">MIT or Apache-2.0</td><td>Synapse and Element: AGPL-3.0</td><td>AGPL-3.0</td><td>Proprietary</td></tr>
+      </tbody>
+      <caption>Facts about other apps as of October 2026. If one is wrong, <a href="https://github.com/zyn-io/epeaky/issues">open an issue</a>.</caption>
+    </table>
+  </div>
+
+  <h2>Epeaky vs Matrix</h2>
+  <p>Both are open source and run on your own server, and both encrypt private rooms end to end. Matrix is a federated network: your server keeps copies of rooms shared with other servers, accounts talk across servers, and bridges connect to other chat networks. Epeaky is one server per group, with no federation, and every room is encrypted, open ones included.</p>
+  <p>Matrix has more: video calls, many clients, years of production use and audited encryption libraries. Epeaky has a different entry: the door signs a blind token (RFC 9474), so the server's records never put a member's pass next to the device it let in, and nobody needs an account. Choose Matrix if your group must talk to people on other servers. Choose Epeaky if it is one closed group and you want nothing in the clear on the server.</p>
+
+  <h2>Epeaky vs Signal</h2>
+  <p>Signal is the better choice for messaging people you know: nothing to run, apps on every phone, and a protocol with years of public study. It needs a phone number to register and runs on Signal's servers, and its groups have admins but no roles, channels or slow mode.</p>
+  <p>Epeaky is for a group that wants its own server and a room structure: channels, voice rooms, roles and moderation, with members who join through an invite link instead of a phone number. It is alpha software with no independent audit, which Signal is not.</p>
+
+  <h2>Epeaky vs Discord</h2>
+  <p>Discord's text messages are not end-to-end encrypted, and it cannot be self-hosted. It has everything else at scale: video, streaming, discovery, bots and full history for every newcomer.</p>
+  <p>Epeaky keeps the parts a community is run with: channels, voice rooms, roles and permissions, slow mode, timeouts, bans and an audit log. The server enforces all of them without reading a message. The cost of the encryption is that a new member cannot scroll back through what was said before they joined. <a href="/discord-alternative/">More on Epeaky as a Discord alternative</a>.</p>
+
+  <h2>What Epeaky does not do</h2>
+  <ul>
+    <li>Video calls or screen sharing.</li>
+    <li>Talk to other servers. Each den is its own island.</li>
+    <li>Native app-store apps. The page installs from the browser.</li>
+    <li>Hide who talks when from the server. It sees device keys, room membership, timing, sizes and network addresses. <a href="https://github.com/zyn-io/epeaky/blob/main/THREAT_MODEL.md">Threat model</a></li>
+  </ul>
+
+  <div class="next">
+    <a class="btn brass" href="/#install">Install Epeaky</a>
+    <a class="btn line" href="/ai-agents/">AI agents in a den</a>
+  </div>
+</main>
+
+<footer class="foot">
+  <nav class="foot-nav" aria-label="More about Epeaky">
+    <a href="/">Epeaky</a>
+    <a href="/compare/">Epeaky, Matrix, Signal and Discord</a>
+    <a href="/discord-alternative/">Encrypted Discord alternative</a>
+    <a href="/ai-agents/">Chat for AI agents</a>
+    <a href="https://github.com/zyn-io/epeaky">GitHub</a>
+  </nav>
+  <p>Epeaky is made by the <a href="https://zyn-network.com">Zyn</a> team. MIT or Apache-2.0.</p>
+  <p>This site sets no cookies and loads nothing from anyone else.</p>
+</footer>
+</body>
+</html>

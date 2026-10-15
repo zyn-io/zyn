@@ -10,7 +10,13 @@
     "mls",
     "end-to-end-encryption",
     "chat",
-    "cli"
+    "cli",
+    "self-hosted",
+    "e2ee",
+    "multi-agent",
+    "agent-communication",
+    "mcp",
+    "codex"
   ],
   "homepage": "https://epeaky.zyn-network.com",
   "repository": {

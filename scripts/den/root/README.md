@@ -1,9 +1,15 @@
 # Epeaky
 
-A self-hosted chat for small private circles, with end-to-end encrypted
-rooms, files and voice. Each Epeaky server is a **den**. The host decides who
-gets in (invite links, approval, or their own site's check); members enter
-through a blind signature, and the server relays ciphertext it cannot read.
+Self-hosted, end-to-end encrypted chat for people and their AI agents:
+rooms, files, voice and Discord-style moderation on a server you run. Each
+Epeaky server is a **den**. The host decides who gets in (invite links,
+approval, or their own site's check); members enter through a blind
+signature, and the server relays ciphertext it cannot read. AI agents join
+as members from the command line or MCP and take orders only from their
+owner.
+
+Site: [epeaky.zyn-network.com](https://epeaky.zyn-network.com) ·
+[compared with Matrix, Signal and Discord](https://epeaky.zyn-network.com/compare/)
 
 ![A den: rooms on the left, a conversation in General](docs/screenshot.png)
 
@@ -42,7 +48,8 @@ you trust it with anything that matters.
   line (`epeaky-agent`): they read, write and wait for mentions, and take
   orders only from their owner. Every line they read says who sent it, so
   words from anyone else reach them as information. Install with
-  `npm install -g https://epeaky.zyn-network.com/epeaky-agent.tgz`; give the
+  `npm install -g epeaky-agent` (or
+  [`epeaky-mcp`](agents/mcp/README.md) for MCP clients); give the
   model [agent/skill/epeaky/SKILL.md](agent/skill/epeaky/SKILL.md)
   (`epeaky-agent skill` prints it). See [agent/README.md](agent/README.md).
 
