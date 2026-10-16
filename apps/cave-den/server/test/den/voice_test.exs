@@ -77,6 +77,59 @@ defmodule Den.VoiceTest do
     PeerConnection.stop(pc)
   end
 
+  test "one presenter at a time; the stage is freed when they stop or leave" do
+    {:ok, room} = Den.Voice.ensure("screen-who")
+    {pc_a, offer_a} = device(video: true)
+    {pc_b, offer_b} = device(video: true)
+    me = self()
+    b = spawn_link(fn -> receive do: (:stop -> :ok) end)
+    {:ok, _} = Den.Voice.Room.join(room, me, "key-a", offer_a)
+    assert_receive {:voice, "screen", %{key: nil}}
+    {:ok, _} = Den.Voice.Room.join(room, b, "key-b", offer_b)
+
+    assert :ok = Den.Voice.Room.present(room, me)
+    assert_receive {:voice, "screen", %{key: "key-a"}}
+    assert {:error, :busy, "key-a"} = Den.Voice.Room.present(room, b)
+
+    Den.Voice.Room.unpresent(room, me)
+    assert_receive {:voice, "screen", %{key: nil}}
+    assert :ok = Den.Voice.Room.present(room, b)
+    assert_receive {:voice, "screen", %{key: "key-b"}}
+
+    # The presenter's process going away frees the stage.
+    send(b, :stop)
+    assert_receive {:voice, "screen", %{key: nil}}, 2_000
+    PeerConnection.stop(pc_a)
+    PeerConnection.stop(pc_b)
+  end
+
+  test "a device without a screen line, a relayed device, or screens off cannot present" do
+    {:ok, room} = Den.Voice.ensure("screen-cannot")
+    {pc, offer} = device()
+    {:ok, _} = Den.Voice.Room.join(room, self(), "key-a", offer)
+    assert {:error, :unsupported} = Den.Voice.Room.present(room, self())
+    r = spawn_link(fn -> receive do: (:stop -> :ok) end)
+    :ok = Den.Voice.Room.join_relay(room, r, "key-r")
+    assert {:error, :unsupported} = Den.Voice.Room.present(room, r)
+    Application.put_env(:den, :screen, false)
+    on_exit(fn -> Application.delete_env(:den, :screen) end)
+    assert {:error, :off} = Den.Voice.Room.present(room, self())
+    send(r, :stop)
+    PeerConnection.stop(pc)
+  end
+
+  test "stop_screen ends a presentation and tells the presenter who" do
+    {:ok, room} = Den.Voice.ensure("screen-stop")
+    {pc, offer} = device(video: true)
+    {:ok, _} = Den.Voice.Room.join(room, self(), "key-a", offer)
+    :ok = Den.Voice.Room.present(room, self())
+    assert {:ok, "key-a"} = Den.Voice.Room.stop_screen(room, "key-b")
+    assert_receive {:voice, "screen_stopped", %{by: "key-b", reason: "moderator"}}
+    assert_receive {:voice, "screen", %{key: nil}}
+    assert {:error, :none} = Den.Voice.Room.stop_screen(room, "key-b")
+    PeerConnection.stop(pc)
+  end
+
   test "two devices join a room's voice and each is given the other's slot" do
     {:ok, room} = Den.Voice.ensure("voice-test")
     {pc_a, offer_a} = device()

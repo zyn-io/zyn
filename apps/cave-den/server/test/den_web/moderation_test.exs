@@ -46,6 +46,47 @@ defmodule DenWeb.ModerationTest do
     _ = a
   end
 
+  defp voice_offer do
+    alias ExWebRTC.{MediaStreamTrack, PeerConnection, SessionDescription}
+    {:ok, pc} = PeerConnection.start(audio_codecs: [:opus], video_codecs: [:vp8])
+    {:ok, _} = PeerConnection.add_track(pc, MediaStreamTrack.new(:audio))
+    [up] = PeerConnection.get_transceivers(pc)
+    :ok = PeerConnection.set_transceiver_direction(pc, up.id, :sendonly)
+    for _ <- 1..Den.Voice.slots(), do: {:ok, _} = PeerConnection.add_transceiver(pc, :audio, direction: :recvonly)
+    {:ok, _} = PeerConnection.add_track(pc, MediaStreamTrack.new(:video))
+    v = PeerConnection.get_transceivers(pc) |> Enum.find(&(&1.kind == :video))
+    :ok = PeerConnection.set_transceiver_direction(pc, v.id, :sendonly)
+    {:ok, _} = PeerConnection.add_transceiver(pc, :video, direction: :recvonly)
+    {:ok, offer} = PeerConnection.create_offer(pc)
+    :ok = PeerConnection.set_local_description(pc, offer)
+    {pc, SessionDescription.to_json(offer)}
+  end
+
+  test "only a device that may kick stops someone's screen, and it is in the audit log", %{ka: ka, kb: kb} do
+    {:ok, _, va} = subscribe_and_join(device(ka), DenWeb.VoiceChannel, "voice:general")
+    {:ok, _, vb} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")
+    {pa, oa} = voice_offer()
+    {pb, ob} = voice_offer()
+    ref = push(va, "offer", oa)
+    assert_reply ref, :ok, _, 5000
+    ref = push(vb, "offer", ob)
+    assert_reply ref, :ok, _, 5000
+    ref = push(vb, "present", %{})
+    assert_reply ref, :ok
+    ref = push(va, "present", %{})
+    assert_reply ref, :error, %{reason: "busy", key: ^kb}
+    ref = push(va, "stop_screen", %{})
+    assert_reply ref, :error, %{reason: "You may not stop screen sharing here."}
+    {:ok, mods} = Mod.role_save(@owner, %{"name" => "Stage", "position" => 5, "perms" => ["kick"]})
+    :ok = Mod.role_give(@owner, ka, mods.id)
+    ref = push(va, "stop_screen", %{})
+    assert_reply ref, :ok
+    assert_push "screen_stopped", %{by: ^ka, reason: "moderator"}
+    assert Enum.any?(Mod.audit(), &(&1.action == "screen_stop" and &1.target == kb))
+    ExWebRTC.PeerConnection.stop(pa)
+    ExWebRTC.PeerConnection.stop(pb)
+  end
+
   test "a timeout reaches a device already in voice, and it cannot talk", %{kb: kb} do
     {:ok, _, v} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")
     Process.unlink(v.channel_pid)

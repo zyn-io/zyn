@@ -92,6 +92,45 @@ defmodule DenWeb.VoiceChannel do
     {:reply, :ok, assign(socket, :room_pid, nil)}
   end
 
+  defp handle("present", _, socket) do
+    case socket.assigns[:room_pid] do
+      pid when is_pid(pid) ->
+        case Den.Voice.Room.present(pid, self()) do
+          :ok -> {:reply, :ok, socket}
+          {:error, :busy, key} -> {:reply, {:error, %{reason: "busy", key: key}}, socket}
+          {:error, :off} -> {:reply, {:error, %{reason: "Screen sharing is off on this den."}}, socket}
+          {:error, :unsupported} -> {:reply, {:error, %{reason: "Screen sharing needs a direct connection. This network only lets voice through."}}, socket}
+        end
+
+      _ ->
+        {:reply, {:error, %{reason: "Join voice first."}}, socket}
+    end
+  end
+
+  defp handle("unpresent", _, socket) do
+    if pid = socket.assigns[:room_pid], do: Den.Voice.Room.unpresent(pid, self())
+    {:reply, :ok, socket}
+  end
+
+  # A moderator ends someone's screen share: only a device that may kick.
+  defp handle("stop_screen", _, socket) do
+    pid = socket.assigns[:room_pid]
+
+    cond do
+      not Den.Mod.can?(socket.assigns.key, "kick") -> {:reply, {:error, %{reason: "You may not stop screen sharing here."}}, socket}
+      is_nil(pid) -> {:reply, {:error, %{reason: "Join voice first."}}, socket}
+      true ->
+        case Den.Voice.Room.stop_screen(pid, socket.assigns.key) do
+          {:ok, target} ->
+            Den.Mod.log(socket.assigns.key, "screen_stop", target, nil)
+            {:reply, :ok, socket}
+
+          {:error, :none} ->
+            {:reply, {:error, %{reason: "Nobody is sharing their screen."}}, socket}
+        end
+    end
+  end
+
   defp handle(_, _, socket), do: {:reply, {:error, %{reason: "unknown"}}, socket}
 
   @impl true

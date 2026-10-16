@@ -125,6 +125,7 @@ defmodule Den.Voice.Room do
 
   # Who speaks is re-ranked this often (ms); a level at or under this
   # (-dBov, 127 is silence) counts as speaking, as does the voice flag.
+  alias ExWebRTC.RTP.Munger
   @tick 300
   @speaking 50
 
@@ -139,12 +140,18 @@ defmodule Den.Voice.Room do
   def join_relay(pid, channel, key), do: GenServer.call(pid, {:join_relay, channel, key}, 15_000)
   def frame(pid, channel, level, frame), do: GenServer.cast(pid, {:frame, channel, level, frame})
 
+  @doc "Ask for the stage: `:ok`, or who already presents, or why this device cannot."
+  def present(pid, channel), do: GenServer.call(pid, {:present, channel})
+  def unpresent(pid, channel), do: GenServer.cast(pid, {:unpresent, channel})
+  @doc "End whoever presents, `{:ok, their key}` (the channel checks `by` may kick, and logs it)."
+  def stop_screen(pid, by), do: GenServer.call(pid, {:stop_screen, by})
+
   @impl true
   def init(room) do
     # Connections are linked to this room: if it stops, they stop (and give
     # their ports back); if one fails, it is dropped, not the room.
     Process.flag(:trap_exit, true)
-    {:ok, %{room: room, peers: %{}, ticking: false}}
+    {:ok, %{room: room, peers: %{}, ticking: false, presenter: nil, screen: fresh_screen(Munger.new(:vp8, 90_000))}}
   end
 
   # A peer: its connection, its own track (once the device sends it), its
@@ -177,8 +184,34 @@ defmodule Den.Voice.Room do
         {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
         slots = for i <- 0..(Den.Voice.slots() - 1), into: %{}, do: {"w#{i}", i}
         peer = %{kind: :relay, pc: nil, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: true, candidates: 0, level: nil, spoke: nil, joined: System.monotonic_time(:millisecond), seq: 0, screens: false, screen_up: nil, stage: nil, stage_ready: false}
+        send(channel, {:voice, "screen", %{key: presenter_key(s)}})
         {:reply, :ok, %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()}
     end
+  end
+
+  # Who presents, and their screen's stream: one munger for the room, so
+  # viewers see one stream across presenters.
+  def handle_call({:present, channel}, _from, s) do
+    p = s.peers[channel]
+
+    cond do
+      not Den.Voice.screen?() -> {:reply, {:error, :off}, s}
+      is_nil(p) or not p.screens -> {:reply, {:error, :unsupported}, s}
+      s.presenter == channel -> {:reply, :ok, s}
+      s.presenter -> {:reply, {:error, :busy, s.peers[s.presenter].key}, s}
+      true ->
+        peers = Map.new(s.peers, fn {c, q} -> {c, %{q | stage_ready: false}} end)
+        s = %{s | presenter: channel, peers: peers, screen: fresh_screen(Munger.update(s.screen.munger))}
+        {:reply, :ok, s |> tell_screen() |> want_key()}
+    end
+  end
+
+  def handle_call({:stop_screen, _by}, _from, %{presenter: nil} = s), do: {:reply, {:error, :none}, s}
+
+  # The channel logs it: this process never waits on the database.
+  def handle_call({:stop_screen, by}, _from, s) do
+    send(s.presenter, {:voice, "screen_stopped", %{by: by, reason: "moderator"}})
+    {:reply, {:ok, presenter_key(s)}, end_screen(s)}
   end
 
   # A connection for one device: its first audio transceiver sends to us, the
@@ -234,6 +267,7 @@ defmodule Den.Voice.Room do
           # A connection that never connects gives its port back.
           Process.send_after(self(), {:reap, channel, pc}, Application.get_env(:den, :voice_connect_ms, 20_000))
           s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()
+          send(channel, {:voice, "screen", %{key: presenter_key(s)}})
           {:reply, {:ok, SessionDescription.to_json(answer)}, s}
         rescue
           _ -> stop_pc(pc, s, :offer)
@@ -291,6 +325,8 @@ defmodule Den.Voice.Room do
   end
 
   def handle_cast({:leave, channel}, s), do: {:noreply, drop(s, channel)}
+  def handle_cast({:unpresent, channel}, %{presenter: channel} = s), do: {:noreply, end_screen(s)}
+  def handle_cast({:unpresent, _}, s), do: {:noreply, s}
 
   # A relayed device's frame: forwarded as the RTP packet it would have been.
   def handle_cast({:frame, channel, level, frame}, s) do
@@ -445,12 +481,29 @@ defmodule Den.Voice.Room do
 
   defp tick(s), do: s
 
+  defp fresh_screen(munger), do: %{munger: munger, live: false, key_at: nil, again: false, bytes: 0, since: System.monotonic_time(:millisecond)}
+
+  defp presenter_key(%{presenter: nil}), do: nil
+  defp presenter_key(s), do: s.peers[s.presenter].key
+
+  defp end_screen(s), do: %{s | presenter: nil} |> tell_screen()
+
+  defp tell_screen(s) do
+    key = presenter_key(s)
+    for {c, _} <- s.peers, do: send(c, {:voice, "screen", %{key: key}})
+    s
+  end
+
+  defp want_key(s), do: s
+
   defp drop(s, channel) do
     case Map.pop(s.peers, channel) do
       {nil, _} ->
         s
 
       {p, rest} ->
+        s = if s.presenter == channel, do: end_screen(s), else: s
+
         if p.pc do
           Process.unlink(p.pc)
           catch_exit(fn -> PeerConnection.stop(p.pc) end)
