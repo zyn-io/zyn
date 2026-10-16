@@ -1844,7 +1844,7 @@ class Voice {
     if (!rtc && !relay) throw new Error('This browser cannot encrypt voice.');
     if (!rtc) mode = 'relay';
     if (!relay && mode === 'relay') throw new Error('This browser cannot send voice through the den; try another browser or network.');
-    this.worker = new Worker(new URL('./den/voice-worker.js', import.meta.url));
+    this.worker = new Worker(new URL('./den/voice-worker.js', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e) => {
       if (e.data.count) Object.assign(this, { sealed: e.data.sealed, opened: e.data.opened, failed: e.data.failed });
       if (e.data.id) { this.waiting.get(e.data.id)?.(e.data.data); this.waiting.delete(e.data.id); }

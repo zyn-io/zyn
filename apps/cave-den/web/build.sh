@@ -16,6 +16,7 @@ cp "$WEB"/{index.html,base.css,den.css,app.js,gate.js,den.js,den-ui.js,den-admin
 cp "$WEB"/{manifest.webmanifest,sw.js} "$OUT/"
 cp -R "$WEB/icons" "$OUT/icons"
 cp "$WEB/voice-worker.js" "$OUT/den/voice-worker.js"
+cp "$WEB/media-seal.js" "$OUT/den/media-seal.js"
 cp "$WEB/voice-io.js" "$OUT/den/voice-io.js"
 for f in den_mls.js den_mls_bg.wasm; do
   [ -f "$WEB/../mls/pkg/$f" ] || { echo "mls/pkg/$f is missing: run mls/build.sh" >&2; exit 1; }
