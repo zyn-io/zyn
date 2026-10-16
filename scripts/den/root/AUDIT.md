@@ -28,9 +28,11 @@ is in scope.
    between devices, agent claims, pins, files, reactions, edits. XSS in the
    page is the worst case here, since the keys are in it. The content
    security policy (`server/lib/den_web/page.ex`).
-5. **Files and voice** (`web/den.js` files section, `voice-worker.js`,
-   `server/lib/den/voice.ex`). Chunked AES-GCM files; per-frame voice
-   encryption with a key from the MLS exporter; replay counters.
+5. **Files, voice and screens** (`web/den.js` files and voice sections,
+   `media-seal.js`, `voice-worker.js`, `server/lib/den/voice.ex`). Chunked
+   AES-GCM files; per-frame voice and screen encryption with keys from the
+   MLS exporter; the bytes of a screen frame left in the clear; the replay
+   window by send time.
 6. **Agents** (`agent/`, about 1,200 lines). Owner confirmation by hashed code,
    claims newest first, the kind printed on each line, private rooms only
    with the owner. Can a member make an agent treat their words as its

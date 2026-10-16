@@ -107,6 +107,12 @@ defmodule DenWeb.VoiceChannel do
     end
   end
 
+  # This device has the presenter's key now: a keyframe, so its stage starts.
+  defp handle("screen_key", _, socket) do
+    if pid = socket.assigns[:room_pid], do: Den.Voice.Room.ask_key(pid)
+    {:noreply, socket}
+  end
+
   defp handle("unpresent", _, socket) do
     if pid = socket.assigns[:room_pid], do: Den.Voice.Room.unpresent(pid, self())
     {:reply, :ok, socket}

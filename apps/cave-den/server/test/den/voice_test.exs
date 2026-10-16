@@ -440,6 +440,20 @@ defmodule Den.VoiceTest do
     refute_receive {"key-a", :pli}, 1_200
   end
 
+  test "a viewer that has the presenter's key asks for a keyframe, within the limit" do
+    {:ok, room} = Den.Voice.ensure("screen-ask")
+    a = live_device(room, "key-a", self(), true)
+    on_exit(fn -> send(a, :stop) end)
+    assert_receive {"key-a", :connected}, 15_000
+    :ok = Den.Voice.Room.present(room, a)
+    send(a, {:show, 5, true})
+    Process.sleep(1_100)
+    Den.Voice.Room.ask_key(room)
+    assert_receive {"key-a", :pli}, 1_000
+    Den.Voice.Room.ask_key(room)
+    refute_receive {"key-a", :pli}, 600
+  end
+
   test "a presenter sending far above the bitrate is stopped" do
     Application.put_env(:den, :screen_bitrate, 300_000)
     on_exit(fn -> Application.delete_env(:den, :screen_bitrate) end)

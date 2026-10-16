@@ -349,17 +349,52 @@ const colour = () => B.p.evaluate(() => {
 const seen = new Set();
 for (let i = 0; i < 40 && seen.size < 3; i++) { seen.add(await colour()); await B.p.waitForTimeout(150); }
 ok(['red', 'green', 'blue'].every((c) => seen.has(c)), `B's picture follows A's screen (${[...seen]})`);
-const vs = await B.p.evaluate(() => ({ failed: window.__den.voice.failed, presenter: window.__den.voice.screen?.key }));
-ok(vs.failed === 0 && vs.presenter === A.me.key, `every screen frame opened, under the key of the device the den names (${JSON.stringify(vs)})`);
+const vs = await B.p.evaluate(() => ({ failed: window.__den.voice.failed, presenter: window.__den.voice.screen?.key, screenOpened: window.__den.voice.openedScreen, screenFailed: window.__den.voice.failedScreen }));
+const as = await A.p.evaluate(() => ({ screenSealed: window.__den.voice.sealedScreen }));
+// Chrome can hand the receiver its first keyframe twice; the second copy is
+// refused as a replay (the first played), so one refused frame is allowed.
+ok(vs.failed <= 1 && vs.presenter === A.me.key, `every frame opened, under the key of the device the den names (${JSON.stringify(vs)})`);
+ok(as.screenSealed > 5 && vs.screenOpened > 5 && vs.screenFailed <= 1, `A seals its screen frames and B opens them (${JSON.stringify({ ...as, ...vs })})`);
+// A den that names the wrong presenter: B's stage, told it is B's own screen, opens nothing.
+const misnamed = await B.p.evaluate(async () => {
+  const v = window.__den.voice;
+  // The den names B itself as the presenter; B's stage then opens under B's own screen key.
+  v.ch.trigger('screen', { key: window.__den.me.key });
+  await new Promise((r) => setTimeout(r, 3000)); // past the worker's 2 s count
+  const f0 = v.failedScreen;
+  const o0 = v.openedScreen;
+  await new Promise((r) => setTimeout(r, 3000));
+  return { failed: v.failedScreen - f0, opened: v.openedScreen - o0 };
+});
+await B.p.evaluate(([k]) => window.__den.voice.ch.trigger('screen', { key: k }), [A.me.key]);
+ok(misnamed.failed > 5 && misnamed.opened === 0, `screen frames under another presenter's name do not open (${JSON.stringify(misnamed)})`);
+const reopened = await B.p.evaluate(() => window.__den.voice.openedScreen);
+ok(await until(B.p, ([n]) => window.__den.voice.openedScreen > n, [reopened + 10], 10000), 'named rightly again, they open');
+// A presenter the den names who is not a member of the room is no presenter.
+const forged = await B.p.evaluate(() => {
+  const v = window.__den.voice;
+  v.ch.trigger('screen', { key: 'ab'.repeat(32) });
+  const out = { screen: v.screen, who: document.querySelector('#stage-who').textContent };
+  return out;
+});
+ok(forged.screen === null && !forged.who.includes('abab'), `a presenter who is not in the room is not shown (${JSON.stringify(forged)})`);
+await B.p.evaluate(([k]) => window.__den.voice.ch.trigger('screen', { key: k }), [A.me.key]);
+ok(await until(B.p, () => /is sharing their screen/.test(document.querySelector('#stage-who')?.textContent || ''), null, 5000), "and the den's real presenter shows again");
 ok(await A.p.evaluate(() => /You are sharing your screen/.test(document.querySelector('#stage-who').textContent) && document.querySelector('#stage-video').hidden), 'A sees that it is sharing, not its own screen back');
 ok(await B.p.evaluate(() => document.querySelector('#voice-screen').disabled), 'B cannot share while A shares');
 const busy = await B.p.evaluate(() => window.__den.voice.present().then(() => 'ok', (e) => e.message));
 ok(busy === `busy:${A.me.key}`, `a second presenter is refused (${busy.slice(0, 20)})`);
 // A new epoch mid-share (A refreshes General's keys): new screen keys, and the picture goes on.
 const epoch0 = await B.p.evaluate(() => Number(window.__den.den.epoch('general')));
+const sf0 = await B.p.evaluate(() => window.__den.voice.failedScreen);
 await A.p.evaluate(() => window.__den.refreshKeys('general'));
+// A keeps sealing under the epoch before for a moment, so viewers that apply the change later still open every frame.
+ok(await until(A.p, () => { const v = window.__den.voice; return Number.isInteger(v.sealIndex) && v.sealIndex !== v.current; }, null, 3000), 'A seals under the previous epoch for a moment after the change');
+ok(await until(A.p, () => { const v = window.__den.voice; return v.sealIndex === v.current; }, null, 6000), 'then under the new one');
 ok(await until(B.p, ([e]) => Number(window.__den.den.epoch('general')) > e, [epoch0], 10000), 'General moves to a new epoch while A shares');
 await B.p.waitForTimeout(2500);
+const sf1 = await B.p.evaluate(() => window.__den.voice.failedScreen);
+ok(sf1 - sf0 <= 2, `no screen frame lost to the epoch change (${sf1 - sf0} failed)`);
 const before = await B.p.evaluate(() => ({ opened: window.__den.voice.opened, failed: window.__den.voice.failed }));
 await B.p.waitForTimeout(3000);
 const after = await B.p.evaluate(() => ({ opened: window.__den.voice.opened, failed: window.__den.voice.failed }));
@@ -436,6 +471,10 @@ ok(await until(A.p, () => !document.querySelector('#stage-stop').hidden, null, 1
 ok(await B.p.evaluate(() => document.querySelector('#stage-stop').hidden), 'the presenter does not');
 await A.p.click('#stage-stop');
 ok(await until(B.p, () => /stopped your screen share/.test(document.querySelector('#stage-note')?.textContent || ''), null, 5000), 'B is told who stopped their share');
+await A.p.click('#voice-screen');
+ok(await until(B.p, () => /is sharing their screen/.test(document.querySelector('#stage-who')?.textContent || ''), null, 10000), 'A shares next');
+ok(await B.p.evaluate(() => !/stopped your screen share/.test(document.querySelector('#stage-note').hidden ? '' : document.querySelector('#stage-note').textContent)), "the note about B's stopped share is gone from A's screen");
+await A.p.click('#voice-screen');
 ok(await until(A.p, () => document.querySelector('#stage').hidden, null, 5000), "the owner's stage is gone");
 ok(host('IO.puts(Enum.any?(Den.Mod.audit(), &(&1.action == "screen_stop")))') === 'true', 'the stop is in the audit log');
 await A.p.click('#voice-leave');

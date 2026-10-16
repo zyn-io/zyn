@@ -23,9 +23,14 @@ const voiceSeen = new Window();
 const screenSeen = new Window();
 let counter = Date.now() * 1000; // the send time in µs, and above any counter this device sent before
 const STALE_MS = 60_000;
+let sealIndex = null; // the epoch this device seals under: the one before, for a moment after a change
 let sealed = 0;
 let opened = 0;
 let failed = 0;
+// The screen's own counts, besides the totals.
+let sealedScreen = 0;
+let openedScreen = 0;
+let failedScreen = 0;
 
 onmessage = (e) => {
   const d = e.data;
@@ -39,17 +44,18 @@ onmessage = (e) => {
   if (d.keys) {
     keys = new Map(d.keys.map(([i, ks]) => [i, new Map(ks)]));
     if (d.screenKeys) screenKeys = new Map(d.screenKeys.map(([i, ks]) => [i, new Map(ks)]));
-    if (typeof d.presenter === 'string') presenter = d.presenter;
     current = d.current;
+    sealIndex = Number.isInteger(d.sealIndex) ? d.sealIndex : null;
     me = d.me;
   }
+  if (typeof d.presenter === 'string') presenter = d.presenter;
   if (d.slots) slots = new Map(d.slots);
   if (d.readable) pipe(d.readable, d.writable, d.mode, d.slot);
 };
 
 onrtctransform = (e) => pipe(e.transformer.readable, e.transformer.writable, e.transformer.options.mode, e.transformer.options.slot);
 
-setInterval(() => postMessage({ count: true, sealed, opened, failed }), 2000);
+setInterval(() => postMessage({ count: true, sealed, opened, failed, sealedScreen, openedScreen, failedScreen }), 2000);
 
 // Modes: seal and open (voice), seal-screen and open-screen (the stage).
 function pipe(readable, writable, mode, slot) {
@@ -57,18 +63,21 @@ function pipe(readable, writable, mode, slot) {
     : mode === 'seal-screen' ? (f) => seal(f, 'screen')
       : mode === 'open-screen' ? (f) => open(f, null, 'screen')
         : (f) => open(f, slot);
+  const screen = mode === 'open-screen' || mode === 'seal-screen';
   readable
-    .pipeThrough(new TransformStream({ transform: async (f, c) => { try { c.enqueue(await step(f)); } catch { failed++; } } }))
+    .pipeThrough(new TransformStream({ transform: async (f, c) => { try { c.enqueue(await step(f)); } catch { failed++; if (screen) failedScreen++; } } }))
     .pipeTo(writable);
 }
 
 async function seal(frame, kind = 'audio') {
-  const key = (kind === 'screen' ? screenKeys : keys).get(current)?.get(me);
+  const index = sealIndex ?? current;
+  const key = (kind === 'screen' ? screenKeys : keys).get(index)?.get(me);
   if (!key) throw new Error('no key');
   counter = Math.max(counter + 1, Date.now() * 1000);
   const data = new Uint8Array(frame.data);
-  frame.data = (await sealFrame(key, current, BigInt(counter), data, clearLength(data, kind))).buffer;
+  frame.data = (await sealFrame(key, index, BigInt(counter), data, clearLength(data, kind))).buffer;
   sealed++;
+  if (kind === 'screen') sealedScreen++;
   return frame;
 }
 
@@ -84,5 +93,6 @@ async function open(frame, slot, kind = 'audio') {
   if (!(kind === 'screen' ? screenSeen : voiceSeen).fresh(sender, n)) throw new Error('replay');
   frame.data = plain.buffer;
   opened++;
+  if (kind === 'screen') openedScreen++;
   return frame;
 }

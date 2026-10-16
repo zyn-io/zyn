@@ -146,6 +146,9 @@ defmodule Den.Voice.Room do
   @doc "Ask for the stage: `:ok`, or who already presents, or why this device cannot."
   def present(pid, channel), do: GenServer.call(pid, {:present, channel})
   def unpresent(pid, channel), do: GenServer.cast(pid, {:unpresent, channel})
+  @doc "A viewer can open the stage now: ask the presenter for a keyframe (at most one a second)."
+  def ask_key(pid), do: GenServer.cast(pid, :ask_key)
+
   @doc "Who presents now: their device key, or nil."
   def presenter(pid), do: GenServer.call(pid, :presenter)
 
@@ -340,6 +343,7 @@ defmodule Den.Voice.Room do
   def handle_cast({:leave, channel}, s), do: {:noreply, drop(s, channel)}
   def handle_cast({:unpresent, channel}, %{presenter: channel} = s), do: {:noreply, end_screen(s)}
   def handle_cast({:unpresent, _}, s), do: {:noreply, s}
+  def handle_cast(:ask_key, s), do: {:noreply, want_key(s)}
 
   # A relayed device's frame: forwarded as the RTP packet it would have been.
   def handle_cast({:frame, channel, level, frame}, s) do

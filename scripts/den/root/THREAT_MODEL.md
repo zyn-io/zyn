@@ -203,8 +203,10 @@ with voice, any member can derive a presenter's screen key, so a member
 working with the den could show frames as someone else's screen.
 
 The den sees who presents, when and for how long; how much video they send
-and when keyframes come; and the size of the shared picture (in the VP8
-keyframe header that stays in the clear). Not what is on the screen. A
+and when keyframes come; and, from the bytes left in the clear, the size of
+the shared picture and its scaling (keyframes), and for every frame the size
+of its first partition and whether it is shown. Frame sizes over time say
+something about how much on the screen changes. Not what is on the screen. A
 member whose voice goes over the den's own connection can neither share nor
 watch.
 

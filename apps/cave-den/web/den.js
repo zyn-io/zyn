@@ -1799,13 +1799,24 @@ class Voice {
     if (this.screen?.key) senders.add(this.screen.key);
     for (const k of senders) {
       if (!ks.has(k)) ks.set(k, await this.client.voiceKey(this.room, k));
-      // Screen keys only where there is a screen: our own, and the presenter's.
-      if ((k === me || k === this.screen?.key) && !ss.has(k)) ss.set(k, await this.client.screenKey(this.room, k));
+      // Screen keys for everyone in voice too, ahead: a new presenter's first
+      // frames then open at once.
+      if (!ss.has(k)) ss.set(k, await this.client.screenKey(this.room, k));
     }
     for (const [m, set] of [[this.keys, ks], [this.screenKeys, ss]]) {
       m.delete(index);
       m.set(index, set);
       while (m.size > 2) m.delete(m.keys().next().value);
+    }
+    // After a change, keep sealing under the epoch before for a moment:
+    // members who apply the change a little later can still open every frame
+    // (the old keys are kept 5 s for that), and nobody's stage freezes.
+    if (this.current !== undefined && this.current !== index && this.keys.has(this.current)) {
+      this.sealIndex = this.current;
+      clearTimeout(this.sealNew);
+      this.sealNew = setTimeout(() => { this.sealIndex = this.current; this.postKeys(); }, 2000);
+    } else if (this.sealIndex === undefined || !this.keys.has(this.sealIndex)) {
+      this.sealIndex = index;
     }
     this.current = index;
     this.postKeys();
@@ -1818,7 +1829,7 @@ class Voice {
 
   postKeys() {
     const flat = (m) => [...m].map(([i, ks]) => [i, [...ks]]);
-    this.worker.postMessage({ keys: flat(this.keys), screenKeys: flat(this.screenKeys), current: this.current, me: this.client.den.key(), presenter: this.screen?.key || '' });
+    this.worker.postMessage({ keys: flat(this.keys), screenKeys: flat(this.screenKeys), current: this.current, sealIndex: this.keys.has(this.sealIndex) ? this.sealIndex : this.current, me: this.client.den.key(), presenter: this.screen?.key || '' });
   }
 
   /// Which member speaks in which down slot, as the den names them.
@@ -1865,7 +1876,10 @@ class Voice {
     if (!relay && mode === 'relay') throw new Error('This browser cannot send voice through the den; try another browser or network.');
     this.worker = new Worker(new URL('./den/voice-worker.js', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e) => {
-      if (e.data.count) Object.assign(this, { sealed: e.data.sealed, opened: e.data.opened, failed: e.data.failed });
+      if (e.data.count) {
+        const { sealed, opened, failed, sealedScreen, openedScreen, failedScreen } = e.data;
+        Object.assign(this, { sealed, opened, failed, sealedScreen, openedScreen, failedScreen });
+      }
       if (e.data.id) { this.waiting.get(e.data.id)?.(e.data.data); this.waiting.delete(e.data.id); }
     };
     await this.refreshKey();
@@ -1890,9 +1904,19 @@ class Voice {
     // Who shares their screen in this voice room, as the den says.
     ch.on('screen', ({ key } = {}) => {
       const was = this.screen?.key;
-      this.screen = typeof key === 'string' && key ? { key } : null;
+      // Only a member of the room, as this device's own group has it, can be the presenter.
+      const members = new Set(this.client.members(this.room).map((m) => m.key));
+      this.screen = typeof key === 'string' && members.has(key) ? { key } : null;
+      // Someone else's screen now: a note about our own stopped share is old news.
+      if (this.screen && this.screen.key !== this.client.den.key()) this.stoppedBy = null;
+      // The worker learns the presenter now, with the keys it already has.
+      if (this.current !== undefined) this.postKeys();
       if (this.presenting && this.screen?.key !== this.client.den.key()) this.endCapture();
-      if (this.screen?.key !== was) this.refreshKey().catch(() => {});
+      // A new presenter: once their key is here, ask for a keyframe, so the
+      // first picture is not one this device could not yet open.
+      if (this.screen?.key !== was) {
+        this.refreshKey().then(() => { if (this.screen && this.screen.key !== this.client.den.key()) this.ch?.push('screen_key', {}); }).catch(() => {});
+      }
       this.onSlots(this.people);
     });
     ch.on('screen_stopped', (m) => {
