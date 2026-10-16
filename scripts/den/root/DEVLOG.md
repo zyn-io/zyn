@@ -2,6 +2,34 @@
 
 Newest first. What changed, why, and what we found along the way.
 
+## 16 October 2026: screen sharing in voice
+
+The first step towards video: one member of a voice room shares a screen,
+window or tab, and the rest of the voice room watches. One presenter at a
+time, first come; a moderator who may kick can stop a share, and it goes in
+the audit log.
+
+- **No new connection.** Each voice connection now has a video line up (idle
+  until its device presents) and one down (the stage). Starting to present
+  puts a track on the first, so nothing is renegotiated, and a page from
+  before this change still joins voice without screens.
+- **Encrypted like voice.** Each frame is sealed under the presenter's own
+  `den screen` key. VP8's first 10 bytes (keyframe) or 3 bytes stay in the
+  clear because WebRTC needs them, and the tag covers them. Sealing moved
+  into one module (`web/media-seal.js`) that voice and screens share and the
+  tests load directly; voice frames are byte for byte what they were.
+- **One stream for viewers.** The den forwards only the presenter's VP8,
+  through one munger per voice room, so a new presenter continues the
+  viewers' stream. A viewer starts on a keyframe; the den asks the presenter
+  for one when a viewer joins or asks, at most once a second. It can only
+  ask once it has had a packet of the stream (a keyframe request names the
+  stream), and a browser starts a new track on a keyframe anyway.
+- **A guard.** A presenter sending more than twice `DEN_SCREEN_BITRATE` over
+  5 seconds is stopped, so one device cannot multiply its upload by every
+  viewer.
+- **Not yet:** cameras, sound from the shared screen, several presenters,
+  screen sharing for members whose voice goes over the den's connection.
+
 ## 15 October 2026: who told which agent what
 
 The den cannot read rooms, so its moderation audit log can say only what

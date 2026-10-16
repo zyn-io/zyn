@@ -32,6 +32,10 @@ you trust it with anything that matters.
   people in one voice room; each hears the eight who spoke most recently.
   Where a network lets no WebRTC through, voice goes over the den's own
   connection.
+- **Screen sharing**: one person in a voice room at a time shares a screen,
+  window or tab (from a desktop browser), and everyone else in the voice
+  room watches. Each frame is encrypted in the browser like voice. A
+  moderator who may kick can stop a share.
 - **Entry** is a blind token (RFC 9474): the door checks a pass and signs a
   token it never sees; the den admits the device that token names.
 - **Moderation**, the way Discord does it: an owner with every power, roles
@@ -189,6 +193,8 @@ redirects every request that arrives without it.
 | `DEN_DOOR_PER_MINUTE` | requests to the door per address a minute (default 60; more for a circle behind one address) |
 | `DEN_ASK_PER_HOUR` | requests to join per address an hour (default 5) |
 | `DEN_VOICE_PUBLIC_ONLY` | `1`: voice offers devices only public addresses |
+| `DEN_SCREEN` | `off`: no screen sharing in voice (default `on`) |
+| `DEN_SCREEN_BITRATE` | bits a second one shared screen may use, 300000 to 8000000 (default 2500000); the den sends it to every viewer, so 2.5 Mbps to 49 viewers is about 120 Mbps up |
 | `POOL_SIZE` | database connections |
 
 **Limits** go in `DEN_LIMITS` (or `config :den, :limits`), each key

@@ -25,7 +25,7 @@
       "headline": "Epeaky vs Matrix, Signal and Discord",
       "url": "https://epeaky.zyn-network.com/compare/",
       "datePublished": "2026-10-15",
-      "dateModified": "2026-10-15",
+      "dateModified": "2026-10-16",
       "author": { "@type": "Organization", "name": "Zyn", "url": "https://zyn-network.com" },
       "about": { "@type": "SoftwareApplication", "name": "Epeaky", "url": "https://epeaky.zyn-network.com/" },
       "image": "https://epeaky.zyn-network.com/assets/og.png"
@@ -63,7 +63,7 @@
 
 <main id="doc" class="doc">
   <h1>Epeaky, Matrix, Signal and Discord compared</h1>
-  <p class="byline">By the Zyn team, who make Epeaky. Updated 15 October 2026.</p>
+  <p class="byline">By the Zyn team, who make Epeaky. Updated 16 October 2026.</p>
 
   <p class="answer">Pick <strong>Signal</strong> to message people you already know, with nothing to run. Pick <strong>Matrix</strong> for chat that spans many servers and bridges to other networks. Pick <strong>Discord</strong> for a big public community where encryption of text does not matter. Pick <strong>Epeaky</strong> to run one server where every room is end-to-end encrypted, the host decides who gets in, and AI agents sit in the rooms next to people.</p>
 
@@ -76,7 +76,7 @@
         <tr><th scope="row">Run your own server</th><td class="us">Yes, one command on a Linux server</td><td>Yes (Synapse, Dendrite, Conduit and forks)</td><td>No: the apps use Signal's servers</td><td>No</td></tr>
         <tr><th scope="row">Servers talk to each other</th><td class="us">No, each server stands alone</td><td>Yes, federation</td><td>No</td><td>No</td></tr>
         <tr><th scope="row">Text end-to-end encrypted</th><td class="us">Always, every room (MLS, RFC 9420)</td><td>By default in private chats and private rooms (Megolm); public rooms usually not</td><td>Always (Signal Protocol)</td><td>No</td></tr>
-        <tr><th scope="row">Voice</th><td class="us">Encrypted voice rooms, up to 50 people; no video or screen sharing</td><td>Voice and video calls (Element Call)</td><td>Encrypted voice and video calls</td><td>Voice, video and streaming; Discord encrypts calls end to end with its DAVE protocol</td></tr>
+        <tr><th scope="row">Voice</th><td class="us">Encrypted voice rooms, up to 50 people, with one shared screen at a time; no video calls</td><td>Voice and video calls (Element Call)</td><td>Encrypted voice and video calls</td><td>Voice, video and streaming; Discord encrypts calls end to end with its DAVE protocol</td></tr>
         <tr><th scope="row">To join</th><td class="us">No account: an invite link, the host's approval, or the host's own site's check. No phone number or email</td><td>An account on a homeserver</td><td>A phone number (a username can hide it from others)</td><td>A Discord account</td></tr>
         <tr><th scope="row">Group size</th><td class="us">500 per room by default, up to 1,000</td><td>Rooms of many thousands</td><td>Groups of up to 1,000</td><td>Servers of hundreds of thousands</td></tr>
         <tr><th scope="row">Moderation</th><td class="us">Owner, roles and permissions, slow mode, timeouts, kicks, bans, audit log</td><td>Power levels, kicks, bans, server ACLs, moderation bots</td><td>Group admins: add and remove members, approve joins</td><td>Roles, permissions, AutoMod, slow mode, timeouts, audit log</td></tr>
@@ -104,7 +104,7 @@
 
   <h2>What Epeaky does not do</h2>
   <ul>
-    <li>Video calls or screen sharing.</li>
+    <li>Video calls. One person at a time can share a screen in voice, but there is no camera video.</li>
     <li>Talk to other servers. Each den is its own island.</li>
     <li>Native app-store apps. The page installs from the browser.</li>
     <li>Hide who talks when from the server. It sees device keys, room membership, timing, sizes and network addresses. <a href="https://github.com/zyn-io/epeaky/blob/main/THREAT_MODEL.md">Threat model</a></li>

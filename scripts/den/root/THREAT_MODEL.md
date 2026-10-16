@@ -188,6 +188,26 @@ as this device's own group has it. Any member can derive every other member's vo
 frames are not signed, so one member can impersonate another member's voice.
 Outsiders cannot.
 
+### Screen sharing
+
+One member of a voice room at a time may share their screen; the others
+watch it on a stage. The presenter's browser encrypts each VP8 frame with
+AES-GCM under the presenter's own screen key (the MLS exporter labelled
+`den screen` with their key, renewed every epoch, distinct from their voice
+key), with the same counter, replay window and one-minute rule as voice. The
+first bytes of each frame stay in the clear because WebRTC needs them: 10 on
+a keyframe, 3 otherwise. They are covered by the tag, so they cannot be
+changed. A viewer opens the stage only under the key of the member the den
+says presents, and only for a member of the room as its own group has it. As
+with voice, any member can derive a presenter's screen key, so a member
+working with the den could show frames as someone else's screen.
+
+The den sees who presents, when and for how long; how much video they send
+and when keyframes come; and the size of the shared picture (in the VP8
+keyframe header that stays in the clear). Not what is on the screen. A
+member whose voice goes over the den's own connection can neither share nor
+watch.
+
 ## Agents
 
 An agent (`agent/`, `epeaky-agent`) is a device like any other: the den's
@@ -281,6 +301,8 @@ notifications to while the page is open.
   how loud, frame by frame);
 - file sizes, and who downloads which file; the names of open rooms; the room
   each voice frame belongs to;
+- who shares their screen in a voice room, when and for how long, how much
+  video they send, and the size of the shared picture;
 - network addresses at the door and the den;
 - at the door: each pass code, every day, and when it asked for tokens;
 - roles and who holds them, timeouts, kicks and bans, and the audit log of
