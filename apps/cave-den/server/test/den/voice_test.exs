@@ -5,15 +5,33 @@ defmodule Den.VoiceTest do
   use ExUnit.Case, async: false
   alias ExWebRTC.{MediaStreamTrack, PeerConnection, SessionDescription}
 
-  defp device do
-    {:ok, pc} = PeerConnection.start(audio_codecs: [:opus], video_codecs: [])
+  defp device(opts \\ []) do
+    {:ok, pc} = PeerConnection.start(audio_codecs: [:opus], video_codecs: if(opts[:video], do: [:vp8], else: []))
     {:ok, _} = PeerConnection.add_track(pc, MediaStreamTrack.new(:audio))
     [up] = PeerConnection.get_transceivers(pc)
     :ok = PeerConnection.set_transceiver_direction(pc, up.id, :sendonly)
     for _ <- 1..Den.Voice.slots(), do: {:ok, _} = PeerConnection.add_transceiver(pc, :audio, direction: :recvonly)
+    if opts[:video] do
+      {:ok, _} = PeerConnection.add_track(pc, MediaStreamTrack.new(:video))
+      v = PeerConnection.get_transceivers(pc) |> Enum.find(&(&1.kind == :video))
+      :ok = PeerConnection.set_transceiver_direction(pc, v.id, :sendonly)
+      {:ok, _} = PeerConnection.add_transceiver(pc, :video, direction: :recvonly)
+    end
     {:ok, offer} = PeerConnection.create_offer(pc)
     :ok = PeerConnection.set_local_description(pc, offer)
     {pc, SessionDescription.to_json(offer)}
+  end
+
+  # Each media line of an SDP: its kind, port and direction.
+  defp media(sdp) do
+    sdp
+    |> String.split(~r/\r?\nm=/)
+    |> Enum.drop(1)
+    |> Enum.map(fn sec ->
+      [kind, port | _] = String.split(sec, " ")
+      dir = Regex.run(~r/a=(sendonly|recvonly|sendrecv|inactive)/, sec, capture: :all_but_first) |> List.wrap() |> List.first()
+      {kind, port, dir}
+    end)
   end
 
   defp directions(sdp), do: Regex.scan(~r/a=(sendonly|recvonly|sendrecv|inactive)/, sdp, capture: :all_but_first) |> List.flatten()
@@ -26,6 +44,37 @@ defmodule Den.VoiceTest do
     Application.put_env(:den, :screen, false)
     refute Den.Voice.screen?()
     Application.delete_env(:den, :screen)
+  end
+
+  test "an offer with a screen and a stage is answered with VP8: the den takes the screen and sends the stage" do
+    {:ok, room} = Den.Voice.ensure("screen-answer")
+    {pc, offer} = device(video: true)
+    {:ok, answer} = Den.Voice.Room.join(room, self(), "key-a", offer)
+    videos = for {"video", port, dir} <- media(answer["sdp"]), do: {port, dir}
+    assert [{p1, "recvonly"}, {p2, "sendonly"}] = videos
+    assert p1 != "0" and p2 != "0"
+    assert answer["sdp"] =~ "VP8/90000"
+    refute answer["sdp"] =~ ~r/H264|AV1/
+    PeerConnection.stop(pc)
+  end
+
+  test "an offer without video (a page from before screens) still joins voice" do
+    {:ok, room} = Den.Voice.ensure("screen-old")
+    {pc, offer} = device()
+    assert {:ok, answer} = Den.Voice.Room.join(room, self(), "key-a", offer)
+    refute answer["sdp"] =~ "m=video"
+    PeerConnection.stop(pc)
+  end
+
+  test "with screens off the video lines are refused and voice works" do
+    Application.put_env(:den, :screen, false)
+    on_exit(fn -> Application.delete_env(:den, :screen) end)
+    {:ok, room} = Den.Voice.ensure("screen-off")
+    {pc, offer} = device(video: true)
+    {:ok, answer} = Den.Voice.Room.join(room, self(), "key-a", offer)
+    videos = for {"video", port, dir} <- media(answer["sdp"]), do: {port, dir}
+    assert videos != [] and Enum.all?(videos, fn {port, dir} -> port == "0" or dir == "inactive" end), inspect(videos)
+    PeerConnection.stop(pc)
   end
 
   test "two devices join a room's voice and each is given the other's slot" do

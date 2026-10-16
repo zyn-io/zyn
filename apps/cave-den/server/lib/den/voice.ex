@@ -176,7 +176,7 @@ defmodule Den.Voice.Room do
         Process.monitor(channel)
         {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
         slots = for i <- 0..(Den.Voice.slots() - 1), into: %{}, do: {"w#{i}", i}
-        peer = %{kind: :relay, pc: nil, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: true, candidates: 0, level: nil, spoke: nil, joined: System.monotonic_time(:millisecond), seq: 0}
+        peer = %{kind: :relay, pc: nil, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: true, candidates: 0, level: nil, spoke: nil, joined: System.monotonic_time(:millisecond), seq: 0, screens: false, screen_up: nil, stage: nil, stage_ready: false}
         {:reply, :ok, %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()}
     end
   end
@@ -189,7 +189,9 @@ defmodule Den.Voice.Room do
 
     exts = [%{type: :all, uri: "urn:ietf:params:rtp-hdrext:sdes:mid"}, %{type: :audio, uri: Den.Voice.level_uri()}]
 
-    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, host_to_srflx_ip_mapper: &Den.Voice.srflx/1, audio_codecs: [:opus], video_codecs: [], rtp_header_extensions: exts, controlling_process: self()) do
+    video = if Den.Voice.screen?(), do: [:vp8], else: []
+
+    case PeerConnection.start_link(ice_port_range: ports, ice_ip_filter: &Den.Voice.ip_ok?/1, host_to_srflx_ip_mapper: &Den.Voice.srflx/1, audio_codecs: [:opus], video_codecs: video, rtp_header_extensions: exts, controlling_process: self()) do
       {:ok, pc} ->
         try do
           :ok = PeerConnection.set_remote_description(pc, SessionDescription.from_json(offer))
@@ -206,12 +208,29 @@ defmodule Den.Voice.Room do
               {t.mid, track.id}
             end
 
+          # Video: the device's screen up, the stage down, when screens are on
+          # and the page offered both; otherwise any video line stays unused.
+          {screens, stage} =
+            case PeerConnection.get_transceivers(pc) |> Enum.filter(&(&1.kind == :video)) do
+              [vup, vdown | rest] when video != [] ->
+                :ok = PeerConnection.set_transceiver_direction(pc, vup.id, :recvonly)
+                track = MediaStreamTrack.new(:video)
+                :ok = PeerConnection.set_transceiver_direction(pc, vdown.id, :sendonly)
+                :ok = PeerConnection.replace_track(pc, vdown.sender.id, track)
+                for t <- rest, do: :ok = PeerConnection.set_transceiver_direction(pc, t.id, :inactive)
+                {true, track.id}
+
+              vs ->
+                for t <- vs, do: :ok = PeerConnection.set_transceiver_direction(pc, t.id, :inactive)
+                {false, nil}
+            end
+
           {:ok, answer} = PeerConnection.create_answer(pc)
           :ok = PeerConnection.set_local_description(pc, answer)
           Process.monitor(channel)
           {:ok, _} = Registry.register(Den.Voice.Peers, channel, nil)
           now = System.monotonic_time(:millisecond)
-          peer = %{kind: :rtc, pc: pc, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: false, candidates: 0, level: level_id(answer.sdp), spoke: nil, joined: now}
+          peer = %{kind: :rtc, pc: pc, key: key, up: nil, slots: slots, carrying: %{}, out: %{}, connected: false, candidates: 0, level: level_id(answer.sdp), spoke: nil, joined: now, screens: screens, screen_up: nil, stage: stage, stage_ready: false}
           # A connection that never connects gives its port back.
           Process.send_after(self(), {:reap, channel, pc}, Application.get_env(:den, :voice_connect_ms, 20_000))
           s = %{s | peers: Map.put(s.peers, channel, peer)} |> assign_all([channel]) |> roster() |> tick()
@@ -323,9 +342,8 @@ defmodule Den.Voice.Room do
     s
   end
 
-  defp on_pc({:track, %MediaStreamTrack{id: id}}, channel, peer, s) do
-    put_in(s.peers[channel], %{peer | up: id})
-  end
+  defp on_pc({:track, %MediaStreamTrack{id: id, kind: :audio}}, channel, peer, s), do: put_in(s.peers[channel], %{peer | up: id})
+  defp on_pc({:track, %MediaStreamTrack{id: id, kind: :video}}, channel, peer, s), do: put_in(s.peers[channel], %{peer | screen_up: id})
 
   # Audio from one device: into its slot on the connection of everyone who
   # carries it now. Its header extensions stay here (their ids are this
