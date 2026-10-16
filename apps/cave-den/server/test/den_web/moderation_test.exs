@@ -87,6 +87,34 @@ defmodule DenWeb.ModerationTest do
     ExWebRTC.PeerConnection.stop(pb)
   end
 
+  test "a moderator cannot stop the screen of someone above them", %{ka: ka, kb: kb} do
+    {:ok, _, va} = subscribe_and_join(device(ka), DenWeb.VoiceChannel, "voice:general")
+    {:ok, _, vb} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")
+    {pa, oa} = voice_offer()
+    {pb, ob} = voice_offer()
+    ref = push(va, "offer", oa)
+    assert_reply ref, :ok, _, 5000
+    ref = push(vb, "offer", ob)
+    assert_reply ref, :ok, _, 5000
+    {:ok, low} = Mod.role_save(@owner, %{"name" => "Low", "position" => 3, "perms" => ["kick"]})
+    {:ok, high} = Mod.role_save(@owner, %{"name" => "High", "position" => 8, "perms" => ["kick"]})
+    :ok = Mod.role_give(@owner, ka, low.id)
+    :ok = Mod.role_give(@owner, kb, high.id)
+    ref = push(vb, "present", %{})
+    assert_reply ref, :ok
+    ref = push(va, "stop_screen", %{})
+    assert_reply ref, :error, %{reason: "You may not stop that member's screen share."}
+    # The other way round: the higher one may.
+    ref = push(vb, "unpresent", %{})
+    assert_reply ref, :ok
+    ref = push(va, "present", %{})
+    assert_reply ref, :ok
+    ref = push(vb, "stop_screen", %{})
+    assert_reply ref, :ok
+    ExWebRTC.PeerConnection.stop(pa)
+    ExWebRTC.PeerConnection.stop(pb)
+  end
+
   test "a timeout reaches a device already in voice, and it cannot talk", %{kb: kb} do
     {:ok, _, v} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")
     Process.unlink(v.channel_pid)

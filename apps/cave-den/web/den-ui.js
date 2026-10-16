@@ -1032,7 +1032,8 @@ export function mountDen(den, el, me) {
     if (!v) return;
     if (!s) { video.srcObject = null; video.hidden = true; el('stage-who').textContent = ''; el('stage-stop').hidden = true; return; }
     el('stage-who').textContent = mine ? 'You are sharing your screen' : `${display(s.key)} is sharing their screen`;
-    el('stage-stop').hidden = mine || !den.can('kick');
+    // Stop only where the den would take it: may kick, and ranks above the presenter.
+    el('stage-stop').hidden = mine || !den.can('kick') || !den.above(s.key);
     if (v.mode === 'relay') { note.hidden = false; note.textContent = 'Screen sharing needs a direct connection. This network only lets voice through.'; }
     video.hidden = mine || v.mode === 'relay';
     if (!video.hidden && video.srcObject !== v.stage) video.srcObject = v.stage || null;

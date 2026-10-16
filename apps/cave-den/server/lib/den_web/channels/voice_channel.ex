@@ -112,15 +112,20 @@ defmodule DenWeb.VoiceChannel do
     {:reply, :ok, socket}
   end
 
-  # A moderator ends someone's screen share: only a device that may kick.
+  # A moderator ends someone's screen share: a device that may kick, and
+  # ranks above the presenter (as for every other moderation).
   defp handle("stop_screen", _, socket) do
     pid = socket.assigns[:room_pid]
+    me = socket.assigns.key
+    target = pid && Den.Voice.Room.presenter(pid)
 
     cond do
-      not Den.Mod.can?(socket.assigns.key, "kick") -> {:reply, {:error, %{reason: "You may not stop screen sharing here."}}, socket}
+      not Den.Mod.can?(me, "kick") -> {:reply, {:error, %{reason: "You may not stop screen sharing here."}}, socket}
       is_nil(pid) -> {:reply, {:error, %{reason: "Join voice first."}}, socket}
+      is_nil(target) -> {:reply, {:error, %{reason: "Nobody is sharing their screen."}}, socket}
+      target != me and not Den.Mod.above?(me, target) -> {:reply, {:error, %{reason: "You may not stop that member's screen share."}}, socket}
       true ->
-        case Den.Voice.Room.stop_screen(pid, socket.assigns.key) do
+        case Den.Voice.Room.stop_screen(pid, me, target) do
           {:ok, target} ->
             Den.Mod.log(socket.assigns.key, "screen_stop", target, nil)
             {:reply, :ok, socket}

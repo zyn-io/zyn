@@ -123,10 +123,13 @@ defmodule Den.VoiceTest do
     {pc, offer} = device(video: true)
     {:ok, _} = Den.Voice.Room.join(room, self(), "key-a", offer)
     :ok = Den.Voice.Room.present(room, self())
-    assert {:ok, "key-a"} = Den.Voice.Room.stop_screen(room, "key-b")
+    assert {:error, :none} = Den.Voice.Room.stop_screen(room, "key-b", "key-x")
+    assert "key-a" = Den.Voice.Room.presenter(room)
+    assert {:ok, "key-a"} = Den.Voice.Room.stop_screen(room, "key-b", "key-a")
     assert_receive {:voice, "screen_stopped", %{by: "key-b", reason: "moderator"}}
     assert_receive {:voice, "screen", %{key: nil}}
-    assert {:error, :none} = Den.Voice.Room.stop_screen(room, "key-b")
+    assert {:error, :none} = Den.Voice.Room.stop_screen(room, "key-b", "key-a")
+    assert nil == Den.Voice.Room.presenter(room)
     PeerConnection.stop(pc)
   end
 

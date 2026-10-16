@@ -146,8 +146,14 @@ defmodule Den.Voice.Room do
   @doc "Ask for the stage: `:ok`, or who already presents, or why this device cannot."
   def present(pid, channel), do: GenServer.call(pid, {:present, channel})
   def unpresent(pid, channel), do: GenServer.cast(pid, {:unpresent, channel})
-  @doc "End whoever presents, `{:ok, their key}` (the channel checks `by` may kick, and logs it)."
-  def stop_screen(pid, by), do: GenServer.call(pid, {:stop_screen, by})
+  @doc "Who presents now: their device key, or nil."
+  def presenter(pid), do: GenServer.call(pid, :presenter)
+
+  @doc """
+  End the presentation of `target` (the channel checks `by` may stop it, and
+  logs it): `{:ok, target}`, or `{:error, :none}` if `target` no longer presents.
+  """
+  def stop_screen(pid, by, target), do: GenServer.call(pid, {:stop_screen, by, target})
 
   @impl true
   def init(room) do
@@ -209,12 +215,16 @@ defmodule Den.Voice.Room do
     end
   end
 
-  def handle_call({:stop_screen, _by}, _from, %{presenter: nil} = s), do: {:reply, {:error, :none}, s}
+  def handle_call(:presenter, _from, s), do: {:reply, presenter_key(s), s}
 
   # The channel logs it: this process never waits on the database.
-  def handle_call({:stop_screen, by}, _from, s) do
-    send(s.presenter, {:voice, "screen_stopped", %{by: by, reason: "moderator"}})
-    {:reply, {:ok, presenter_key(s)}, end_screen(s)}
+  def handle_call({:stop_screen, by, target}, _from, s) do
+    if s.presenter && presenter_key(s) == target do
+      send(s.presenter, {:voice, "screen_stopped", %{by: by, reason: "moderator"}})
+      {:reply, {:ok, target}, end_screen(s)}
+    else
+      {:reply, {:error, :none}, s}
+    end
   end
 
   # A connection for one device: its first audio transceiver sends to us, the
