@@ -127,7 +127,7 @@ for (const btn of document.querySelectorAll('.copy[data-copy]')) {
 
 // Sections rise in as they arrive.
 if (!still && 'IntersectionObserver' in window) {
-  const items = document.querySelectorAll('main > section:not(.door) > *, .coda');
+  const items = document.querySelectorAll('main > section:not(.door):not(.showcase) > *, .coda');
   const io = new IntersectionObserver((es) => {
     for (const e of es) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
   }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });

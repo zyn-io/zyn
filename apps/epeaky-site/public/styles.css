@@ -63,9 +63,8 @@ p { margin: 0; }
 /* ---- The door --------------------------------------------------------------- */
 .door {
   position: relative; isolation: isolate;
-  min-height: 100svh;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 120px var(--gutter) 72px;
+  padding: clamp(112px, 15vh, 150px) var(--gutter) clamp(150px, 20vw, 260px);
   text-align: center;
   overflow: hidden;
 }
@@ -77,14 +76,16 @@ p { margin: 0; }
     repeating-linear-gradient(90deg, rgba(0, 0, 0, 0) 0 46px, rgba(0, 0, 0, 0.18) 46px 47px, rgba(255, 220, 160, 0.025) 47px 48px),
     linear-gradient(180deg, var(--wood-2), var(--wood) 60%, var(--ink));
 }
+/* The door's wood fades into the page, so the den shown over it has no seam behind it. */
+.door::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 45%; z-index: -1; background: linear-gradient(180deg, rgba(15, 12, 10, 0), var(--ink)); pointer-events: none; }
 .panel::before, .panel::after {
   content: ''; position: absolute; left: 50%; transform: translateX(-50%);
   width: min(880px, calc(100% - 2 * var(--gutter)));
   border: 1px solid var(--line);
   border-radius: 2px;
 }
-.panel::before { top: 88px; bottom: 40px; }
-.panel::after { top: 100px; bottom: 52px; width: min(856px, calc(100% - 2 * var(--gutter) - 24px)); border-color: rgba(201, 162, 91, 0.1); }
+.panel::before { top: 88px; bottom: 0; border-bottom: 0; }
+.panel::after { top: 100px; bottom: 0; border-bottom: 0; width: min(856px, calc(100% - 2 * var(--gutter) - 24px)); border-color: rgba(201, 162, 91, 0.1); }
 
 .peep { margin-bottom: clamp(36px, 6vh, 64px); }
 .peep-frame {
@@ -132,7 +133,6 @@ p { margin: 0; }
   margin-top: 14px;
   font: 400 11px/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--brass-lo);
-  opacity: 0; animation: rise 0.8s ease 1.7s forwards;
 }
 
 .door h1 {
@@ -141,14 +141,12 @@ p { margin: 0; }
   letter-spacing: -0.012em;
   color: var(--cream);
   text-wrap: balance;
-  opacity: 0; animation: rise 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.9s forwards;
 }
 .lede {
   max-width: 46ch; margin-top: 26px;
-  font-size: clamp(16px, 1.6vw, 19px); color: var(--muted);
-  opacity: 0; animation: rise 1s ease 1.15s forwards;
+  font-size: clamp(16px, 1.6vw, 19px); color: #c4b8a3;
 }
-.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 36px; opacity: 0; animation: rise 1s ease 1.3s forwards; }
+.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 36px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 48px; padding: 0 28px;
@@ -164,14 +162,12 @@ p { margin: 0; }
   list-style: none; padding: 0; margin: 56px 0 0;
   display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px;
   font: 400 12px/1.4 var(--mono); letter-spacing: 0.06em; color: var(--cream);
-  opacity: 0; animation: rise 1s ease 1.5s forwards;
 }
 .specs span { color: var(--brass-lo); }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 /* ---- Sections ----------------------------------------------------------------- */
 main > section:not(.door) { width: min(var(--max), 100%); margin: 0 auto; padding: clamp(72px, 11vw, 140px) var(--gutter); }
-.kicker { font: 400 clamp(1.05rem, 1.8vw, 1.35rem)/1.3 var(--display); font-style: italic; color: var(--brass); margin-bottom: 10px; }
 main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spacing: -0.01em; }
 .sub { margin-top: 18px; max-width: 54ch; color: var(--muted); }
 
@@ -180,29 +176,57 @@ main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spaci
 .rule::after { background: linear-gradient(90deg, var(--line), transparent); }
 .rule span { width: 9px; height: 9px; margin: 0 16px; transform: rotate(45deg); border: 1px solid var(--brass); }
 
-/* Features */
-.grid {
-  list-style: none; padding: 0; margin: 56px 0 0;
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid var(--line);
+/* Showcase: the den itself, a desktop window with a phone in front */
+main > section.showcase {
+  position: relative; z-index: 1;
+  width: min(1240px, 100%);
+  margin: calc(-1 * clamp(120px, 17vw, 230px)) auto 0;
+  padding: 0 var(--gutter) clamp(56px, 8vw, 96px);
 }
-.grid li { position: relative; padding: 34px 32px 40px 0; border-bottom: 1px solid var(--line); }
-.grid li + li { }
-.grid li:not(:nth-child(3n + 1)) { padding-left: 32px; border-left: 1px solid var(--line); }
-.num { display: block; font: 400 15px/1 var(--display); color: var(--brass); letter-spacing: 0.12em; margin-bottom: 22px; }
-.grid h3 { display: flex; align-items: center; gap: 10px; font: 400 26px/1.15 var(--display); margin-bottom: 12px; }
-.grid p { color: var(--muted); font-size: 16px; }
-@media (max-width: 900px) {
-  .grid { grid-template-columns: 1fr 1fr; }
-  .grid li:not(:nth-child(3n + 1)) { padding-left: 0; border-left: 0; }
-  .grid li:nth-child(even) { padding-left: 24px; border-left: 1px solid var(--line); }
+.showcase figure, .band-shot { margin: 0; }
+.shot-desk img, .band-shot img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid rgba(201, 162, 91, 0.35); border-radius: 10px;
+  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
-@media (max-width: 600px) {
-  .grid { grid-template-columns: 1fr; }
-  .grid li, .grid li:nth-child(even) { padding: 28px 0 32px; border-left: 0; }
+.shot-phone {
+  position: absolute; left: calc(var(--gutter) - 1.5%); bottom: clamp(20px, 4vw, 60px);
+  width: clamp(150px, 19%, 230px);
+}
+.shot-phone img, .band-shot.phone img {
+  display: block; width: 100%; height: auto;
+  border: 7px solid #070605; border-radius: 30px;
+  box-shadow: 0 0 0 1px rgba(201, 162, 91, 0.4), 0 30px 70px rgba(0, 0, 0, 0.7);
+}
+@media (max-width: 720px) {
+  .shot-desk { display: none; }
+  main > section.showcase { margin-top: calc(-1 * clamp(110px, 30vw, 160px)); }
+  .shot-phone { position: static; width: min(300px, 78%); margin: 0 auto; }
 }
 
-/* Info bubbles */
+/* Features: two groups, each beside the den doing it */
+.band {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(28px, 5vw, 72px); align-items: center;
+  margin-top: clamp(48px, 7vw, 88px);
+}
+.band.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); }
+.band.flip .band-text { order: 2; }
+.band h3, .mod h3 { font: 400 clamp(1.6rem, 3vw, 2.3rem)/1.1 var(--display); margin-bottom: 22px; }
+.points { list-style: none; padding: 0; margin: 0; display: grid; gap: 20px; }
+.points li { position: relative; padding-left: 20px; border-left: 1px solid var(--line); }
+.points h4 { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font: 600 17px/1.3 var(--body); color: var(--cream); }
+.points p { color: var(--muted); font-size: 16px; }
+.points .tip { top: 100%; margin-top: 8px; }
+.band-shot.phone { justify-self: center; width: min(320px, 100%); }
+.mod { margin-top: clamp(56px, 8vw, 96px); padding-top: clamp(32px, 4vw, 48px); border-top: 1px solid var(--line); max-width: 70ch; }
+.mod h3 { margin-bottom: 12px; }
+.mod p { color: var(--muted); }
+@media (max-width: 860px) {
+  .band, .band.flip { grid-template-columns: 1fr; }
+  .band.flip .band-text { order: 0; }
+}
+
 .info {
   flex: none;
   width: 20px; height: 20px; padding: 0;
@@ -223,7 +247,6 @@ main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spaci
 }
 .tip::before { content: ''; position: absolute; top: -6px; left: var(--ax, 24px); width: 12px; height: 12px; background: var(--paper); transform: rotate(45deg); }
 .tip a { color: var(--oxblood); }
-.grid .tip { top: auto; }
 
 /* Two views */
 .split { display: grid; grid-template-columns: 1fr 1.15fr; margin-top: 56px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }

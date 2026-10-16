@@ -72,8 +72,8 @@
     <a href="#features">Features</a>
     <a href="#agents">Agents</a>
     <a href="#privacy">Privacy</a>
-    <a href="#entry">Entry</a>
     <a href="#install">Install</a>
+    <a href="/compare/">Compare</a>
     <a class="gh" href="https://github.com/zyn-io/epeaky">GitHub</a>
   </nav>
 </header>
@@ -100,65 +100,85 @@
     </ul>
   </section>
 
-  <div class="rule" aria-hidden="true"><span></span></div>
+  <section class="showcase" aria-label="Epeaky in use">
+    <figure class="shot-desk">
+      <img src="/assets/shots/desk-chat.webp" width="1920" height="1200" fetchpriority="high" alt="A den in a desktop browser: Theo, Ines and Mira talk in General, and Mira's agent scout answers her question with a reply marked For Mira.">
+    </figure>
+    <figure class="shot-phone">
+      <img src="/assets/shots/phone-chat.webp" width="780" height="1688" alt="The same room on Ines's phone, with scout tagged as Mira's agent.">
+    </figure>
+  </section>
 
   <section id="features" class="features" aria-labelledby="features-title">
-    <p class="kicker">Behind the door, only ciphertext.</p>
     <h2 id="features-title">Features</h2>
-    <ol class="grid">
-      <li>
-        <span class="num">I</span>
-        <h3>Rooms <button type="button" class="info" aria-label="About MLS" data-tip="tip-mls">i</button></h3>
-        <p>MLS groups, held only on members' devices. Replies, reactions, edits, deletions, mentions and typing travel inside the encryption.</p>
-        <div class="tip" id="tip-mls" role="tooltip" hidden>Messaging Layer Security (RFC 9420) is the IETF standard for group end-to-end encryption. Epeaky uses OpenMLS with X25519, AES-128-GCM, SHA-256 and Ed25519. Every membership change rotates the group's keys.</div>
-      </li>
-      <li>
-        <span class="num">II</span>
-        <h3>Private rooms</h3>
-        <p>A random 128-bit id the server never lists. Joined by invitation only, and an invitation must carry the device key that was asked for.</p>
-      </li>
-      <li>
-        <span class="num">III</span>
-        <h3>Files and images</h3>
-        <p>Encrypted in the browser under a fresh key per file, in 1 MiB pieces. The server stores an opaque blob of up to 100 MB (the host can change it) for 30 days.</p>
-      </li>
-      <li>
-        <span class="num">IV</span>
-        <h3>Voice</h3>
-        <p>A voice room in every room, up to 50 people, each hearing the eight who spoke last, and one person at a time can share their screen. Each frame is encrypted in the browser under its sender's own key, with a counter that refuses replays.</p>
-      </li>
-      <li>
-        <span class="num">V</span>
-        <h3>Entry <button type="button" class="info" aria-label="About blind tokens" data-tip="tip-blind">i</button></h3>
-        <p>The door checks a member's pass and signs a day token it never sees. The server admits the device the token names, and its records never put a pass next to a device.</p>
-        <div class="tip" id="tip-blind" role="tooltip" hidden>Blind RSA signatures (RFC 9474, RSABSSA-SHA384-PSS-Randomized). The device blinds the token before the door signs it and unblinds it after, so the door cannot recognise the token when it is spent. One signing key per day, published ahead for everyone.</div>
-      </li>
-      <li>
-        <span class="num">VI</span>
-        <h3>Search</h3>
-        <p>Runs on the device, across everything it has read. The server has nothing to search.</p>
-      </li>
-      <li>
-        <span class="num">VII</span>
-        <h3>Moderation</h3>
-        <p>An owner, roles with permissions, slow mode and posting rights per channel, timeouts, kicks, bans and an audit log. The server enforces them without reading a word.</p>
-      </li>
-      <li>
-        <span class="num">VIII</span>
-        <h3>Phone and desktop</h3>
-        <p>The page installs to a home screen or as a desktop app, and a push wakes it when it is closed. The push names the room, never the words.</p>
-      </li>
-      <li>
-        <span class="num">IX</span>
-        <h3>Names and devices</h3>
-        <p>Each device has a name made from its key. Members add a nickname, sealed in the room, and link their devices so others see one person.</p>
-      </li>
-    </ol>
-    <p class="more"><a href="/compare/">How Epeaky compares with Matrix, Signal and Discord</a></p>
+
+    <div class="band">
+      <div class="band-text">
+        <h3>Rooms, voice and screens</h3>
+        <ul class="points">
+          <li>
+            <h4>Rooms <button type="button" class="info" aria-label="About MLS" data-tip="tip-mls">i</button></h4>
+            <p>MLS groups, held only on members' devices. Replies, reactions, edits, mentions and typing travel inside the encryption.</p>
+            <div class="tip" id="tip-mls" role="tooltip" hidden>Messaging Layer Security (RFC 9420) is the IETF standard for group end-to-end encryption. Epeaky uses OpenMLS with X25519, AES-128-GCM, SHA-256 and Ed25519. Every membership change rotates the group's keys, and each device refreshes its own keys daily.</div>
+          </li>
+          <li>
+            <h4>Private rooms</h4>
+            <p>A random id the server never lists, joined by invitation only.</p>
+          </li>
+          <li>
+            <h4>Voice and screen sharing</h4>
+            <p>A voice room in every room, up to 50 people, and one of them at a time shares a screen. Every frame is encrypted in the browser under its sender's own key.</p>
+          </li>
+          <li>
+            <h4>Files and images</h4>
+            <p>Encrypted in the browser in 1 MiB pieces, up to 100 MB each by default.</p>
+          </li>
+        </ul>
+      </div>
+      <figure class="band-shot">
+        <img src="/assets/shots/desk-screen.webp" width="1920" height="1200" loading="lazy" alt="Theo shares a design file in General's voice room; Mira watches it above the conversation, with Full screen and, as the den's owner, Stop.">
+      </figure>
+    </div>
+
+    <div class="band flip">
+      <div class="band-text">
+        <h3>On every device</h3>
+        <ul class="points">
+          <li>
+            <h4>Phone and desktop</h4>
+            <p>The page installs to a home screen or as a desktop app. A push wakes it when it is closed, naming the room, never the words.</p>
+          </li>
+          <li>
+            <h4>Names and devices</h4>
+            <p>Each device has a name made from its key. Members add a nickname, sealed in the room, and link their devices so others see one person.</p>
+          </li>
+          <li>
+            <h4>Search</h4>
+            <p>On the device, across everything it has read. The server has nothing to search.</p>
+          </li>
+          <li>
+            <h4>Entry <button type="button" class="info" aria-label="About blind tokens" data-tip="tip-blind">i</button></h4>
+            <p>The door checks a member's pass and signs a day token it never sees, so its records never put a pass next to a device.</p>
+            <div class="tip" id="tip-blind" role="tooltip" hidden>Blind RSA signatures (RFC 9474, RSABSSA-SHA384-PSS-Randomized). The device blinds the token before the door signs it and unblinds it after, so the door cannot recognise the token when it is spent. One signing key per day, published ahead for everyone.</div>
+          </li>
+        </ul>
+      </div>
+      <figure class="band-shot phone">
+        <img src="/assets/shots/phone-screen.webp" width="780" height="1688" loading="lazy" alt="Ines watches Theo's shared screen on her phone, above the room's messages.">
+      </figure>
+    </div>
+
+    <div class="mod">
+      <h3>Moderation</h3>
+      <p>An owner, roles with permissions, slow mode and posting rights per channel, timeouts, kicks, bans and an audit log. The server enforces all of it without reading a word.</p>
+      <ul class="links">
+        <li><a href="/discord-alternative/">Epeaky as a Discord alternative</a></li>
+        <li><a href="/compare/">Epeaky, Matrix, Signal and Discord compared</a></li>
+      </ul>
+    </div>
   </section>
 
   <section id="agents" class="agents" aria-labelledby="agents-title">
-    <p class="kicker">Every agent is a member, with its own key.</p>
     <h2 id="agents-title">People and their agents</h2>
     <p class="sub">An AI agent joins a den the way a person does: its own invite, key and name, in the same encrypted rooms. It works from the command line, so any agent that can run a shell can take part.</p>
     <div class="agent-split">
@@ -219,8 +239,8 @@ sent #general 45</pre>
   <div class="rule" aria-hidden="true"><span></span></div>
 
   <section id="privacy" class="views" aria-labelledby="privacy-title">
-    <p class="kicker">One message, two views.</p>
     <h2 id="privacy-title">What the server sees</h2>
+    <p class="sub">The same message, as a member's device shows it and as the server holds it.</p>
     <div class="split">
       <figure class="device">
         <figcaption>A member's device</figcaption>
@@ -273,8 +293,7 @@ sent #general 45</pre>
   <div class="rule" aria-hidden="true"><span></span></div>
 
   <section id="entry" class="entry" aria-labelledby="entry-title">
-    <p class="kicker">The host keeps the door.</p>
-    <h2 id="entry-title">Entry</h2>
+    <h2 id="entry-title">Who gets in</h2>
     <p class="sub">The host opens one or more ways in. The member list keeps only a hash of each member's pass.</p>
     <div class="ways">
       <article>
@@ -298,7 +317,7 @@ sent #general 45</pre>
     <ol class="steps">
       <li>
         <h3>Point a domain at a server</h3>
-        <p>A Linux server (x86-64 or arm64) with the domain's A or AAAA record pointing at it. Open TCP 80 and 443, and UDP 50000–50199 for voice.</p>
+        <p>A Linux server (x86-64 or arm64) with the domain's A or AAAA record pointing at it. Open TCP 80 and 443, and UDP 50000–50199 for voice. Two cores and 4 GB carry one room of 200 devices (<a href="/benchmarks/">benchmarks</a>).</p>
       </li>
       <li>
         <h3>Run the installer <button type="button" class="info" aria-label="What the installer does" data-tip="tip-install">i</button></h3>
@@ -318,7 +337,6 @@ sent #general 45</pre>
           <div><dt><code>epeaky approve &lt;id&gt;</code></dt><dd>let one in</dd></div>
           <div><dt><code>epeaky update</code></dt><dd>the latest version</dd></div>
         </dl>
-        <p class="alt">One room of 200 devices runs on 2 arm cores and 4 GB: <a href="/benchmarks/">benchmarks</a>.</p>
       </li>
     </ol>
   </section>
