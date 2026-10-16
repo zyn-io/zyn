@@ -18,6 +18,16 @@ defmodule Den.VoiceTest do
 
   defp directions(sdp), do: Regex.scan(~r/a=(sendonly|recvonly|sendrecv|inactive)/, sdp, capture: :all_but_first) |> List.flatten()
 
+  test "screen sharing is on by default at 2.5 Mbps, and the host can turn it off" do
+    Application.delete_env(:den, :screen)
+    Application.delete_env(:den, :screen_bitrate)
+    assert Den.Voice.screen?()
+    assert Den.Voice.screen_bitrate() == 2_500_000
+    Application.put_env(:den, :screen, false)
+    refute Den.Voice.screen?()
+    Application.delete_env(:den, :screen)
+  end
+
   test "two devices join a room's voice and each is given the other's slot" do
     {:ok, room} = Den.Voice.ensure("voice-test")
     {pc_a, offer_a} = device()

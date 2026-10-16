@@ -22,7 +22,7 @@ defmodule DenWeb.VoiceChannel do
           true ->
             # A timeout reaches a device already in voice: it is stopped here.
             DenWeb.Endpoint.subscribe("voice-device:" <> socket.assigns.key)
-            {:ok, %{slots: Den.Voice.slots()}, assign(socket, :voice, room)}
+            {:ok, %{slots: Den.Voice.slots(), screen: Den.Voice.screen?(), screen_bitrate: Den.Voice.screen_bitrate()}, assign(socket, :voice, room)}
         end
     end
   end

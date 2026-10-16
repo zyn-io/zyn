@@ -57,6 +57,21 @@ if v = System.get_env("DEN_ISSUER_LABEL") do
   config :den, issuer_label: String.trim(v)
 end
 
+# Screen sharing in voice (Den.Voice.screen?/0, screen_bitrate/0).
+case System.get_env("DEN_SCREEN") do
+  nil -> :ok
+  v when v in ["on", "1", "true"] -> config :den, screen: true
+  v when v in ["off", "0", "false"] -> config :den, screen: false
+  v -> raise "DEN_SCREEN must be on or off, not #{inspect(v)}"
+end
+
+if v = System.get_env("DEN_SCREEN_BITRATE") do
+  case Integer.parse(v) do
+    {n, ""} when n in 300_000..8_000_000 -> config :den, screen_bitrate: n
+    _ -> raise "DEN_SCREEN_BITRATE must be bits a second, 300000 to 8000000"
+  end
+end
+
 # The public address of a den behind 1:1 NAT, for voice (Den.Voice.public_ip/0).
 if v = System.get_env("DEN_PUBLIC_IP") do
   case :inet.parse_address(String.to_charlist(String.trim(v))) do

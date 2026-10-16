@@ -25,6 +25,12 @@ defmodule Den.Voice do
   """
   def max_peers, do: Application.get_env(:den, :voice_max_peers, 150)
 
+  @doc "Whether members may share their screen in voice (`DEN_SCREEN`, on by default)."
+  def screen?, do: Application.get_env(:den, :screen, true)
+
+  @doc "Bits a second a presenter may send (`DEN_SCREEN_BITRATE`, 2.5 Mbps)."
+  def screen_bitrate, do: Application.get_env(:den, :screen_bitrate, 2_500_000)
+
   @doc "How many people one voice room holds (`:voice_room_max`, default 50)."
   def room_max, do: Application.get_env(:den, :voice_room_max, 50)
 
