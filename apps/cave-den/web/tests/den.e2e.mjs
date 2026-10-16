@@ -71,6 +71,18 @@ async function person(name, url) {
   const ctx = await b.newContext({ viewport: { width: 1300, height: 900 }, permissions: ['microphone'] });
   const p = await ctx.newPage();
   await p.addInitScript(() => { navigator.mediaDevices.getUserMedia = async () => { const ac = new AudioContext(); const o = ac.createOscillator(); const d = ac.createMediaStreamDestination(); o.connect(d); o.start(); return d.stream; }; });
+  // A screen to share: a canvas whose colour changes every second (red, green, blue).
+  await p.addInitScript(() => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const c = Object.assign(document.createElement('canvas'), { width: 640, height: 360 });
+      const g = c.getContext('2d');
+      const colours = ['#ff0000', '#00ff00', '#0000ff'];
+      const draw = () => { g.fillStyle = colours[Math.floor(Date.now() / 1000) % 3]; g.fillRect(0, 0, 640, 360); };
+      draw();
+      setInterval(draw, 100);
+      return c.captureStream(15);
+    };
+  });
   p.on('pageerror', (e) => errs.push(`${name}: ${e.message.slice(0, 200)}`));
   p.on('console', (m) => { if (/Content Security Policy|Refused to/.test(m.text())) csp.push(`${name}: ${m.text().slice(0, 200)}`); });
   await p.goto(url, { waitUntil: 'networkidle' });
@@ -320,6 +332,45 @@ const relabel = await A.p.evaluate(async () => {
 ok(relabel.after === relabel.mid, `a relabelled slot opens nothing (${JSON.stringify(relabel)})`);
 await A.p.evaluate(() => window.__den.voice.postSlots());
 ok(await until(A.p, ([n]) => window.__den.voice.opened > n, [relabel.after], 10000), 'named rightly again, it opens');
+
+// Screen sharing in General's voice.
+ok(await until(A.p, () => !document.querySelector('#voice-screen').hidden), 'A is offered Share screen');
+await A.p.click('#voice-screen');
+ok(await until(B.p, () => /is sharing their screen/.test(document.querySelector('#stage-who')?.textContent || ''), null, 10000), 'B sees that A is sharing');
+ok(await until(B.p, () => document.querySelector('#stage-video').videoWidth > 0, null, 15000), "B's stage shows a picture");
+const colour = () => B.p.evaluate(() => {
+  const v = document.querySelector('#stage-video');
+  const c = Object.assign(document.createElement('canvas'), { width: v.videoWidth, height: v.videoHeight });
+  const g = c.getContext('2d');
+  g.drawImage(v, 0, 0);
+  const [r, gr, bl] = g.getImageData(c.width >> 1, c.height >> 1, 1, 1).data;
+  return r > 150 && gr < 100 && bl < 100 ? 'red' : gr > 150 && r < 100 ? 'green' : bl > 150 && r < 100 ? 'blue' : 'other';
+});
+const seen = new Set();
+for (let i = 0; i < 40 && seen.size < 3; i++) { seen.add(await colour()); await B.p.waitForTimeout(150); }
+ok(['red', 'green', 'blue'].every((c) => seen.has(c)), `B's picture follows A's screen (${[...seen]})`);
+const vs = await B.p.evaluate(() => ({ failed: window.__den.voice.failed, presenter: window.__den.voice.screen?.key }));
+ok(vs.failed === 0 && vs.presenter === A.me.key, `every screen frame opened, under the key of the device the den names (${JSON.stringify(vs)})`);
+ok(await A.p.evaluate(() => /You are sharing your screen/.test(document.querySelector('#stage-who').textContent) && document.querySelector('#stage-video').hidden), 'A sees that it is sharing, not its own screen back');
+ok(await B.p.evaluate(() => document.querySelector('#voice-screen').disabled), 'B cannot share while A shares');
+const busy = await B.p.evaluate(() => window.__den.voice.present().then(() => 'ok', (e) => e.message));
+ok(busy === `busy:${A.me.key}`, `a second presenter is refused (${busy.slice(0, 20)})`);
+// A new epoch mid-share (A refreshes General's keys): new screen keys, and the picture goes on.
+const epoch0 = await B.p.evaluate(() => Number(window.__den.den.epoch('general')));
+await A.p.evaluate(() => window.__den.refreshKeys('general'));
+ok(await until(B.p, ([e]) => Number(window.__den.den.epoch('general')) > e, [epoch0], 10000), 'General moves to a new epoch while A shares');
+await B.p.waitForTimeout(2500);
+const before = await B.p.evaluate(() => ({ opened: window.__den.voice.opened, failed: window.__den.voice.failed }));
+await B.p.waitForTimeout(3000);
+const after = await B.p.evaluate(() => ({ opened: window.__den.voice.opened, failed: window.__den.voice.failed }));
+ok(after.opened > before.opened + 50 && after.failed - before.failed < 5, `after the new epoch the stage and voice keep opening (${JSON.stringify({ before, after })})`);
+seen.clear();
+for (let i = 0; i < 40 && seen.size < 2; i++) { seen.add(await colour()); await B.p.waitForTimeout(150); }
+ok(seen.size >= 2 && !seen.has('other'), `and B's picture still follows A's screen (${[...seen]})`);
+await A.p.click('#voice-screen');
+ok(await until(B.p, () => document.querySelector('#stage').hidden, null, 5000), 'Stop sharing frees the stage');
+ok(await until(B.p, () => !document.querySelector('#voice-screen').disabled, null, 5000), 'and B may share again');
+
 await A.p.click('#voice-leave');
 ok(await until(A.p, () => document.querySelector('#voice').hidden), 'A leaves voice');
 
@@ -361,6 +412,10 @@ ok(await until(D.p, () => /relayed/.test(document.querySelector('#voice .voice-l
 await A.p.waitForTimeout(4000);
 const rd = await D.p.evaluate(() => ({ opened: window.__den.voice.opened, sealed: window.__den.voice.sealed }));
 ok(rd.opened > 50 && rd.sealed > 50, `D hears A and is heard (${JSON.stringify(rd)})`);
+ok(await D.p.evaluate(() => document.querySelector('#voice-screen').hidden), 'D, relayed, is not offered Share screen');
+await A.p.click('#voice-screen');
+ok(await until(D.p, () => /needs a direct connection/.test(document.querySelector('#stage-note')?.textContent || ''), null, 10000), 'D is told that the screen A shares needs a direct connection');
+await A.p.click('#voice-screen');
 await D.p.evaluate(() => window.__den.voice?.leave());
 await strict.close();
 await A.p.click('#voice-leave');
@@ -370,6 +425,21 @@ await A.p.click('#voice-leave');
 host(`:ok = Den.Mod.set_owner("${A.me.key}"); IO.puts("ok")`);
 await A.p.reload({ waitUntil: 'networkidle' });
 ok(await inside(A.p) && await until(A.p, () => window.__den.inRoom('general') && window.__den.mod.owner === window.__den.me.key, null, 30000), 'the host makes A the owner; A is back in General');
+
+// The owner (who may kick) stops B's screen share.
+await A.p.click('[data-room="general"]');
+await A.p.click('#voice-go');
+await B.p.click('#voice-go');
+ok(await until(B.p, () => window.__den.voice?.pc?.connectionState === 'connected', null, 15000) && await until(A.p, () => window.__den.voice?.pc?.connectionState === 'connected', null, 15000), 'A and B are back in voice');
+await B.p.click('#voice-screen');
+ok(await until(A.p, () => !document.querySelector('#stage-stop').hidden, null, 10000), "the owner sees Stop on B's screen");
+ok(await B.p.evaluate(() => document.querySelector('#stage-stop').hidden), 'the presenter does not');
+await A.p.click('#stage-stop');
+ok(await until(B.p, () => /stopped your screen share/.test(document.querySelector('#stage-note')?.textContent || ''), null, 5000), 'B is told who stopped their share');
+ok(await until(A.p, () => document.querySelector('#stage').hidden, null, 5000), "the owner's stage is gone");
+ok(host('IO.puts(Enum.any?(Den.Mod.audit(), &(&1.action == "screen_stop")))') === 'true', 'the stop is in the audit log');
+await A.p.click('#voice-leave');
+await B.p.click('#voice-leave');
 
 // A member sends a commit the den accepts but nobody can apply (its
 // membership tag flipped): B cannot apply it, reports it, and the den undoes
