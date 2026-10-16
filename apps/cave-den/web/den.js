@@ -31,6 +31,8 @@ function noteState(t, state, by, at) {
 }
 const INVITATIONS = 5;
 export const VOICE_LABEL = 'den voice';
+// A presenter's screen frames: their own key, not their voice key.
+export const SCREEN_LABEL = 'den screen';
 
 // ---------------------------------------------------------------------------
 // Bytes and storage.
@@ -1735,6 +1737,11 @@ export class DenClient {
     return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
   }
 
+  async screenKey(room, sender) {
+    const raw = this.den.export(room, `${SCREEN_LABEL}|${sender}`, 32);
+    return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  }
+
   /// Join a room's voice: one connection to the den, our microphone up,
   /// eight slots down, every frame sealed here and opened here. By WebRTC;
   /// where the network lets none through, the same sealed frames go over the
@@ -1776,7 +1783,7 @@ const VOICE_BITRATE = 64_000;
 
 class Voice {
   constructor(client, room, onSlots) {
-    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0, waiting: new Map(), asked: 0 });
+    Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), screenKeys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0, waiting: new Map(), asked: 0, screen: null, presenting: false, stage: null, stoppedBy: null });
   }
 
   /// Keys for us and everyone in the voice room (not only those in a slot
@@ -1787,19 +1794,31 @@ class Voice {
     const index = Number(this.client.den.epoch(this.room)) % 256;
     const me = this.client.den.key();
     const ks = index === this.current ? this.keys.get(index) : new Map();
-    for (const k of new Set([me, ...this.roster, ...this.people.map((p) => p.key)])) {
+    const ss = index === this.current ? this.screenKeys.get(index) : new Map();
+    const senders = new Set([me, ...this.roster, ...this.people.map((p) => p.key)]);
+    if (this.screen?.key) senders.add(this.screen.key);
+    for (const k of senders) {
       if (!ks.has(k)) ks.set(k, await this.client.voiceKey(this.room, k));
+      // Screen keys only where there is a screen: our own, and the presenter's.
+      if ((k === me || k === this.screen?.key) && !ss.has(k)) ss.set(k, await this.client.screenKey(this.room, k));
     }
-    this.keys.delete(index);
-    this.keys.set(index, ks);
+    for (const [m, set] of [[this.keys, ks], [this.screenKeys, ss]]) {
+      m.delete(index);
+      m.set(index, set);
+      while (m.size > 2) m.delete(m.keys().next().value);
+    }
     this.current = index;
-    while (this.keys.size > 2) this.keys.delete(this.keys.keys().next().value);
-    this.worker.postMessage({ keys: [...this.keys].map(([i, m]) => [i, [...m]]), current: index, me });
+    this.postKeys();
     clearTimeout(this.dropOld);
     this.dropOld = setTimeout(() => {
-      for (const i of [...this.keys.keys()]) if (i !== this.current) this.keys.delete(i);
-      this.worker.postMessage({ keys: [...this.keys].map(([i, m]) => [i, [...m]]), current: this.current, me });
+      for (const m of [this.keys, this.screenKeys]) for (const i of [...m.keys()]) if (i !== this.current) m.delete(i);
+      this.postKeys();
     }, 5000);
+  }
+
+  postKeys() {
+    const flat = (m) => [...m].map(([i, ks]) => [i, [...ks]]);
+    this.worker.postMessage({ keys: flat(this.keys), screenKeys: flat(this.screenKeys), current: this.current, me: this.client.den.key(), presenter: this.screen?.key || '' });
   }
 
   /// Which member speaks in which down slot, as the den names them.
@@ -1868,7 +1887,22 @@ class Voice {
       this.onSlots(this.people);
     });
     ch.on('f', (buf) => this.heard(buf));
-    await new Promise((resolve, reject) => ch.join().receive('ok', resolve).receive('error', (e) => reject(new Error(e?.reason || 'could not join the voice room'))));
+    // Who shares their screen in this voice room, as the den says.
+    ch.on('screen', ({ key } = {}) => {
+      const was = this.screen?.key;
+      this.screen = typeof key === 'string' && key ? { key } : null;
+      if (this.presenting && this.screen?.key !== this.client.den.key()) this.endCapture();
+      if (this.screen?.key !== was) this.refreshKey().catch(() => {});
+      this.onSlots(this.people);
+    });
+    ch.on('screen_stopped', (m) => {
+      this.stoppedBy = { by: m?.by || null, reason: m?.reason || '' };
+      this.endCapture();
+      this.onSlots(this.people);
+    });
+    const joined = await new Promise((resolve, reject) => ch.join().receive('ok', resolve).receive('error', (e) => reject(new Error(e?.reason || 'could not join the voice room'))));
+    this.screenAllowed = !!joined?.screen;
+    this.screenBitrate = joined?.screen_bitrate || 2_500_000;
     if (mode !== 'relay') {
       await this.startRtc();
       // WebRTC needs UDP to the den. Where none gets through (a strict
@@ -1911,7 +1945,22 @@ class Voice {
     this.downs = [];
     for (let i = 0; i < 8; i++) this.downs.push(pc.addTransceiver('audio', { direction: 'recvonly' }));
     this.downs.forEach((t, i) => this.transform(t.receiver, 'open', i));
+    // The screen up (a track only while presenting) and the stage down.
+    if (this.screenAllowed) {
+      this.screenUp = pc.addTransceiver('video', { direction: 'sendonly' });
+      this.transform(this.screenUp.sender, 'seal-screen');
+      this.stageT = pc.addTransceiver('video', { direction: 'recvonly' });
+      this.transform(this.stageT.receiver, 'open-screen');
+      // VP8 only: the den forwards VP8, and the clear prefix is VP8's.
+      const vp8 = RTCRtpReceiver.getCapabilities?.('video')?.codecs.filter((c) => /vp8|rtx/i.test(c.mimeType));
+      if (vp8?.length) for (const t of [this.screenUp, this.stageT]) { try { t.setCodecPreferences?.(vp8); } catch { /* the browser picks */ } }
+    }
     pc.ontrack = (e) => {
+      if (e.track.kind === 'video') {
+        this.stage = new MediaStream([e.track]);
+        this.onSlots(this.people);
+        return;
+      }
       const stream = new MediaStream([e.track]);
       const audio = new Audio();
       audio.srcObject = stream;
@@ -1933,11 +1982,61 @@ class Voice {
     await up.sender.setParameters(p).catch(() => {});
   }
 
+  get canPresent() {
+    return this.mode === 'rtc' && !!this.screenUp && !!navigator.mediaDevices?.getDisplayMedia;
+  }
+
+  /// Share this device's screen with the voice room: the browser asks which
+  /// screen, window or tab; then the den is asked for the stage.
+  async present() {
+    if (!this.canPresent) throw new Error('Screen sharing needs a direct connection. This network only lets voice through.');
+    const cap = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
+    const track = cap.getVideoTracks()[0];
+    try {
+      await this.client.push(this.ch, 'present', {});
+    } catch (e) {
+      cap.getTracks().forEach((t) => t.stop());
+      throw e.message === 'busy' ? new Error(`busy:${e.key}`) : e;
+    }
+    track.contentHint = 'detail';
+    // The browser's own Stop sharing.
+    track.onended = () => { if (this.capture === cap) this.stopPresenting().catch(() => {}); };
+    await this.screenUp.sender.replaceTrack(track);
+    const p = this.screenUp.sender.getParameters();
+    p.encodings = p.encodings?.length ? p.encodings : [{}];
+    Object.assign(p.encodings[0], { maxBitrate: this.screenBitrate, maxFramerate: 15 });
+    await this.screenUp.sender.setParameters(p).catch(() => {});
+    this.capture = cap;
+    this.presenting = true;
+    this.stoppedBy = null;
+    this.onSlots(this.people);
+  }
+
+  async stopPresenting() {
+    this.endCapture();
+    try { await this.client.push(this.ch, 'unpresent', {}); } catch { /* gone */ }
+    this.onSlots(this.people);
+  }
+
+  endCapture() {
+    this.capture?.getTracks().forEach((t) => t.stop());
+    this.capture = null;
+    this.presenting = false;
+    this.screenUp?.sender.replaceTrack(null).catch(() => {});
+  }
+
+  /// A moderator's stop, for whoever presents.
+  stopScreen() { return this.client.push(this.ch, 'stop_screen', {}); }
+
   async stopRtc() {
+    this.endCapture();
     try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
     this.pc.close();
     this.pc = null;
     this.downs = null;
+    this.screenUp = null;
+    this.stageT = null;
+    this.stage = null;
     (this.audios || []).forEach((a) => { a.srcObject = null; });
     this.audios = [];
     this.meters?.clear();
@@ -2054,6 +2153,7 @@ class Voice {
   }
 
   async leave() {
+    this.endCapture();
     clearInterval(this.offMembers);
     clearTimeout(this.dropOld);
     try { await this.client.push(this.ch, 'leave', {}); } catch { /* gone */ }
