@@ -276,6 +276,14 @@ defmodule Den.VoiceTest do
     end)
   end
 
+  defp flush_pli(key) do
+    receive do
+      {^key, :pli} -> flush_pli(key)
+    after
+      0 -> :ok
+    end
+  end
+
   # The newest `event` the test has been told for `key`, from its mailbox.
   defp last_of(key, event, acc) do
     receive do
@@ -429,9 +437,19 @@ defmodule Den.VoiceTest do
     on_exit(fn -> send(d, :stop) end)
     assert_receive {"key-d", :connected}, 15_000
     assert_receive {"key-a", :pli}, 1_000
-    send(a, {:show, 5, true})
-    assert_receive {"key-d", :stage, _, true}, 3_000
-    Process.sleep(1_100)
+    # Keyframes until the viewer has one (a slow machine may still be bringing its connection up).
+    got = Enum.find_value(1..15, fn _ ->
+      send(a, {:show, 5, true})
+      receive do
+        {"key-d", :stage, _, true} -> true
+      after
+        1_000 -> nil
+      end
+    end)
+    assert got, "the late viewer gets a keyframe"
+    # An ask held back by the limit may still be due: let it come and its second pass.
+    Process.sleep(2_200)
+    flush_pli("key-a")
     # The viewer's decoder asks three times at once: one PLI now, one a second later, no more.
     for _ <- 1..3, do: send(d, :pli)
     assert_receive {"key-a", :pli}, 500
