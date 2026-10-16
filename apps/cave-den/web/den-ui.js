@@ -252,6 +252,7 @@ export function mountDen(den, el, me) {
     drawLog(focus);
     drawComposer();
     if (!el('members').hidden) drawMembers();
+    drawStage();
   }
 
   // ---- Dialogs ----------------------------------------------------------------
@@ -989,6 +990,7 @@ export function mountDen(den, el, me) {
     el('voice').hidden = !v;
     drawHead();
     clearInterval(meterTimer);
+    drawStage();
     if (!v) return;
     el('voice-room').textContent = roomTitle(v.room);
     // Relayed: this network let no WebRTC through, so voice goes by the den's own connection.
@@ -1004,7 +1006,56 @@ export function mountDen(den, el, me) {
       const lv = den.voice?.levels?.() || {};
       el('voice-who').querySelectorAll('li').forEach((li) => li.classList.toggle('speaking', (lv[li.dataset.mid] || 0) > 0.02));
     }, 150);
+    drawStage();
   }
+
+  // A shared screen: the stage in the voice room's view, Share screen in the
+  // voice bar, and in any other room the voice bar says who shares.
+  function drawStage() {
+    const v = den.voice;
+    const s = v?.screen;
+    const mine = !!v?.presenting;
+    const btn = el('voice-screen');
+    btn.hidden = !v || !v.canPresent;
+    btn.textContent = mine ? 'Stop sharing' : 'Share screen';
+    btn.disabled = !!(s && !mine);
+    btn.title = s && !mine ? `${display(s.key)} is sharing` : '';
+    const here = !!v && v.room === room;
+    el('stage').hidden = !(here && (s || v.stoppedBy));
+    const note = el('stage-note');
+    const video = el('stage-video');
+    note.hidden = true;
+    if (v?.stoppedBy && !mine) {
+      note.hidden = false;
+      note.textContent = v.stoppedBy.reason === 'too fast' ? 'Your screen share sent more than this den allows, so it stopped.' : `${display(v.stoppedBy.by)} stopped your screen share`;
+    }
+    if (!v) return;
+    if (!s) { video.srcObject = null; video.hidden = true; el('stage-who').textContent = ''; el('stage-stop').hidden = true; return; }
+    el('stage-who').textContent = mine ? 'You are sharing your screen' : `${display(s.key)} is sharing their screen`;
+    el('stage-stop').hidden = mine || !den.can('kick');
+    if (v.mode === 'relay') { note.hidden = false; note.textContent = 'Screen sharing needs a direct connection. This network only lets voice through.'; }
+    video.hidden = mine || v.mode === 'relay';
+    if (!video.hidden && video.srcObject !== v.stage) video.srcObject = v.stage || null;
+    // Elsewhere: the voice bar's room button takes them to the stage.
+    if (!here) el('voice-room').textContent = `${roomTitle(v.room)} · ${display(s.key)} is sharing · Watch`;
+  }
+  el('voice-screen').onclick = async () => {
+    const v = den.voice;
+    if (!v) return;
+    try {
+      if (v.presenting) await v.stopPresenting();
+      else await v.present();
+    } catch (e) {
+      const m = /^busy:(.+)$/.exec(e.message);
+      // The browser's own Cancel in its picker says nothing here.
+      if (e.name !== 'NotAllowedError') status(m ? `${display(m[1])} is sharing` : e.message);
+    }
+    drawStage();
+  };
+  el('stage-full').onclick = () => { el('stage-video').requestFullscreen?.().catch(() => {}); };
+  el('stage-stop').onclick = async () => {
+    try { await den.voice?.stopScreen(); } catch (e) { status(e.message); }
+  };
   el('voice-go').onclick = async () => {
     el('voice-go').disabled = true;
     status('Joining voice…', true);

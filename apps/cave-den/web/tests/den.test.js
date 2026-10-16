@@ -216,3 +216,12 @@ test('screen frames keep VP8 bytes in the clear, sealed to them; voice frames ar
   assert.ok(w.fresh('s', 10n) && w.fresh('s', 12n) && w.fresh('s', 11n));
   assert.ok(!w.fresh('s', 11n), 'a counter seen is refused');
 });
+
+test('the page has a stage for a shared screen and a button to share one', async () => {
+  const html = await read('../index.html');
+  for (const id of ['voice-screen', 'stage', 'stage-video', 'stage-who', 'stage-full', 'stage-stop', 'stage-note']) assert.match(html, new RegExp(`id="${id}"`), id);
+  const ui = await read('../den-ui.js');
+  assert.match(ui, /Share screen/);
+  assert.match(ui, /is sharing their screen/);
+  assert.match(ui, /Screen sharing needs a direct connection\. This network only lets voice through\./);
+});

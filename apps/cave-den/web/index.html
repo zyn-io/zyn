@@ -96,8 +96,13 @@
             <span class="voice-label"><span class="live-dot"></span>Voice</span>
             <button type="button" id="voice-room"></button>
             <ul class="voice-who" id="voice-who" aria-label="In voice"></ul>
-            <span class="voice-acts"><button type="button" class="mini" id="voice-mute" aria-pressed="false">Mute</button><button type="button" class="mini leave" id="voice-leave">Leave</button></span>
+            <span class="voice-acts"><button type="button" class="mini" id="voice-screen" hidden>Share screen</button><button type="button" class="mini" id="voice-mute" aria-pressed="false">Mute</button><button type="button" class="mini leave" id="voice-leave">Leave</button></span>
           </div>
+          <section class="stage" id="stage" hidden aria-labelledby="stage-who">
+            <div class="stage-bar"><span id="stage-who"></span><span class="stage-acts"><button type="button" class="mini" id="stage-full">Full screen</button><button type="button" class="mini leave" id="stage-stop" hidden>Stop</button></span></div>
+            <video id="stage-video" autoplay playsinline muted></video>
+            <p class="stage-note" id="stage-note" hidden></p>
+          </section>
           <div class="den-body">
             <div class="log-wrap">
               <ol class="log" id="log" role="log" aria-label="Messages"></ol>
