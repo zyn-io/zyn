@@ -63,10 +63,18 @@ p { margin: 0; }
 /* ---- The door --------------------------------------------------------------- */
 .door {
   position: relative; isolation: isolate;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: clamp(92px, 12vh, 118px) var(--gutter) clamp(140px, 18vw, 240px);
-  text-align: center;
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: center;
+  gap: clamp(32px, 4vw, 56px);
+  padding: clamp(104px, 14vh, 136px) max(var(--gutter), calc((100% - 1320px) / 2)) clamp(64px, 9vh, 104px);
   overflow: hidden;
+}
+.door-text { position: relative; z-index: 1; }
+.door-shots { position: relative; z-index: 1; padding-bottom: 4%; }
+@media (max-width: 960px) {
+  .door { grid-template-columns: 1fr; text-align: center; }
+  .door-text { display: flex; flex-direction: column; align-items: center; }
+  .door .ctas { justify-content: center; }
+  .door-shots { max-width: 720px; width: 100%; margin: 0 auto; }
 }
 .panel {
   position: absolute; inset: 0; z-index: -1;
@@ -78,21 +86,14 @@ p { margin: 0; }
 }
 /* The door's wood fades into the page, so the den shown over it has no seam behind it. */
 .door::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 45%; z-index: -1; background: linear-gradient(180deg, rgba(15, 12, 10, 0), var(--ink)); pointer-events: none; }
-.panel::before, .panel::after {
-  content: ''; position: absolute; left: 50%; transform: translateX(-50%);
-  width: min(880px, calc(100% - 2 * var(--gutter)));
-  border: 1px solid var(--line);
-  border-radius: 2px;
-}
-.panel::before { top: 88px; bottom: 0; border-bottom: 0; }
-.panel::after { top: 100px; bottom: 0; border-bottom: 0; width: min(856px, calc(100% - 2 * var(--gutter) - 24px)); border-color: rgba(201, 162, 91, 0.1); }
 
-.peep { margin-bottom: clamp(26px, 4vh, 40px); }
+
+.peep { margin-bottom: clamp(24px, 4vh, 36px); }
 .peep-frame {
   position: relative;
-  width: min(520px, calc(100vw - 2 * var(--gutter) - 40px));
-  height: 58px;
-  margin: 0 auto;
+  width: min(400px, calc(100vw - 2 * var(--gutter) - 40px));
+  height: 54px;
+  margin: 0 14px;
   padding: 7px;
   border-radius: 6px;
   background: linear-gradient(180deg, var(--brass-hi), var(--brass) 45%, var(--brass-lo));
@@ -136,8 +137,8 @@ p { margin: 0; }
 }
 
 .door h1 {
-  max-width: 24ch;
-  font: 400 clamp(2.2rem, 4.6vw, 4.1rem)/1.04 var(--display);
+  max-width: 17ch;
+  font: 400 clamp(2.2rem, 3.5vw, 3.4rem)/1.05 var(--display);
   letter-spacing: -0.012em;
   color: var(--cream);
   text-wrap: balance;
@@ -146,7 +147,7 @@ p { margin: 0; }
   max-width: 46ch; margin-top: 20px;
   font-size: clamp(16px, 1.6vw, 19px); color: #c4b8a3;
 }
-.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 28px; }
+.ctas { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 48px; padding: 0 28px;
@@ -177,22 +178,18 @@ main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spaci
 .rule span { width: 9px; height: 9px; margin: 0 16px; transform: rotate(45deg); border: 1px solid var(--brass); }
 
 /* Showcase: the den itself, a desktop window with a phone in front */
-main > section.showcase {
-  position: relative; z-index: 1;
-  width: min(1240px, 100%);
-  margin: calc(-1 * clamp(96px, 13.5vw, 186px)) auto 0;
-  padding: 0 var(--gutter) clamp(56px, 8vw, 96px);
-}
-.showcase figure, .band-shot { margin: 0; }
+.door-shots figure, .band-shot { margin: 0; }
 .shot-desk img, .band-shot img {
   display: block; width: 100%; height: auto;
   border: 1px solid rgba(201, 162, 91, 0.35); border-radius: 10px;
   box-shadow: 0 40px 90px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.6);
 }
+.shot-desk { width: 128%; margin-left: 9% !important; }
 .shot-phone {
-  position: absolute; left: calc(var(--gutter) - 1.5%); bottom: clamp(20px, 4vw, 60px);
-  width: clamp(150px, 19%, 230px);
+  position: absolute; left: 0; bottom: -2%;
+  width: 22%;
 }
+@media (max-width: 960px) { .shot-desk { width: 92%; } }
 .shot-phone img, .band-shot.phone img {
   display: block; width: 100%; height: auto;
   border: 7px solid #070605; border-radius: 30px;
@@ -200,7 +197,7 @@ main > section.showcase {
 }
 @media (max-width: 720px) {
   .shot-desk { display: none; }
-  main > section.showcase { margin-top: calc(-1 * clamp(110px, 30vw, 160px)); }
+  .door-shots { padding-bottom: 0; }
   .shot-phone { position: static; width: min(300px, 78%); margin: 0 auto; }
 }
 
