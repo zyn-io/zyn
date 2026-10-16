@@ -64,7 +64,7 @@ p { margin: 0; }
 .door {
   position: relative; isolation: isolate;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: clamp(112px, 15vh, 150px) var(--gutter) clamp(150px, 20vw, 260px);
+  padding: clamp(92px, 12vh, 118px) var(--gutter) clamp(140px, 18vw, 240px);
   text-align: center;
   overflow: hidden;
 }
@@ -87,7 +87,7 @@ p { margin: 0; }
 .panel::before { top: 88px; bottom: 0; border-bottom: 0; }
 .panel::after { top: 100px; bottom: 0; border-bottom: 0; width: min(856px, calc(100% - 2 * var(--gutter) - 24px)); border-color: rgba(201, 162, 91, 0.1); }
 
-.peep { margin-bottom: clamp(36px, 6vh, 64px); }
+.peep { margin-bottom: clamp(26px, 4vh, 40px); }
 .peep-frame {
   position: relative;
   width: min(520px, calc(100vw - 2 * var(--gutter) - 40px));
@@ -136,17 +136,17 @@ p { margin: 0; }
 }
 
 .door h1 {
-  max-width: 17ch;
-  font: 400 clamp(2.5rem, 6.2vw, 5.6rem)/1.02 var(--display);
+  max-width: 24ch;
+  font: 400 clamp(2.2rem, 4.6vw, 4.1rem)/1.04 var(--display);
   letter-spacing: -0.012em;
   color: var(--cream);
   text-wrap: balance;
 }
 .lede {
-  max-width: 46ch; margin-top: 26px;
+  max-width: 46ch; margin-top: 20px;
   font-size: clamp(16px, 1.6vw, 19px); color: #c4b8a3;
 }
-.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 36px; }
+.ctas { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 28px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 48px; padding: 0 28px;
@@ -159,8 +159,8 @@ p { margin: 0; }
 .btn.line { color: var(--cream); border: 1px solid var(--line); }
 .btn.line:hover { border-color: var(--brass); color: var(--brass-hi); }
 .specs {
-  list-style: none; padding: 0; margin: 56px 0 0;
-  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px;
+  list-style: none; padding: 0; margin: 18px 0 0;
+  display: flex; flex-wrap: wrap; gap: 10px 28px;
   font: 400 12px/1.4 var(--mono); letter-spacing: 0.06em; color: var(--cream);
 }
 .specs span { color: var(--brass-lo); }
@@ -180,7 +180,7 @@ main h2 { font: 400 clamp(2.2rem, 5vw, 3.8rem)/1.05 var(--display); letter-spaci
 main > section.showcase {
   position: relative; z-index: 1;
   width: min(1240px, 100%);
-  margin: calc(-1 * clamp(120px, 17vw, 230px)) auto 0;
+  margin: calc(-1 * clamp(96px, 13.5vw, 186px)) auto 0;
   padding: 0 var(--gutter) clamp(56px, 8vw, 96px);
 }
 .showcase figure, .band-shot { margin: 0; }
