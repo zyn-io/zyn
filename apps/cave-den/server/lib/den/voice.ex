@@ -125,8 +125,11 @@ defmodule Den.Voice.Room do
 
   # Who speaks is re-ranked this often (ms); a level at or under this
   # (-dBov, 127 is silence) counts as speaking, as does the voice flag.
-  alias ExWebRTC.RTP.Munger
+  alias ExWebRTC.RTP.{Munger, VP8}
+  alias ExRTCP.Packet.PayloadFeedback.{PLI, FIR}
   @tick 300
+  # Keyframes asked of the presenter: at most one a second.
+  @key_every 1_000
   @speaking 50
 
   def start_link(room), do: GenServer.start_link(__MODULE__, room, name: {:via, Registry, {Den.Voice.Registry, room}})
@@ -370,6 +373,8 @@ defmodule Den.Voice.Room do
   def handle_info(:stop_if_empty, %{peers: peers} = s) when map_size(peers) == 0, do: {:stop, :normal, s}
 
   # Re-rank who speaks, while there are more people than slots.
+  # The ask that waited for the second to pass.
+  def handle_info(:want_key, s), do: {:noreply, want_key(%{s | screen: %{s.screen | again: false, key_at: nil}})}
   def handle_info(:tick, s), do: {:noreply, %{s | ticking: false} |> assign_all() |> tick()}
   def handle_info(_, s), do: {:noreply, s}
 
@@ -381,6 +386,30 @@ defmodule Den.Voice.Room do
   defp on_pc({:track, %MediaStreamTrack{id: id, kind: :audio}}, channel, peer, s), do: put_in(s.peers[channel], %{peer | up: id})
   defp on_pc({:track, %MediaStreamTrack{id: id, kind: :video}}, channel, peer, s), do: put_in(s.peers[channel], %{peer | screen_up: id})
 
+  # The presenter's screen: through the room's one munger, to every viewer
+  # that has had a keyframe. Anyone else's video goes nowhere.
+  defp on_pc({:rtp, id, _rid, packet}, channel, %{screen_up: id}, %{presenter: channel} = s) do
+    s = count(s, byte_size(packet.payload))
+
+    if s.presenter != channel do
+      s
+    else
+      key? = VP8.keyframe?(packet)
+      s = %{s | screen: %{s.screen | seen: true}}
+      # A stream not yet started on a keyframe, or one a viewer asked of
+      # before the den knew it: ask for a keyframe now. A keyframe answers it.
+      s = if key?, do: %{s | screen: %{s.screen | wanted: false}}, else: if(s.screen.wanted or not s.screen.live, do: want_key(s), else: s)
+      if s.screen.live or key?, do: show(s, channel, packet, key?), else: s
+    end
+  end
+
+  defp on_pc({:rtp, id, _rid, _packet}, _channel, %{screen_up: id}, s) when not is_nil(id), do: s
+
+  # A viewer's decoder asks for a keyframe: passed on to the presenter, within the limit.
+  defp on_pc({:rtcp, packets}, _channel, _peer, s) do
+    if Enum.any?(packets, fn {_, p} -> is_struct(p, PLI) or is_struct(p, FIR) end), do: want_key(s), else: s
+  end
+
   # Audio from one device: into its slot on the connection of everyone who
   # carries it now. Its header extensions stay here (their ids are this
   # connection's, not the listener's); the den writes the listener's own.
@@ -391,7 +420,8 @@ defmodule Den.Voice.Room do
   end
 
   defp on_pc({:connection_state_change, :failed}, channel, _peer, s), do: drop(s, channel)
-  defp on_pc({:connection_state_change, :connected}, channel, peer, s), do: put_in(s.peers[channel], %{peer | connected: true})
+  # A viewer that connects starts on the next keyframe, which is asked for now.
+  defp on_pc({:connection_state_change, :connected}, channel, peer, s), do: put_in(s.peers[channel], %{peer | connected: true, stage_ready: false}) |> want_key()
   defp on_pc(_, _, _, s), do: s
 
   # By the level the browser measured; without one, by size: a frame of
@@ -481,7 +511,7 @@ defmodule Den.Voice.Room do
 
   defp tick(s), do: s
 
-  defp fresh_screen(munger), do: %{munger: munger, live: false, key_at: nil, again: false, bytes: 0, since: System.monotonic_time(:millisecond)}
+  defp fresh_screen(munger), do: %{munger: munger, live: false, seen: false, wanted: false, key_at: nil, again: false, bytes: 0, since: System.monotonic_time(:millisecond)}
 
   defp presenter_key(%{presenter: nil}), do: nil
   defp presenter_key(s), do: s.peers[s.presenter].key
@@ -494,7 +524,60 @@ defmodule Den.Voice.Room do
     s
   end
 
-  defp want_key(s), do: s
+  defp show(s, presenter, packet, key?) do
+    {packet, munger} = Munger.munge(s.screen.munger, packet)
+    s = %{s | screen: %{s.screen | munger: munger, live: true}}
+
+    Enum.reduce(s.peers, s, fn {c, q}, s ->
+      cond do
+        c == presenter or is_nil(q.stage) -> s
+        q.stage_ready -> send_stage(s, q, packet)
+        key? -> send_stage(s, q, packet) |> put_in([:peers, c, :stage_ready], true)
+        true -> s
+      end
+    end)
+  end
+
+  defp send_stage(s, q, packet) do
+    PeerConnection.send_rtp(q.pc, q.stage, packet)
+    s
+  end
+
+  defp want_key(%{presenter: nil} = s), do: s
+  # A PLI names the stream, so it waits until the den has had a packet of it.
+  defp want_key(%{screen: %{seen: false}} = s), do: %{s | screen: %{s.screen | wanted: true}}
+
+  defp want_key(s) do
+    now = System.monotonic_time(:millisecond)
+    p = s.peers[s.presenter]
+
+    cond do
+      s.screen.key_at && now - s.screen.key_at < @key_every ->
+        # Asked within the second: once more when it is up.
+        unless s.screen.again, do: Process.send_after(self(), :want_key, @key_every - (now - s.screen.key_at))
+        %{s | screen: %{s.screen | again: true}}
+
+      true ->
+        PeerConnection.send_pli(p.pc, p.screen_up)
+        %{s | screen: %{s.screen | key_at: now, again: false, wanted: false}}
+    end
+  end
+
+  # The guard: over twice the bitrate in a 5-second window ends the presentation,
+  # so one device cannot multiply its upload by every viewer.
+  defp count(s, n) do
+    now = System.monotonic_time(:millisecond)
+    sc = s.screen
+    {bytes, since} = if now - sc.since > 5_000, do: {n, now}, else: {sc.bytes + n, sc.since}
+    s = %{s | screen: %{sc | bytes: bytes, since: since}}
+
+    if bytes * 8 > 2 * Den.Voice.screen_bitrate() * 5 do
+      send(s.presenter, {:voice, "screen_stopped", %{by: nil, reason: "too fast"}})
+      end_screen(s)
+    else
+      s
+    end
+  end
 
   defp drop(s, channel) do
     case Map.pop(s.peers, channel) do
