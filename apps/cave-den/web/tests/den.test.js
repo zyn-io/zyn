@@ -225,3 +225,19 @@ test('the page has a stage for a shared screen and a button to share one', async
   assert.match(ui, /is sharing their screen/);
   assert.match(ui, /Screen sharing needs a direct connection\. This network only lets voice through\./);
 });
+
+test('the replay window takes a late frame it has not seen, by send time in µs, and refuses one seen or too old', async () => {
+  const { Window } = await import('../dist/den/media-seal.js');
+  const w = new Window();
+  const t0 = BigInt(Date.now()) * 1000n;
+  assert.ok(w.fresh('s', t0));
+  assert.ok(w.fresh('s', t0 + 133_000n), 'two frames on (15 fps)');
+  assert.ok(w.fresh('s', t0 + 66_000n), 'the frame between, completed late after a resend, is taken');
+  assert.ok(!w.fresh('s', t0 + 66_000n), 'but only once');
+  assert.ok(!w.fresh('s', t0 + 133_000n), 'the newest is not taken twice either');
+  assert.ok(!w.fresh('s', t0 - 3_000_000n), 'one from seconds before the newest is refused');
+  // Many frames: what it keeps stays small.
+  for (let i = 1; i <= 5000; i++) w.fresh('s', t0 + 133_000n + BigInt(i) * 20_000n);
+  assert.ok(w.seen.get('s').size <= 512, `it keeps at most 512 counters (${w.seen.get('s').size})`);
+  assert.ok(w.fresh('t', t0), 'each sender has its own window');
+});

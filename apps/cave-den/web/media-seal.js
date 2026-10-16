@@ -55,25 +55,25 @@ function join(a, b) {
   return out;
 }
 
-/// A sliding window of 64 frames per sender: newer counters move it on, a
-/// late frame inside it is taken once, anything older is refused.
+/// Which frames a sender's stream has had, by counter (the send time in µs):
+/// any counter not seen before is taken if it is within `span` of the newest
+/// (2 s), so a frame that completes late after a resend still plays; one
+/// already seen, or older than that, is refused. At most `keep` counters are
+/// kept per sender, the oldest dropped first.
 export class Window {
-  constructor(size = 64n) { this.size = size; this.seen = new Map(); }
+  constructor(span = 2_000_000n, keep = 512) { this.span = span; this.keep = keep; this.seen = new Map(); }
 
   fresh(sender, n) {
-    const s = this.seen.get(sender);
-    if (!s) { this.seen.set(sender, { max: n, mask: 1n }); return true; }
+    let s = this.seen.get(sender);
+    if (!s) { s = new Set(); s.max = n; this.seen.set(sender, s); }
+    if (n < s.max - this.span || s.has(n)) return false;
+    s.add(n);
     if (n > s.max) {
-      const shift = n - s.max;
-      s.mask = shift >= this.size ? 1n : ((s.mask << shift) | 1n) & ((1n << this.size) - 1n);
       s.max = n;
-      return true;
+      for (const c of s) if (c < n - this.span) s.delete(c);
     }
-    const back = s.max - n;
-    if (back >= this.size) return false;
-    const bit = 1n << back;
-    if (s.mask & bit) return false;
-    s.mask |= bit;
+    // A Set keeps insertion order: the first ones are the oldest taken.
+    while (s.size > this.keep) s.delete(s.values().next().value);
     return true;
   }
 }
