@@ -63,10 +63,10 @@ test('only known settings, each to its own rule, written with a backup and a res
 });
 
 test('the check report says what is fine and what the human must fix', () => {
-  const good = report({ os: 'Linux', arch: 'aarch64', cores: '2', mem_mb: '3805', disk_free_gb: '33', sudo: 'root', ports: '', docker: 'no', addrs: '159.69.252.109 2a01:4f8::1 172.17.0.1', public: '159.69.252.109', installed: 'no', firewall: 'inactive' }, { a: ['159.69.252.109'], aaaa: [] });
+  const good = report({ os: 'Linux', arch: 'aarch64', cores: '2', mem_mb: '3805', disk_free_gb: '33', sudo: 'root', ports: '', docker: 'no', addrs: '203.0.113.10 2001:db8::1 172.17.0.1', public: '203.0.113.10', installed: 'no', firewall: 'inactive' }, { a: ['203.0.113.10'], aaaa: [] });
   assert.deepEqual(good.fix, []);
   assert.ok(good.ok.some((l) => /points at this server/.test(l)));
-  const bad = report({ os: 'Linux', arch: 'armv7l', cores: '1', mem_mb: '900', disk_free_gb: '2', sudo: 'password', ports: '0.0.0.0:80', docker: 'yes', addrs: '192.168.1.5', public: '203.0.113.9', installed: 'no', firewall: 'inactive' }, { a: ['198.51.100.1'], aaaa: [] });
+  const bad = report({ os: 'Linux', arch: 'armv7l', cores: '1', mem_mb: '900', disk_free_gb: '2', sudo: 'password', ports: '0.0.0.0:80', docker: 'yes', addrs: '10.0.0.5', public: '203.0.113.9', installed: 'no', firewall: 'inactive' }, { a: ['198.51.100.1'], aaaa: [] });
   for (const re of [/arm|x86/i, /80/, /does not point/, /behind NAT|router/i, /password/, /memory/i, /disk/i]) assert.ok(bad.fix.some((l) => re.test(l)), `${re} in ${JSON.stringify(bad.fix)}`);
 });
 
