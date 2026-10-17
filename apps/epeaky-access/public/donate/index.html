@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Donate</title>
+  <link rel="icon" href="/assets/coin.png">
+  <link rel="stylesheet" href="/access.css">
+  <link rel="stylesheet" href="/donate/donate.css">
+  <script type="module" src="/donate/donate.js"></script>
+</head>
+<body>
+  <main class="donate-page">
+    <header>
+      <img src="/assets/coin.png" alt="" width="56" height="56">
+      <h1>Donate</h1>
+    </header>
+    <p class="lead">Send at least the minimum to one of these addresses.</p>
+
+    <div class="coins">
+      <section class="coin" aria-labelledby="h-zec">
+        <img class="qr" src="/donate/qr-zec.svg" width="168" height="168" alt="QR code of the ZEC address">
+        <div class="coin-text">
+          <h2 id="h-zec">Zcash <span>ZEC</span></h2>
+          <p class="min">Minimum 0.01 ZEC</p>
+          <p class="addr" id="a-zec">u1ry6fjswf53yaz0lqv93mhe9nu5fja39amw92tec60slla49lj3f2d8ft9k62q9cly3fkpmu88zpwqy97uyznru74u0deddr53vsquesh</p>
+          <button type="button" class="copy" data-copy="u1ry6fjswf53yaz0lqv93mhe9nu5fja39amw92tec60slla49lj3f2d8ft9k62q9cly3fkpmu88zpwqy97uyznru74u0deddr53vsquesh">Copy address</button>
+          
+        </div>
+      </section>
+      <section class="coin" aria-labelledby="h-sol">
+        <img class="qr" src="/donate/qr-sol.svg" width="168" height="168" alt="QR code of the SOL address">
+        <div class="coin-text">
+          <h2 id="h-sol">Solana <span>SOL</span></h2>
+          <p class="min">Minimum 0.1 SOL</p>
+          <p class="addr" id="a-sol">FY2DmpewnPEj7eXhuRMapA9wJ83KkCfaxvSPLYXuPftL</p>
+          <button type="button" class="copy" data-copy="FY2DmpewnPEj7eXhuRMapA9wJ83KkCfaxvSPLYXuPftL">Copy address</button>
+          
+        </div>
+      </section>
+      <section class="coin" aria-labelledby="h-eth">
+        <img class="qr" src="/donate/qr-eth.svg" width="168" height="168" alt="QR code of the ETH address">
+        <div class="coin-text">
+          <h2 id="h-eth">Ethereum <span>ETH</span></h2>
+          <p class="min">Minimum 0.01 ETH</p>
+          <p class="addr" id="a-eth">0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983</p>
+          <button type="button" class="copy" data-copy="0xEE741530abB9eaD1C7d6E9C58E5Df0D43F39b983">Copy address</button>
+          <p class="small">On Ethereum mainnet. Some exchanges send withdrawals with too little gas for this address, and the transfer fails; the ETH then stays with you.</p>
+        </div>
+      </section>
+    </div>
+
+    <ul class="notes">
+      <li>Check the address in your wallet before you send: it must match the one shown here.</li>
+      <li>Donations are not refunded.</li>
+    </ul>
+    <p id="say" class="say" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>
