@@ -95,4 +95,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: (cd agents/mcp && node --test tests/*.test.mjs) && (cd agents/librarian && node --test tests/*.test.mjs)
+      - run: (cd agents/mcp && node --test tests/*.test.mjs) && (cd agents/librarian && node --test tests/*.test.mjs) && (cd agents/host-mcp && node --test tests/*.test.mjs)
