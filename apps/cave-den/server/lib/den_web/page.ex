@@ -39,7 +39,12 @@ defmodule DenWeb.Page do
     built = with {:ok, s} <- File.read(file), {:ok, %{} = c} <- Jason.decode(s), do: c, else: (_ -> %{})
 
     set =
-      %{"issuer" => Application.get_env(:den, :issuer), "issuerLabel" => Application.get_env(:den, :issuer_label)}
+      %{
+        "issuer" => Application.get_env(:den, :issuer),
+        "issuerLabel" => Application.get_env(:den, :issuer_label),
+        "donate" => Application.get_env(:den, :donate),
+        "donateLabel" => Application.get_env(:den, :donate_label)
+      }
       |> Map.reject(fn {_, v} -> is_nil(v) end)
 
     conn

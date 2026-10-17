@@ -183,6 +183,8 @@ redirects every request that arrives without it.
 | `DEN_ISSUER_TOKEN` | the host site's token for registering passes (`external`; 32+ characters) |
 | `DEN_ISSUER` | the issuer's page (`external`), for the stock page; `config.json`'s `issuer` otherwise |
 | `DEN_ISSUER_LABEL` | the text of the button that opens it (default "Enter") |
+| `DEN_DONATE` | an https page where members can donate to the host; the den shows a link to it |
+| `DEN_DONATE_LABEL` | the link's text (default "Donate") |
 | `DEN_ROOMS` | the rooms every member sees, as `id:Title,…` (default `general:General`) |
 | `DEN_GATE` | another gate module, compiled in from `extra/` |
 | `DEN_EXTRA_CHILDREN` | processes an add-on starts, by module name |

@@ -57,6 +57,18 @@ if v = System.get_env("DEN_ISSUER_LABEL") do
   config :den, issuer_label: String.trim(v)
 end
 
+# A page where members can donate to the host, and the text of the button
+# that opens it (default "Donate"). The den only links to it.
+if v = System.get_env("DEN_DONATE") do
+  String.starts_with?(v, "https://") || raise "DEN_DONATE must be an https:// address"
+  config :den, donate: String.trim(v)
+end
+
+if v = System.get_env("DEN_DONATE_LABEL") do
+  String.length(v) in 1..40 || raise "DEN_DONATE_LABEL must be 1 to 40 characters"
+  config :den, donate_label: String.trim(v)
+end
+
 # Screen sharing in voice (Den.Voice.screen?/0, screen_bitrate/0).
 case System.get_env("DEN_SCREEN") do
   nil -> :ok

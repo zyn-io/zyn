@@ -241,3 +241,14 @@ test('the replay window takes a late frame it has not seen, by send time in µs,
   assert.ok(w.seen.get('s').size <= 512, `it keeps at most 512 counters (${w.seen.get('s').size})`);
   assert.ok(w.fresh('t', t0), 'each sender has its own window');
 });
+
+test("a Donate link appears only for the host's https page, and opens it apart from the den", async () => {
+  const html = await read('../index.html');
+  const link = /<a [^>]*id="donate"[^>]*>/.exec(html)?.[0] || '';
+  assert.match(link, /\bhidden\b/, 'hidden until the host sets a page');
+  assert.match(link, /target="_blank"/);
+  assert.match(link, /rel="noopener noreferrer"/, 'the donation page gets no handle on the den');
+  const app = await read('../app.js');
+  assert.match(app, /\/\^https:\\\/\\\/\/\.test\(config\.donate/, 'only an https address is linked');
+  assert.match(app, /config\.donateLabel \|\| 'Donate'/);
+});

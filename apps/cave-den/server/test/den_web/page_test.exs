@@ -37,6 +37,22 @@ defmodule DenWeb.PageTest do
     assert get_resp_header(door, "content-security-policy") == []
   end
 
+  test "config.json names the donation page the host set, and only then", %{conn: conn} do
+    plain = Jason.decode!(get(conn, "/config.json").resp_body)
+    refute Map.has_key?(plain, "donate")
+    Application.put_env(:den, :donate, "https://example.org/donate")
+    Application.put_env(:den, :donate_label, "Support us")
+
+    on_exit(fn ->
+      Application.delete_env(:den, :donate)
+      Application.delete_env(:den, :donate_label)
+    end)
+
+    config = Jason.decode!(get(build_conn(), "/config.json").resp_body)
+    assert config["donate"] == "https://example.org/donate"
+    assert config["donateLabel"] == "Support us"
+  end
+
   test "config.json names the issuer the host set, over the built file's keys", %{conn: conn} do
     plain = get(conn, "/config.json")
     assert plain.status == 200

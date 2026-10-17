@@ -71,6 +71,14 @@ function door(asking) {
   else if (!config.issuer && !ways.invite && !ways.approval) say('This den has no way in set up yet.', true);
 }
 
+// The host's donation page, if it set one (DEN_DONATE): a link, nothing more.
+const donate = el('donate');
+if (donate && /^https:\/\//.test(config.donate || '')) {
+  donate.href = config.donate;
+  donate.textContent = config.donateLabel || 'Donate';
+  donate.hidden = false;
+}
+
 const enter = el('enter');
 if (enter) {
   if (config.issuerLabel) enter.textContent = config.issuerLabel;

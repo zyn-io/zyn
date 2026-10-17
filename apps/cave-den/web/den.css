@@ -288,6 +288,9 @@ kbd { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); 
 .log .earlier { text-align: center; margin: 8px 0; }
 
 /* The den's own name and icon, and its settings (owner and moderators). */
+.donate { display: block; margin-bottom: 10px; text-align: center; text-decoration: none; color: var(--acid); border-color: rgba(199, 240, 75, 0.45); }
+.donate:hover { border-color: var(--acid); }
+.donate[hidden] { display: none; }
 .den-head { display: flex; align-items: center; gap: 10px; padding: 12px 10px 12px 14px; border-bottom: 1px solid var(--line); }
 .den-head b { flex: 1; min-width: 0; font: 600 15px var(--sans); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .den-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 50%; background: rgba(199, 240, 75, 0.12); color: var(--acid); font: 600 14px var(--sans); text-transform: uppercase; }
