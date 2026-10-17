@@ -82,3 +82,12 @@ test('every epeaky command and setting the tool uses exists', () => {
   for (const name of Object.keys(SETTINGS)) assert.ok(read.has(name), name);
   for (const f of ['--domain', '--email', '--yes']) assert.match(install, new RegExp(`^\\s+${f}[|)]`, 'm'), f);
 });
+
+test('the MCP Registry entry names this package, at this version', () => {
+  const pkg = JSON.parse(readFileSync(here('../package.json'), 'utf8'));
+  const srv = JSON.parse(readFileSync(here('../server.json'), 'utf8'));
+  assert.equal(pkg.mcpName, 'io.github.zyn-io/epeaky-host-mcp');
+  assert.equal(srv.name, pkg.mcpName);
+  assert.equal(srv.version, pkg.version);
+  assert.deepEqual(srv.packages.map((p) => [p.registryType, p.identifier, p.version, p.transport.type]), [['npm', 'epeaky-host-mcp', pkg.version, 'stdio']]);
+});

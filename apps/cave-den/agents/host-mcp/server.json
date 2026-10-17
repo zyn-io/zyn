@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.zyn-io/epeaky-host-mcp",
+  "title": "Epeaky host",
+  "description": "Set up and run an Epeaky den on a server you already have, over your own SSH.",
+  "repository": {
+    "url": "https://github.com/zyn-io/epeaky",
+    "source": "github",
+    "subfolder": "agents/host-mcp"
+  },
+  "websiteUrl": "https://epeaky.zyn-network.com",
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "epeaky-host-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "EPEAKY_HOST_SSH",
+          "description": "Another ssh to use (default: ssh on PATH)",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
