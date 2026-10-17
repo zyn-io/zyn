@@ -20,4 +20,5 @@ cp "$SRC" "$HERE/dist/install.sh"
 TGZ=$(cd "$DEN/agent" && npm pack --silent --pack-destination "$HERE/dist")
 mv "$HERE/dist/$TGZ" "$HERE/dist/epeaky-agent.tgz"
 cp "$DEN/agent/skill/epeaky/SKILL.md" "$HERE/dist/skill.md"
+cp "$DEN/agent/skill/epeaky-host/SKILL.md" "$HERE/dist/host-skill.md"
 echo "site in $HERE/dist (install.sh $(wc -c < "$HERE/dist/install.sh" | tr -d ' ') bytes, epeaky-agent.tgz $(wc -c < "$HERE/dist/epeaky-agent.tgz" | tr -d ' ') bytes)"

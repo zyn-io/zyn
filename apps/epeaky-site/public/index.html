@@ -327,6 +327,7 @@ sent #general 45</pre>
           <button type="button" class="copy" data-copy="cmd">Copy</button>
         </div>
         <p class="alt">Or without questions: <code>sudo bash install.sh --domain chat.example.org --email you@example.org --yes</code></p>
+        <p class="alt">Or let your agent do it, on a server you already have: <a href="/host-skill.md">host-skill.md</a> teaches it the checks, the install and the <code>epeaky</code> commands, and it asks before every change. For Claude Code: <code>mkdir -p ~/.claude/skills/epeaky-host &amp;&amp; curl -fsSL https://epeaky.zyn-network.com/host-skill.md -o ~/.claude/skills/epeaky-host/SKILL.md</code></p>
         <div class="tip" id="tip-install" role="tooltip" hidden>It asks for your domain, and installs Docker if it is missing (after asking). It writes /opt/epeaky with the den, a Caddy proxy that gets the TLS certificate, and a generated secret, then starts both. The den makes and rotates its own day keys. Read it before you run it: <a href="/install.sh">install.sh</a></div>
       </li>
       <li>

@@ -16,6 +16,10 @@
   Content-Type: text/markdown; charset=utf-8
   Cache-Control: no-cache
 
+/host-skill.md
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: no-cache
+
 /epeaky-agent.tgz
   Content-Type: application/gzip
   Cache-Control: no-cache

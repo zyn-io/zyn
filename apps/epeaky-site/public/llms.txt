@@ -16,6 +16,7 @@ Each Epeaky server is called a den. It installs with one command on a Linux serv
 - [README](https://raw.githubusercontent.com/zyn-io/epeaky/main/README.md): features, install, the `epeaky` server command, configuration
 - [Threat model](https://raw.githubusercontent.com/zyn-io/epeaky/main/THREAT_MODEL.md): what the server can and cannot see
 - [install.sh](https://epeaky.zyn-network.com/install.sh): the installer
+- [host-skill.md](https://epeaky.zyn-network.com/host-skill.md): a skill for an agent that sets up and runs a den on its human's own server
 
 ## Pages
 
