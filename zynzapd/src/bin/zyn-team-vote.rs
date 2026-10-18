@@ -11,6 +11,9 @@
 //!                                        shares sign for: what `dao-zyn` takes
 //!   zyn-team-vote status                 the Zyn track and its open proposals
 //!   zyn-team-vote <proposal> yes | no    cast the team's vote, once
+//!   zyn-team-vote register-viewing <x25519 public, 64 hex>
+//!                                        publish where the team account is
+//!                                        paid (its viewing key), once
 //! ```
 //!
 //! ```text
@@ -130,14 +133,47 @@ fn vote(node: &str, chain: u32, collection_hex: &str, proposal: u32, choice: u8)
     }
     let collection = unhex32(collection_hex).ok_or("the collection is 64 hex characters")?;
     let op = Op::TeamVote { team: account, program: program::dao(), collection, proposal, choice };
-    let receipts = match &team {
-        Team::Key(k) => submit(node, chain, k, op)?,
+    let receipts = sign_and_submit(node, chain, &team, op)?;
+    println!("team vote on #{proposal}: {}", receipts.chars().take(160).collect::<String>());
+    Ok(())
+}
+
+/// Sign `op` as the team (its key, or its custodians' shares) and submit it.
+fn sign_and_submit(node: &str, chain: u32, team: &Team, op: Op) -> Result<String, String> {
+    match team {
+        Team::Key(k) => submit(node, chain, k, op),
         Team::Custodians { public, custodians, threshold } => {
             let request = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
-            submit_threshold(node, chain, custodians, public, *threshold, request, op)?
+            submit_threshold(node, chain, custodians, public, *threshold, request, op)
         }
-    };
-    println!("team vote on #{proposal}: {}", receipts.chars().take(160).collect::<String>());
+    }
+}
+
+/// Publish the team account's viewing key, so deposits to its address are
+/// credited as notes it can open rather than held as owed. Only the public
+/// half is given; the secret stays wherever its holder keeps it.
+///
+/// Once only: registering again would replace the key, and every later
+/// deposit would be sealed to the new one. So an account that already has a
+/// key is refused here, and replacing it is a deliberate act outside this tool.
+fn register_viewing(node: &str, chain: u32, viewing_hex: &str) -> Result<(), String> {
+    let viewing = unhex32(viewing_hex).ok_or("the viewing key is 64 hex characters (an x25519 public key)")?;
+    if viewing == [0u8; 32] {
+        return Err("not a viewing key".into());
+    }
+    let team = Team::from_env()?;
+    let account = team.account()?;
+    let known = call(node, "zyn_viewingKey", serde_json::json!({ "account": hex(&account) })).ok().and_then(|v| v["viewing"].as_str().map(String::from));
+    if let Some(k) = known {
+        return Err(if k == hex(&viewing) {
+            format!("{} already publishes this viewing key; nothing to do", hex(&account))
+        } else {
+            format!("{} already publishes a different viewing key ({k}); refusing to replace it", hex(&account))
+        });
+    }
+    let op = Op::Register { account, program: program::register_viewing_key(), viewing };
+    let receipts = sign_and_submit(node, chain, &team, op)?;
+    println!("registered {}: {}", hex(&account), receipts.chars().take(160).collect::<String>());
     Ok(())
 }
 
@@ -146,11 +182,12 @@ fn main() {
     let chain: u32 = env("ZYN_TEAM_CHAIN", "212").parse().unwrap_or(212);
     let collection = env("ZYN_TEAM_COLLECTION", CAVE_Z);
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: zyn-team-vote account | status | <proposal> yes|no";
+    let usage = "usage: zyn-team-vote account | status | <proposal> yes|no | register-viewing <x25519 public hex>";
     let result = match args.as_slice() {
         [] => status(&node, &collection),
         [s] if s == "status" => status(&node, &collection),
         [s] if s == "account" => Team::from_env().and_then(|t| t.account()).map(|a| println!("{}", hex(&a))),
+        [cmd, key] if cmd == "register-viewing" => register_viewing(&node, chain, key),
         [id, side] => match (id.parse::<u32>(), side.as_str()) {
             (Ok(n), "yes") => vote(&node, chain, &collection, n, objectvm::dao::YES),
             (Ok(n), "no") => vote(&node, chain, &collection, n, objectvm::dao::NO),
