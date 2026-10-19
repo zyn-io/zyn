@@ -10,10 +10,19 @@ defmodule DenWeb.UserSocket do
 
   @impl true
   def connect(params, socket, info) do
-    case info[:auth_token] || params["session"] do
-      session when is_binary(session) -> session(session, socket)
-      _ -> :error
+    cond do
+      DenWeb.RateLimit.connects_over?(address(info)) -> :error
+      is_binary(session = info[:auth_token] || params["session"]) -> session(session, socket)
+      true -> :error
     end
+  end
+
+  # Where it comes from, as the door counts addresses (a proxy on this machine
+  # says, in X-Forwarded-For).
+  defp address(info) do
+    ip = get_in(info, [:peer_data, :address]) || {0, 0, 0, 0}
+    fwd = for {"x-forwarded-for", v} <- info[:x_headers] || [], do: v
+    DenWeb.RateLimit.address(ip, fwd)
   end
 
   defp session(session, socket) do
@@ -23,8 +32,14 @@ defmodule DenWeb.UserSocket do
          %DateTime{} = until <- Den.Rooms.device_until(key),
          :gt <- DateTime.compare(until, DateTime.utc_now()) do
       # A kicked or banned device still connects, to be told so: every
-      # channel refuses it ("removed").
-      {:ok, assign(socket, :key, key)}
+      # channel refuses it ("removed"). A few connections a device, each
+      # counted while it lasts (this process is the connection's).
+      if length(Registry.lookup(Den.Sockets, key)) >= Den.Limits.get(:sockets) do
+        :error
+      else
+        {:ok, _} = Registry.register(Den.Sockets, key, nil)
+        {:ok, assign(socket, :key, key)}
+      end
     else
       _ -> :error
     end

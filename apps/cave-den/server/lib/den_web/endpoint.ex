@@ -6,7 +6,7 @@ defmodule DenWeb.Endpoint do
   # its URL, which proxies write to their logs.
   socket "/socket", DenWeb.UserSocket,
     auth_token: true,
-    websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 1_048_576],
+    websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 1_048_576, connect_info: [:peer_data, :x_headers]],
     longpoll: false
 
   # The den's own page at "/" (priv/page), under its own policy.

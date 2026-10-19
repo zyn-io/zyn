@@ -32,15 +32,21 @@ defmodule DenWeb.RateLimit do
   address by its /64, which one host commonly holds whole and could rotate
   through.
   """
-  def client(conn), do: conn |> peer() |> prefix()
+  def client(conn), do: address(conn.remote_ip, get_req_header(conn, "x-forwarded-for"))
+
+  @doc "The same, from a peer's address and the X-Forwarded-For values it sent."
+  def address(ip, fwd), do: ip |> peer(fwd) |> prefix()
+
+  @doc "Whether an address has opened more than `:connects_per_minute` connections this minute."
+  def connects_over?(ip), do: over?({:socket, ip}, 60, Den.Limits.get(:connects_per_minute))
 
   # An IPv4 client seen through a dual-stack listener is its IPv4 address.
   defp prefix({0, 0, 0, 0, 0, 0xFFFF, x, y}), do: {div(x, 256), rem(x, 256), div(y, 256), rem(y, 256)}
   defp prefix({a, b, c, d, _, _, _, _}), do: {a, b, c, d}
   defp prefix(ip), do: ip
 
-  defp peer(conn) do
-    case {conn.remote_ip, get_req_header(conn, "x-forwarded-for")} do
+  defp peer(ip, fwd) do
+    case {ip, fwd} do
       {ip, [fwd | _]} when ip in [{127, 0, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 1}] ->
         last = fwd |> String.split(",") |> List.last() |> String.trim()
         case :inet.parse_address(String.to_charlist(last)) do
@@ -67,6 +73,7 @@ defmodule DenWeb.RateLimit do
     ask = div(now, 3600)
     :ets.select_delete(@table, [
       {{{{:door, :_}, :"$1"}, :_}, [{:<, :"$1", door}], [true]},
+      {{{{:socket, :_}, :"$1"}, :_}, [{:<, :"$1", door}], [true]},
       {{{{:ask, :_}, :"$1"}, :_}, [{:<, :"$1", ask}], [true]}
     ])
   end

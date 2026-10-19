@@ -112,6 +112,22 @@ defmodule DenWeb.LimitsTest do
     assert_reply ref, :error, %{reason: "quota"}
   end
 
+  test "a device holds at most :sockets connections, and an address opens at most :connects_per_minute" do
+    %{"a" => ka, "b" => kb} = keys()
+    Den.Rooms.admit(ka, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
+    Den.Rooms.admit(kb, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
+    s = fn key -> %{"session" => Phoenix.Token.sign(DenWeb.Endpoint, "den", %{key: key})} end
+    at = fn ip -> [connect_info: %{peer_data: %{address: ip, port: 1}, x_headers: []}] end
+    Application.put_env(:den, :limits, %{sockets: 2, connects_per_minute: 4})
+    assert {:ok, _} = connect(DenWeb.UserSocket, s.(ka), at.({198, 51, 100, 1}))
+    assert {:ok, _} = connect(DenWeb.UserSocket, s.(ka), at.({198, 51, 100, 1}))
+    assert :error = connect(DenWeb.UserSocket, s.(ka), at.({198, 51, 100, 1}))
+    assert {:ok, _} = connect(DenWeb.UserSocket, s.(kb), at.({198, 51, 100, 1}))
+    # Four from that address this minute: a fifth is refused, another address is not.
+    assert :error = connect(DenWeb.UserSocket, s.(kb), at.({198, 51, 100, 1}))
+    assert {:ok, _} = connect(DenWeb.UserSocket, s.(kb), at.({198, 51, 100, 2}))
+  end
+
   test "below the free-disk floor, nothing is taken" do
     Application.put_env(:den, :limits, %{min_free_bytes: 1_000_000_000_000_000})
     :persistent_term.erase({Den.Limits, :disk})

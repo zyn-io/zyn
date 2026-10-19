@@ -46,7 +46,7 @@ const q = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
 /// What a setting's value may be (and an empty value removes it). Values
 /// never carry quotes, backslashes, `$` or line breaks: they go into .env.
 const SAFE = /^[^'"`$\\\n\r]*$/;
-const LIMITS = ['message_bytes', 'file_max', 'file_bytes', 'files', 'room_members', 'invites', 'inbox', 'history_bytes', 'min_free_bytes'];
+const LIMITS = ['message_bytes', 'file_max', 'file_bytes', 'files', 'room_members', 'invites', 'inbox', 'history_bytes', 'min_free_bytes', 'sockets', 'connects_per_minute'];
 export const SETTINGS = {
   DEN_ENTRY: { rule: (v) => /^(invite|approval|external)(,(invite|approval|external))*$/.test(v), say: 'invite, approval or external, comma-separated' },
   DEN_ROOMS: { rule: (v) => /^[a-z0-9-]{1,32}:[^,:]{1,40}(,[a-z0-9-]{1,32}:[^,:]{1,40})*$/.test(v), say: 'id:Title pairs, comma-separated (ids: a-z, 0-9, -)' },

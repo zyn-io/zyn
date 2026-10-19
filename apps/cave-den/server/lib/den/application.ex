@@ -32,6 +32,7 @@ defmodule Den.Application do
       {Registry, keys: :unique, name: Den.Voice.Registry},
       # Which devices are connected to which room now (Den.Rooms.report/4).
       {Registry, keys: :duplicate, name: Den.Online},
+      {Registry, keys: :duplicate, name: Den.Sockets},
       # Every voice connection, for the den-wide cap.
       {Registry, keys: :duplicate, name: Den.Voice.Peers},
       {DynamicSupervisor, name: Den.Voice.Sup, strategy: :one_for_one},

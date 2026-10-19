@@ -12,6 +12,8 @@ defmodule Den.Limits do
   * `:inbox` — Welcomes waiting for one device at once (100)
   * `:history_bytes` — ciphertext in one history reply (4 MB)
   * `:min_free_bytes` — free disk below which no message or file is taken (2 GB)
+  * `:sockets` — connections one device holds open at once (10)
+  * `:connects_per_minute` — connections opened from one address a minute (300)
   """
 
   @defaults %{
@@ -23,7 +25,9 @@ defmodule Den.Limits do
     invites: 200,
     inbox: 100,
     history_bytes: 4_000_000,
-    min_free_bytes: 2_000_000_000
+    min_free_bytes: 2_000_000_000,
+    sockets: 10,
+    connects_per_minute: 300
   }
 
   # A map or a keyword list in config; DEN_LIMITS="files=100,file_bytes=…".

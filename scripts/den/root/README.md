@@ -213,6 +213,8 @@ optional. They are per device per day unless noted:
 | `inbox` | 100 | invitations waiting for one device at once |
 | `history_bytes` | 4 MB | ciphertext in one history reply |
 | `min_free_bytes` | 2 GB | free disk below which nothing more is taken |
+| `sockets` | 10 | connections one device holds open at once |
+| `connects_per_minute` | 300 | connections opened from one address a minute (a crowd behind one address may need more) |
 
 Ciphertext and files are kept `retention_days` (30) days.
 

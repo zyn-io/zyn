@@ -105,10 +105,10 @@ if v = System.get_env("DEN_LIMITS") do
     for pair <- list.(v), into: %{} do
       with [k, n] <- String.split(pair, "=", parts: 2),
            {n, ""} <- Integer.parse(String.trim(n)),
-           key when is_atom(key) <- Enum.find([:message_bytes, :file_max, :file_bytes, :files, :room_members, :invites, :inbox, :history_bytes, :min_free_bytes], &(Atom.to_string(&1) == String.trim(k))) do
+           key when is_atom(key) <- Enum.find([:message_bytes, :file_max, :file_bytes, :files, :room_members, :invites, :inbox, :history_bytes, :min_free_bytes, :sockets, :connects_per_minute], &(Atom.to_string(&1) == String.trim(k))) do
         {key, n}
       else
-        _ -> raise "DEN_LIMITS: #{inspect(pair)} is not name=number (message_bytes, file_max, file_bytes, files, room_members, invites, inbox, history_bytes, min_free_bytes)"
+        _ -> raise "DEN_LIMITS: #{inspect(pair)} is not name=number (message_bytes, file_max, file_bytes, files, room_members, invites, inbox, history_bytes, min_free_bytes, sockets, connects_per_minute)"
       end
     end
 
