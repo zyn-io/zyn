@@ -18,7 +18,11 @@ something is a limit rather than a guarantee, it says so.
   extensions for a den that matters.
 - **The issuer** (on the host's own site, `external` only): checks whatever
   the host requires and hands the page a pass code through a window the page
-  opens. Wallets and sign-ins run there, not beside the keys.
+  opens. Wallets and sign-ins run there, not beside the keys. That window
+  needs a way back to the page to hand it the code, so while it is open it
+  could also send the den's tab to another address (which would then not
+  have the keys, but could look like the den): it is the host's own site,
+  trusted as far as the host is.
 - **The door** (`/door/*`): checks a member pass and signs a blinded entry
   token (RFC 9474, RSABSSA-SHA384-PSS-Randomized).
 - **The den** (`/socket`, `/blob`): admits a device for the day its token

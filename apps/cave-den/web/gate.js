@@ -17,6 +17,8 @@ export async function enter({ den, say, config }) {
   const own = config.issuerCode ? null : await den.constructor.newPass();
   const issuer = new URL(config.issuer, location.href);
   if (own) issuer.hash = `den-pass=${own.pass}`;
+  // It keeps its opener, which it needs to hand the code back, and with it
+  // could send this tab elsewhere: it is the host's own site (THREAT_MODEL).
   const win = window.open(issuer.href, 'den-issuer', 'popup,width=480,height=680');
   if (!win) throw new Error('The browser blocked the window. Allow pop-ups for this page and try again.');
   say(config.issuerSay || 'Finish in the window that opened.');
