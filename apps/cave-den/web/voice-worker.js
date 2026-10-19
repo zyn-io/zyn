@@ -5,13 +5,13 @@
 // only under the presenter's. The layout is media-seal.js's; its last nine
 // bytes are authenticated, and a counter already seen is refused. The
 // counter is the send time in microseconds (kept rising), so a listener also
-// refuses a frame more than a minute old: the den cannot replay what a member
-// said earlier to someone who joins voice later.
+// refuses a frame more than a minute old (a screen's, 15 s): the den cannot
+// replay what a member said or showed earlier to someone who joins later.
 //
 // Streams arrive by transfer (Chrome) or through RTCRtpScriptTransform
 // (Safari, Firefox); relayed frames, one by one as messages.
 
-import { clearLength, sealFrame, openFrame, indexOf, Window } from './media-seal.js';
+import { clearLength, sealFrame, openFrame, indexOf, tooOld, Window } from './media-seal.js';
 
 let keys = new Map(); // key index → Map(sender key hex → CryptoKey), 'den voice'
 let screenKeys = new Map(); // the same, 'den screen'
@@ -22,7 +22,6 @@ let slots = new Map(); // slot → sender key hex
 const voiceSeen = new Window();
 const screenSeen = new Window();
 let counter = Date.now() * 1000; // the send time in µs, and above any counter this device sent before
-const STALE_MS = 60_000;
 let sealIndex = null; // the epoch this device seals under: the one before, for a moment after a change
 let sealed = 0;
 let opened = 0;
@@ -89,7 +88,7 @@ async function open(frame, slot, kind = 'audio') {
   const key = sender && (kind === 'screen' ? screenKeys : keys).get(indexOf(d))?.get(sender);
   if (!key) throw new Error('no key');
   const { plain, counter: n } = await openFrame(key, d, clearLength(d, kind));
-  if (Math.abs(Number(n / 1000n) - Date.now()) > STALE_MS) throw new Error('stale');
+  if (tooOld(n, Date.now(), kind)) throw new Error('stale');
   if (!(kind === 'screen' ? screenSeen : voiceSeen).fresh(sender, n)) throw new Error('replay');
   frame.data = plain.buffer;
   opened++;

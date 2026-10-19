@@ -408,3 +408,14 @@ test("the agent's join command is built from the invite's code alone, on the pag
   assert.equal(inviteLink('https://elsewhere.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9', O), 'https://den.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9', 'never another host');
   assert.equal(inviteLink(null, O), null);
 });
+
+test('a screen frame is taken only if sent in the last 15 s (voice: a minute), so the den cannot replay a share to a new viewer', async () => {
+  const { tooOld } = await import('../dist/den/media-seal.js');
+  const now = Date.now();
+  const at = (ms) => BigInt(ms) * 1000n;
+  assert.equal(tooOld(at(now - 5_000), now, 'screen'), false);
+  assert.equal(tooOld(at(now - 20_000), now, 'screen'), true);
+  assert.equal(tooOld(at(now - 20_000), now, 'audio'), false);
+  assert.equal(tooOld(at(now - 70_000), now, 'audio'), true);
+  assert.equal(tooOld(at(now + 20_000), now, 'screen'), true, 'nor from far ahead');
+});

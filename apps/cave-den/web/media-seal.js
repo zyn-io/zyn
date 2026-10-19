@@ -55,6 +55,15 @@ function join(a, b) {
   return out;
 }
 
+/// Whether a frame's counter (its send time in µs) is too far from now: a
+/// minute for voice, 15 s for a screen, so the den can replay neither what
+/// was said nor what was shown to someone who joins later. (The limit also
+/// bounds how far apart two devices' clocks may be.)
+export const MAX_AGE_MS = { audio: 60_000, screen: 15_000 };
+export function tooOld(n, nowMs, kind) {
+  return Math.abs(Number(n / 1000n) - nowMs) > (MAX_AGE_MS[kind] ?? MAX_AGE_MS.audio);
+}
+
 /// Which frames a sender's stream has had, by counter (the send time in µs):
 /// any counter not seen before is taken if it is within `span` of the newest
 /// (2 s), so a frame that completes late after a resend still plays; one

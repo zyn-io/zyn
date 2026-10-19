@@ -202,7 +202,9 @@ One member of a voice room at a time may share their screen; the others
 watch it on a stage. The presenter's browser encrypts each VP8 frame with
 AES-GCM under the presenter's own screen key (the MLS exporter labelled
 `den screen` with their key, renewed every epoch, distinct from their voice
-key), with the same counter, replay window and one-minute rule as voice. The
+key), with the same counter and replay window as voice, and a 15-second rule
+(voice's is a minute): the den can replay at most the last few seconds of a
+share to someone who starts watching. The
 first bytes of each frame stay in the clear because WebRTC needs them: 10 on
 a keyframe, 3 otherwise. They are covered by the tag, so they cannot be
 changed. A viewer opens the stage only under the key of the member the den
