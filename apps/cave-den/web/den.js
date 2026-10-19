@@ -81,6 +81,14 @@ const plainText = (s) => String(s ?? '').replace(/[\t\n\r]/g, ' ').replace(/[\u0
 // Shown in place only these; anything else (SVG, HTML, …) is a download.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 
+/// An invite link for a command to run: the code (hex) from the link the den
+/// made, on this page's own origin, so nothing else the den put in it reaches
+/// a shell.
+export function inviteLink(link, origin) {
+  const code = typeof link === 'string' ? /#invite=([0-9a-f]{16,128})$/.exec(link)?.[1] : null;
+  return code ? `${origin}/#invite=${code}` : null;
+}
+
 /// An image's width and height from its header (PNG, GIF, JPEG, WebP, AVIF),
 /// read before anything decodes it, so a huge one is refused unopened; null
 /// for a header it does not know.

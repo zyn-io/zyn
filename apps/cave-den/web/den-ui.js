@@ -2,7 +2,7 @@
 // Everything here works on what den.js keeps on this device; nothing is
 // fetched in the clear but the den's ciphertext and the day keys.
 
-import { REACTIONS as EMOJI, imageSize } from './den.js';
+import { REACTIONS as EMOJI, imageSize, inviteLink } from './den.js';
 import { mountAdmin, slowName } from './den-admin.js';
 const GROUP_MS = 5 * 60_000;
 // One line of text with nothing hidden in it: no bidirectional or zero-width
@@ -1198,7 +1198,7 @@ export function mountDen(den, el, me) {
         if (!link) agentInvite = null;
       }
       if (!link && den.can('manage_invites')) {
-        try { link = (await den.modDo('invite_make', { n: 1, days: 1 })).links?.[0] || null; } catch { link = null; }
+        try { link = inviteLink((await den.modDo('invite_make', { n: 1, days: 1 })).links?.[0], location.origin); } catch { link = null; }
         if (link) agentInvite = { link, at: Date.now() };
       }
       el('ask').dataset.kind = 'own';
