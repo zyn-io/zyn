@@ -333,3 +333,15 @@ test('a message id, reply or for is a message id, so no member can bloat everyon
   assert.deepEqual(log.map((m) => [m.id, m.reply]), [['1'.repeat(16), null], ['old-0123456789ab', '1'.repeat(16)]]);
   assert.ok(JSON.stringify(log).length < 2000);
 });
+
+test("the den's own deletion is for open rooms: in a private room it is not taken", async () => {
+  const { DenClient } = await import('../dist/den.js');
+  const P = `p-${'1'.repeat(32)}`;
+  const store = new Map([[`log:${P}`, [{ t: 'msg', id: '1'.repeat(16), seq: 4, text: 'ours' }]], ['log:general', [{ t: 'msg', id: '2'.repeat(16), seq: 4, text: 'open' }]]]);
+  const den = Object.create(DenClient.prototype);
+  Object.assign(den, { rooms: new Map([[P, { id: P, kind: 'private' }], ['general', { id: 'general', kind: 'open' }]]), on: () => {}, kv: { get: async (k) => store.get(k), put: async (k, v) => store.set(k, v) } });
+  await den.deleted(P, 4);
+  assert.equal(store.get(`log:${P}`)[0].text, 'ours');
+  await den.deleted('general', 4);
+  assert.equal(store.get('log:general')[0].deleted, true, 'a moderator of an open room still can');
+});

@@ -533,8 +533,11 @@ export class DenClient {
   /// A moderator's deletion of someone else's message (by its number).
   modDelete(room, seq) { return this.push(this.channels.get(room), 'delete', { seq }); }
 
-  /// The den deleted a message (a moderator did): gone here too.
+  /// The den deleted a message (a moderator did): gone here too. Only in an
+  /// open room: the den deletes nothing in a private one, so a "deleted"
+  /// there is not taken.
   async deleted(room, seq) {
+    if (/^p-/.test(room) || this.rooms.get(room)?.kind === 'private') return;
     const log = await this.log(room);
     const m = log.find((x) => x.seq === seq && (x.t === 'msg' || x.t === 'file'));
     if (!m) return;
