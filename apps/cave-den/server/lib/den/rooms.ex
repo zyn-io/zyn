@@ -286,6 +286,11 @@ defmodule Den.Rooms do
   def relay(room, bytes, sender) do
     with {:ok, env} <- Den.Mls.envelope(bytes),
          true <- env.room == room || {:error, :wrong_room} do
+      # A commit is checked against the room's state before the write lock
+      # is taken (the check can take a while on a big room), and taken only
+      # if the room is still in that state.
+      checked = if env.commit, do: check_commit(room, bytes)
+
       Repo.transaction(fn ->
         r = Repo.get(Room, room) || Repo.rollback(:no_room)
 
@@ -309,15 +314,17 @@ defmodule Den.Rooms do
             # Checked against the room's public state, and signed by the
             # device whose session sent it: no commit-shaped bytes, and no
             # commits in another device's name.
-            case Den.Public.commit(r.public_state, bytes) do
-              {:ok, {state, epoch, ^sender, removed}} when epoch == r.epoch + 1 ->
+            case checked do
+              {:ok, base, _} when base != r.public_state -> Repo.rollback({:epoch, r.epoch})
+              {:ok, _, {state, epoch, ^sender, removed}} when epoch == r.epoch + 1 ->
                 cond do
                   byte_size(state) > state_max() or length(public_members(state, r.id)) > members_max() -> Repo.rollback(:too_big)
                   r.kind != "private" and not Enum.all?(removed, &may_remove?(sender, &1)) -> Repo.rollback(:may_not_remove)
                   true -> order(r, env, bytes, epoch, state, sender)
                 end
-              {:ok, {_, _, _, _}} -> Repo.rollback(:not_yours)
+              {:ok, _, {_, _, _, _}} -> Repo.rollback(:not_yours)
               {:error, why} -> Repo.rollback({:bad_commit, why})
+              nil -> Repo.rollback({:epoch, r.epoch})
             end
 
           # Words only from a member: a device the last commit took out (or
@@ -329,6 +336,19 @@ defmodule Den.Rooms do
             order(r, env, bytes, r.epoch, r.public_state)
         end
       end)
+    end
+  end
+
+  # The commit against the room's state as it is now: that state and what
+  # the commit makes of it, or nil when the room has no state yet.
+  defp check_commit(room, bytes) do
+    with %Room{public_state: base} when is_binary(base) <- Repo.get(Room, room) do
+      case Den.Public.commit(base, bytes) do
+        {:ok, result} -> {:ok, base, result}
+        {:error, why} -> {:error, why}
+      end
+    else
+      _ -> nil
     end
   end
 
