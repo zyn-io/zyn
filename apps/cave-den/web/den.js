@@ -1788,7 +1788,7 @@ const supportsScript = typeof RTCRtpScriptTransform !== 'undefined';
 const supportsStreams = typeof RTCRtpSender !== 'undefined' && 'createEncodedStreams' in RTCRtpSender.prototype;
 const VOICE_BITRATE = 64_000;
 
-class Voice {
+export class Voice {
   constructor(client, room, onSlots) {
     Object.assign(this, { client, room, onSlots: onSlots || (() => {}), keys: new Map(), screenKeys: new Map(), people: [], roster: [], sealed: 0, opened: 0, failed: 0, waiting: new Map(), asked: 0, screen: null, presenting: false, stage: null, stoppedBy: null });
   }
@@ -1818,7 +1818,8 @@ class Voice {
     // After a change, keep sealing under the epoch before for a moment:
     // members who apply the change a little later can still open every frame
     // (the old keys are kept 5 s for that), and nobody's stage freezes.
-    if (this.current !== undefined && this.current !== index && this.keys.has(this.current)) {
+    const changed = this.current !== undefined && this.current !== index;
+    if (changed && this.keys.has(this.current)) {
       this.sealIndex = this.current;
       clearTimeout(this.sealNew);
       this.sealNew = setTimeout(() => { this.sealIndex = this.current; this.postKeys(); }, 2000);
@@ -1827,11 +1828,16 @@ class Voice {
     }
     this.current = index;
     this.postKeys();
-    clearTimeout(this.dropOld);
-    this.dropOld = setTimeout(() => {
-      for (const m of [this.keys, this.screenKeys]) for (const i of [...m.keys()]) if (i !== this.current) m.delete(i);
-      this.postKeys();
-    }, 5000);
+    // The epoch before goes 5 s after the change, and only the change starts
+    // that clock: refreshes in between (roster, slots, a presenter) must not
+    // keep a removed member's keys alive.
+    if (changed) {
+      clearTimeout(this.dropOld);
+      this.dropOld = setTimeout(() => {
+        for (const m of [this.keys, this.screenKeys]) for (const i of [...m.keys()]) if (i !== this.current) m.delete(i);
+        this.postKeys();
+      }, 5000);
+    }
   }
 
   postKeys() {

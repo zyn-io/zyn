@@ -294,3 +294,23 @@ test("the den cannot rename, reopen or wipe a private room: a p- id never comes 
   den.addRoom({ id: 'news', kind: 'open', title: 'News' });
   assert.equal(den.rooms.get('news').title, 'News', 'open rooms still come from the lobby');
 });
+
+test("the epoch before is dropped 5 s after the change, however often the keys are refreshed", async (t) => {
+  const { Voice } = await import('../dist/den.js');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let epoch = 1n;
+  const v = Object.create(Voice.prototype);
+  Object.assign(v, {
+    room: 'general', keys: new Map(), screenKeys: new Map(), roster: [], people: [], screen: null,
+    worker: { postMessage: () => {} },
+    client: { den: { epoch: () => epoch, key: () => 'me' }, voiceKey: async () => 'vk', screenKey: async () => 'sk' },
+  });
+  await v.refreshKey();
+  epoch = 2n;
+  await v.refreshKey();
+  assert.deepEqual([...v.keys.keys()], [1, 2], 'both, just after the change');
+  // A busy room: roster, slots and screen events refresh every 2 s.
+  for (let i = 0; i < 4; i++) { t.mock.timers.tick(2000); await v.refreshKey(); }
+  assert.deepEqual([...v.keys.keys()], [2], 'the epoch before is gone');
+  assert.deepEqual([...v.screenKeys.keys()], [2]);
+});
