@@ -156,6 +156,11 @@ defmodule DenWeb.LobbyTest do
       assert_reply ref, :error, %{reason: "You do not have permission to do that."}
 
       # Channels: made by Manage channels only, set up, deleted (not the host's own).
+      # (x's timeout lifted first: while it holds, x opens nothing anyway.)
+      ref = push(x, "open_room", %{"title" => "Mine"})
+      assert_reply ref, :error, %{code: "timeout"}
+      ref = push(m, "untimeout", %{"key" => @member})
+      assert_reply ref, :ok
       ref = push(x, "open_room", %{"title" => "Mine"})
       assert_reply ref, :error, %{reason: "You do not have permission to do that."}
       ref = push(m, "open_room", %{"title" => "Announcements"})

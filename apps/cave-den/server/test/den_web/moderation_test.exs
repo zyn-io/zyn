@@ -62,6 +62,17 @@ defmodule DenWeb.ModerationTest do
     {pc, SessionDescription.to_json(offer)}
   end
 
+  test "a timed-out device opens no rooms, starts no group and sends no invitations", %{b: b, kb: kb} do
+    :ok = Mod.timeout(@owner, kb, 600)
+    {:ok, _, lobby} = subscribe_and_join(device(kb), DenWeb.LobbyChannel, "lobby")
+    ref = push(lobby, "open_room", %{"title" => "Mine"})
+    assert_reply ref, :error, %{code: "timeout"}
+    ref = push(lobby, "private_room", %{"id" => "p-" <> String.duplicate("1", 32)})
+    assert_reply ref, :error, %{code: "timeout"}
+    ref = push(b, "create", %{"group_info" => mls("general.info")})
+    assert_reply ref, :error, %{code: "timeout"}
+  end
+
   test "only a device that may kick stops someone's screen, and it is in the audit log", %{ka: ka, kb: kb} do
     {:ok, _, va} = subscribe_and_join(device(ka), DenWeb.VoiceChannel, "voice:general")
     {:ok, _, vb} = subscribe_and_join(device(kb), DenWeb.VoiceChannel, "voice:general")

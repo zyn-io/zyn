@@ -63,10 +63,24 @@ defmodule DenWeb.RoomChannel do
     if socket.assigns.key in keys, do: {:noreply, socket}, else: {:stop, {:shutdown, :removed}, socket}
   end
 
+  # A timed-out device keeps its own state in step (commits, GroupInfo,
+  # reports) but starts nothing new: no room, group or invitation.
+  defp muted(socket) do
+    case Den.Mod.sanction(socket.assigns.key) do
+      %{until: until} -> {:error, %{reason: "You are timed out#{if until, do: " until #{Calendar.strftime(until, "%H:%M")} UTC", else: ""}.", code: "timeout", until: until && DateTime.to_unix(until)}}
+      _ -> nil
+    end
+  end
+
+  @starts ~w(create invite)
+
   # Every event, at a rate the den can answer (DenWeb.Throttle).
   @impl true
   def handle_in(event, payload, socket) do
+    refused = if event in @starts, do: muted(socket)
+
     cond do
+      refused -> {:reply, refused, socket}
       DenWeb.Throttle.allow?(event) -> handle(event, payload, socket)
       event == "typing" -> {:noreply, socket}
       true -> {:reply, DenWeb.Throttle.refused(), socket}
