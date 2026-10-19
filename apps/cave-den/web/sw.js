@@ -1,18 +1,24 @@
 // The den's service worker: only so the page can be installed, and so a push
 // can wake a closed page. It caches nothing and sees no messages: a push says
 // only the den's name and which room, sealed for this browser by the den.
+// The words shown are the page's own, so a den cannot put any of its own in
+// a notification: only its name (one line) and a room id.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+
+const ROOM_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = {}; }
-  const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
-  e.waitUntil(self.registration.showNotification(text(d.title, 60) || 'Epeaky', {
-    body: text(d.body, 120) || 'New message',
-    tag: text(d.tag, 80) || 'den',
+  const name = typeof d.title === 'string' ? d.title.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+  const room = typeof d.tag === 'string' && ROOM_ID.test(d.tag) ? d.tag : '';
+  const where = !room ? '' : room.startsWith('p-') ? ' in a private room' : ` in #${room}`;
+  e.waitUntil(self.registration.showNotification(name || 'Epeaky', {
+    body: `New message${where}`,
+    tag: room || 'den',
     icon: 'icons/icon-192.png',
-    data: { room: text(d.tag, 80) },
+    data: { room },
   }));
 });
 

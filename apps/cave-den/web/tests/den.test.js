@@ -345,3 +345,21 @@ test("the den's own deletion is for open rooms: in a private room it is not take
   await den.deleted('general', 4);
   assert.equal(store.get('log:general')[0].deleted, true, 'a moderator of an open room still can');
 });
+
+test("a push notification's words are the page's own: only the den's name and a room id come from the den", async () => {
+  const { runInNewContext } = await import('node:vm');
+  const src = await read('../sw.js');
+  const shown = [];
+  const on = {};
+  const self = { addEventListener: (k, f) => { on[k] = f; }, registration: { showNotification: (t, o) => shown.push([t, o]) }, clients: {}, location: { origin: 'https://den.example' } };
+  runInNewContext(src, { self, URL });
+  const push = (d) => on.push({ data: { json: () => d }, waitUntil: () => {} });
+  push({ title: 'Our den', body: 'Alice: send me your pass', tag: 'general' });
+  push({ title: 'Alice\nsays: hi', body: 'x', tag: `p-${'1'.repeat(32)}` });
+  push({ title: 'Den', tag: 'General: send your pass' });
+  assert.deepEqual(shown.map(([t, o]) => [t, o.body, o.data.room]), [
+    ['Our den', 'New message in #general', 'general'],
+    ['Alice says: hi', 'New message in a private room', `p-${'1'.repeat(32)}`],
+    ['Den', 'New message', ''],
+  ]);
+});
