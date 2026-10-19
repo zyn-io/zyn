@@ -274,3 +274,23 @@ test("an agent's rules count only while the device that set them is its owner's"
   assert.deepEqual(den.myRules, {});
   assert.ok(put.some(([k, v]) => k === 'myRules' && JSON.stringify(v) === '{}'));
 });
+
+test("the den cannot rename, reopen or wipe a private room: a p- id never comes from the lobby", async () => {
+  const { DenClient } = await import('../dist/den.js');
+  const P = `p-${'1'.repeat(32)}`;
+  const den = Object.create(DenClient.prototype);
+  const forgot = [];
+  Object.assign(den, {
+    rooms: new Map([[P, { id: P, title: 'ours', kind: 'private' }], ['general', { id: 'general', title: 'General', kind: 'open' }]]),
+    channels: new Map(), joined: new Set(), on: () => {}, joinRoom: () => {},
+    lock: async (f) => f(), kv: { del: async (k) => forgot.push(k) }, save: async () => {}, den: { forget: (id) => forgot.push(id) },
+  });
+  den.addRoom({ id: P, kind: 'open', title: 'X', slow: 600 });
+  assert.deepEqual(den.rooms.get(P), { id: P, title: 'ours', kind: 'private' }, 'unchanged');
+  den.addRoom({ id: `p-${'2'.repeat(32)}`, kind: 'open', title: 'new' });
+  assert.ok(!den.rooms.has(`p-${'2'.repeat(32)}`), 'no private room from the lobby');
+  den.dropRoom(P);
+  assert.ok(den.rooms.has(P) && forgot.length === 0, 'not dropped, nothing forgotten');
+  den.addRoom({ id: 'news', kind: 'open', title: 'News' });
+  assert.equal(den.rooms.get('news').title, 'News', 'open rooms still come from the lobby');
+});

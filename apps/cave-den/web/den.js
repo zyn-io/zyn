@@ -445,7 +445,9 @@ export class DenClient {
 
   addRoom(r) {
     // A room's id as dens make them; anything else from a den is not taken.
-    if (typeof r?.id !== 'string' || !ROOM_ID.test(r.id)) return;
+    // The lobby lists open rooms only: a private room (p-…) comes from an
+    // invitation, and nothing the den says renames, reopens or replaces one.
+    if (typeof r?.id !== 'string' || !ROOM_ID.test(r.id) || r.id.startsWith('p-') || this.rooms.get(r.id)?.kind === 'private') return;
     this.rooms.set(r.id, { ...this.rooms.get(r.id), ...r });
     this.on('rooms', [...this.rooms.values()]);
     this.joinRoom(r.id);
@@ -453,7 +455,7 @@ export class DenClient {
 
   /// A moderator deleted an open room: gone here too, with its words.
   dropRoom(id) {
-    if (!this.rooms.has(id) || this.rooms.get(id).kind === 'private') return;
+    if (typeof id !== 'string' || id.startsWith('p-') || !this.rooms.has(id) || this.rooms.get(id).kind === 'private') return;
     this.channels.get(id)?.leave();
     this.channels.delete(id);
     this.joined.delete(id);
