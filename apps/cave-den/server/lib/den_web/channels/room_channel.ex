@@ -182,15 +182,19 @@ defmodule DenWeb.RoomChannel do
     end
   end
 
-  # After an Add the den ordered: the Welcome for the devices added.
+  # After an Add the den ordered: the Welcome for the devices added. Only in
+  # a private room (whose channel only its members can join): open rooms are
+  # joined by GroupInfo, and anyone can be in one.
   defp handle("invite", %{"to" => keys, "welcome" => b64}, socket) when is_list(keys) and length(keys) <= 50 and is_binary(b64) do
-    with {:ok, welcome} <- decode(b64),
+    with true <- String.starts_with?(socket.assigns.room, "p-") || {:error, :"invitations come from private rooms"},
+         {:ok, welcome} <- decode(b64),
          true <- Enum.all?(keys, &(is_binary(&1) and &1 =~ ~r/\A[0-9a-f]{64}\z/)) || {:error, :keys},
          true <- Den.Limits.disk_ok?() || {:error, :disk},
-         # Only devices the den has admitted get a Welcome; each copy is
-         # counted against the sender's daily bytes.
+         # Only devices the den has admitted get a Welcome; each recipient
+         # counts against the sender's invitations a day, and each copy
+         # against its daily bytes.
          to = Den.Inbox.known(keys),
-         :ok <- Rooms.quota(socket.assigns.key, "invite", Den.Limits.get(:invites)),
+         :ok <- Rooms.quota(socket.assigns.key, "invite", Den.Limits.get(:invites), max(length(to), 1)),
          :ok <- Rooms.quota(socket.assigns.key, "message_bytes", Den.Limits.get(:message_bytes), byte_size(welcome) * length(to)) do
       Den.Inbox.deliver(to, socket.assigns.room, welcome)
       {:reply, :ok, socket}

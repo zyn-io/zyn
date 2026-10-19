@@ -71,6 +71,26 @@ defmodule DenWeb.LimitsTest do
     assert_reply ref, :error, %{reason: "quota"}
   end
 
+  test "invitations come only from a private room, and each recipient counts against the day's cap" do
+    sender = String.duplicate("e5", 32)
+    victims = for i <- 0..2, do: String.duplicate("e#{6 + i}", 32)
+    for v <- victims, do: Den.Rooms.admit(v, DateTime.add(DateTime.utc_now(), 3600, :second) |> DateTime.truncate(:second))
+    # From an open room (anyone may join one): refused.
+    {:ok, _, open} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:general")
+    ref = push(open, "invite", %{"to" => victims, "welcome" => Base.encode64("w")})
+    assert_reply ref, :error, %{reason: "invitations come from private rooms"}
+    assert Enum.all?(victims, &(Den.Inbox.waiting(&1) == []))
+    # From a private room: three recipients use three of the day's three.
+    room = "p-" <> String.duplicate("6f", 16)
+    {:ok, _} = Den.Rooms.private_room(room, sender)
+    {:ok, _, r} = subscribe_and_join(device(sender), DenWeb.RoomChannel, "room:" <> room)
+    Application.put_env(:den, :limits, %{invites: 3})
+    ref = push(r, "invite", %{"to" => victims, "welcome" => Base.encode64("w")})
+    assert_reply ref, :ok
+    ref = push(r, "invite", %{"to" => [hd(victims)], "welcome" => Base.encode64("w")})
+    assert_reply ref, :error, %{reason: "quota"}
+  end
+
   test "a Welcome goes only to devices the den knows, and every copy counts against the sender's bytes" do
     room = "p-" <> String.duplicate("5e", 16)
     sender = String.duplicate("e3", 32)
