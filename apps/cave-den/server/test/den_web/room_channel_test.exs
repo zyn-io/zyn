@@ -184,6 +184,15 @@ defmodule DenWeb.RoomChannelTest do
     assert_reply ref, :error, %{reason: "most members could not apply this device's last change here; it may not change the room until tomorrow"}
   end
 
+  test "an undo counts only the reports of members who could vote now: reporters who went away do not count" do
+    voters = ["c", "d", "e"]
+    # A and B reported, then left (not voters now); C reports: one of three, no undo.
+    refute Den.Rooms.undo?(["a", "b", "c"], voters)
+    # C and D: two of three, undone.
+    assert Den.Rooms.undo?(["a", "c", "d"], voters)
+    refute Den.Rooms.undo?([], [])
+  end
+
   test "an open room's commit whose GroupInfo never comes is undone, its sender not barred" do
     %{"a" => ka, "b" => kb} = keys()
     {:ok, _, a} = subscribe_and_join(device(ka), DenWeb.RoomChannel, "room:general")

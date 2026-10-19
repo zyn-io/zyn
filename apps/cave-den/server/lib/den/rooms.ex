@@ -368,9 +368,19 @@ defmodule Den.Rooms do
       Repo.insert_all("reports", [%{room: room, seq: seq, key: key, inserted_at: now()}], on_conflict: :nothing)
       online = for {_, k} <- Registry.lookup(Den.Online, room), do: k
       voters = Enum.filter(before, &(&1 in now_in and &1 != r.last_committer and &1 in online))
-      n = Repo.aggregate(from(x in "reports", where: x.room == ^room and x.seq == ^seq), :count)
-      if n * 2 > length(voters), do: roll_back(r, true), else: {:ok, :noted}
+      reporters = Repo.all(from(x in "reports", where: x.room == ^room and x.seq == ^seq, select: x.key))
+      if undo?(reporters, voters), do: roll_back(r, true), else: {:ok, :noted}
     end
+  end
+
+  @doc """
+  Whether reports undo a commit: most of the members who could vote now
+  (`voters`) reported it. A report from someone who is no longer a voter
+  (gone offline, or out of the room) does not count.
+  """
+  def undo?(reporters, voters) do
+    n = Enum.count(Enum.uniq(reporters), &(&1 in voters))
+    voters != [] and n * 2 > length(voters)
   end
 
   @doc """
