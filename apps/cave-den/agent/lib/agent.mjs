@@ -143,7 +143,8 @@ export class Agent {
     // A task's state, for next --tasks: on a task this agent gave (its
     // worker's word), or its own task being canceled by whoever gave it.
     const t = d?.message?.task;
-    if (ev === 'message' && t && !d.mine && this.visible(d.room) && ((d.kind === 'task-state' && (d.message.key === this.me.key || (t.to === this.me.key && t.state === 'canceled'))) || (d.kind === 'del' && t.to === this.me.key))) {
+    // (A deleted task is the deletion above, which --tasks also takes.)
+    if (ev === 'message' && t && !d.mine && this.visible(d.room) && d.kind === 'task-state' && (d.message.key === this.me.key || (t.to === this.me.key && t.state === 'canceled'))) {
       this.changing = (this.changing || Promise.resolve()).then(() => this.noteChange(d.room, d.message, 'state')).catch((e) => this.log(`change: ${e.message}`));
     }
     for (const f of this.listeners) f.event?.(ev, d);
@@ -302,13 +303,19 @@ export class Agent {
     return j.list.slice(-Math.max(1, Math.min(5000, limit)));
   }
 
-  /// Orders as they are handed (by next or watch): each once in the journal,
-  /// and the last in each room kept for causeOf's guess.
-  async handedOrders(records) {
+  /// The ids of the orders handed so far, from the journal.
+  async handedSet() {
     if (!this.handedIds) {
       const j = (await this.den.kv.get('journal')) || { list: [] };
       this.handedIds = new Set(j.list.filter((e) => e.act === 'handed').map((e) => e.id));
     }
+    return this.handedIds;
+  }
+
+  /// Orders as they are handed (by next or watch): each once in the journal,
+  /// and the last in each room kept for causeOf's guess.
+  async handedOrders(records) {
+    await this.handedSet();
     const fresh = records.filter((r) => !r.change && (r.authority === 'owner' || r.authority === 'delegated') && !this.handedIds.has(r.id));
     for (const r of fresh) {
       this.handedIds.add(r.id);
@@ -407,7 +414,7 @@ export class Agent {
     const j = (await this.den.kv.get('changes')) || { n: 0, list: [] };
     j.n += 1;
     // As it stood then: an edit's words, a task's state.
-    const then = kind === 'edit' ? { text: m.text } : kind === 'state' ? { task: { ...m.task } } : {};
+    const then = kind === 'edit' ? { text: m.text } : (kind === 'state' || (kind === 'del' && m.task)) ? { task: { ...m.task } } : {};
     j.list = [...j.list, { n: j.n, room, id: m.id, kind, ct: Date.now(), ...then }].slice(-2000);
     await this.den.kv.put('changes', j);
     const r = await this.changeRecord(j.list.at(-1));
@@ -432,7 +439,7 @@ export class Agent {
     // as a task for this agent.
     const fits = (r) => {
       if (only && r.room !== only) return false;
-      if (r.change) return r.change === 'state' ? tasks : changes;
+      if (r.change) return r.change === 'state' ? tasks : changes || (tasks && r.change === 'deleted' && r.task?.to === this.me.key);
       if (r.kind === 'self' || r.kind === 'den') return false;
       return (!tasks || r.task?.to === this.me.key) && (!orders || r.authority === 'owner' || r.authority === 'delegated') && (!mentions || r.mention);
     };
@@ -455,6 +462,10 @@ export class Agent {
       // and the changes in theirs: queues whose heads are merged by time, so
       // what is handed is always a prefix of each queue and its cursor can
       // move to the last one handed without passing over another.
+      // An order already handed (by watch) is not handed again; a message
+      // still to come here carries its own edits and deletion.
+      const handed = await this.handedSet();
+      const ahead = new Set();
       const queues = [];
       for (const r of this.den.rooms.values()) {
         if (!this.visible(r.id) || (only && r.id !== only)) continue;
@@ -464,19 +475,26 @@ export class Agent {
         for (const m of log) {
           if ((m.seq || 0) > from && !m.mine && (m.t === 'msg' || m.t === 'file')) {
             const rec = this.recordOf(r.id, m, null, log);
-            if (fits(rec)) q.push(rec);
+            if (!fits(rec) || ((rec.authority === 'owner' || rec.authority === 'delegated') && handed.has(rec.id))) continue;
+            ahead.add(rec.id);
+            q.push(rec);
           }
         }
         q.sort((a, b) => a.seq - b.seq);
         if (q.length) queues.push(q);
       }
+      // The changes after the cursor: those to hand, and those it may pass
+      // over (not for this filter, or carried by a message still to come).
+      const pending = [];
       if (changes || tasks) {
         const j = (await this.den.kv.get('changes')) || { n: 0, list: [] };
         const q = [];
         for (const c of j.list) {
-          if (c.n <= cur.change || (only && c.room !== only) || !this.visible(c.room)) continue;
-          const rec = await this.changeRecord(c);
-          if (rec && fits(rec)) q.push(rec);
+          if (c.n <= cur.change) continue;
+          const rec = (only && c.room !== only) || !this.visible(c.room) ? null : await this.changeRecord(c);
+          const take = !!rec && fits(rec) && !(c.kind !== 'state' && ahead.has(c.id));
+          pending.push({ n: c.n, take });
+          if (take) q.push(rec);
         }
         q.sort((a, b) => a.change_n - b.change_n);
         if (q.length) queues.push(q);
@@ -493,11 +511,20 @@ export class Agent {
         if (!came.length) await new Promise((resolve) => { woke = resolve; setTimeout(resolve, wait * 1000); });
         out = came.slice(0, 1);
       }
+      const was = JSON.stringify(cur);
+      const gave = new Set();
       for (const r of out) {
-        if (r.change) cur.change = Math.max(cur.change || 0, r.change_n);
+        if (r.change) gave.add(r.change_n);
         else cur.rooms[r.room] = Math.max(cur.rooms[r.room] ?? 0, r.seq);
       }
-      if (out.length) await this.den.kv.put('handedBy', this.handedBy);
+      // The change cursor moves over what was handed and what it may pass,
+      // up to the first change still to hand.
+      for (const c of pending) {
+        if (c.take && !gave.has(c.n)) break;
+        cur.change = c.n;
+      }
+      for (const n of gave) cur.change = Math.max(cur.change || 0, n);
+      if (JSON.stringify(cur) !== was) await this.den.kv.put('handedBy', this.handedBy);
       await this.handedOrders(out);
       return out;
     } finally {
