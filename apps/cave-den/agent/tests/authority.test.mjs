@@ -31,3 +31,11 @@ test('once the delegating agent belongs to someone else, its tasks are informati
   assert.notEqual(r.authority, 'delegated');
   assert.equal(agent({ botOwner: null }).recordOf('general', task).authority === 'delegated', false);
 });
+
+test("the owner's task for another agent is no order to this one", () => {
+  const a = agent();
+  const own = { t: 'msg', key: OWNER, at: 1000, seq: 6, id: '2'.repeat(16), text: 'deploy', task: { to: ME } };
+  assert.equal(a.recordOf('general', own).authority, 'owner');
+  const other = { ...own, id: '3'.repeat(16), task: { to: BOT } };
+  assert.equal(a.recordOf('general', other).authority, 'none');
+});

@@ -45,7 +45,7 @@ export function record(room, m, { kind, nick, name, mention = false, replySeq = 
     mention: !!mention,
     ...(m.edited ? { edited: true } : {}),
     ...(m.deleted ? { deleted: true } : {}),
-    ...(m.task ? { task: { id: m.id, to: m.task.to, state: m.task.state, text: m.task.text || '', artifacts: m.task.artifacts || [], updated: new Date(m.task.updated || m.at || 0).toISOString(), by: m.task.by || null, history: (m.task.history || []).map((h) => ({ state: h.state, by: h.by || null, at: new Date(h.at || 0).toISOString() })) } } : {}),
+    ...(m.task ? { task: { id: m.id, to: m.task.to, state: m.task.state, text: m.task.text || '', text_by: m.task.by || null, artifacts: m.task.artifacts || [], updated: new Date(m.task.updated || m.at || 0).toISOString(), by: m.task.by || null, history: (m.task.history || []).map((h) => ({ state: h.state, by: h.by || null, at: new Date(h.at || 0).toISOString() })) } } : {}),
   };
 }
 
@@ -54,7 +54,10 @@ export function record(room, m, { kind, nick, name, mention = false, replySeq = 
 export function line(r, now = Date.now()) {
   const who = r.kind === 'den' ? 'den' : `${r.kind} ${r.from}${r.nick ? ` ${quoted(r.nick)}` : ''}`;
   const reply = `${r.reply ? ` ↩${Number(r.reply) || 0}` : ''}${r.for ? ` for ${Number(r.for.seq) || 0}` : ''}`;
-  const task = r.task ? `[task ${oneLine(r.task.id)} for ${r.task.to_nick ? quoted(r.task.to_nick) : `m-${String(r.task.to).slice(0, 20)}`} · ${oneLine(r.task.state)}${r.task.text ? `: ${oneLine(r.task.text)}` : ''}${r.task.artifacts?.length ? ` (results: ${r.task.artifacts.map(oneLine).join(', ')})` : ''}] ` : '';
+  // The state's words are whoever set the state's: named when that is not
+  // the task's giver, so a worker's words never read as an order.
+  const by = r.task?.text_by && r.task.text_by !== r.key ? `, from m-${String(r.task.text_by).slice(0, 20)}` : '';
+  const task = r.task ? `[task ${oneLine(r.task.id)} for ${r.task.to_nick ? quoted(r.task.to_nick) : `m-${String(r.task.to).slice(0, 20)}`} · ${oneLine(r.task.state)}${r.task.text ? `${by}: ${oneLine(r.task.text)}` : ''}${r.task.artifacts?.length ? ` (results: ${r.task.artifacts.map(oneLine).join(', ')})` : ''}] ` : '';
   const change = r.change === 'edited' ? ' (edited)' : r.change === 'state' ? ' (task changed)' : '';
   const words = r.deleted ? `${task}(deleted)` : `${task}${oneLine(r.text)}${r.edited && r.change !== 'edited' ? ' (edited)' : ''}${change}`;
   return `#${oneLine(r.room).replace(/\s/g, '')} ${Number(r.seq) || 0} ${when(r.at, now)} ${who}${reply}: ${words}`;

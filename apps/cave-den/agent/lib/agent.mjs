@@ -212,6 +212,8 @@ export class Agent {
     if (m.t === 'note') r.text = m.text || '';
     if (!r.mention && kind !== 'self' && names(m.text, { name: this.me.name, nick: this.me.nick })) r.mention = true;
     if (r.task) r.task.to_nick = this.den.nickFor(r.task.to) || '';
+    // The owner's task for someone else is no order to this agent.
+    if (r.task && r.task.to !== this.me.key && r.authority === 'owner') r.authority = 'none';
     const rules = this.den.rules();
     // Delegated: a task for this agent from an agent its owner named, given
     // after the owner did, while that agent still has the same owner as this
