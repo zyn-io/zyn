@@ -51,6 +51,27 @@ defmodule Den.Blobs do
     {:ok, id}
   end
 
+  @doc """
+  Clears what uploads left half-written: a temporary file nothing has
+  written to for `idle` seconds (an upload still coming keeps writing).
+  """
+  def sweep_parts(idle \\ 3600) do
+    now = System.os_time(:second)
+
+    case File.ls(dir()) do
+      {:ok, names} ->
+        for n <- names, String.contains?(n, ".part-"),
+            p = Path.join(dir(), n),
+            match?({:ok, %{mtime: t}} when now - t > idle, File.stat(p, time: :posix)),
+            do: File.rm(p)
+
+      _ ->
+        :ok
+    end
+
+    :ok
+  end
+
   def path(id) do
     if id =~ ~r/\A[0-9a-f]{64}\z/ and Repo.exists?(from b in "blobs", where: b.id == ^id), do: {:ok, Path.join(dir(), id)}, else: :error
   end

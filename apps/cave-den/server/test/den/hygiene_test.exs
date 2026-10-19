@@ -15,6 +15,18 @@ defmodule Den.HygieneTest do
     Application.delete_env(:den, :voice_public_only)
   end
 
+  test "an upload left half-written is cleared once nothing has written to it for an hour" do
+    old = Den.Blobs.part()
+    File.write!(old, "half")
+    File.touch!(old, System.os_time(:second) - 3700)
+    fresh = Den.Blobs.part()
+    File.write!(fresh, "still coming")
+    Den.Sweeper.run()
+    refute File.exists?(old)
+    assert File.exists?(fresh)
+    File.rm(fresh)
+  end
+
   test "the door says when its day keys run out" do
     dir = Path.join(System.tmp_dir!(), "den-keys-#{System.unique_integer([:positive])}")
     was = Application.get_env(:den, :keys_dir)

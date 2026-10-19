@@ -2,7 +2,8 @@ defmodule Den.Sweeper do
   @moduledoc """
   Every minute: devices whose day ended are named to each room they were in
   (so its members' devices take them out of the group), their connections are
-  closed, and ciphertext and door records past their time are dropped.
+  closed, ciphertext and door records past their time are dropped, and
+  uploads left half-written are cleared.
   """
   use GenServer
 
@@ -37,6 +38,7 @@ defmodule Den.Sweeper do
     Den.Mod.sweep()
     Den.Mod.slow_sweep()
     Den.Push.sweep()
+    Den.Blobs.sweep_parts()
 
     for {room, keys} <- by_room do
       DenWeb.Endpoint.broadcast("room:" <> room, "expired", %{keys: keys})
