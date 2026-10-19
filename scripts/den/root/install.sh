@@ -53,7 +53,7 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   fi
   # Docker's script to a file of our own (mktemp: new, 0600, a name nobody
   # could have placed), so sh reads it rather than this script's input.
-  case "$answer" in y|Y|yes) get=$(mktemp) && curl -fsSL https://get.docker.com -o "$get" && sh "$get" </dev/null && rm -f "$get" ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
+  case "$answer" in y|Y|yes) get=$(mktemp) && curl --proto '=https' --tlsv1.2 -fsSL https://get.docker.com -o "$get" && sh "$get" </dev/null && rm -f "$get" ;; *) fail "install Docker first: https://docs.docker.com/engine/install/" ;; esac
 fi
 
 # ---- The domain -----------------------------------------------------------------
@@ -108,8 +108,11 @@ else
   sed -i "s/^PHX_HOST=.*/PHX_HOST=$DOMAIN/" "$DIR/.env"
 fi
 
+# No admin API: anything on this machine (the den's container shares its
+# network) could otherwise reconfigure Caddy on localhost:2019.
 cat > "$DIR/Caddyfile" <<CADDY
 {
+	admin off
 	${EMAIL:+email $EMAIL}
 }
 
@@ -159,7 +162,8 @@ cd /opt/epeaky
 rpc() { docker compose exec -T den /app/bin/den rpc "$1"; }
 q() { printf '"%s"' "${1//[^0-9a-f]/}"; }
 case "${1:-help}" in
-  invite)   rpc "Den.Host.invite(${2:-1}, ${3:-7})" ;;
+  # Numbers only where they go into a call to the den.
+  invite)   n=${2:-1}; d=${3:-7}; case "$n$d" in *[!0-9]*) echo "epeaky invite [N] [DAYS]: numbers only" >&2; exit 2 ;; esac; rpc "Den.Host.invite($n, $d)" ;;
   invites)  rpc "Den.Host.invites()" ;;
   withdraw) rpc "IO.inspect(Den.Host.withdraw($(q "${2:?an invite id}")))" ;;
   requests) rpc "Den.Host.requests()" ;;
@@ -171,8 +175,8 @@ case "${1:-help}" in
               --clear) rpc "Den.Host.owner(:clear)" ;;
               *) rpc "Den.Host.owner($(q "$2"))" ;;
             esac ;;
-  audit)    rpc "Den.Host.audit(${2:-30})" ;;
-  logs)     docker compose logs --tail "${2:-100}" den ;;
+  audit)    n=${2:-30}; case "$n" in *[!0-9]*) echo "epeaky audit [N]: a number" >&2; exit 2 ;; esac; rpc "Den.Host.audit($n)" ;;
+  logs)     n=${2:-100}; case "$n" in *[!0-9]*) echo "epeaky logs [N]: a number" >&2; exit 2 ;; esac; docker compose logs --tail "$n" den ;;
   update)   docker compose pull && docker compose up -d ;;
   *) cat <<HELP
 epeaky invite [N] [DAYS]   N one-use invite links, good for DAYS days (1, 7)

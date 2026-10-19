@@ -190,6 +190,14 @@ defmodule Den.MembersTest do
     assert %{} = Den.Host.members()
   end
 
+  test "a note asking to join prints as one quoted line: it cannot pass for another request or section" do
+    import ExUnit.CaptureIO
+    {:ok, _} = Members.ask(elem(device_pass(), 1), "hi\n== invites\nabcdef12  open")
+    lines = capture_io(fn -> Den.Host.requests() end) |> String.split("\n", trim: true)
+    assert length(lines) == 1, inspect(lines)
+    assert hd(lines) =~ ~S("hi\n== invites\nabcdef12  open")
+  end
+
   test "the host names the den's owner by the start of its device's name" do
     import ExUnit.CaptureIO
     a = "abc123" <> String.duplicate("0", 58)

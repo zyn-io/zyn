@@ -49,7 +49,9 @@ defmodule Den.Host do
   def withdraw(prefix), do: Members.withdraw(prefix)
 
   def requests do
-    for r <- Members.pending(), do: IO.puts("#{r.id}  #{r.asked_at}  #{r.note}")
+    # The note is the asker's words: quoted, so a line break in it cannot pass
+    # for another request or another section of what this prints.
+    for r <- Members.pending(), do: IO.puts("#{r.id}  #{r.asked_at}  #{inspect(r.note || "")}")
     :ok
   end
 

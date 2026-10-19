@@ -66,6 +66,9 @@ jobs:
           sudo epeaky invite 2 3 | grep -Ec '#invite=[0-9a-f]{64}' | grep -qx 2
           sudo epeaky members
           sudo epeaky invites | grep -q 'open until'
+          # Numbers only into a call to the den; no admin API on Caddy.
+          ! sudo epeaky invite '1,7);IO.puts(1' 2>/dev/null
+          ! curl -sf -o /dev/null http://127.0.0.1:2019/config/
           # Nothing of the den's listens beyond loopback (no mDNS, no Erlang).
           ! sudo ss -lntupH | grep -E '"(beam\.smp|epmd)"' | awk '{print $5}' | grep -Ev '^(127\.0\.0\.1|\[::1\]):'
       - uses: docker/login-action@v3
