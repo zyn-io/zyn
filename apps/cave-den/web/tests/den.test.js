@@ -381,3 +381,21 @@ test("an image's size is read from its header, before anything decodes it", asyn
   assert.deepEqual(imageSize(avif), { w: 9000, h: 9000 });
   assert.equal(imageSize(u8([1, 2, 3])), null, 'no header it knows: not shown');
 });
+
+test("a moderator's unpin holds: the same pin sent again by its pinner is not taken", async () => {
+  const { DenClient } = await import('../dist/den.js');
+  const MOD = 'a'.repeat(64), BOB = 'b'.repeat(64);
+  const store = new Map();
+  const den = Object.create(DenClient.prototype);
+  Object.assign(den, { me: { key: 'c'.repeat(64) }, rooms: new Map([['general', { id: 'general', kind: 'open' }]]), on: () => {},
+    kv: { get: async (k) => store.get(k), put: async (k, v) => store.set(k, v) }, can: (perm, k) => k === MOD });
+  const pin = { t: 'pin', pin: '1'.repeat(16), text: 'spam', key: BOB, at: 1 };
+  await den.applyPin('general', pin, false);
+  await den.applyPin('general', { t: 'unpin', pin: pin.pin, owner: BOB, key: MOD }, false);
+  assert.deepEqual(await den.pinsOf('general'), []);
+  await den.applyPin('general', { t: 'pins', key: BOB, pins: [pin] }, false);
+  await den.applyPin('general', pin, false);
+  assert.deepEqual(await den.pinsOf('general'), [], 'still unpinned');
+  await den.applyPin('general', { ...pin, pin: '2'.repeat(16), text: 'a real note' }, false);
+  assert.equal((await den.pinsOf('general')).length, 1, 'another pin of theirs is taken');
+});

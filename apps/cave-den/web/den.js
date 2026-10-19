@@ -750,8 +750,12 @@ export class DenClient {
     }
     if (typeof m.pin !== 'string' || !/^[0-9a-f]{16}$/.test(m.pin)) return;
     const pins = await this.pinsOf(room);
+    // Pins a moderator took down, remembered here so their pinner cannot
+    // put them back by sending them again.
+    const down = (await this.kv.get(`unpinned:${room}`)) || [];
     if (m.t === 'pin') {
       if (pins.some((p) => p.pin === m.pin && p.by === by) || typeof m.text !== 'string' || !m.text.trim()) return;
+      if (down.includes(`${by}|${m.pin}`)) return;
       if (pins.filter((p) => p.by === by).length >= 20 || pins.length >= 200) return;
       // When it was pinned (the pinner's clock), kept as it is sent again.
       // `author`: whose message it was, as the pinner says (`from` is every
@@ -763,6 +767,7 @@ export class DenClient {
       const mod = this.can('manage_messages', by) && this.rooms.get(room)?.kind !== 'private';
       if (i < 0 || (pinner !== by && !mod)) return;
       pins.splice(i, 1);
+      if (pinner !== by) await this.kv.put(`unpinned:${room}`, [...down, `${pinner}|${m.pin}`].slice(-1000));
     }
     await this.kv.put(`pins:${room}`, pins);
     this.on('pins', { room });
