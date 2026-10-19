@@ -167,7 +167,11 @@ included: `docker build -t epeaky .` (the image `ghcr.io/zyn-io/epeaky` is
 built the same way). `server/Dockerfile` builds only the server, around a page
 already built into `server/priv/page`. Run it bound to loopback behind a TLS
 proxy that sends `X-Forwarded-Proto: https`; the den forces https and
-redirects every request that arrives without it.
+redirects every request that arrives without it. The proxy must run on the
+same machine: the den takes the client's address from `X-Forwarded-For` only
+from a proxy on loopback. Behind a proxy elsewhere every client has the
+proxy's address, so the per-address limits (the door, joining, connecting)
+count the whole den as one client.
 
 | Variable | |
 |---|---|
