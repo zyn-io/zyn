@@ -100,6 +100,7 @@ defmodule DenWeb.VoiceChannel do
           {:error, :busy, key} -> {:reply, {:error, %{reason: "busy", key: key}}, socket}
           {:error, :off} -> {:reply, {:error, %{reason: "Screen sharing is off on this den."}}, socket}
           {:error, :unsupported} -> {:reply, {:error, %{reason: "Screen sharing needs a direct connection. This network only lets voice through."}}, socket}
+          {:error, :cooldown} -> {:reply, {:error, %{reason: "Your screen was sending too much and was stopped. Try again in half a minute, at a lower resolution."}}, socket}
         end
 
       _ ->

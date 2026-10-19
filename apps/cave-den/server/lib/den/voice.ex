@@ -128,6 +128,11 @@ end
 defmodule Den.Voice.Room do
   @moduledoc false
   use GenServer, restart: :temporary
+
+  # A presenter the guard stopped waits this long to present again.
+  @cooldown_ms 30_000
+  # Video a device that does not present may send: 256 KB, refilled at 64 KB/s.
+  @stray_bits 256 * 1024 * 8
   require Logger
   alias ExWebRTC.{ICECandidate, MediaStreamTrack, PeerConnection, SessionDescription}
 
@@ -171,7 +176,7 @@ defmodule Den.Voice.Room do
     # Connections are linked to this room: if it stops, they stop (and give
     # their ports back); if one fails, it is dropped, not the room.
     Process.flag(:trap_exit, true)
-    {:ok, %{room: room, peers: %{}, ticking: false, presenter: nil, screen: fresh_screen(Munger.new(:vp8, 90_000))}}
+    {:ok, %{room: room, peers: %{}, ticking: false, presenter: nil, screen: fresh_screen(Munger.new(:vp8, 90_000)), cooldown: %{}}}
   end
 
   # A peer: its connection, its own track (once the device sends it), its
@@ -218,6 +223,7 @@ defmodule Den.Voice.Room do
       not Den.Voice.screen?() -> {:reply, {:error, :off}, s}
       is_nil(p) or not p.screens -> {:reply, {:error, :unsupported}, s}
       s.presenter == channel -> {:reply, :ok, s}
+      cooling?(s, p.key) -> {:reply, {:error, :cooldown}, s}
       s.presenter -> {:reply, {:error, :busy, s.peers[s.presenter].key}, s}
       true ->
         peers = Map.new(s.peers, fn {c, q} -> {c, %{q | stage_ready: false}} end)
@@ -425,7 +431,18 @@ defmodule Den.Voice.Room do
     end
   end
 
-  defp on_pc({:rtp, id, _rid, _packet}, _channel, %{screen_up: id}, s) when not is_nil(id), do: s
+  # Video from a device that does not present goes nowhere, and is counted:
+  # past a little (what comes after it stops presenting), its voice ends.
+  defp on_pc({:rtp, id, _rid, packet}, channel, %{screen_up: id} = peer, s) when not is_nil(id) do
+    {ok, bucket} = take(Map.get(peer, :stray), byte_size(packet.payload) * 8, @stray_bits, @stray_bits / 4)
+
+    if ok do
+      put_in(s.peers[channel], Map.put(peer, :stray, bucket))
+    else
+      send(channel, {:voice, "left", %{reason: "video while not presenting"}})
+      drop(s, channel)
+    end
+  end
 
   # A viewer's decoder asks for a keyframe: passed on to the presenter, within the limit.
   defp on_pc({:rtcp, packets}, _channel, _peer, s) do
@@ -533,7 +550,7 @@ defmodule Den.Voice.Room do
 
   defp tick(s), do: s
 
-  defp fresh_screen(munger), do: %{munger: munger, live: false, seen: false, wanted: false, key_at: nil, again: false, bytes: 0, since: System.monotonic_time(:millisecond)}
+  defp fresh_screen(munger), do: %{munger: munger, live: false, seen: false, wanted: false, key_at: nil, again: false, bucket: nil}
 
   defp presenter_key(%{presenter: nil}), do: nil
   defp presenter_key(s), do: s.peers[s.presenter].key
@@ -585,20 +602,33 @@ defmodule Den.Voice.Room do
     end
   end
 
-  # The guard: over twice the bitrate in a 5-second window ends the presentation,
-  # so one device cannot multiply its upload by every viewer.
+  # The guard: a bucket that fills at twice the bitrate and holds two seconds
+  # of it. Emptied, the presentation ends, and its device may not present
+  # again for half a minute, so one device cannot multiply its upload by
+  # every viewer, in bursts or steadily.
   defp count(s, n) do
-    now = System.monotonic_time(:millisecond)
-    sc = s.screen
-    {bytes, since} = if now - sc.since > 5_000, do: {n, now}, else: {sc.bytes + n, sc.since}
-    s = %{s | screen: %{sc | bytes: bytes, since: since}}
+    rate = 2 * Den.Voice.screen_bitrate()
+    {ok, bucket} = take(s.screen.bucket, n * 8, 2 * rate, rate)
+    s = %{s | screen: %{s.screen | bucket: bucket}}
 
-    if bytes * 8 > 2 * Den.Voice.screen_bitrate() * 5 do
-      send(s.presenter, {:voice, "screen_stopped", %{by: nil, reason: "too fast"}})
-      end_screen(s)
-    else
+    if ok do
       s
+    else
+      send(s.presenter, {:voice, "screen_stopped", %{by: nil, reason: "too fast"}})
+      %{s | cooldown: Map.put(s.cooldown, presenter_key(s), System.monotonic_time(:millisecond) + @cooldown_ms)} |> end_screen()
     end
+  end
+
+  # (Monotonic time can be below zero: no entry means no cooldown.)
+  defp cooling?(s, key), do: (until = s.cooldown[key]) != nil and until > System.monotonic_time(:millisecond)
+
+  # A token bucket of `cap` bits filling at `rate` bits a second: whether
+  # `bits` more fit, and the bucket after.
+  defp take(bucket, bits, cap, rate) do
+    now = System.monotonic_time(:millisecond)
+    {have, at} = bucket || {cap, now}
+    have = min(cap, have + rate * (now - at) / 1000)
+    if have >= bits, do: {true, {have - bits, now}}, else: {false, {have, now}}
   end
 
   defp drop(s, channel) do

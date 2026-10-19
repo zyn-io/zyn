@@ -488,6 +488,17 @@ defmodule Den.VoiceTest do
     send(a, {:show_big, 400})
     assert_receive {"key-a", "screen_stopped", %{by: nil, reason: "too fast"}}, 8_000
     assert_receive {"key-a", "screen", %{key: nil}}, 1_000
+    # Not again straight away.
+    assert {:error, :cooldown} = Den.Voice.Room.present(room, a)
+  end
+
+  test "video from a device that does not present is counted, and too much of it ends its voice" do
+    {:ok, room} = Den.Voice.ensure("screen-stray")
+    b = live_device(room, "key-b", self(), true)
+    on_exit(fn -> send(b, :stop) end)
+    assert_receive {"key-b", :connected}, 15_000
+    send(b, {:show_big, 400})
+    assert_receive {"key-b", "left", %{reason: "video while not presenting"}}, 8_000
   end
 
   test "a device whose network lets no WebRTC through hears and is heard over its channel" do
