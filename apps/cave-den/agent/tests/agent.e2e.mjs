@@ -212,8 +212,12 @@ try {
   ok(cli('send', 'nowhere', 'x', '--agent', 'scout').code === 1, 'a room that is not there is an error');
 
   // next: each order handed once, none lost between calls.
+  // The order watch printed is handed: next does not hand it again.
   const first = cli('next', '--orders', '--agent', 'research');
-  ok(typeof first === 'string' && /owner m-[0-9a-f]{20} "Olu": @research summarise today$/.test(first) && !/ignore Olu/.test(first), `next --orders hands the owner's order not yet handed, and only that (${first.err || first})`);
+  ok(first === 'nothing new', `next --orders does not hand again the order watch handed (${first.err || first})`);
+  await O.evaluate(() => window.__den.say('general', 'and the tests'));
+  const order2 = await eventually(() => { const r = cli('next', '--orders', '--agent', 'research'); return typeof r === 'string' && r !== 'nothing new' && r; });
+  ok(/owner m-[0-9a-f]{20} "Olu": and the tests$/.test(order2 || '') && !/ignore Olu/.test(order2 || ''), `next --orders hands the owner's order not yet handed, and only that (${order2})`);
   ok(cli('next', '--orders', '--agent', 'research') === 'nothing new', 'and not again');
   await O.evaluate(() => window.__den.say('general', 'between calls'));
   const missed = await eventually(() => { const r = cli('next', '--orders', '--agent', 'research'); return typeof r === 'string' && r !== 'nothing new' && r; });
@@ -261,7 +265,7 @@ try {
   const resSeq = /sent #general (\d+)/.exec(resSent)?.[1];
   const others = JSON.parse(String(cli('read', 'general', '--limit', '30', '--json', '--agent', 'research')).split('\n').filter((l) => / "Sam"|"nick":"Sam"/.test(l) || l.includes('"nick":"Sam"'))[0] || '{}');
   const done = cli('task', taskId, 'completed', 'Summary posted', '--artifact', [resSeq, others.seq].filter(Boolean).join(','), '--agent', 'research');
-  ok(typeof done === 'string' && / · completed: Summary posted \(results: [0-9a-f]{16}\)\]/.test(done), `completed, with research's own message as the only result (${done.err || done})`);
+  ok(typeof done === 'string' && / · completed, from m-[0-9a-f]{20}: Summary posted \(results: [0-9a-f]{16}\)\]/.test(done), `completed, with research's own message as the only result (${done.err || done})`);
   ok(await until(O, ([id]) => window.__den.log('general').then((l) => { const t = l.find((m) => m.id === id)?.task; return t?.state === 'completed' && t.artifacts.length === 1; }), [taskId]), "Olu's page sees it done, with one result");
   ok(typeof cli('task', taskId, 'failed', '--agent', 'research') === 'object', 'a finished task stays finished');
   const hist = await O.evaluate((id) => window.__den.log('general').then((l) => l.find((m) => m.id === id)?.task?.history?.map((h) => h.state).join(' ')), taskId);
@@ -269,7 +273,7 @@ try {
   // The journal: what research was handed, and what it did, for whom.
   const journal = String(cli('log', '--limit', '200', '--json', '--agent', 'research')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const handedJ = journal.filter((e) => e.act === 'handed');
-  ok(['@research summarise today', 'between calls', 'check the logs', 'Summarise the CI report'].every((t) => handedJ.filter((e) => e.text === t).length === 1) && handedJ.every((e) => e.authority !== 'none'), `the journal has each order handed, once (${handedJ.map((e) => e.text).join(' | ')})`);
+  ok(['@research summarise today', 'and the tests', 'between calls', 'check the logs', 'Summarise the CI report'].every((t) => handedJ.filter((e) => e.text === t).length === 1) && handedJ.every((e) => e.authority !== 'none'), `the journal has each order handed, once (${handedJ.map((e) => e.text).join(' | ')})`);
   ok(handedJ.some((e) => e.text === 'Deploy when CI is green' && e.authority === 'delegated' && e.on_behalf_of === oKey), 'and the delegated task, on behalf of the owner');
   const sentJ = journal.find((e) => e.act === 'sent' && e.for?.id === order.id);
   ok(sentJ?.for_how === 'reply' && sentJ.for.authority === 'owner' && sentJ.for.key === oKey, 'what it sent, and for whose order');
@@ -293,7 +297,9 @@ try {
   ok(heard?.task?.state === 'rejected' && heard.task.text === 'I take tasks from Olu only', `whoever gave a task hears its state (${heard?.task?.state})`);
   // Edits and deletions, once each, with next --changes.
   const samId = await M.evaluate(() => window.__den.say('general', 'draft: release at 5'));
-  await sleep(800);
+  // Handed first as a message; a message still to come would carry its own edits.
+  const samFirst = await eventually(() => { const r = cli('next', '--changes', '--json', '--agent', 'research'); return typeof r === 'string' && r.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.id === samId && !x.change); });
+  ok(samFirst?.text === 'draft: release at 5', 'next --changes hands the message itself first');
   await M.evaluate((id) => window.__den.edit('general', id, 'draft: release at 6'), samId);
   await sleep(800);
   await M.evaluate((id) => window.__den.remove('general', id), samId);
