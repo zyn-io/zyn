@@ -145,11 +145,17 @@ defmodule Den.Push do
       send = Application.get_env(:den, :push_deliver, &deliver/2)
       jitter = Application.get_env(:den, :push_jitter_ms, 15_000)
 
-      # A few at a time, each after its own short wait, so pushes to a room's
-      # members do not all leave at the same moment.
+      # Each at its own moment within the jitter window, so pushes to a
+      # room's members do not all leave at once; taken in that order, a few
+      # at a time, so the whole room's pushes leave within the window (not
+      # one window after another) and one big room holds a slot briefly.
+      t0 = System.monotonic_time(:millisecond)
+
       subs
       |> Enum.filter(&((&1.mode == "all" or room.kind == "private") and due?(&1.endpoint, room_id)))
-      |> Task.async_stream(fn s -> if(jitter > 0, do: Process.sleep(:rand.uniform(jitter))); send.(s, body) end, max_concurrency: 8, timeout: jitter + 20_000, on_timeout: :kill_task)
+      |> Enum.map(&{if(jitter > 0, do: :rand.uniform(jitter), else: 0), &1})
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Task.async_stream(fn {at, s} -> Process.sleep(max(0, t0 + at - System.monotonic_time(:millisecond))); send.(s, body) end, max_concurrency: 16, timeout: jitter + 20_000, on_timeout: :kill_task)
       |> Stream.run()
     end
 

@@ -103,6 +103,18 @@ defmodule Den.PushTest do
     assert [_] = :ets.lookup(Push, {"https://fcm.googleapis.com/fcm/send/new", "r"})
   end
 
+  test "a room's pushes all leave within the jitter window, not one window after another" do
+    {keys, _, _, _} = browser()
+    members = for i <- 1..80, do: (k = key(); :ok = Push.subscribe(k, Map.merge(keys, %{"endpoint" => "https://fcm.googleapis.com/fcm/send/m#{i}", "mode" => "all"})); k)
+    Repo.insert!(%Room{id: "big-push", title: "Big", kind: "open", members: Enum.join(members, ",")})
+    me = self()
+    Application.put_env(:den, :push_deliver, fn s, _ -> Process.sleep(20); send(me, {:pushed, s.endpoint}) end)
+    Application.put_env(:den, :push_jitter_ms, 400)
+    {us, :ok} = :timer.tc(fn -> Push.run("big-push", key()) end)
+    for _ <- 1..80, do: assert_received({:pushed, "https://fcm.googleapis.com/fcm/send/m" <> _})
+    assert us < 1_500_000, "took #{div(us, 1000)} ms"
+  end
+
   test "a push goes to members not connected, by their mode, once in a while" do
     [sender, priv_mode, all_mode] = for _ <- 1..3, do: key()
     {keys, _, _, _} = browser()
