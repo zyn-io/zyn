@@ -370,13 +370,20 @@ defmodule Den.Mod do
     end
   end
 
+  # Lifted only by one above the device, and above whoever banned it (or by
+  # that one): a moderator never undoes the ban of someone over it.
   def unban(actor, key) do
-    with :ok <- may(actor, "ban"), true <- key?(key) || {:error, :key} do
+    with :ok <- may(actor, "ban"),
+         :ok <- on(actor, key),
+         :ok <- over_banner(actor, sanction(key)) do
       Repo.delete_all(from s in "sanctions", where: s.key == ^key and s.kind in ["ban", "kick"])
       log(actor, "unban", key, nil)
       changed()
     end
   end
+
+  defp over_banner(actor, %{by: by}) when is_binary(by) and by != actor, do: if(above?(actor, by), do: :ok, else: {:error, :above})
+  defp over_banner(_, _), do: :ok
 
   # A stronger sanction is never replaced by a weaker one while it holds.
   @strength %{"timeout" => 1, "kick" => 2, "ban" => 3}

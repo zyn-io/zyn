@@ -124,6 +124,17 @@ defmodule Den.ModTest do
     refute Mod.out?(@member)
   end
 
+  test "an unban is by rank: only above the device and above whoever banned it", %{mod: mod} do
+    {:ok, _} = Mod.role_save(@owner, %{"id" => mod.id, "name" => "Moderator", "position" => 10, "perms" => ["timeout", "kick", "ban", "manage_messages", "manage_roles"]})
+    :ok = Mod.ban(@owner, @member)
+    assert Mod.unban(@mod, @member) == {:error, :above}, "the owner's ban is not a moderator's to lift"
+    :ok = Mod.unban(@owner, @member)
+    :ok = Mod.ban(@mod, @member)
+    assert Mod.unban(@mod, @member) == :ok, "its own ban, on a device below it"
+    :ok = Mod.ban(@owner, @helper)
+    :ok = Mod.unban(@owner, @helper)
+  end
+
   test "the audit log says who did what to whom, never what anyone wrote" do
     :ok = Mod.timeout(@mod, @member, 600, "flooding")
     assert [%{actor: @mod, action: "timeout 600s", target: @member, reason: "flooding"} | _] = Mod.audit(5)
