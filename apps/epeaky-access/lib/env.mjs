@@ -45,9 +45,10 @@ export async function quote(env, sol) {
 }
 
 /// What Jupiter gives now for `lamports` of SOL, in the mint's base units:
-/// the market price a claimed buy is held to.
+/// the market price a claimed buy is held to. (MARKET_QUOTE: another quote
+/// URL of the same form, for tests only.)
 export async function marketOut(env, lamports) {
-  const u = new URL(`${JUP}/quote`);
+  const u = new URL(env.MARKET_QUOTE || `${JUP}/quote`);
   u.search = new URLSearchParams({ inputMint: SOL_MINT, outputMint: env.MINT, amount: String(lamports), slippageBps: '300' });
   const r = await fetch(u);
   if (!r.ok) throw new Error('quote');

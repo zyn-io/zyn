@@ -80,6 +80,9 @@ export async function claim({ pass, signature, wallet, signed }, deps) {
   if (!seen.ok) return { ...seen, status: seen.why === 'missing' ? 404 : 403 };
   // What the market would give for that SOL now: a buy that got under half of
   // it did not come from the market (fees and the price moving are within).
+  // This floor carries the check: the route's shape alone does not say whose
+  // pool the SOL went to, and a buy through one's own thin pool gets far
+  // fewer tokens than the market gives. Do not drop it.
   let market;
   try { market = BigInt(await deps.quote(seen.lamportsIn)); } catch { return { ok: false, why: 'quote', status: 503 }; }
   if (seen.tokensIn * 2n < market) return { ok: false, why: 'price', status: 403 };

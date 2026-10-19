@@ -1,17 +1,21 @@
 // End to end, locally: the den's page opens the access window, a stand-in
-// wallet buys (Jupiter is real, the chain is a stand-in RPC that reports the
-// buy), the claim registers the pass, and the den's page is let in.
+// wallet buys (Jupiter's quote and swap are real, the chain is a stand-in RPC
+// that reports the buy, in the shape the page's Jupiter swap has), the claim
+// holds it to a stand-in market price, registers the pass, and the den's
+// page is let in.
 //
 //   DEN=http://localhost:4300   a den with entry [:invite, :external], issuer
 //                               http://localhost:8788/ and the issuer token
 //   ACCESS=http://localhost:8788  `wrangler pages dev` with .dev.vars:
-//                               DEN_URL, DEN_ISSUER_TOKEN, SOLANA_RPC=http://localhost:8899
+//                               DEN_URL, DEN_ISSUER_TOKEN, SOLANA_RPC=http://localhost:8899,
+//                               MARKET_QUOTE=http://localhost:8897/quote
 //   PLAYWRIGHT_FROM=…           a folder with playwright-core
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { encode, moveMessage } from '../public/shared.mjs';
+import { jupiterize } from './fixtures/jupiter.mjs';
 
 const require = createRequire(process.env.PLAYWRIGHT_FROM ? `${process.env.PLAYWRIGHT_FROM.replace(/\/$/, '')}/package.json` : import.meta.url);
 const { chromium } = require('playwright-core');
@@ -36,7 +40,11 @@ const buy = JSON.parse(readFileSync(new URL('./fixtures/buy.json', import.meta.u
 const BUYER = buy.transaction.message.accountKeys[0].pubkey;
 buy.transaction.message.accountKeys[0].pubkey = WALLET;
 for (const b of [...buy.meta.preTokenBalances, ...buy.meta.postTokenBalances]) if (b.owner === BUYER) b.owner = WALLET;
+jupiterize(buy);
 buy.transaction.signatures = [SIG];
+// A second buy of the same shape, for the market check.
+const SIG2 = encode(crypto.getRandomValues(new Uint8Array(64)));
+const buy2 = { ...structuredClone(buy), transaction: { ...structuredClone(buy.transaction), signatures: [SIG2] } };
 let asked = 0;
 const rpc = createServer((req, res) => {
   let body = '';
@@ -50,15 +58,23 @@ const rpc = createServer((req, res) => {
       // Not on chain at the first ask, as right after sending.
       if (asked > 1) result = { ...buy, blockTime: Math.floor(Date.now() / 1000) };
     }
+    if (method === 'getTransaction' && params[0] === SIG2) result = { ...buy2, blockTime: Math.floor(Date.now() / 1000) };
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ jsonrpc: '2.0', id, result }));
   });
 }).listen(8899);
 
+// The stand-in market: what Jupiter would give now for the SOL of a buy.
+let market = '1';
+const jup = createServer((req, res) => {
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({ outAmount: market }));
+}).listen(8897);
+
 const b = await chromium.launch({ executablePath: CHROME, headless: true });
 const ctx = await b.newContext();
-const INIT = ({ pkcs8, wallet, sig }) => {
-  if (!location.port || location.port !== '8788') return;
+const INIT = ({ pkcs8, wallet, sig, port }) => {
+  if (!location.port || location.port !== port) return;
   const raw = Uint8Array.from(atob(pkcs8), (c) => c.charCodeAt(0));
   const ABC = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   const dec = (s) => { let n = 0n; for (const c of s) n = n * 58n + BigInt(ABC.indexOf(c)); const o = []; while (n > 0n) { o.unshift(Number(n & 255n)); n >>= 8n; } for (const c of s) { if (c !== '1') break; o.unshift(0); } return Uint8Array.from(o); };
@@ -78,7 +94,7 @@ const INIT = ({ pkcs8, wallet, sig }) => {
   const register = ({ register }) => register(w);
   window.addEventListener('wallet-standard:app-ready', (e) => register(e.detail));
 };
-await ctx.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG });
+await ctx.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG, port: new URL(ACCESS).port });
 
 // Opened on its own, the access page offers nothing to buy.
 const alone = await ctx.newPage();
@@ -123,10 +139,19 @@ const again = await fetch(`${ACCESS}/api/claim`, {
 }).then((r) => r.json());
 ok(again.error === 'used', 'the same buy cannot let in a second device');
 
+// A buy that got far fewer tokens than the market gives did not come from it.
+market = '999999999999999999';
+const thin = await fetch(`${ACCESS}/api/claim`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ pass: 'ef'.repeat(32), signature: SIG2, wallet: WALLET, signed: encode(new Uint8Array(await crypto.subtle.sign('Ed25519', key.privateKey, new TextEncoder().encode(`Epeaky access\npass: ${'ef'.repeat(32)}\ntx: ${SIG2}`)))) }),
+}).then((r) => r.json());
+ok(thin.error === 'price', `a buy far under the market price is refused (${thin.error})`);
+market = '1';
+
 // A new device: the wallet that bought moves its access here, with no new buy.
 const before = members();
 const ctx2 = await b.newContext();
-await ctx2.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG });
+await ctx2.addInitScript(INIT, { pkcs8: PKCS8, wallet: WALLET, sig: SIG, port: new URL(ACCESS).port });
 const den2 = await ctx2.newPage();
 await den2.goto(`${DEN}/`);
 await den2.waitForSelector('#enter:not([hidden])', { timeout: 20000 });
@@ -149,5 +174,6 @@ ok(soon.error === 'soon' && soon.next > Date.now(), 'a second move the same day 
 
 await b.close();
 rpc.close();
+jup.close();
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);
