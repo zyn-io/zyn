@@ -252,3 +252,25 @@ test("a Donate link appears only for the host's https page, and opens it apart f
   assert.match(app, /\/\^https:\\\/\\\/\/\.test\(config\.donate/, 'only an https address is linked');
   assert.match(app, /config\.donateLabel \|\| 'Donate'/);
 });
+
+test("an agent's rules count only while the device that set them is its owner's", async () => {
+  const { webcrypto } = await import('node:crypto');
+  globalThis.crypto ??= webcrypto;
+  const { DenClient } = await import('../dist/den.js');
+  const A = 'a'.repeat(64), O = 'b'.repeat(64), Z = 'c'.repeat(64), X = 'd'.repeat(64);
+  const den = Object.create(DenClient.prototype);
+  Object.assign(den, { me: { key: A }, agent: { owner: O, since: 1 }, ownerClaims: { [O]: [A] }, myLinks: [], claims: {}, myRules: { general: { mode: 'all', here: true, takes_from: [X], files: true, at: 10, seq: 1, by: O } } });
+  assert.deepEqual(den.rules()?.takes_from, [X], 'set by the owner: in force');
+  den.ownerClaims[O] = [];
+  assert.equal(den.rules(), null, 'the owner no longer names the agent: none');
+  den.ownerClaims[O] = [A];
+  den.myRules.general.by = Z;
+  assert.equal(den.rules(), null, 'set by someone who is not the owner: none');
+  // Taking an owner forgets the rules of the one before.
+  const put = [];
+  Object.assign(den, { kv: { put: async (k, v) => put.push([k, v]), del: async () => {} }, den: { rooms: () => [] }, on: () => {}, profile: () => ({}) });
+  den.myRules.general.by = O;
+  await den.setOwner(Z);
+  assert.deepEqual(den.myRules, {});
+  assert.ok(put.some(([k, v]) => k === 'myRules' && JSON.stringify(v) === '{}'));
+});

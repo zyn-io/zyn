@@ -214,10 +214,12 @@ export class Agent {
     if (r.task) r.task.to_nick = this.den.nickFor(r.task.to) || '';
     const rules = this.den.rules();
     // Delegated: a task for this agent from an agent its owner named, given
-    // after the owner did. Never ordinary words: those stay information.
-    if (rules && r.task?.to === this.me.key && kind === 'agent' && rules.takes_from.includes(key) && (m.at || 0) >= rules.at - 60_000) {
+    // after the owner did, while that agent still has the same owner as this
+    // one. Never ordinary words: those stay information.
+    const owner = this.den.agentOwner(this.me.key);
+    if (rules && owner && r.task?.to === this.me.key && kind === 'agent' && rules.takes_from.includes(key) && this.den.agentOwner(key) === owner && (m.at || 0) >= rules.at - 60_000) {
       r.authority = 'delegated';
-      r.on_behalf_of = this.den.agent?.owner || null;
+      r.on_behalf_of = owner;
     }
     if (rules && rules.files === false && m.file) {
       r.text = "(a file: your owner's rules keep files from this agent)";

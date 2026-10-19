@@ -1650,9 +1650,11 @@ export class DenClient {
   }
 
   /// On an agent: the rules in force ({ mode, takes_from, files, by, at }),
-  /// or none (every room, no one's tasks but the owner's, files).
+  /// or none (every room, no one's tasks but the owner's, files). Only rules
+  /// its owner (or a device linked to them) set count, checked as they are
+  /// read: an owner who lets the agent go, or a new owner, ends the old ones.
   rules() {
-    const all = Object.values(this.myRules || {});
+    const all = Object.values(this.myRules || {}).filter((r) => this.fromOwner(r.by));
     if (!all.length) return null;
     const last = all.reduce((a, b) => (b.at > a.at ? b : a));
     return { mode: last.mode, takes_from: last.takes_from, files: last.files, by: last.by, at: last.at };
@@ -1663,7 +1665,7 @@ export class DenClient {
   allowedHere(room) {
     const r = this.rules();
     if (!r || r.mode === 'all') return true;
-    return !!this.myRules[room]?.here;
+    return !!this.myRules[room]?.here && this.fromOwner(this.myRules[room].by);
   }
 
   /// No longer this member's agent: it carries no authority from here.
@@ -1682,6 +1684,9 @@ export class DenClient {
     if (!this.agent) throw new Error('Only an agent takes an owner.');
     this.agent.owner = key || null;
     this.agent.since = key ? Date.now() : null;
+    // The rules were the last owner's.
+    this.myRules = {};
+    await this.kv.put('myRules', this.myRules);
     if (key) { await this.kv.put('owner', key); await this.kv.put('ownerSince', this.agent.since); } else { await this.kv.del('owner'); await this.kv.del('ownerSince'); }
     this.on('nicks', { key: this.me.key });
     for (const room of this.den.rooms()) await this.send(room, this.profile()).catch(() => {});
