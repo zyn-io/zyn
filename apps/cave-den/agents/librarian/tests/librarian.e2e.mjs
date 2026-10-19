@@ -93,8 +93,18 @@ try {
   const a2 = await ask(M, 'general', `@librarian everywhere vault ${tag}`);
   ok(a2 && !a2.includes('november') && /Only my owner can search every room/.test(a2), `a member gets nothing from another room (${a2?.replace(/\n/g, ' / ').slice(0, 120)})`);
 
+  // In a busy room even the owner's "everywhere" stays in that room: its
+  // answer would be read by everyone there.
   const a3 = await ask(O, 'general', `@librarian everywhere vault ${tag} please`);
-  ok(a3 && a3.includes('november') && a3.includes(`#${other.id}`), `its owner may search every room (${a3?.slice(0, 90)})`);
+  ok(a3 && !a3.includes('november') && /Ask me "everywhere" in a private room/.test(a3), `the owner's "everywhere" in a busy room stays in that room (${a3?.replace(/\n/g, ' / ').slice(0, 120)})`);
+
+  // In a private room of the owner and the librarian it searches every room.
+  const libKey = JSON.parse(execFileSync(process.execPath, [AGENT_BIN, 'status', '--json', '--agent', 'librarian'], { env, encoding: 'utf8' }).trim().split('\n')[0]).key;
+  const dm = await O.evaluate((k) => window.__den.startPrivate([k], 'Ask the librarian'), libKey);
+  const dmId = dm?.id || dm;
+  await until(O, ([id]) => window.__den.inRoom(id), [dmId], 30000);
+  const a3b = await ask(O, dmId, `@librarian everywhere vault ${tag} please`);
+  ok(a3b && a3b.includes('november') && a3b.includes(`#${other.id}`), `its owner may search every room from a private room of the two (${a3b?.slice(0, 90)})`);
 
   // A deletion and an edit reach the index as changes, at once.
   const id = await O.evaluate(async (t) => (await window.__den.log('general')).find((m) => m.text?.includes(`release ${t}`))?.id, tag);
@@ -104,7 +114,7 @@ try {
   await new Promise((r) => setTimeout(r, 3000));
   const a4 = await ask(M, 'general', `@librarian deploy ${tag} again`);
   ok(a4 && !a4.includes('friday after the audit') && /Nothing I hold matches/.test(a4), `a deleted message is forgotten (${a4?.slice(0, 90)})`);
-  const a5 = await ask(O, 'general', `@librarian everywhere vault ${tag} rotate`);
+  const a5 = await ask(O, dmId, `@librarian everywhere vault ${tag} rotate`);
   ok(a5 && a5.includes('december') && !a5.includes('november'), `an edit replaces the words it holds (${a5?.slice(0, 90)})`);
 } catch (e) {
   ok(false, `stopped: ${e.message}`);

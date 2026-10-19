@@ -55,3 +55,26 @@ test('the question is not its own answer; questions and its answers are not kept
   const hits = find(db, 'vault please', null, { not: { room: 'general', seq: 20 } });
   assert.deepEqual(hits.map((h) => `${h.room} ${h.seq}`), ['ops 10']);
 });
+
+test('answers mention nobody, and "everywhere" is answered only in a room of two', async () => {
+  const { quiet, everywhereHere, limiter } = await import('../epeaky-librarian.mjs');
+  const db = open(':memory:');
+  keep(db, rec('general', 1, 'deploy is @scout and @helper', { nick: '@ops' }));
+  const text = answer(find(db, 'deploy', 'general'), '@helper deploy', false);
+  assert.ok(!/@[^⁠]/.test(text), 'every @ is followed by a word joiner');
+  assert.equal(quiet('@a@b'), '@⁠a@⁠b');
+  assert.equal(everywhereHere({ kind: 'private', members: 2 }), true);
+  assert.equal(everywhereHere({ kind: 'private', members: 3 }), false);
+  assert.equal(everywhereHere({ kind: 'open', members: 2 }), false);
+  assert.equal(everywhereHere(undefined), false);
+  const ok = limiter(2, 1000);
+  assert.deepEqual([ok('a', 0), ok('a', 1), ok('a', 2), ok('b', 2), ok('a', 1001)], [true, true, false, true, true]);
+});
+
+test('rooms it is no longer in are not searched', () => {
+  const db = open(':memory:');
+  keep(db, rec('general', 1, 'the budget is fine'));
+  keep(db, rec('p-left', 2, 'the budget secret'));
+  assert.deepEqual(find(db, 'budget', null, { rooms: ['general'] }).map((h) => h.room), ['general']);
+  assert.equal(find(db, 'budget', null, { rooms: [] }).length, 0);
+});

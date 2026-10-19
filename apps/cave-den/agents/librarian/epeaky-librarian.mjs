@@ -36,8 +36,9 @@ const AGENT = flag('--agent') || process.env.EPEAKY_AGENT;
 function agentBin() {
   if (process.env.EPEAKY_AGENT_BIN) return process.env.EPEAKY_AGENT_BIN;
   try { return createRequire(import.meta.url).resolve('epeaky-agent/bin/epeaky-agent.mjs'); } catch { /* not installed beside it */ }
+  // A checkout's own agent, never a folder that happens to sit beside node_modules.
   const local = fileURLToPath(new URL('../../agent/bin/epeaky-agent.mjs', import.meta.url));
-  return existsSync(local) ? local : 'epeaky-agent';
+  return !import.meta.url.includes('/node_modules/') && existsSync(local) ? local : 'epeaky-agent';
 }
 const BIN = agentBin();
 const HITS = 5;
@@ -98,12 +99,13 @@ export function query(text, join = ' ') {
 /// The best matches for a question, in `room` or everywhere: those with every
 /// word, or, if none has them all ("… please"), those with the most. `not`
 /// is the question itself ({room, seq}), which holds its own words.
-export function find(db, text, room = null, { not = null, limit = HITS + 1 } = {}) {
+export function find(db, text, room = null, { not = null, limit = HITS + 1, rooms = null } = {}) {
   const search = (q) => {
     if (!q) return [];
     const sql = `SELECT m.room, m.seq, m.at, m.sender, m.nick, m.text FROM words w JOIN msgs m ON m.room = w.room AND m.seq = w.seq
-      WHERE words MATCH ? ${room ? 'AND w.room = ?' : ''} ${not ? 'AND NOT (m.room = ? AND m.seq = ?)' : ''} ORDER BY bm25(words) LIMIT ${limit}`;
-    return db.prepare(sql).all(q, ...(room ? [room] : []), ...(not ? [not.room, not.seq] : []));
+      WHERE words MATCH ? ${room ? 'AND w.room = ?' : ''} ${not ? 'AND NOT (m.room = ? AND m.seq = ?)' : ''}
+      ${rooms ? `AND m.room IN (${rooms.map(() => '?').join(',') || "''"})` : ''} ORDER BY bm25(words) LIMIT ${limit}`;
+    return db.prepare(sql).all(q, ...(room ? [room] : []), ...(not ? [not.room, not.seq] : []), ...(rooms || []));
   };
   const all = search(query(text));
   return all.length ? all : search(query(text, ' OR '));
@@ -119,13 +121,38 @@ export function question(text, names) {
   return { words: t.replace(/^(everywhere|all rooms)\b[:,]?/i, '').trim(), everywhere };
 }
 
+/// Words quoted back must not mention anyone: an "@name" in an answer would
+/// wake that agent, and two agents answering mentions would ping-pong.
+export const quiet = (s) => String(s).replace(/@/g, '@\u2060');
+
 /// One line per hit, short enough to read in a chat.
-export function answer(hits, words, everywhere) {
+export function answer(hits, rawWords, everywhere) {
+  const words = quiet(rawWords);
   if (!words) return 'Ask me words to look for, e.g. "@librarian deploy friday".';
   if (!hits.length) return `Nothing I hold matches "${words}"${everywhere ? ' in any room' : ' in this room'}.`;
   const day = (at) => (at ? at.slice(0, 10) : '');
   const cut = (s) => (s.length > 140 ? `${s.slice(0, 139)}…` : s);
-  return hits.slice(0, HITS).map((h) => `${everywhere ? `#${h.room} ` : ''}${h.seq} · ${day(h.at)} · ${h.nick || h.sender}: ${cut(h.text.replace(/\s+/g, ' '))}`).join('\n');
+  return hits.slice(0, HITS).map((h) => `${everywhere ? `#${h.room} ` : ''}${h.seq} · ${day(h.at)} · ${quiet(h.nick || h.sender)}: ${quiet(cut(h.text.replace(/\s+/g, ' ')))}`).join('\n');
+}
+
+/// Where an owner's "everywhere" may be answered: a private room with only
+/// the owner and this agent in it. Anywhere else the answer, with words from
+/// private rooms, would be read by everyone in the room it was asked in.
+export function everywhereHere(room) {
+  return !!room && room.kind === 'private' && room.members > 0 && room.members <= 2;
+}
+
+/// At most `n` questions a minute from one sender: a loop of agents, or a
+/// member typing in a hurry, gets silence rather than a flood.
+export function limiter(n = 6, ms = 60_000) {
+  const seen = new Map();
+  return (who, now = Date.now()) => {
+    const recent = (seen.get(who) || []).filter((t) => now - t < ms);
+    if (recent.length >= n) { seen.set(who, recent); return false; }
+    recent.push(now);
+    seen.set(who, recent);
+    return true;
+  };
 }
 
 async function main() {
@@ -140,6 +167,7 @@ async function main() {
     for (const m of await cli('read', ['--since', '0', '--limit', '1000'], [r.id]).catch(() => [])) keep(db, m);
   }
   console.error(`librarian ${AGENT}: up, ${db.prepare('SELECT count(*) AS n FROM msgs').get().n} messages held`);
+  const allowed = limiter();
   for (;;) {
     const t0 = Date.now();
     const recs = await cli('next', ['--changes', '--wait', '300']).catch((e) => { console.error(`next: ${e.message}`); return []; });
@@ -149,12 +177,18 @@ async function main() {
       keep(db, r);
       // An edit or a deletion is taken in, never answered.
       if (r.change || !r.mention) continue;
+      if (!allowed(r.from || r.key || r.room)) { debug(`quiet: ${r.from} asks too often`); continue; }
       const q = question(r.text, names);
-      // Every room only for the owner; anyone else gets their own room.
-      const everywhere = q.everywhere && r.authority === 'owner';
-      const hits = find(db, q.words, everywhere ? null : r.room, { not: r });
+      // The rooms it is in now: what it left is not searched, and "everywhere"
+      // is answered only to its owner, in a private room of the two of them.
+      const rooms = await cli('rooms').catch(() => []);
+      const here = rooms.find((x) => x.id === r.room);
+      const owner = r.authority === 'owner';
+      const everywhere = q.everywhere && owner && everywhereHere(here);
+      const hits = find(db, q.words, everywhere ? null : r.room, { not: r, rooms: rooms.map((x) => x.id) });
       const reply = answer(hits, q.words, everywhere)
-        + (q.everywhere && !everywhere ? '\n(Only my owner can search every room.)' : '');
+        + (q.everywhere && !owner ? '\n(Only my owner can search every room.)' : '')
+        + (q.everywhere && owner && !everywhere ? '\n(Ask me "everywhere" in a private room with just you and me: here, everyone would read it. This answer is from this room only.)' : '');
       await cli('send', ['--reply', String(r.seq)], [r.room, '-'], { input: reply })
         .then(() => console.error(`answered #${r.room} ${r.seq}`), (e) => console.error(`send: ${e.message}`));
     }

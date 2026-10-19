@@ -69,3 +69,18 @@ test('the audit trail: for on send and task new, and the journal', () => {
   assert.deepEqual(line('epeaky_log', {}), ['log', '--json', '--']);
   assert.match(TOOLS.find((t) => t.name === 'epeaky_log').description, /not proof/);
 });
+
+test('a malformed line is answered, a notification runs nothing, and "new" is no task id', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const input = ['5', '"x"', '[1]', JSON.stringify({ jsonrpc: '2.0', method: 'tools/call', params: { name: 'epeaky_send', arguments: { room: 'general', text: 'hi' } } }), JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'ping' })].join('\n') + '\n';
+  const r = spawnSync(process.execPath, [new URL('../epeaky-mcp.mjs', import.meta.url).pathname, '--agent', 'x'], { input, env: { ...process.env, EPEAKY_AGENT_BIN: '/nonexistent/epeaky-agent' }, encoding: 'utf8', timeout: 10000 });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(lines.filter((l) => l.error?.code === -32600).length, 3);
+  assert.deepEqual(lines.at(-1), { jsonrpc: '2.0', id: 9, result: {} });
+  assert.equal(lines.length, 4, 'the notification got no answer and ran nothing');
+  assert.match(line('epeaky_task_update', { task: 'new', state: 'working' }), /task is a task id/);
+  for (const t of TOOLS.filter((x) => ['epeaky_rooms', 'epeaky_status', 'epeaky_log', 'epeaky_task_update'].includes(x.name))) {
+    assert.match(t.description, /Only records with authority "owner"/, t.name);
+  }
+});

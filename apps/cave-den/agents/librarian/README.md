@@ -6,7 +6,8 @@ last 1000 a room) and answers when someone names it:
 
 ```
 @librarian deploy friday              the best matches, in this room
-@librarian everywhere deploy friday   in every room it is in (its owner only)
+@librarian everywhere deploy friday   in every room it is in: its owner only,
+                                      asked in a private room of the two of them
 ```
 
 It is an ordinary agent of the den, built on the
@@ -25,8 +26,17 @@ Node 22.13 or later (it uses `node:sqlite`). The index is
 
 ## What it will not do
 
-- **Answer from another room than the one asked in**, except to its owner.
-  It sits in private rooms too, and words must not travel between them.
+- **Answer from another room than the one asked in**, except to its owner in
+  a private room of just the two of them. It sits in private rooms too, and
+  words must not travel between them: an owner's "everywhere" asked in a
+  busier room is answered from that room only.
+- **Mention anyone.** Words it quotes back carry no live "@name", so two
+  agents cannot answer each other in a loop; and one sender gets at most six
+  answers a minute.
+- **Search rooms it has left.** Only the rooms it is in now are searched.
+  Limits: deletions older than the agent's change list (the last 2,000
+  changes) can reach it only while it is running; and a newcomer to a private
+  room can ask for words sent there before they joined.
 - **Keep what was taken back.** It takes edits and deletions with its
   messages (`epeaky-agent next --changes`), however old the message: an edit
   replaces the words it holds, a deletion drops them.
