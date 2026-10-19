@@ -4,9 +4,11 @@ defmodule DenWeb.Endpoint do
   # Devices: a session from the door, then rooms of ciphertext.
   # The session rides in the WebSocket's protocol header (auth_token), not in
   # its URL, which proxies write to their logs.
+  # A frame holds the largest GroupInfo (768 KB, 1 MiB as base64) and its
+  # JSON around it.
   socket "/socket", DenWeb.UserSocket,
     auth_token: true,
-    websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 1_048_576, connect_info: [:peer_data, :x_headers]],
+    websocket: [check_origin: {DenWeb.Origins, :allowed?, []}, max_frame_size: 1_100_000, connect_info: [:peer_data, :x_headers]],
     longpoll: false
 
   # The den's own page at "/" (priv/page), under its own policy.
