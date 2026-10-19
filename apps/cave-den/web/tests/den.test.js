@@ -314,3 +314,22 @@ test("the epoch before is dropped 5 s after the change, however often the keys a
   assert.deepEqual([...v.keys.keys()], [2], 'the epoch before is gone');
   assert.deepEqual([...v.screenKeys.keys()], [2]);
 });
+
+test('a message id, reply or for is a message id, so no member can bloat everyone\'s stored log', async () => {
+  const { DenClient } = await import('../dist/den.js');
+  const B = 'b'.repeat(64);
+  const den = Object.create(DenClient.prototype);
+  const store = new Map();
+  Object.assign(den, {
+    me: { key: 'a'.repeat(64) }, rooms: new Map([['general', { id: 'general', kind: 'open' }]]), on: () => {},
+    kv: { get: async (k) => store.get(k), put: async (k, v) => store.set(k, v) },
+    learnNick: async () => {}, can: () => true, linkedTo: () => [], everyone: () => false,
+  });
+  const big = 'f'.repeat(200_000);
+  await den.apply('general', { t: 'msg', id: big, key: B, text: 'hi', at: 1 });
+  await den.apply('general', { t: 'msg', id: '1'.repeat(16), key: B, text: 'hi', reply: big, at: 1 });
+  await den.apply('general', { t: 'msg', id: 'old-0123456789ab', key: B, text: 'old words', reply: '1'.repeat(16), at: 1 });
+  const log = await den.log('general');
+  assert.deepEqual(log.map((m) => [m.id, m.reply]), [['1'.repeat(16), null], ['old-0123456789ab', '1'.repeat(16)]]);
+  assert.ok(JSON.stringify(log).length < 2000);
+});

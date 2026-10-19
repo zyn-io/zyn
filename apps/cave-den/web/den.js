@@ -137,6 +137,12 @@ function store(name, prefix) {
   };
 }
 
+/// A message's id: 16 hex characters, or `old-` and 12 for words an older
+/// device sent bare. Nothing longer is kept in anyone's log.
+const MSG_ID = /^(?:[0-9a-f]{16}|old-[0-9a-f]{12})$/;
+/// The largest document a page sends (a pinner's pins again, at most).
+const DOC_MAX = 256 * 1024;
+
 /// A room message's body, decoded: older devices sent bare words.
 function decode(text) {
   try {
@@ -661,6 +667,7 @@ export class DenClient {
       return; // before this device joined, or its own
     }
     if (ev.kind === 'text') {
+      if (typeof ev.text !== 'string' || ev.text.length > DOC_MAX) { this.saveSoon(); return; }
       const d = decode(ev.text);
       await this.apply(room, { ...d, from: ev.from, key: ev.key, seq: m.seq, at: sent(d.at), srv: m.at });
     } else if (ev.kind === 'commit') {
@@ -848,7 +855,7 @@ export class DenClient {
     const at = (id) => log.findIndex((x) => x.id === id);
     let shown = null;
     if (m.t === 'msg' || m.t === 'file') {
-      if (typeof m.id !== 'string' || at(m.id) >= 0) return;
+      if (typeof m.id !== 'string' || !MSG_ID.test(m.id) || at(m.id) >= 0) return;
       // Faster than the room's slow mode lets anyone write: not shown.
       if (!mine && !this.can('bypass_slow', m.key) && tooSoon(log, m, this.slowOf(room))) return;
       // Every message carries its sender's door-key fingerprint for its day,
@@ -862,7 +869,7 @@ export class DenClient {
       // What it was sent for: an earlier message of this room (the order an
       // agent acts on), as its sender says.
       const cause = typeof m.for === 'string' && /^[0-9a-f]{16}$/.test(m.for) && m.for !== m.id ? m.for : null;
-      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {}, ...(task ? { task } : {}), ...(cause ? { for: cause } : {}) };
+      shown = { id: m.id, t: m.t, from: m.from, key: m.key, text: typeof m.text === 'string' ? m.text.slice(0, 4000) : '', reply: typeof m.reply === 'string' && MSG_ID.test(m.reply) ? m.reply : null, file, seq: m.seq || 0, at: m.at || Date.now(), ...(Number.isFinite(m.srv) ? { srv: m.srv } : {}), mine, reactions: {}, ...(task ? { task } : {}), ...(cause ? { for: cause } : {}) };
       log.push(shown);
     } else if (m.t === 'react') {
       const i = at(m.to);
@@ -911,7 +918,7 @@ export class DenClient {
       // is told who gave it.
       const r = this.rooms.get(room);
       const title = plainText(m.text).slice(0, 60);
-      if (!r || r.kind !== 'private' || !title || /^m-[0-9a-f]/i.test(title)) return;
+      if (!r || r.kind !== 'private' || !title || /^m-[0-9a-f]/i.test(title) || typeof m.id !== 'string' || !MSG_ID.test(m.id)) return;
       r.title = title;
       await this.keepPrivate();
       this.on('rooms', [...this.rooms.values()]);
