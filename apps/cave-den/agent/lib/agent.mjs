@@ -25,6 +25,10 @@ export function parseInvite(link) {
   return { base: u.origin, code };
 }
 
+// What the agent can start again if its file is damaged: where next stopped,
+// the changes it numbered, its journal.
+const REMAKE = ['handed', 'handedBy', 'handedChange', 'changes', 'journal'];
+
 export class Agent {
   constructor(dir, log = () => {}) {
     this.dir = dir;
@@ -42,7 +46,7 @@ export class Agent {
   async open(base) {
     const { DenClient } = await client();
     const wasm = await readFile(new URL('den/den_mls_bg.wasm', RUNTIME));
-    this.den = new DenClient({ base, keysUrl: `${base}/door/keys`, kv: fileStore(join(this.dir, 'state')), wasm, on: (ev, d) => this.event(ev, d) });
+    this.den = new DenClient({ base, keysUrl: `${base}/door/keys`, kv: fileStore(join(this.dir, 'state'), { remake: REMAKE }), wasm, on: (ev, d) => this.event(ev, d) });
     this.me = await this.den.start();
     this.trusted = new Set((await this.den.kv.get('agent:trusted')) || []);
     return this.me;

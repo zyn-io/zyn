@@ -1,7 +1,7 @@
 // The background process's plumbing, on every system (CI runs this on
 // Windows too): its socket or named pipe, its lock, its store.
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -106,4 +106,34 @@ test('the command goes only to a process that proved the secret first', async ()
   assert.deepEqual(await request(path, 'status', {}, null, secret), { up: true });
   await new Promise((r) => real.close(r));
   await rm(dir, { recursive: true, force: true });
+});
+
+test('the store: a value that cannot be read stops only what can be made again', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'eax-'));
+  const kv = fileStore(dir, { remake: ['handedBy'] });
+  await kv.put('handedBy', { t: 1 });
+  await kv.put('identity', { k: 1 });
+  await writeFile(join(dir, 'handedBy'), 'not a value');
+  await writeFile(join(dir, 'identity'), 'not a value');
+  // A cursor is started again (the bad file kept aside to look at)...
+  assert.equal(await kv.get('handedBy'), undefined);
+  assert.ok((await readdir(dir)).includes('handedBy.corrupt'));
+  await kv.put('handedBy', { t: 2 });
+  assert.deepEqual(await kv.get('handedBy'), { t: 2 });
+  // ...but a key or a group's state is never quietly forgotten.
+  await assert.rejects(kv.get('identity'), (e) => e.code === 'corrupt' && e.message.includes(join(dir, 'identity')));
+  await kv.wipe();
+});
+
+test('the store: half-written files of a process that is gone are cleared', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'eat-'));
+  const dead = 2 ** 22 + 12345;
+  await writeFile(join(dir, `k.${dead}.abcdef012345.tmp`), 'x');
+  await writeFile(join(dir, `k.${process.pid}.abcdef012345.tmp`), 'x');
+  const kv = fileStore(dir);
+  await kv.get('k');
+  const left = await readdir(dir);
+  assert.ok(!left.includes(`k.${dead}.abcdef012345.tmp`));
+  assert.ok(left.includes(`k.${process.pid}.abcdef012345.tmp`), 'not one a living process is writing');
+  await kv.wipe();
 });
