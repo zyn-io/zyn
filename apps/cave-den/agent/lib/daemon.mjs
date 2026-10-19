@@ -101,11 +101,16 @@ export async function serve(dir) {
   return agent;
 }
 
-function talk(agent, sock, stop, secret) {
+/// One connection: the command's nonce first, answered with the proof that
+/// this is the agent's own process, and only then the command, so whatever
+/// else might listen on the socket or pipe never hears it. (A request of
+/// 0.5 or older sends both on one line.)
+export function talk(agent, sock, stop, secret) {
   let buf = '';
   let proof = null;
+  let busy = false;
   // A reader that falls far behind is let go rather than held in memory. The
-  // first answer carries the proof that this is the agent's own process.
+  // first answer carries the proof.
   const send = (o) => {
     if (sock.destroyed) return;
     if (proof) { o = { ...o, proof, version: VERSION }; proof = null; }
@@ -114,15 +119,18 @@ function talk(agent, sock, stop, secret) {
   };
   sock.on('error', () => {});
   sock.on('data', async (chunk) => {
+    if (busy) return sock.destroy();
     buf += chunk;
     if (buf.length > 1 << 20) return sock.destroy();
     const nl = buf.indexOf('\n');
     if (nl < 0) return;
     const line = buf.slice(0, nl);
-    buf = '';
+    buf = buf.slice(nl + 1);
     let req;
     try { req = JSON.parse(line); } catch { send({ ok: false, error: 'not a request' }); return sock.end(); }
-    if (typeof req.nonce === 'string' && /^[0-9a-f]{32}$/.test(req.nonce)) proof = proofFor(secret, req.nonce);
+    if (typeof req?.nonce === 'string' && /^[0-9a-f]{32}$/.test(req.nonce)) proof = proofFor(secret, req.nonce);
+    if (req?.hello) { send({ ok: true, data: 'hello' }); return; }
+    busy = true;
     try {
       if (req.cmd === 'watch') return watch(agent, sock, req.args || {}, send);
       send({ ok: true, data: await answer(agent, req.cmd, req.args || {}) });
@@ -201,38 +209,58 @@ export async function ensure(dir, bin) {
 }
 
 /// One request to the background process: its answer, or, for watch, each
-/// line to `each` until the process or the caller ends it.
+/// line to `each` until the process or the caller ends it. The command is
+/// sent only once the process has proved it holds the agent's secret.
 export function request(path, cmd, args, each = null, secret = null, version = null) {
   return new Promise((resolve, reject) => {
     const s = connect(path);
     const nonce = randomBytes(16).toString('hex');
     let buf = '';
-    let first = true;
-    s.on('connect', () => s.write(`${JSON.stringify({ cmd, args, nonce })}\n`));
+    let stage = 'hello';
+    s.on('connect', () => s.write(`${JSON.stringify({ hello: true, nonce })}\n`));
     s.on('data', (chunk) => {
       buf += chunk;
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
-        const o = JSON.parse(buf.slice(0, nl));
+        let o;
+        try { o = JSON.parse(buf.slice(0, nl)); } catch { o = null; }
         buf = buf.slice(nl + 1);
-        if (first) {
-          first = false;
+        if (stage === 'hello') {
           // Only the agent's own process knows its secret.
           const want = secret && Buffer.from(proofFor(secret, nonce));
-          if (secret && !(typeof o.proof === 'string' && o.proof.length === want.length && timingSafeEqual(Buffer.from(o.proof), want))) {
+          if (!o || (secret && !(typeof o.proof === 'string' && o.proof.length === want.length && timingSafeEqual(Buffer.from(o.proof), want)))) {
             s.destroy();
             return reject(Object.assign(new Error("Something other than this agent's background process answered on its socket. Stop it, and check who else can run programs on this machine."), { code: 'impostor' }));
           }
-          if (version && o.version !== version && cmd !== 'down') {
+          if (version && o.version !== version) {
             s.destroy();
+            // An older process (it took the command with its nonce) may still be stopped.
+            if (cmd === 'down') return resolve(legacyDown(path));
             return reject(Object.assign(new Error(`This agent's background process runs epeaky-agent ${o.version || 'older than 0.3'}; this command is ${version}. Keep one version: run \`epeaky-agent down --agent …\` with either, then the command again with the one you keep.`), { code: 'version' }));
           }
+          stage = 'answer';
+          s.write(`${JSON.stringify({ cmd, args })}\n`);
+        } else if (stage === 'answer') {
+          stage = 'more';
+          if (!o) { s.destroy(); return reject(new Error('The background process sent something unreadable.')); }
           if (!o.ok) return reject(Object.assign(new Error(o.error), { code: o.code }));
           if (!each) return resolve(o.data);
-        } else if (each && o.message) each(o.message);
+        } else if (each && o?.message) each(o.message);
       }
     });
     s.on('error', reject);
+    s.on('close', () => resolve(null));
+  });
+}
+
+// `down` to a process of 0.5 or older, which takes the command on the line it
+// proves on: the command carries nothing.
+function legacyDown(path) {
+  return new Promise((resolve) => {
+    const s = connect(path);
+    s.on('connect', () => s.write(`${JSON.stringify({ cmd: 'down', args: {}, nonce: randomBytes(16).toString('hex') })}\n`));
+    s.on('data', () => {});
+    s.on('error', () => resolve(null));
     s.on('close', () => resolve(null));
   });
 }
