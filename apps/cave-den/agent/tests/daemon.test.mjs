@@ -137,3 +137,16 @@ test('the store: half-written files of a process that is gone are cleared', asyn
   assert.ok(left.includes(`k.${process.pid}.abcdef012345.tmp`), 'not one a living process is writing');
   await kv.wipe();
 });
+
+test('with no secret to check the proof by, no command is sent', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ean-'));
+  const path = socketPath(dir);
+  let heard = '';
+  const any = createServer((s) => s.on('data', (d) => { heard += d; s.write(`${JSON.stringify({ ok: true, data: 'hello' })}\n`); }));
+  await new Promise((r) => any.listen(path, r));
+  await assert.rejects(request(path, 'owner', { code: 'abcd-1234' }, null, null), (e) => e.code === 'impostor');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.doesNotMatch(heard, /abcd-1234/);
+  await new Promise((r) => any.close(r));
+  await rm(dir, { recursive: true, force: true });
+});

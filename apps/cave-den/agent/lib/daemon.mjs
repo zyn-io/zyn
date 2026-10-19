@@ -226,9 +226,10 @@ export function request(path, cmd, args, each = null, secret = null, version = n
         try { o = JSON.parse(buf.slice(0, nl)); } catch { o = null; }
         buf = buf.slice(nl + 1);
         if (stage === 'hello') {
-          // Only the agent's own process knows its secret.
+          // Only the agent's own process knows its secret; with none to
+          // check by, nothing is sent.
           const want = secret && Buffer.from(proofFor(secret, nonce));
-          if (!o || (secret && !(typeof o.proof === 'string' && o.proof.length === want.length && timingSafeEqual(Buffer.from(o.proof), want)))) {
+          if (!o || !secret || !(typeof o.proof === 'string' && o.proof.length === want.length && timingSafeEqual(Buffer.from(o.proof), want))) {
             s.destroy();
             return reject(Object.assign(new Error("Something other than this agent's background process answered on its socket. Stop it, and check who else can run programs on this machine."), { code: 'impostor' }));
           }
