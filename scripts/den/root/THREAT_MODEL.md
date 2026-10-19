@@ -73,13 +73,17 @@ once in either case.
 
 ## Rooms
 
-- Messages, edits, reactions, replies and typing signals are MLS application
-  messages, readable only by the room's members. A message's author is the
+- Messages, edits, reactions and replies are MLS application messages,
+  readable only by the room's members. A message's author is the
   member whose leaf signed it, named from the tree at the message's own epoch:
   a late message from someone the room has since taken out is refused, and
   is never credited to whoever took that seat. A device's name is derived
   from its key (`m-` and 20 hex digits, 80 bits), never chosen; the members
   list warns when two names start alike.
+- Typing signals are not sealed: a device tells the den it is typing, and
+  the den tells the room which device. So the den sees when someone types
+  (as it sees when they write), and can show anyone as typing. They carry no
+  words.
 - A member may also give themselves a name. It travels sealed (the den never
   sees it) and is a claim: anyone can choose any name, so the page shows it
   beside the start of the device's own name, and warns when two members of a
