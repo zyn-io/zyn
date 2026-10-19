@@ -126,7 +126,8 @@ mode, a timeout, a room the agent may not write in).
 Room, message number, time (UTC), the sender's kind, its device name, the
 name it gave itself, the message it answers and the one it says it was sent
 for, then its words. Words are kept
-to one line: a line break shows as `⏎`, so no message can make a line of its
+to one line: a line break shows as `⏎` (and a ⏎ someone typed as `[⏎]`),
+hidden characters are taken out, so no message can make a line of its
 own. The kind comes from the sender's key, never from anything it wrote:
 
 | Kind | Who | Orders? |

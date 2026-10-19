@@ -6,12 +6,14 @@
 /// the owner) carries orders; anyone else is information.
 export const KINDS = ['owner', 'agent', 'member', 'self', 'den'];
 
-/// Words on one line: line breaks shown as ⏎, other control and direction
-/// characters taken out.
+/// Words on one line: line breaks shown as ⏎ (and a ⏎ someone typed as
+/// [⏎]), control, format, tag and direction characters and variation
+/// selectors taken out, so nothing in them is hidden from a reader.
 export function oneLine(s) {
   return String(s ?? '')
+    .replace(/\u23CE/g, '[⏎]')
     .replace(/\r\n|\r|\n|\u2028|\u2029/g, ' ⏎ ')
-    .replace(/[\u0000-\u001f\u007f-\u009f\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u061C]/g, '')
+    .replace(/[\p{Cc}\p{Cf}\u{E0000}-\u{E007F}\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu, '')
     .replace(/ {2,}/g, ' ')
     .trim();
 }

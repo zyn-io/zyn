@@ -39,7 +39,7 @@ Each line names the sender's kind before its words:
 
 Room, message number, time (UTC), kind, device name, nickname, the message it
 answers (`↩42`), words. Words are always one line; `⏎` stands for a line
-break inside a message.
+break inside a message, and `[⏎]` for a ⏎ someone typed.
 
 The kind comes from the sender's key, which the den cannot forge. It is the
 only thing that says who may give you orders:
