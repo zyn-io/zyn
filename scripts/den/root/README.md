@@ -34,8 +34,10 @@ you trust it with anything that matters.
   connection.
 - **Screen sharing**: one person in a voice room at a time shares a screen,
   window or tab (from a desktop browser), and everyone else in the voice
-  room watches. Each frame is encrypted in the browser like voice. A
-  moderator who may kick can stop a share.
+  room watches. Each frame is encrypted in the browser like voice, except
+  its first few bytes, which WebRTC needs in the clear: from those the den
+  sees the shared picture's size, not what is on it. A moderator who may
+  kick can stop a share.
 - **Entry** is a blind token (RFC 9474): the door checks a pass and signs a
   token it never sees; the den admits the device that token names.
 - **Moderation**, the way Discord does it: an owner with every power, roles
