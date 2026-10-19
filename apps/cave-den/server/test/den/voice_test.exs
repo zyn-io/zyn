@@ -231,6 +231,10 @@ defmodule Den.VoiceTest do
     Application.put_env(:den, :voice_public_only, true)
     refute Den.Voice.candidate?(c.("192.168.50.10"))
     refute Den.Voice.candidate?(%{"candidate" => "garbage"})
+    # The same addresses written as IPv4 in IPv6, and those nobody is: 0/8,
+    # multicast, broadcast and reserved, IPv6 multicast and unspecified.
+    for a <- ~w(::ffff:127.0.0.1 ::ffff:10.0.0.5 ::ffff:192.168.50.10 0.1.2.3 224.0.0.251 239.1.2.3 255.255.255.255 240.0.0.1 ff02::fb ::), do: refute(Den.Voice.candidate?(c.(a)), a)
+    assert Den.Voice.candidate?(c.("::ffff:198.51.100.4"))
   end
 
   test "the den does not listen for mDNS (ex_ice's resolver is stopped at start)" do

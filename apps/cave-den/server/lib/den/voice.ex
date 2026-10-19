@@ -43,6 +43,14 @@ defmodule Den.Voice do
   how the server is set up); with `:voice_public_only`, no private LAN
   address either, for a den on the open internet.
   """
+  # IPv4 written in IPv6 (::ffff:a.b.c.d) is that IPv4 address.
+  def ip_ok?({0, 0, 0, 0, 0, 0xFFFF, x, y}), do: ip_ok?({div(x, 256), rem(x, 256), div(y, 256), rem(y, 256)})
+  # Nobody's: "this network", multicast, reserved and broadcast; IPv6
+  # unspecified and multicast.
+  def ip_ok?({0, _, _, _}), do: false
+  def ip_ok?({a, _, _, _}) when a >= 224, do: false
+  def ip_ok?({0, 0, 0, 0, 0, 0, 0, 0}), do: false
+  def ip_ok?({a, _, _, _, _, _, _, _}) when a >= 0xFF00, do: false
   def ip_ok?({127, _, _, _}), do: false
   def ip_ok?({169, 254, _, _}), do: false
   def ip_ok?({172, 17, _, _}), do: false
