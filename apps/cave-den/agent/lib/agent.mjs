@@ -439,43 +439,64 @@ export class Agent {
     const f = (r) => { if (fits(r)) { came.push(r); woke?.(); } };
     this.listeners.add(f);
     try {
-      this.handed ??= (await this.den.kv.get('handed')) || {};
-      let out = [];
+      // A cursor for each filter, so one filter's handing never hides from
+      // another what it has not handed. A filter seen for the first time
+      // starts from the cursor of before (one for all), so nothing old
+      // comes again.
+      const fk = `${orders ? 'o' : ''}${mentions ? 'm' : ''}${tasks ? 't' : ''}${changes ? 'c' : ''}` || '-';
+      this.handedBy ??= (await this.den.kv.get('handedBy')) || {};
+      if (!this.handedBy[fk]) {
+        this.handedBy[fk] = { rooms: { ...((await this.den.kv.get('handed')) || {}) }, change: (await this.den.kv.get('handedChange')) || 0 };
+      }
+      const cur = this.handedBy[fk];
+      // Each room's fitting messages in the room's own order (the den's seq),
+      // and the changes in theirs: queues whose heads are merged by time, so
+      // what is handed is always a prefix of each queue and its cursor can
+      // move to the last one handed without passing over another.
+      const queues = [];
       for (const r of this.den.rooms.values()) {
         if (!this.visible(r.id) || (only && r.id !== only)) continue;
         const log = await this.den.log(r.id);
-        const from = this.handed[r.id] ?? 0;
+        const from = cur.rooms[r.id] ?? 0;
+        const q = [];
         for (const m of log) {
           if ((m.seq || 0) > from && !m.mine && (m.t === 'msg' || m.t === 'file')) {
             const rec = this.recordOf(r.id, m, null, log);
-            if (fits(rec)) out.push(rec);
+            if (fits(rec)) q.push(rec);
           }
         }
+        q.sort((a, b) => a.seq - b.seq);
+        if (q.length) queues.push(q);
       }
       if (changes || tasks) {
-        this.handedChange ??= (await this.den.kv.get('handedChange')) || 0;
         const j = (await this.den.kv.get('changes')) || { n: 0, list: [] };
+        const q = [];
         for (const c of j.list) {
-          if (c.n <= this.handedChange || (only && c.room !== only) || !this.visible(c.room)) continue;
+          if (c.n <= cur.change || (only && c.room !== only) || !this.visible(c.room)) continue;
           const rec = await this.changeRecord(c);
-          if (rec && fits(rec)) out.push(rec);
+          if (rec && fits(rec)) q.push(rec);
         }
+        q.sort((a, b) => a.change_n - b.change_n);
+        if (q.length) queues.push(q);
+      }
+      const max = Math.max(1, Math.min(1000, limit));
+      const when = (r) => r.changed_at || r.at || '';
+      let out = [];
+      while (out.length < max && queues.some((q) => q.length)) {
+        let best = null;
+        for (const q of queues) if (q.length && (!best || when(q[0]) < when(best[0]))) best = q;
+        out.push(best.shift());
       }
       if (!out.length && wait > 0) {
         if (!came.length) await new Promise((resolve) => { woke = resolve; setTimeout(resolve, wait * 1000); });
         out = came.slice(0, 1);
       }
-      // In the order things happened: a message when it was sent, a change when it was made.
-      const when = (r) => r.changed_at || r.at;
-      out.sort((a, b) => (when(a) < when(b) ? -1 : when(a) > when(b) ? 1 : 0));
-      out = out.slice(0, Math.max(1, Math.min(1000, limit)));
       for (const r of out) {
-        if (r.change) this.handedChange = Math.max(this.handedChange || 0, r.change_n);
-        else this.handed[r.room] = Math.max(this.handed[r.room] ?? 0, r.seq);
+        if (r.change) cur.change = Math.max(cur.change || 0, r.change_n);
+        else cur.rooms[r.room] = Math.max(cur.rooms[r.room] ?? 0, r.seq);
       }
-      if (out.some((r) => !r.change)) await this.den.kv.put('handed', this.handed);
+      if (out.length) await this.den.kv.put('handedBy', this.handedBy);
       await this.handedOrders(out);
-      if (out.some((r) => r.change)) await this.den.kv.put('handedChange', this.handedChange);
       return out;
     } finally {
       this.listeners.delete(f);

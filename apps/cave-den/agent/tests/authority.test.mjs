@@ -18,7 +18,7 @@ function agent({ botOwner = OWNER, rules = { mode: 'all', takes_from: [BOT], fil
   };
   return a;
 }
-const task = { t: 'task', key: BOT, at: 1000, seq: 5, id: '1'.repeat(16), task: { id: 't1', to: ME, text: 'run the tests' } };
+const task = { t: 'msg', key: BOT, at: 1000, seq: 5, id: '1'.repeat(16), task: { id: 't1', to: ME, text: 'run the tests' } };
 
 test("a task from an agent of the same owner, under the owner's rules, is delegated", () => {
   const r = agent().recordOf('general', task);
