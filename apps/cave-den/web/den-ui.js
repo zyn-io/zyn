@@ -2,7 +2,7 @@
 // Everything here works on what den.js keeps on this device; nothing is
 // fetched in the clear but the den's ciphertext and the day keys.
 
-import { REACTIONS as EMOJI } from './den.js';
+import { REACTIONS as EMOJI, imageSize } from './den.js';
 import { mountAdmin, slowName } from './den-admin.js';
 const GROUP_MS = 5 * 60_000;
 // One line of text with nothing hidden in it: no bidirectional or zero-width
@@ -503,6 +503,10 @@ export function mountDen(den, el, me) {
     try {
       if (!urls.has(m.id)) {
         const blob = await den.openFile(m.file);
+        // Its size from its header first: a huge one is never decoded.
+        const size = imageSize(new Uint8Array(await blob.arrayBuffer()));
+        if (!size) return refuse(`${m.file.name}: this image could not be opened.`);
+        if (size.w * size.h > MAX_PIXELS) return refuse(`${m.file.name} is too large to show here.`);
         const bmp = await createImageBitmap(blob).catch(() => null);
         if (!bmp) return refuse(`${m.file.name}: this image could not be opened.`);
         const pixels = bmp.width * bmp.height;

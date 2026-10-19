@@ -363,3 +363,21 @@ test("a push notification's words are the page's own: only the den's name and a 
     ['Den', 'New message', ''],
   ]);
 });
+
+test("an image's size is read from its header, before anything decodes it", async () => {
+  const { imageSize } = await import('../dist/den.js');
+  const u8 = (...a) => new Uint8Array(a.flat());
+  const be32 = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const png = u8([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], be32(13), [...'IHDR'].map((c) => c.charCodeAt(0)), be32(30000), be32(20000), [8, 6, 0, 0, 0]);
+  assert.deepEqual(imageSize(png), { w: 30000, h: 20000 });
+  const gif = u8([...'GIF89a'].map((c) => c.charCodeAt(0)), [0x40, 0x01, 0xf0, 0x00]);
+  assert.deepEqual(imageSize(gif), { w: 320, h: 240 });
+  // JPEG: an APP segment first, then the frame header.
+  const jpg = u8([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x04, 0, 0, 0xff, 0xc2, 0x00, 0x11, 8, 0x0f, 0xa0, 0x1f, 0x40, 3]);
+  assert.deepEqual(imageSize(jpg), { w: 8000, h: 4000 });
+  const webp = u8([...'RIFF'].map((c) => c.charCodeAt(0)), [0, 0, 0, 0], [...'WEBPVP8X'].map((c) => c.charCodeAt(0)), [10, 0, 0, 0, 0, 0, 0, 0], [0xff, 0x0f, 0x00], [0xff, 0x0f, 0x00]);
+  assert.deepEqual(imageSize(webp), { w: 4096, h: 4096 });
+  const avif = u8([0, 0, 0, 20], [...'ispe'].map((c) => c.charCodeAt(0)), [0, 0, 0, 0], be32(9000), be32(9000));
+  assert.deepEqual(imageSize(avif), { w: 9000, h: 9000 });
+  assert.equal(imageSize(u8([1, 2, 3])), null, 'no header it knows: not shown');
+});

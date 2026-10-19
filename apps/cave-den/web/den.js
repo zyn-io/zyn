@@ -81,6 +81,44 @@ const plainText = (s) => String(s ?? '').replace(/[\t\n\r]/g, ' ').replace(/[\u0
 // Shown in place only these; anything else (SVG, HTML, …) is a download.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 
+/// An image's width and height from its header (PNG, GIF, JPEG, WebP, AVIF),
+/// read before anything decodes it, so a huge one is refused unopened; null
+/// for a header it does not know.
+export function imageSize(b) {
+  const u16 = (i) => (b[i] << 8) | b[i + 1];
+  const u32 = (i) => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+  const str = (i, n) => String.fromCharCode(...b.subarray(i, i + n));
+  if (b.length >= 24 && b[0] === 0x89 && str(1, 3) === 'PNG' && str(12, 4) === 'IHDR') return { w: u32(16), h: u32(20) };
+  if (b.length >= 10 && str(0, 3) === 'GIF') return { w: b[6] | (b[7] << 8), h: b[8] | (b[9] << 8) };
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    for (let i = 2; i + 9 < b.length;) {
+      if (b[i] !== 0xff) return null;
+      const t = b[i + 1];
+      if (t === 0xff) { i += 1; continue; }
+      if (t >= 0xc0 && t <= 0xcf && t !== 0xc4 && t !== 0xc8 && t !== 0xcc) return { w: u16(i + 7), h: u16(i + 5) };
+      if (t === 0xd8 || (t >= 0xd0 && t <= 0xd7) || t === 0x01) { i += 2; continue; }
+      i += 2 + u16(i + 2);
+    }
+    return null;
+  }
+  if (b.length >= 30 && str(0, 4) === 'RIFF' && str(8, 4) === 'WEBP') {
+    const c = str(12, 4);
+    if (c === 'VP8X') return { w: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), h: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) };
+    if (c === 'VP8 ' && b[23] === 0x9d && b[24] === 0x01 && b[25] === 0x2a) return { w: (b[26] | (b[27] << 8)) & 0x3fff, h: (b[28] | (b[29] << 8)) & 0x3fff };
+    if (c === 'VP8L' && b[20] === 0x2f) return { w: 1 + (b[21] | ((b[22] & 0x3f) << 8)), h: 1 + ((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10)) };
+    return null;
+  }
+  // AVIF (ISOBMFF): the largest 'ispe' (image spatial extents) box it holds.
+  let best = null;
+  for (let i = 4; i + 16 <= b.length && i < 1 << 20; i++) {
+    if (b[i] === 0x69 && str(i, 4) === 'ispe') {
+      const s = { w: u32(i + 8), h: u32(i + 12) };
+      if (!best || s.w * s.h > best.w * best.h) best = s;
+    }
+  }
+  return best;
+}
+
 /// A file message's fields as another device sent them, checked: a den blob
 /// id, a 32-byte key, a 12-byte iv, a size in range, a plain name. Null if
 /// any is wrong.
