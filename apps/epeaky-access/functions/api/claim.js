@@ -1,14 +1,17 @@
 // POST {pass, signature, wallet, signed}: checks the buy, then registers the
 // device's pass with the den.
 import { claim } from '../../lib/check.mjs';
-import { json, minLamports, rpc } from '../../lib/env.mjs';
+import { isSignature, isWallet, json, marketOut, minLamports, rpc } from '../../lib/env.mjs';
 
 export async function onRequestPost({ env, request }) {
   const body = await request.json().catch(() => ({}));
+  // Nothing that is not a signature and a wallet goes on to the Solana node.
+  if (!isSignature(body?.signature) || !isWallet(body?.wallet)) return json({ error: 'signed' }, 400);
   const db = env.CLAIMS;
   const r = await claim(body, {
     mint: env.MINT,
     minLamports: minLamports(env),
+    quote: (lamports) => marketOut(env, lamports),
     getTx: (s) => rpc(env, 'getTransaction', [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null),
     record: async (s, pass, wallet) => {
       const ins = await db.prepare('INSERT INTO claims (signature, pass, wallet, at) VALUES (?, ?, ?, ?) ON CONFLICT (signature) DO NOTHING')

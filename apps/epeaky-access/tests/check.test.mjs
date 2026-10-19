@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { decode, encode } from '../public/shared.mjs';
 import { claim, judge, message } from '../lib/check.mjs';
+import { jupiterize, P, WRAPPED } from './fixtures/jupiter.mjs';
 
 const MINT = '6dkcEZs83NpCJmWveasCMu3Kmd2XkCzSVmNJJhQBLtx1';
-const buy = JSON.parse(readFileSync(new URL('./fixtures/buy.json', import.meta.url)));
+const recorded = JSON.parse(readFileSync(new URL('./fixtures/buy.json', import.meta.url)));
+const buy = jupiterize(structuredClone(recorded));
 const BUYER = buy.transaction.message.accountKeys[0].pubkey;
 const AT = buy.blockTime * 1000 + 60_000;
 const opts = { wallet: BUYER, mint: MINT, minLamports: 100_000_000, now: AT };
@@ -17,12 +19,41 @@ test('base58 round-trips, leading zeros too', () => {
   assert.throws(() => decode('0OIl'));
 });
 
-test('a real buy of 0.19 SOL passes', () => assert.deepEqual(judge(buy, opts), { ok: true }));
+test('a buy of 0.19 SOL through Jupiter passes, with what went in and came out', () => {
+  const r = judge(buy, opts);
+  assert.equal(r.ok, true);
+  assert.equal(r.lamportsIn, 190_000_000);
+  assert.equal(r.tokensIn, 22241383923214n - 18057751453792n);
+});
+test('a buy that did not go through Jupiter (another app\'s router) is not one from this page', () => assert.equal(judge(recorded, opts).why, 'shape'));
+test('SOL sent anywhere but the payer\'s own wrapped-SOL account is refused', () => {
+  const t = edit((x) => { x.transaction.message.instructions[3].parsed.info.destination = 'B'.repeat(44); });
+  assert.equal(judge(t, opts).why, 'shape');
+});
+test('tokens slipped in beside the swap (a top-level transfer) are refused', () => {
+  for (const type of ['transfer', 'transferChecked']) {
+    const t = edit((x) => { x.transaction.message.instructions.splice(6, 0, { program: 'spl-token', programId: P.token, parsed: { type, info: { source: 'S', destination: 'D', amount: '5' } } }); });
+    assert.equal(judge(t, opts).why, 'shape', type);
+  }
+});
+test('a program outside the list is refused; the wallet\'s guard and memo are fine', () => {
+  assert.equal(judge(edit((x) => { x.transaction.message.instructions.push({ programId: 'Evi1111111111111111111111111111111111111111', accounts: [], data: '' }); }), opts).why, 'shape');
+  const guarded = edit((x) => { x.transaction.message.instructions.push({ programId: 'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95', accounts: [], data: 'x' }, { program: 'spl-memo', programId: 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', parsed: 'hi' }); });
+  assert.equal(judge(guarded, opts).ok, true);
+});
+test('no Jupiter route at all is refused', () => assert.equal(judge(edit((x) => { x.transaction.message.instructions.splice(5, 1); }), opts).why, 'shape'));
+test('a wrapped-SOL account of someone else does not count', () => {
+  const t = edit((x) => { x.transaction.message.instructions[2].parsed.info.wallet = 'C'.repeat(44); });
+  assert.equal(judge(t, opts).why, 'shape');
+});
+test('a closeAccount that sends the SOL elsewhere is refused', () => {
+  assert.equal(judge(edit((x) => { x.transaction.message.instructions[6].parsed.info.destination = 'D'.repeat(44); }), opts).why, 'shape');
+});
 test('no transaction yet', () => assert.equal(judge(null, opts).why, 'missing'));
 test('a failed transaction', () => assert.equal(judge(edit((t) => { t.meta.err = { InstructionError: [0, 'x'] }; }), opts).why, 'failed'));
 test('an old one', () => assert.equal(judge(buy, { ...opts, now: AT + 20 * 60_000 }).why, 'old'));
 test('someone else paid', () => assert.equal(judge(buy, { ...opts, wallet: MINT }).why, 'payer'));
-test('under the smallest amount', () => assert.equal(judge(buy, { ...opts, minLamports: 250_000_000 }).why, 'small'));
+test('under the smallest amount into the swap', () => assert.equal(judge(buy, { ...opts, minLamports: 250_000_000 }).why, 'small'));
 test('no EPEAKY came in (a sell)', () => assert.equal(judge(edit((t) => { t.meta.postTokenBalances = t.meta.preTokenBalances; }), opts).why, 'token'));
 
 // A wallet of our own, so the message signature is real.
@@ -31,6 +62,7 @@ const WALLET = encode(new Uint8Array(await crypto.subtle.exportKey('raw', key.pu
 const mine = edit((t) => {
   t.transaction.message.accountKeys[0].pubkey = WALLET;
   for (const b of [...t.meta.preTokenBalances, ...t.meta.postTokenBalances]) if (b.owner === BUYER) b.owner = WALLET;
+  jupiterize(t);
 });
 const SIG = buy.transaction.signatures[0];
 const PASS = 'ab'.repeat(32);
@@ -42,6 +74,8 @@ function deps(rows = new Map(), registered = []) {
     getTx: async (s) => (s === SIG ? mine : null),
     record: async (s, pass) => { if (!rows.has(s)) { rows.set(s, pass); return 'new'; } return rows.get(s) === pass ? 'same' : 'other'; },
     register: async (pass) => { registered.push(pass); return { ok: true }; },
+    // Jupiter's quote for the SOL that went in: here, about what this buy got.
+    quote: async () => 4_000_000_000_000,
     rows, registered,
   };
 }
@@ -97,14 +131,22 @@ import { move } from '../lib/check.mjs';
 import { moveMessage } from '../public/shared.mjs';
 
 const DAY = 24 * 3600_000;
+// The claims row as D1 holds it: take and restore are conditional updates,
+// as their SQL is, so only one of two moves at once can take the row.
 function moves(row, log = []) {
   return {
     now: () => AT,
-    latest: async (w) => (w === WALLET ? row : null),
-    swap: async (s, pass, at) => { log.push(['swap', s, pass]); row.pass = pass; row.moved_at = at; },
+    latest: async (w) => (w === WALLET && row ? { ...row } : null),
+    take: async (s, from, to, at, before) => {
+      log.push(['take', s, from, to]);
+      if (row.signature !== s || row.pass !== from || (row.moved_at !== null && row.moved_at >= before)) return false;
+      Object.assign(row, { pass: to, moved_at: at });
+      return true;
+    },
+    restore: async (s, from, to, movedAt) => { log.push(['restore', s, to]); if (row.pass === from) Object.assign(row, { pass: to, moved_at: movedAt }); },
     unregister: async (pass) => { log.push(['unregister', pass]); return { ok: true }; },
-    register: async (pass) => { log.push(['register', pass]); return { ok: true }; },
-    log,
+    register: async (pass) => { log.push(['register', pass]); await new Promise((r) => setTimeout(r, 5)); return { ok: true }; },
+    row, log,
   };
 }
 const NEW = 'ef'.repeat(32);
@@ -113,7 +155,7 @@ test('the wallet that bought moves its access: old pass out, new pass in', async
   const d = moves({ signature: SIG, pass: PASS, moved_at: null });
   const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
   assert.deepEqual(r, { ok: true });
-  assert.deepEqual(d.log, [['register', NEW], ['swap', SIG, NEW], ['unregister', PASS]]);
+  assert.deepEqual(d.log, [['take', SIG, PASS, NEW], ['register', NEW], ['unregister', PASS]]);
 });
 
 test('a wallet that never bought has nothing to move', async () => {
@@ -143,9 +185,43 @@ test('moving to the device that already has it changes nothing', async () => {
   assert.deepEqual(d.log, []);
 });
 
-test('the den failing to take the new pass leaves the record as it was', async () => {
+test('the den failing to take the new pass puts the record back, and the old device keeps its access', async () => {
   const d = { ...moves({ signature: SIG, pass: PASS, moved_at: null }), register: async () => ({ error: 503 }) };
   const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
   assert.equal(r.why, 'den');
-  assert.deepEqual(d.log, [], 'the old device keeps its access');
+  assert.deepEqual(d.log, [['take', SIG, PASS, NEW], ['restore', SIG, PASS]]);
+  assert.equal(d.row.pass, PASS);
+  assert.ok(!d.log.some(([k]) => k === 'unregister'), 'nobody is taken out');
+});
+
+test('two moves at once: one wins, the other waits; one buy never lets in two new devices', async () => {
+  const d = moves({ signature: SIG, pass: PASS, moved_at: null });
+  const B = '12'.repeat(32);
+  const [r1, r2] = await Promise.all([
+    move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d),
+    move({ pass: B, wallet: WALLET, at: AT, signed: await sign(moveMessage(B, WALLET, AT)) }, d),
+  ]);
+  assert.deepEqual([r1.ok, r2.ok].sort(), [false, true]);
+  assert.equal((r1.ok ? r2 : r1).why, 'soon');
+  assert.equal(d.log.filter(([k]) => k === 'register').length, 1, 'only the winner is registered');
+});
+
+test('a failed unregister is tried again, and said, not ignored', async () => {
+  let tries = 0;
+  const d = { ...moves({ signature: SIG, pass: PASS, moved_at: null }), unregister: async () => { tries++; return { error: 503 }; } };
+  const r = await move({ pass: NEW, wallet: WALLET, at: AT, signed: await sign(moveMessage(NEW, WALLET, AT)) }, d);
+  assert.equal(r.ok, true, 'the new device is in');
+  assert.equal(tries, 2);
+  assert.equal(r.left, PASS, 'the pass still to take out, for the log');
+});
+
+test('a buy that got far fewer $EPEAKY than the market gives is refused; a failed quote is a retry', async () => {
+  const cheap = { ...deps(), quote: async () => 9_000_000_000_000 };
+  const r = await claim({ pass: PASS, signature: SIG, wallet: WALLET, signed: await sign(message(PASS, SIG)) }, cheap);
+  assert.equal(r.why, 'price');
+  assert.deepEqual(cheap.registered, []);
+  const down = { ...deps(), quote: async () => { throw new Error('jupiter'); } };
+  const q = await claim({ pass: PASS, signature: SIG, wallet: WALLET, signed: await sign(message(PASS, SIG)) }, down);
+  assert.equal(q.why, 'quote');
+  assert.ok(q.status >= 500, 'the page offers Check again');
 });

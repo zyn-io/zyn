@@ -14,6 +14,8 @@ const WHY = {
   payer: 'This wallet did not make that buy.',
   small: 'The buy was under the smallest amount.',
   token: 'That transaction did not buy $EPEAKY.',
+  shape: 'That transaction is not a buy made on this page.',
+  price: 'That buy got far fewer $EPEAKY than the market gives right now.',
   signed: 'The wallet did not sign the message for this device.',
   used: 'This buy already let a device in.',
   den: 'The buy is fine, but the den did not answer. Press Check again.',

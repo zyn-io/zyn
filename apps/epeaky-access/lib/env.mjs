@@ -44,6 +44,23 @@ export async function quote(env, sol) {
   return r.json();
 }
 
+/// What Jupiter gives now for `lamports` of SOL, in the mint's base units:
+/// the market price a claimed buy is held to.
+export async function marketOut(env, lamports) {
+  const u = new URL(`${JUP}/quote`);
+  u.search = new URLSearchParams({ inputMint: SOL_MINT, outputMint: env.MINT, amount: String(lamports), slippageBps: '300' });
+  const r = await fetch(u);
+  if (!r.ok) throw new Error('quote');
+  const out = (await r.json()).outAmount;
+  if (!/^\d+$/.test(String(out))) throw new Error('quote');
+  return out;
+}
+
+/// A transaction signature: 64 bytes of base58. Checked before asking a node.
+export function isSignature(s) {
+  try { return typeof s === 'string' && s.length <= 100 && decode(s).length === 64; } catch { return false; }
+}
+
 export async function swap(q, wallet) {
   const r = await fetch(`${JUP}/swap`, {
     method: 'POST',

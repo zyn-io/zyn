@@ -14,9 +14,13 @@ export async function onRequestPost({ env, request }) {
     }).catch(() => null);
   const r = await move(body, {
     latest: (w) => db.prepare('SELECT signature, pass, moved_at FROM claims WHERE wallet = ? ORDER BY at DESC LIMIT 1').bind(w).first(),
+    // Only if the row is still as it was read: one of two moves at once wins.
+    take: async (s, from, to, at, before) => (await db.prepare('UPDATE claims SET pass = ?, moved_at = ? WHERE signature = ? AND pass = ? AND (moved_at IS NULL OR moved_at < ?)').bind(to, at, s, from, before).run()).meta.changes === 1,
+    restore: (s, from, to, movedAt) => db.prepare('UPDATE claims SET pass = ?, moved_at = ? WHERE signature = ? AND pass = ?').bind(to, movedAt, s, from).run(),
     register: async (pass) => ({ ok: (await door('POST', '/door/passes', { pass }))?.ok === true }),
-    swap: (s, pass, at) => db.prepare('UPDATE claims SET pass = ?, moved_at = ? WHERE signature = ?').bind(pass, at, s).run(),
-    unregister: (pass) => door('DELETE', `/door/passes/${pass}`),
+    unregister: async (pass) => ({ ok: (await door('DELETE', `/door/passes/${pass}`))?.ok === true }),
   });
+  // A pass the den would not take out: logged, for the host to take out by hand.
+  if (r.left) console.error(`epeaky-access: move: the den did not take out pass ${r.left}`);
   return r.ok ? json({ ok: true }) : json({ error: r.why, next: r.next }, r.status);
 }
