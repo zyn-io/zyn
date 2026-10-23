@@ -1,6 +1,6 @@
 # Zyn Pay: scheduled payments, one-off payments and refunds
 
-Design, 23 Oct 2026. Status: for review, not built.
+Design, 23 Oct 2026. Status: built on branch zyn-pay (ledger + node), not deployed; Nap and merchant package not built.
 
 ## Goal
 
@@ -81,18 +81,31 @@ them (tier 2).
 | `PayClock { at }` | operator | Advances the clock; pays every schedule due at or before `at`, oldest first, at most `MAX_DUE_PER_TICK` (256, S5), the rest at the next tick. |
 
 Each payout is a claim for the payee (`market.pay`), which the payee's
-wallet or server collects as usual (`zyn_collect`). Claims gain an optional
-`reference` and period number (today they hold owner, asset and amount
-only), so the merchant can match a payment to its subscription.
+wallet or server collects as usual (`zyn_collect`). Claims do not change. Payment ids derive from the schedule and the period,
+and a payee's claim is `claim_id(payment, 0)`, so the merchant matches a
+payment to its subscription by id (DECISIONS §188.7).
 
 A due schedule whose pot holds less than one period is marked `unfunded`
-and pays nothing; it resumes after a top-up. Nothing is partially paid.
+and pays nothing; a top-up resumes it at the latest period already due.
+Periods skipped while unfunded are never charged and count against
+`remaining`, so "N times from date D" keeps its end date; after the term's
+last due date has passed, a resume pays at most that one overdue period.
+Nothing is partially paid.
+
+A cancel takes effect immediately: periods due but not yet paid (for example
+held back by the 256-per-tick cap) are not paid, and their money returns with
+the pot. A refused pay op leaves ledger state unchanged.
 
 ### The clock
 
 `PayClock` is posted by the operator like `LendTime` and `DaoClock`: forward
-only, and refused if more than 120 s ahead of the epoch's own timestamp. A
-schedule therefore pays within one tick of its due time, and never early.
+only, and by at most an hour per post, because the ledger holds no epoch
+timestamp to check it against. The node posts it every `ZYN_PAY_TICK_SECS`
+(default 10 s) and catches up an hour per post after downtime. A schedule
+therefore pays within one tick of its due time, and never early. Until the
+clock has caught up, a new schedule's first due date is checked against the
+clock's last time, so a past first date can be accepted and paid from the
+payer's own pot.
 The operator can delay a tick; that is the same trust as every other
 operator-sequenced action, and a delay shows in the journal.
 
@@ -166,7 +179,7 @@ small `zyn-pay serve` service:
 
 - Insufficient inputs, unknown asset, payee without viewing key, past
   `first_due`, zero amount or periods: refused at sequencing with a reason.
-- Clock ahead of the epoch by more than 120 s, or backwards: refused.
+- Clock more than an hour ahead of its last time, or backwards: refused.
 - More than 256 schedules due in one tick: the rest pay at the next tick, in
   due order; never skipped.
 - Refund above the unrefunded amount, or by anyone but the payee: refused.

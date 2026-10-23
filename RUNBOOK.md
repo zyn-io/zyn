@@ -2814,6 +2814,21 @@ curl -s -X POST 127.0.0.1:8499 -d "{\"method\":\"zyn_submit\",\"token\":\"$T\",\
 `zyn_market` shows `fees`, `zyn_pot` and `collections`; check the pot against
 the fees after any credit, withdrawal or sale.
 
+## Zyn Pay (23 Oct 2026, DECISIONS §188)
+
+Built on branch `zyn-pay` (ledger ops 69–74 and the node); **not deployed**. Nap and the merchant package are not built.
+
+- `ZYN_PAY_TICK_SECS` (node env, default `10`, minimum `5`): how often the node posts the pay clock. The clock is silent until the chain has any pay state; from then on the node posts it at this interval for good, and skips posts while halted. Each post is one journal record and one operator "Pay clock" row in ZynScan. After downtime it catches up an hour per post.
+- Read methods, on the node's RPC (loopback `127.0.0.1:8499` on the testnet and mainnet boxes). `ids` is a comma-separated list of 32-byte hex ids, at most 256; unknown ids are left out; the payer is never in the answer:
+
+```sh
+curl -s -X POST 127.0.0.1:8499 -d '{"method":"zyn_paySchedules","ids":"<hex>"}'
+curl -s -X POST 127.0.0.1:8499 -d '{"method":"zyn_payPayments","ids":"<hex>"}'
+```
+
+  `zyn_paySchedules` takes schedule ids; `zyn_payPayments` takes payment ids.
+- Rollout order (verifier first, §51.8): replicas and ZynScan take the build first, then the signers, then the sequencer, which is the one that starts emitting pay ops. Testnet 212 first; mainnet 26460 after the NU7 switch.
+
 ## 5f-undecies. The bridge from the wallet (23 Sep 2026)
 
 **In:** Nap asks `zyn_depositAddress {account}`; if the answer says
