@@ -326,6 +326,137 @@ pub(crate) fn decode(d: &mut zyn_vm::read::Decoder) -> Option<Pay> {
     Some(p)
 }
 
+impl ObjectVm {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_pay_create(
+        &mut self,
+        payer: &AccountId,
+        payee: &AccountId,
+        asset: &Address,
+        amount: Fixed,
+        every: Every,
+        first_due: u64,
+        periods: Option<u32>,
+        fund_periods: u32,
+        reference: &Hash,
+        nonce: &Hash,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        if payer == payee {
+            return Err("a schedule cannot pay its own payer");
+        }
+        if !self.viewing.contains_key(payee) {
+            return Err("the payee has not registered where to be paid");
+        }
+        if amount.0 <= 0 {
+            return Err("an amount must be above nothing");
+        }
+        if due_at(first_due, every, 1).is_none() {
+            return Err("a schedule needs a period above nothing");
+        }
+        if fund_periods == 0 {
+            return Err("fund at least one period");
+        }
+        if periods == Some(0) || periods.is_some_and(|p| fund_periods > p) {
+            return Err("fund no more periods than the schedule has");
+        }
+        if first_due < self.market.pay.time {
+            return Err("the first payment is already past");
+        }
+        let id = schedule_id(payer, nonce);
+        self.fresh_source(&id)?;
+        let pot = amount.0.checked_mul(fund_periods as i128).ok_or("that schedule is too large")?;
+        let f = self.plan_funding(payer, inputs, change, &[(*asset, Fixed(pot))])?;
+        self.apply_funding(payer, inputs, f);
+        self.market.pay.schedules.insert(
+            id,
+            Schedule {
+                payer: *payer,
+                payee: *payee,
+                asset: *asset,
+                amount,
+                every,
+                first_due,
+                index: 0,
+                remaining: periods,
+                pot: Fixed(pot),
+                reference: *reference,
+                state: ScheduleState::Active,
+            },
+        );
+        Ok(Receipt::Paid { id })
+    }
+
+    pub(crate) fn apply_pay_top_up(
+        &mut self,
+        payer: &AccountId,
+        schedule: &Hash,
+        periods: u32,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        let s = *self.market.pay.schedules.get(schedule).ok_or("no such schedule")?;
+        if &s.payer != payer {
+            return Err("not your schedule");
+        }
+        if matches!(s.state, ScheduleState::Ended | ScheduleState::Cancelled) {
+            return Err("that schedule has ended");
+        }
+        if periods == 0 {
+            return Err("fund at least one period");
+        }
+        // Resuming skips the periods missed while unfunded. They count against
+        // the term, so a fixed term keeps its end date. Worked out on copies.
+        let time = self.market.pay.time;
+        let (mut index, mut remaining) = (s.index, s.remaining);
+        if s.state == ScheduleState::Unfunded {
+            while let Some(next) = index.checked_add(1) {
+                if remaining.is_some_and(|r| r <= 1) || !due_at(s.first_due, s.every, next).is_some_and(|d| d <= time) {
+                    break;
+                }
+                index = next;
+                remaining = remaining.map(|r| r - 1);
+            }
+        }
+        if remaining == Some(0) {
+            return Err("nothing left to pay on that schedule");
+        }
+        let add = s.amount.0.checked_mul(periods as i128).ok_or("that schedule is too large")?;
+        let pot = s.pot.0.checked_add(add).ok_or("that schedule is too large")?;
+        if let Some(r) = remaining {
+            if pot > s.amount.0.saturating_mul(r as i128) {
+                return Err("fund no more periods than the schedule has");
+            }
+        }
+        let f = self.plan_funding(payer, inputs, change, &[(s.asset, Fixed(add))])?;
+        self.apply_funding(payer, inputs, f);
+        let m = self.market.pay.schedules.get_mut(schedule).expect("checked above");
+        m.pot = Fixed(pot);
+        m.index = index;
+        m.remaining = remaining;
+        if m.state == ScheduleState::Unfunded {
+            m.state = ScheduleState::Active;
+        }
+        Ok(Receipt::Paid { id: *schedule })
+    }
+
+    pub(crate) fn apply_pay_cancel(&mut self, payer: &AccountId, schedule: &Hash) -> Result<Receipt, &'static str> {
+        let s = *self.market.pay.schedules.get(schedule).ok_or("no such schedule")?;
+        if &s.payer != payer {
+            return Err("not your schedule");
+        }
+        if matches!(s.state, ScheduleState::Ended | ScheduleState::Cancelled) {
+            return Err("that schedule has ended");
+        }
+        crate::market::Market::pay(&mut self.market, &cancel_source(schedule), 0, s.payer, s.asset, s.pot);
+        let m = self.market.pay.schedules.get_mut(schedule).expect("checked above");
+        m.pot = Fixed::ZERO;
+        m.state = ScheduleState::Cancelled;
+        Ok(Receipt::Paid { id: *schedule })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,127 +506,5 @@ mod tests {
         let n = [2u8; 32];
         assert_ne!(schedule_id(&a, &n), pay_once_id(&a, &n));
         assert_ne!(pay_payment_id(&schedule_id(&a, &n), 0), pay_payment_id(&schedule_id(&a, &n), 1));
-    }
-}
-
-impl ObjectVm {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn apply_pay_create(
-        &mut self,
-        payer: &AccountId,
-        payee: &AccountId,
-        asset: &Address,
-        amount: Fixed,
-        every: Every,
-        first_due: u64,
-        periods: Option<u32>,
-        fund_periods: u32,
-        reference: &Hash,
-        nonce: &Hash,
-        inputs: &[(Hash, Hash)],
-        change: &[Output],
-    ) -> Result<Receipt, &'static str> {
-        if payer == payee {
-            return Err("a schedule cannot pay its own payer");
-        }
-        if !self.viewing.contains_key(payee) {
-            return Err("the payee has not registered where to be paid");
-        }
-        if amount.0 <= 0 {
-            return Err("an amount must be above nothing");
-        }
-        if due_at(first_due, every, 1).is_none() {
-            return Err("a schedule needs a period above nothing");
-        }
-        if fund_periods == 0 {
-            return Err("fund at least one period");
-        }
-        if periods == Some(0) || periods.is_some_and(|p| fund_periods > p) {
-            return Err("fund no more periods than the schedule has");
-        }
-        if first_due < self.market.pay.time {
-            return Err("the first payment is already past");
-        }
-        let id = schedule_id(payer, nonce);
-        self.fresh_source(&id)?;
-        if self.market.pay.schedules.contains_key(&id) {
-            return Err("that schedule already exists");
-        }
-        let pot = amount.0.checked_mul(fund_periods as i128).ok_or("that schedule is too large")?;
-        let f = self.plan_funding(payer, inputs, change, &[(*asset, Fixed(pot))])?;
-        self.apply_funding(payer, inputs, f);
-        self.market.pay.schedules.insert(
-            id,
-            Schedule {
-                payer: *payer,
-                payee: *payee,
-                asset: *asset,
-                amount,
-                every,
-                first_due,
-                index: 0,
-                remaining: periods,
-                pot: Fixed(pot),
-                reference: *reference,
-                state: ScheduleState::Active,
-            },
-        );
-        Ok(Receipt::Paid { id })
-    }
-
-    pub(crate) fn apply_pay_top_up(
-        &mut self,
-        payer: &AccountId,
-        schedule: &Hash,
-        periods: u32,
-        inputs: &[(Hash, Hash)],
-        change: &[Output],
-    ) -> Result<Receipt, &'static str> {
-        let s = *self.market.pay.schedules.get(schedule).ok_or("no such schedule")?;
-        if &s.payer != payer {
-            return Err("not your schedule");
-        }
-        if matches!(s.state, ScheduleState::Ended | ScheduleState::Cancelled) {
-            return Err("that schedule has ended");
-        }
-        if periods == 0 {
-            return Err("fund at least one period");
-        }
-        let add = s.amount.0.checked_mul(periods as i128).ok_or("that schedule is too large")?;
-        let pot = s.pot.0.checked_add(add).ok_or("that schedule is too large")?;
-        if let Some(r) = s.remaining {
-            if pot > s.amount.0.saturating_mul(r as i128) {
-                return Err("fund no more periods than the schedule has");
-            }
-        }
-        let f = self.plan_funding(payer, inputs, change, &[(s.asset, Fixed(add))])?;
-        self.apply_funding(payer, inputs, f);
-        let time = self.market.pay.time;
-        let m = self.market.pay.schedules.get_mut(schedule).expect("checked above");
-        m.pot = Fixed(pot);
-        if m.state == ScheduleState::Unfunded {
-            // Periods missed while unfunded are skipped, not charged later:
-            // move to the latest one already due, which the next tick pays.
-            while due_at(m.first_due, m.every, m.index + 1).is_some_and(|d| d <= time) {
-                m.index += 1;
-            }
-            m.state = ScheduleState::Active;
-        }
-        Ok(Receipt::Paid { id: *schedule })
-    }
-
-    pub(crate) fn apply_pay_cancel(&mut self, payer: &AccountId, schedule: &Hash) -> Result<Receipt, &'static str> {
-        let s = *self.market.pay.schedules.get(schedule).ok_or("no such schedule")?;
-        if &s.payer != payer {
-            return Err("not your schedule");
-        }
-        if matches!(s.state, ScheduleState::Ended | ScheduleState::Cancelled) {
-            return Err("that schedule has ended");
-        }
-        crate::market::Market::pay(&mut self.market, &cancel_source(schedule), 0, s.payer, s.asset, s.pot);
-        let m = self.market.pay.schedules.get_mut(schedule).expect("checked above");
-        m.pot = Fixed::ZERO;
-        m.state = ScheduleState::Cancelled;
-        Ok(Receipt::Paid { id: *schedule })
     }
 }

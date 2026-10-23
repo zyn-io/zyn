@@ -288,3 +288,90 @@ fn top_up_adds_periods_and_cancel_returns_the_pot() {
     assert_eq!(c.refused(Op::PayTopUp { payer: ALICE, program: program::pay_manage(), schedule: id, periods: 1, inputs, change }), "that schedule has ended");
     assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: id }), "that schedule has ended");
 }
+
+fn unfund_after_one_paid(c: &mut Chain, id: Hash, at: u64) {
+    // Stand in for the clock (Task 5): period 0 paid out to a claim, the
+    // schedule out of money.
+    let s = c.vm.market.pay.schedules.get_mut(&id).unwrap();
+    let paid = s.amount;
+    s.pot = Fixed::ZERO;
+    s.index = 1;
+    s.remaining = s.remaining.map(|r| r - 1);
+    s.state = ScheduleState::Unfunded;
+    c.vm.market.claims.insert(objectvm::market::claim_id(&[0x99; 32], 0), objectvm::market::Claim { owner: SHOP, asset: BOLD, amount: paid });
+    c.vm.market.pay.time = at;
+}
+
+fn top_up(c: &mut Chain, id: Hash, periods: u32, who: AccountId) -> Op {
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10 * periods as i128));
+    Op::PayTopUp { payer: who, program: program::pay_manage(), schedule: id, periods, inputs, change }
+}
+
+#[test]
+fn resume_after_a_gap_keeps_the_end_date() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(4), 1);
+    unfund_after_one_paid(&mut c, id, NOV1 + 5 * DAY);
+    // Periods 1 and 2 are skipped; only the last of the four remains.
+    let op = top_up(&mut c, id, 2, ALICE);
+    assert_eq!(c.refused(op), "fund no more periods than the schedule has");
+    let op = top_up(&mut c, id, 1, ALICE);
+    c.ok(op);
+    let s = c.vm.market.pay.schedules[&id];
+    assert_eq!((s.index, s.remaining, s.state, s.pot), (3, Some(1), ScheduleState::Active, whole(10)));
+    assert!(c.vm.market.pay.payments.is_empty());
+}
+
+#[test]
+fn top_up_after_the_term_has_run_out_is_refused() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(1), 1);
+    unfund_after_one_paid(&mut c, id, NOV1 + 5 * DAY);
+    let before = c.vm.market.pay.schedules[&id];
+    let op = top_up(&mut c, id, 1, ALICE);
+    assert_eq!(c.refused(op), "nothing left to pay on that schedule");
+    assert_eq!(c.vm.market.pay.schedules[&id], before);
+}
+
+#[test]
+fn top_up_cannot_go_past_the_term() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(3), 2);
+    let op = top_up(&mut c, id, 2, ALICE);
+    assert_eq!(c.refused(op), "fund no more periods than the schedule has");
+}
+
+#[test]
+fn create_refuses_a_term_it_cannot_fund() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    for (periods, fund) in [(Some(0), 1), (Some(2), 3)] {
+        let nonce = c.fresh();
+        let (inputs, change) = c.fund(ALICE, BOLD, whole(30));
+        let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Days(1), first_due: NOV1, periods, fund_periods: fund, reference: [0; 32], nonce, inputs, change };
+        assert_eq!(c.refused(op), "fund no more periods than the schedule has");
+    }
+}
+
+#[test]
+fn unknown_schedules_and_wrong_programs_are_refused() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, None, 1);
+    let ghost = [0x66; 32];
+    let op = top_up(&mut c, ghost, 1, ALICE);
+    assert_eq!(c.refused(op), "no such schedule");
+    assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: ghost }), "no such schedule");
+    let wrong = program::pay_clock();
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayCreate { payer: ALICE, program: wrong, payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Days(1), first_due: NOV1, periods: None, fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+    assert_eq!(c.refused(op), "wrong program for a scheduled payment");
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayTopUp { payer: ALICE, program: wrong, schedule: id, periods: 1, inputs, change };
+    assert_eq!(c.refused(op), "wrong program for a top-up");
+    assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: wrong, schedule: id }), "wrong program for a cancellation");
+}
