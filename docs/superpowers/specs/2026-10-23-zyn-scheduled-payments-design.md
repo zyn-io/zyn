@@ -1,0 +1,195 @@
+# Zyn Pay: scheduled payments, one-off payments and refunds
+
+Design, 23 Oct 2026. Status: for review, not built.
+
+## Goal
+
+A merchant can sell a subscription, a donation plan or any repeating payment
+in ZEC, ETH, SOL or BOLD, and get paid every period without the customer
+doing anything after the first approval. A merchant can also take one-off
+payments and refund them without ever learning who paid.
+
+Zcash itself cannot do this: every shielded spend needs a fresh proof made
+with the spending key, so a ZEC subscription needs the customer's wallet open
+each period. CipherPay's subscriptions say so plainly ("Zcash requires the
+customer to actively send each payment") and send the customer an invoice
+link each time. On Zyn the customer signs once and the ledger keeps the
+schedule.
+
+Background: the ZEC Pay design (2026-10-23-zec-pay-design.md) is parked —
+CipherPay has run that product on mainnet since February.
+
+## What the customer approves
+
+One consent card in Nap (S13: every field that changes the outcome is shown):
+
+> **Pay merchant.example 10 BOLD every month, 12 times, from 1 Nov 2026.**
+> Sets aside 120 BOLD now. Cancel any time; what has not been paid comes back.
+
+The customer chooses how many periods to fund now (at least one). Funding
+fewer than the total is allowed; Nap reminds them to top up before the
+money runs out.
+
+## Why funds are set aside
+
+On the object ledger value lives in notes, and spending a note needs a
+nullifier only its owner can derive. The ledger therefore cannot take money
+from a customer's notes later. Instead, approval moves the funded amount out
+of the customer's notes into the schedule (the same way market orders and
+lending pools hold value), and the ledger pays out of that on each due date.
+
+Consequences, stated to the customer:
+- the amount set aside is not spendable while the schedule runs;
+- cancelling returns the unpaid remainder at once;
+- the merchant can never take more than one period's amount per period.
+
+A later phase may let Nap top a schedule up automatically while it is open
+(auto top-up, phase 2). The ledger rule stays the same.
+
+## Ledger changes (`objectvm/src/pay.rs`)
+
+### State
+
+`Schedule`:
+- `id` — `H(payer ‖ nonce)`;
+- `payer`, `payee` (account ids);
+- `asset`, `amount` (per period);
+- `every` — `Days(n)` or `Months(n)`; months use the UTC calendar (a
+  schedule started on the 31st pays on the last day of shorter months);
+- `next_due` (operator-clock seconds), `remaining` periods (or unlimited);
+- `pot` — amount set aside and not yet paid;
+- `reference` — 32 bytes chosen by the merchant (its subscription id);
+- `state` — `active`, `unfunded`, `ended`, `cancelled`.
+
+`Payment` (every payment made through `pay`, for refunds):
+- `id` — `H(schedule ‖ period)` or `H(payer ‖ nonce)` for one-off;
+- `payer`, `payee`, `asset`, `amount`, `refunded`.
+
+Both live in a new state section as a Merkle root of blinded leaves, like the
+market's claims: the public learns nothing; the operator and replicas read
+them (tier 2).
+
+### Ops
+
+| Op | Authority (S14) | Does |
+|---|---|---|
+| `PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change }` | payer | Consumes `inputs`, moves `amount × fund_periods` into the pot, creates the schedule. Refuses a payee with no registered viewing key, `first_due` in the past, `fund_periods < 1`. |
+| `PayTopUp { payer, schedule, periods, inputs, change }` | payer | Adds to the pot; an `unfunded` schedule becomes `active` and pays what is due at the next tick. |
+| `PayCancel { payer, schedule }` | payer | Ends it now; the pot becomes a claim for the payer. |
+| `PayOnce { payer, payee, asset, amount, reference, nonce, inputs, change }` | payer | A one-off payment with a refundable record. |
+| `PayRefund { payee, payment, amount, inputs, change }` | payee | Pays up to the unrefunded amount back to the original payer as a claim. The payee names the payment, never the payer. |
+| `PayClock { at }` | operator | Advances the clock; pays every schedule due at or before `at`, oldest first, at most `MAX_DUE_PER_TICK` (256, S5), the rest at the next tick. |
+
+Each payout is a claim for the payee (`market.pay`), which the payee's
+wallet or server collects as usual (`zyn_collect`). Claims gain an optional
+`reference` and period number (today they hold owner, asset and amount
+only), so the merchant can match a payment to its subscription.
+
+A due schedule whose pot holds less than one period is marked `unfunded`
+and pays nothing; it resumes after a top-up. Nothing is partially paid.
+
+### The clock
+
+`PayClock` is posted by the operator like `LendTime` and `DaoClock`: forward
+only, and refused if more than 120 s ahead of the epoch's own timestamp. A
+schedule therefore pays within one tick of its due time, and never early.
+The operator can delay a tick; that is the same trust as every other
+operator-sequenced action, and a delay shows in the journal.
+
+### Fee
+
+0.5% of each scheduled or one-off payment, taken from the payee's side and
+paid to the team treasury (the fee pot). Refunds carry no fee and do not
+return it. The rate is a committed parameter.
+
+### Rollout
+
+New ops and a new state section are a chain-format change: verifier first
+(§51.8). Every signer and replica takes the new build before the sequencer
+emits a `Pay*` op. Testnet 212 first; mainnet 26460 after the NU7 switch.
+
+## Nap
+
+- Consent cards for `PayCreate`, `PayOnce` and `PayTopUp`, from the typed
+  intent (S13).
+- A **Payments** list under Zyn: each schedule with payee, amount, next
+  payment, funded until, Top up, Cancel; past payments and refunds.
+- A notice 7 days (or one period, if shorter) before a pot runs out, and
+  when a schedule turns `unfunded`.
+- Nap Connect methods: `zyn_payCreate`, `zyn_payOnce`, `zyn_payTopUp`,
+  `zyn_payCancel`, `zyn_paySchedules`.
+
+## Merchant side
+
+The merchant is a Zyn account. `@zyn-io/pay` (Node) and the same engine as a
+small `zyn-pay serve` service:
+
+- **Checkout:** `checkout({ plan | amount, reference })` returns what the page
+  passes to Nap Connect (`zyn_payCreate` / `zyn_payOnce`); a page without Nap
+  shows "Pay with Nap" and the Nap web link.
+- **Watching:** reads the payee's claims through the node's signed account
+  reads and collects them. No viewing key leaves the merchant.
+- **Refunds:** `refund(paymentId, amount)` signs `PayRefund` with the merchant
+  key.
+- **Webhooks**, versioned, each with an event id and a timestamped HMAC
+  signature: `subscription.created`, `payment.succeeded`,
+  `subscription.unfunded`, `subscription.resumed`, `subscription.cancelled`,
+  `subscription.ended`, `payment.refunded`.
+- **API** under `/v1`: `POST /checkouts` (Idempotency-Key),
+  `GET /subscriptions/:reference`, `GET /payments/:id`,
+  `POST /payments/:id/refund`.
+- Built gateway-ready as in the parked ZEC Pay design: every record keyed by
+  merchant id, storage behind an interface, a hosted multi-merchant service
+  possible later.
+
+## What is visible to whom (shown inline in Nap and the docs)
+
+- **Public:** nothing about who pays whom, how much or how often.
+- **The merchant:** payments to its account, their reference and period;
+  never the payer's account or address. Refunds go back without it.
+- **The operator (us), today:** every schedule and payment, including payer
+  and payee. The same tier-2 visibility as all of Zyn.
+- **Custody:** amounts set aside are on Zyn; withdrawing to Zcash depends on
+  the team's threshold custodians.
+
+## Not in this spec
+
+- Merchant pull with caps (variable and usage billing, agents): phase 2, on
+  the same `Schedule` with a `cap` instead of a fixed amount.
+- Prices in dollars paid in ZEC/ETH/SOL (using posted prices): phase 2. v1
+  prices in the payment asset; BOLD is the dollar option.
+- Auto top-up from Nap: phase 2.
+- Escrow and batch payouts: own specs.
+- Shielded ZEC paid straight from a Zcash wallet: that is CipherPay's ground.
+
+## Error handling
+
+- Insufficient inputs, unknown asset, payee without viewing key, past
+  `first_due`, zero amount or periods: refused at sequencing with a reason.
+- Clock ahead of the epoch by more than 120 s, or backwards: refused.
+- More than 256 schedules due in one tick: the rest pay at the next tick, in
+  due order; never skipped.
+- Refund above the unrefunded amount, or by anyone but the payee: refused.
+- Webhook delivery failures: retried with backoff for 24 h; state stays
+  readable through the API.
+
+## Testing
+
+- `objectvm` unit tests: create/fund/pay/end; Days and Months schedules
+  including month ends; unfunded then top-up; cancel returns exactly the
+  pot; refund routing and limits; authority on every op; conservation across
+  all of them; the 256-per-tick bound and ordering; clock rules.
+- Journal replay and replica determinism on a testnet fixture with schedules
+  spanning several clock ticks.
+- Nap: consent card fields match the op (S13); Payments list; cave.e2e-style
+  end-to-end on testnet 212: subscribe, two periods paid, cancel, remainder
+  back.
+- `@zyn-io/pay`: checkout, claim matching, refunds, webhooks (signature,
+  ids, retries), idempotent API.
+
+## Open points for the user
+
+- The fee: 0.5% of each payment, paid by the merchant — or another rate.
+- Whether the first live merchant is one of ours (a Jade or Cave
+  subscription, or recurring donations to the team treasury) before inviting
+  outside merchants.

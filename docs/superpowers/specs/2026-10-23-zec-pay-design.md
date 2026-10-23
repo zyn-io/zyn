@@ -1,6 +1,6 @@
 # ZEC Pay: accept shielded ZEC on a website
 
-Design, 23 Oct 2026. Status: for review, not built.
+Design, 23 Oct 2026. Status: **parked** (23 Oct) — CipherPay has run this product on mainnet since Feb 2026; see 2026-10-23-zyn-scheduled-payments-design.md.
 
 ## Goal
 
