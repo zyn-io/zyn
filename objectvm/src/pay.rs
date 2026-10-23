@@ -183,6 +183,129 @@ pub(crate) fn decode_every(d: &mut zyn_vm::read::Decoder) -> Option<Every> {
     }
 }
 
+impl Pay {
+    /// Held for somebody: every schedule's pot. Payments already made are
+    /// claims, counted by the market; records hold no value.
+    pub fn holdings(&self, asset: &Address) -> Option<i128> {
+        let mut t: i128 = 0;
+        for s in self.schedules.values() {
+            if &s.asset == asset {
+                t = t.checked_add(s.pot.0)?;
+            }
+        }
+        Some(t)
+    }
+}
+
+/// Ids a pay op made, so no other intent reuses one as a claim source.
+pub(crate) fn source_in_use(p: &Pay, source: &Hash) -> bool {
+    p.schedules.contains_key(source) || p.payments.contains_key(source)
+}
+
+fn state_byte(s: ScheduleState) -> u8 {
+    match s {
+        ScheduleState::Active => 0,
+        ScheduleState::Unfunded => 1,
+        ScheduleState::Ended => 2,
+        ScheduleState::Cancelled => 3,
+    }
+}
+
+fn state_from(b: u8) -> Option<ScheduleState> {
+    Some(match b {
+        0 => ScheduleState::Active,
+        1 => ScheduleState::Unfunded,
+        2 => ScheduleState::Ended,
+        3 => ScheduleState::Cancelled,
+        _ => return None,
+    })
+}
+
+fn schedule_bytes(e: &mut Encoder, id: &Hash, s: &Schedule) {
+    e.bytes(id).bytes(&s.payer).bytes(&s.payee).bytes(&s.asset).fixed(s.amount);
+    encode_every(e, s.every);
+    e.u64(s.first_due).u32(s.index);
+    match s.remaining {
+        None => e.u8(0),
+        Some(n) => e.u8(1).u32(n),
+    };
+    e.fixed(s.pot).bytes(&s.reference).u8(state_byte(s.state));
+}
+
+fn payment_bytes(e: &mut Encoder, id: &Hash, p: &PaymentRecord) {
+    e.bytes(id).bytes(&p.payer).bytes(&p.payee).bytes(&p.asset).fixed(p.amount).fixed(p.fee).fixed(p.refunded).u32(p.refunds).u64(p.at);
+}
+
+/// The pay section of the market leaf: the clock in the clear, schedules and
+/// payments as Merkle roots of their leaves. Ids carry the payer's nonce, so
+/// a leaf cannot be recomputed from a guess at who paid whom.
+pub(crate) fn section(e: &mut Encoder, p: &Pay) {
+    let leaf = |f: &dyn Fn(&mut Encoder)| {
+        let mut x = Encoder::new();
+        f(&mut x);
+        x.leaf()
+    };
+    let s: Vec<Hash> = p.schedules.iter().map(|(id, s)| leaf(&|x| schedule_bytes(x, id, s))).collect();
+    let r: Vec<Hash> = p.payments.iter().map(|(id, r)| leaf(&|x| payment_bytes(x, id, r))).collect();
+    e.bytes(b"objectvm.pay.v1")
+        .u64(p.time)
+        .u32(s.len() as u32)
+        .bytes(&zyn_vm::commit::merkle_root(&s))
+        .u32(r.len() as u32)
+        .bytes(&zyn_vm::commit::merkle_root(&r));
+}
+
+pub(crate) fn encode(e: &mut Encoder, p: &Pay) {
+    e.u64(p.time).u32(p.schedules.len() as u32);
+    for (id, s) in &p.schedules {
+        schedule_bytes(e, id, s);
+    }
+    e.u32(p.payments.len() as u32);
+    for (id, r) in &p.payments {
+        payment_bytes(e, id, r);
+    }
+}
+
+pub(crate) fn decode(d: &mut zyn_vm::read::Decoder) -> Option<Pay> {
+    let mut p = Pay { time: d.u64().ok()?, ..Pay::default() };
+    for _ in 0..d.u32().ok()? {
+        let id = d.hash().ok()?;
+        let s = Schedule {
+            payer: d.account().ok()?,
+            payee: d.account().ok()?,
+            asset: d.hash().ok()?,
+            amount: d.fixed().ok()?,
+            every: decode_every(d)?,
+            first_due: d.u64().ok()?,
+            index: d.u32().ok()?,
+            remaining: match d.u8().ok()? {
+                0 => None,
+                1 => Some(d.u32().ok()?),
+                _ => return None,
+            },
+            pot: d.fixed().ok()?,
+            reference: d.hash().ok()?,
+            state: state_from(d.u8().ok()?)?,
+        };
+        p.schedules.insert(id, s);
+    }
+    for _ in 0..d.u32().ok()? {
+        let id = d.hash().ok()?;
+        let r = PaymentRecord {
+            payer: d.account().ok()?,
+            payee: d.account().ok()?,
+            asset: d.hash().ok()?,
+            amount: d.fixed().ok()?,
+            fee: d.fixed().ok()?,
+            refunded: d.fixed().ok()?,
+            refunds: d.u32().ok()?,
+            at: d.u64().ok()?,
+        };
+        p.payments.insert(id, r);
+    }
+    Some(p)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

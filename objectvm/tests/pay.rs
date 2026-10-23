@@ -2,7 +2,7 @@
 //! payments funded at approval, one-off payments, refunds. Every intent goes
 //! through `apply`, and after each one the books must still balance.
 
-use objectvm::pay::{self, Every};
+use objectvm::pay::{self, Every, ScheduleState};
 use objectvm::{Limits, ObjectVm, Op, Output, Receipt};
 use zyn_vm::commit::Hash;
 use zyn_vm::note_enc::{seal, viewing_public, StaticSecret};
@@ -26,14 +26,12 @@ struct Chain {
     vm: ObjectVm,
     seq: u64,
     salt: u64,
-    /// The pay clock, as far as this harness has moved it.
-    clock: u64,
 }
 
 #[allow(dead_code)] // the pay behaviour tests that follow use the rest
 impl Chain {
     fn new() -> Chain {
-        let mut c = Chain { vm: ObjectVm::genesis(212, Limits { max_io: 16 }), seq: 0, salt: 0, clock: 0 };
+        let mut c = Chain { vm: ObjectVm::genesis(212, Limits { max_io: 16 }), seq: 0, salt: 0 };
         for who in [ALICE, SHOP] {
             c.ok(Op::Register { account: who, program: program::register_viewing_key(), viewing: viewing_public(&StaticSecret::from([who[0]; 32])) });
         }
@@ -140,11 +138,10 @@ impl Chain {
 
     /// Move the clock to `to` in steps the clock rule allows.
     fn clock_to(&mut self, to: u64) {
-        let mut at = self.clock;
+        let mut at = self.vm.market.pay.time;
         while at < to {
             at = if at == 0 { to } else { (at + pay::MAX_PAY_CLOCK_STEP_SECS).min(to) };
             assert!(!ObjectVm::rejected(&self.clock(at)));
-            self.clock = at;
         }
     }
 }
@@ -170,4 +167,51 @@ fn pay_ops_round_trip_and_name_their_signer() {
         assert_eq!(ObjectVm::decode_intent(&mut d).as_ref(), Some(op));
         assert_eq!(ObjectVm::intent_authorities(op), want, "{op:?}");
     }
+}
+
+/// Mint, spend, register, seal: a history with no pay op. Its root was
+/// computed by the code before Zyn Pay; it must not move.
+#[test]
+fn a_history_without_pay_keeps_its_root() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(5));
+    assert!(matches!(c.apply(Op::Seal), Receipt::Sealed(_)));
+    let root = c.vm.state_root();
+    assert_eq!(hex(&root), PINNED_ROOT);
+}
+
+const PINNED_ROOT: &str = "2294e3f2275bf1c3735731c1007c277024aa7ecee520460b3527dc208a04c2dd";
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[test]
+fn pay_state_round_trips_and_counts_toward_conservation() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    // Put a schedule straight into state to test encoding and holdings
+    // before the ops exist (Task 4 makes it through PayCreate).
+    c.vm.market.pay.schedules.insert(
+        [9; 32],
+        pay::Schedule {
+            payer: ALICE,
+            payee: SHOP,
+            asset: BOLD,
+            amount: whole(10),
+            every: Every::Months(1),
+            first_due: NOV1,
+            index: 0,
+            remaining: Some(12),
+            pot: whole(30),
+            reference: [1; 32],
+            state: ScheduleState::Active,
+        },
+    );
+    c.vm.issued.insert(BOLD, whole(130));
+    assert_eq!(c.vm.market.holdings(&BOLD), Some(whole(30).0));
+    assert_eq!(c.vm.conserved(), Ok(()));
+    let back = ObjectVm::decode(&c.vm.encode()).expect("decodes");
+    assert_eq!(back, c.vm);
+    assert_ne!(hex(&c.vm.state_root()), PINNED_ROOT);
 }
