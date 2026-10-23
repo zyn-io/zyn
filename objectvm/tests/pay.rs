@@ -573,3 +573,39 @@ fn a_clock_tick_refused_for_fee_overflow_changes_nothing() {
     let op = Op::PayClock { program: program::pay_clock(), at: NOV1 };
     refused_leaves_state(&mut c, &op, "fee overflow");
 }
+
+#[test]
+fn a_wallet_sees_every_field_of_a_schedule_and_other_ops_stay_opaque() {
+    use zyn_vm::eip712::{TypedData, Value};
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Months(1), first_due: NOV1, periods: Some(12), fund_periods: 3, reference: [1; 32], nonce: [2; 32], inputs: vec![([3; 32], [4; 32])], change: Vec::new() };
+    let t = ObjectVm::typed_intent(&op);
+    let s = format!("{t:?}");
+    for f in ["ZynPayCreate", "payee", "asset", "amountPerPeriod", "everyUnit", "everyCount", "firstDue", "periods", "fundPeriods", "reference"] {
+        assert!(s.contains(f), "missing {f} in {s}");
+    }
+    // Every field that changes the outcome moves the struct hash.
+    let mut changed = op.clone();
+    if let Op::PayCreate { fund_periods, .. } = &mut changed {
+        *fund_periods = 4;
+    }
+    assert_ne!(t.struct_hash(), ObjectVm::typed_intent(&changed).struct_hash());
+
+    let schedule = [7; 32];
+    let others = [
+        (Op::PayTopUp { payer: ALICE, program: program::pay_create(), schedule, periods: 2, inputs: Vec::new(), change: Vec::new() }, "ZynPayTopUp"),
+        (Op::PayCancel { payer: ALICE, program: program::pay_create(), schedule }, "ZynPayCancel"),
+        (Op::PayOnce { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(1), reference: [1; 32], nonce: [2; 32], inputs: Vec::new(), change: Vec::new() }, "ZynPayOnce"),
+        (Op::PayRefund { payee: SHOP, program: program::pay_create(), payment: [8; 32], amount: whole(1), inputs: Vec::new(), change: Vec::new() }, "ZynPayRefund"),
+    ];
+    for (op, name) in &others {
+        assert!(format!("{:?}", ObjectVm::typed_intent(op)).contains(name), "{name}");
+    }
+
+    // Any other op reproduces the trait default exactly: sha256 of encode_intent.
+    use sha2::{Digest, Sha256};
+    let other = Op::Mint { asset: BOLD, amount: whole(1), owner: ALICE, nonce: [9; 32] };
+    let digest: [u8; 32] = Sha256::digest(ObjectVm::encode_intent(&other)).into();
+    let default = TypedData::new("OpaqueIntent").field("intent", Value::Bytes32(digest));
+    assert_eq!(ObjectVm::typed_intent(&other), default);
+    assert!(format!("{:?}", ObjectVm::typed_intent(&other)).contains("OpaqueIntent"));
+}
