@@ -2614,10 +2614,10 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_pay_clock(*at)
             }),
-            Op::PayOnce { payer, program, payee, asset, amount, reference: _, nonce, inputs, change } => one(if *program != program::pay_once() {
+            Op::PayOnce { payer, program, payee, asset, amount, reference, nonce, inputs, change } => one(if *program != program::pay_once() {
                 Err("wrong program for a payment")
             } else {
-                self.apply_pay_once(payer, payee, asset, *amount, nonce, inputs, change)
+                self.apply_pay_once(payer, payee, asset, *amount, reference, nonce, inputs, change)
             }),
             Op::PayRefund { payee, program, payment, amount, inputs, change } => one(if *program != program::pay_refund() {
                 Err("wrong program for a refund")

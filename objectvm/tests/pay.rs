@@ -16,6 +16,8 @@ const SHOP: AccountId = [0x5E; 32];
 const DAY: u64 = 86_400;
 // 2026-11-01 00:00:00 UTC
 const NOV1: u64 = 1_793_491_200;
+/// Where `Chain::started` puts the pay clock.
+const START: u64 = NOV1 - DAY;
 
 fn enc() -> zyn_vm::note_enc::EncryptedNote {
     seal(&viewing_public(&StaticSecret::from([0x11; 32])), StaticSecret::from([0x42; 32]), b"n").unwrap()
@@ -33,6 +35,14 @@ impl Chain {
         for who in [ALICE, SHOP] {
             c.ok(Op::Register { account: who, program: program::register_viewing_key(), viewing: viewing_public(&StaticSecret::from([who[0]; 32])) });
         }
+        c
+    }
+
+    /// A chain whose pay clock has started, a day before NOV1: pay ops are
+    /// refused until the operator's first post.
+    fn started() -> Chain {
+        let mut c = Chain::new();
+        assert!(!ObjectVm::rejected(&c.clock(START)));
         c
     }
 
@@ -216,7 +226,7 @@ fn pay_state_round_trips_and_counts_toward_conservation() {
 
 #[test]
 fn create_sets_aside_the_funded_periods() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Months(1), NOV1, Some(12), 3);
     let s = c.vm.market.pay.schedules[&id];
@@ -227,7 +237,7 @@ fn create_sets_aside_the_funded_periods() {
 
 #[test]
 fn create_is_refused_when_it_cannot_work() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let nobody: AccountId = [0x0D; 32];
     let base = |c: &mut Chain, payee: AccountId, every: Every, first_due: u64, fund: u32| {
@@ -247,9 +257,9 @@ fn create_is_refused_when_it_cannot_work() {
 
 #[test]
 fn create_after_its_first_due_is_refused() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
-    c.clock(NOV1 + DAY);
+    c.clock_to(NOV1 + DAY);
     let nonce = c.fresh();
     let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
     let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Days(1), first_due: NOV1, periods: Some(1), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
@@ -258,7 +268,7 @@ fn create_after_its_first_due_is_refused() {
 
 #[test]
 fn funding_overflow_is_refused() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(1));
     let nonce = c.fresh();
     let (inputs, change) = c.fund(ALICE, BOLD, whole(1));
@@ -268,7 +278,7 @@ fn funding_overflow_is_refused() {
 
 #[test]
 fn top_up_adds_periods_and_cancel_returns_the_pot() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Months(1), NOV1, None, 1);
     let (inputs, change) = c.fund(ALICE, BOLD, whole(20));
@@ -294,7 +304,7 @@ fn top_up(c: &mut Chain, id: Hash, periods: u32, who: AccountId) -> Op {
 
 #[test]
 fn resume_after_a_gap_keeps_the_end_date() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(4), 1);
     // Period 0 is paid, then the pot is empty and the next due turns it unfunded.
@@ -325,7 +335,7 @@ fn resume_after_a_gap_keeps_the_end_date() {
 
 #[test]
 fn top_up_after_the_term_has_run_out_is_refused() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(1), 1);
     c.clock_to(NOV1 + 5 * DAY);
@@ -338,7 +348,7 @@ fn top_up_after_the_term_has_run_out_is_refused() {
 
 #[test]
 fn top_up_cannot_go_past_the_term() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(3), 2);
     let op = top_up(&mut c, id, 2, ALICE);
@@ -347,7 +357,7 @@ fn top_up_cannot_go_past_the_term() {
 
 #[test]
 fn create_refuses_a_term_it_cannot_fund() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     for (periods, fund) in [(Some(0), 1), (Some(2), 3)] {
         let nonce = c.fresh();
@@ -359,7 +369,7 @@ fn create_refuses_a_term_it_cannot_fund() {
 
 #[test]
 fn unknown_schedules_and_wrong_programs_are_refused() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, None, 1);
     let ghost = [0x66; 32];
@@ -383,7 +393,7 @@ fn paid_to(c: &Chain, id: &Hash, k: u32) -> pay::PaymentRecord {
 
 #[test]
 fn the_clock_pays_each_period_once_less_the_fee() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(30), NOV1, Some(2), 2);
     c.clock_to(NOV1 - 1);
@@ -405,7 +415,7 @@ fn the_clock_pays_each_period_once_less_the_fee() {
 
 #[test]
 fn catch_up_pays_each_missed_period_in_order() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(1), Every::Days(1), NOV1, None, 10);
     c.clock_to(NOV1 - 1);
@@ -424,7 +434,7 @@ fn catch_up_pays_each_missed_period_in_order() {
 
 #[test]
 fn an_empty_pot_turns_unfunded_and_a_top_up_resumes_without_back_charges() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, None, 1);
     c.clock_to(NOV1);
@@ -443,7 +453,7 @@ fn an_empty_pot_turns_unfunded_and_a_top_up_resumes_without_back_charges() {
 
 #[test]
 fn at_most_256_payouts_per_tick_oldest_first() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(1_000));
     c.clock_to(NOV1 - 3600);
     let mut ids = Vec::new();
@@ -468,13 +478,96 @@ fn the_clock_only_moves_forward_and_an_hour_at_a_time() {
 }
 
 #[test]
-fn fee_rounds_down_to_nothing_on_dust() {
+fn amounts_below_the_minimum_are_refused_but_refunds_are_not_floored() {
+    let mut c = Chain::started();
+    c.mint(ALICE, BOLD, whole(10));
+    let small = Fixed(pay::MIN_PAY_AMOUNT.0 - 1);
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, small);
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: small, every: Every::Days(1), first_due: NOV1, periods: Some(1), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+    refused_leaves_state(&mut c, &op, "an amount below the minimum");
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, small);
+    let op = Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: BOLD, amount: small, reference: [3; 32], nonce, inputs, change };
+    refused_leaves_state(&mut c, &op, "an amount below the minimum");
+    // The minimum itself is accepted, and its fee is not dust.
+    c.subscribe(pay::MIN_PAY_AMOUNT, Every::Days(1), NOV1, Some(1), 1);
+    let id = pay_once(&mut c, pay::MIN_PAY_AMOUNT);
+    assert!(pay::fee_of(pay::MIN_PAY_AMOUNT).0 > 0);
+    // A refund may be any amount above nothing.
+    assert!(!ObjectVm::rejected(&refund(&mut c, id, Fixed(1))));
+}
+
+#[test]
+fn pay_waits_for_the_clock_to_start() {
     let mut c = Chain::new();
-    c.mint(ALICE, BOLD, Fixed(1_000));
-    c.subscribe(Fixed(100), Every::Days(1), NOV1, Some(1), 1);
+    c.mint(ALICE, BOLD, whole(100));
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Days(1), first_due: NOV1, periods: Some(1), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+    refused_leaves_state(&mut c, &op, "the pay clock has not started");
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: BOLD, amount: whole(10), reference: [3; 32], nonce, inputs, change };
+    refused_leaves_state(&mut c, &op, "the pay clock has not started");
+    assert!(c.vm.market.pay.is_empty());
+}
+
+#[test]
+fn items_cannot_be_paid() {
+    let mut c = Chain::started();
+    let item = [0x1E; 32];
+    c.vm.market.items.insert(item, objectvm::market::ItemInfo { collection: [0xC0; 32], serial: 1 });
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: item, amount: whole(1), every: Every::Days(1), first_due: NOV1, periods: Some(1), fund_periods: 1, reference: [0; 32], nonce: [1; 32], inputs: Vec::new(), change: Vec::new() };
+    refused_leaves_state(&mut c, &op, "items cannot be paid by schedule");
+    let op = Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: item, amount: whole(1), reference: [3; 32], nonce: [2; 32], inputs: Vec::new(), change: Vec::new() };
+    refused_leaves_state(&mut c, &op, "items cannot be paid this way");
+}
+
+#[test]
+fn a_schedule_past_the_calendar_is_refused() {
+    let mut c = Chain::started();
+    c.mint(ALICE, BOLD, whole(100));
+    for every in [Every::Days(1), Every::Months(1)] {
+        let nonce = c.fresh();
+        let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+        let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every, first_due: u64::MAX - 10, periods: Some(2), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+        assert_eq!(c.refused(op), "that schedule runs past the calendar", "{every:?}");
+    }
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Months(0), first_due: NOV1, periods: Some(2), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+    assert_eq!(c.refused(op), "a schedule needs a period above nothing");
+}
+
+#[test]
+fn a_payment_keeps_its_reference() {
+    let mut c = Chain::started();
+    c.mint(ALICE, BOLD, whole(100));
+    let once = pay_once(&mut c, whole(5));
+    assert_eq!(c.vm.market.pay.payments[&once].reference, [3; 32]);
+    let sid = c.subscribe(whole(10), Every::Days(1), NOV1, Some(1), 1);
     c.clock_to(NOV1);
-    assert_eq!(c.claimable(SHOP, BOLD), 100);
-    assert_eq!(c.vm.market.pol.get(&BOLD).copied().unwrap_or(Fixed::ZERO), Fixed::ZERO);
+    assert_eq!(paid_to(&c, &sid, 0).reference, [0xEF; 32]);
+}
+
+/// Several periods of one schedule in one tick: a top-up resumes at a period
+/// already due, and the next falls due within the hour the next post moves.
+#[test]
+fn a_resumed_schedule_can_pay_two_periods_in_one_tick() {
+    let mut c = Chain::started();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, None, 1);
+    c.clock_to(NOV1 + DAY);
+    assert_eq!(c.vm.market.pay.schedules[&id].state, ScheduleState::Unfunded);
+    c.clock_to(NOV1 + 2 * DAY - 1800);
+    let op = top_up(&mut c, id, 2, ALICE);
+    c.ok(op);
+    assert_eq!(c.vm.market.pay.schedules[&id].index, 1);
+    assert!(!ObjectVm::rejected(&c.clock(NOV1 + 2 * DAY + 1800)));
+    assert_eq!(paid_to(&c, &id, 1).at, NOV1 + DAY);
+    assert_eq!(paid_to(&c, &id, 2).at, NOV1 + 2 * DAY);
+    assert_eq!(c.vm.market.pay.schedules[&id].pot, Fixed::ZERO);
 }
 
 fn pay_once(c: &mut Chain, amount: Fixed) -> Hash {
@@ -492,7 +585,7 @@ fn refund(c: &mut Chain, payment: Hash, amount: Fixed) -> Receipt {
 
 #[test]
 fn a_one_off_payment_pays_the_payee_less_the_fee() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(50));
     let id = pay_once(&mut c, whole(20));
     let fee = pay::fee_of(whole(20));
@@ -502,7 +595,7 @@ fn a_one_off_payment_pays_the_payee_less_the_fee() {
 
 #[test]
 fn a_refund_goes_back_to_the_payer_unnamed() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(50));
     let id = pay_once(&mut c, whole(20));
     assert!(!ObjectVm::rejected(&refund(&mut c, id, whole(5))));
@@ -512,7 +605,7 @@ fn a_refund_goes_back_to_the_payer_unnamed() {
 
 #[test]
 fn partial_refunds_cannot_exceed_the_payment() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(50));
     let sid = c.subscribe(whole(10), Every::Days(1), NOV1, None, 2);
     c.clock_to(NOV1);
@@ -529,7 +622,7 @@ fn partial_refunds_cannot_exceed_the_payment() {
 
 #[test]
 fn only_the_payee_refunds() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(50));
     let id = pay_once(&mut c, whole(20));
     let (inputs, change) = c.fund(ALICE, BOLD, whole(1));
@@ -554,7 +647,7 @@ fn refused_leaves_state(c: &mut Chain, op: &Op, why: &str) {
 
 #[test]
 fn a_one_off_payment_refused_for_fee_overflow_changes_nothing() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(50));
     c.vm.market.pol.insert(BOLD, Fixed(i128::MAX));
     let nonce = c.fresh();
@@ -565,7 +658,7 @@ fn a_one_off_payment_refused_for_fee_overflow_changes_nothing() {
 
 #[test]
 fn a_clock_tick_refused_for_fee_overflow_changes_nothing() {
-    let mut c = Chain::new();
+    let mut c = Chain::started();
     c.mint(ALICE, BOLD, whole(100));
     c.subscribe(whole(10), Every::Days(1), NOV1, None, 2);
     c.clock_to(NOV1 - 1);

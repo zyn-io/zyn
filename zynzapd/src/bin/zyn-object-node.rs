@@ -651,6 +651,7 @@ fn pay_payment_json(id: &[u8; 32], r: &objectvm::pay::PaymentRecord) -> serde_js
         "fee": r.fee.0.to_string(),
         "refunded": r.refunded.0.to_string(),
         "at": r.at,
+        "reference": hex(&r.reference),
     })
 }
 
@@ -4547,6 +4548,8 @@ mod market_door {
         let shop = [0x5E; 32];
         r.operator(Op::Register { account: shop, program: zyn_vm::program::register_viewing_key(), viewing: [0x42; 32] });
         r.operator(Op::Mint { asset: ZEC, amount: Fixed::whole(100), owner: a, nonce: [1; 32] });
+        // Pay ops wait for the operator's first pay clock post.
+        r.operator(Op::PayClock { program: zyn_vm::program::pay_clock(), at: 1_793_491_200 - 86_400 });
         let (c, _) = r.live(&a, ZEC)[0];
         let v = r.signed(&alice, Op::PayCreate {
             payer: a,
@@ -4594,6 +4597,7 @@ mod market_door {
         let rows = v["result"].as_array().expect("rows");
         assert_eq!(rows.len(), 1, "{v}");
         assert_eq!(rows[0]["amount"], Fixed::whole(5).0.to_string());
+        assert_eq!(rows[0]["reference"], hex(&[0xEE; 32]));
         assert!(rows[0].get("payer").is_none());
         assert!(!v.to_string().contains(&hex(&a)), "the payer must not appear: {v}");
 
@@ -4816,9 +4820,10 @@ mod pay_rpc_tests {
 
     #[test]
     fn payment_json_omits_the_payer() {
-        let r = PaymentRecord { payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), fee: zyn_vm::Fixed(0), refunded: zyn_vm::Fixed(0), refunds: 0, at: 5 };
+        let r = PaymentRecord { payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), fee: zyn_vm::Fixed(0), refunded: zyn_vm::Fixed(0), refunds: 0, at: 5, reference: [0xEE; 32] };
         let v = pay_payment_json(&[8; 32], &r);
         assert!(v.get("payer").is_none());
         assert_eq!(v["at"], 5);
+        assert_eq!(v["reference"], hex(&[0xEE; 32]));
     }
 }

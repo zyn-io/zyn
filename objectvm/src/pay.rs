@@ -22,6 +22,10 @@ pub const PAY_FEE_BPS: i128 = 50;
 pub const MAX_DUE_PER_TICK: usize = 256;
 /// One post moves the pay clock at most an hour (as lending's, §179.6).
 pub const MAX_PAY_CLOCK_STEP_SECS: u64 = 3600;
+/// The least a scheduled period or a one-off payment may be: 0.001 of a
+/// token with 18 decimals. Each schedule and payment is a record kept for
+/// good, so dust amounts would grow state for nothing. Refunds have no floor.
+pub const MIN_PAY_AMOUNT: Fixed = Fixed(1_000_000_000_000_000);
 
 const DAY: u64 = 86_400;
 
@@ -71,6 +75,8 @@ pub struct PaymentRecord {
     pub refunds: u32,
     /// Pay-clock time it was made.
     pub at: u64,
+    /// The payee's own id: a one-off's own reference, or its schedule's.
+    pub reference: Hash,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -235,7 +241,7 @@ fn schedule_bytes(e: &mut Encoder, id: &Hash, s: &Schedule) {
 }
 
 fn payment_bytes(e: &mut Encoder, id: &Hash, p: &PaymentRecord) {
-    e.bytes(id).bytes(&p.payer).bytes(&p.payee).bytes(&p.asset).fixed(p.amount).fixed(p.fee).fixed(p.refunded).u32(p.refunds).u64(p.at);
+    e.bytes(id).bytes(&p.payer).bytes(&p.payee).bytes(&p.asset).fixed(p.amount).fixed(p.fee).fixed(p.refunded).u32(p.refunds).u64(p.at).bytes(&p.reference);
 }
 
 /// The pay section of the market leaf: the clock in the clear, schedules and
@@ -320,13 +326,37 @@ pub(crate) fn decode(d: &mut zyn_vm::read::Decoder) -> Option<Pay> {
             refunded: d.fixed().ok()?,
             refunds: d.u32().ok()?,
             at: d.u64().ok()?,
+            reference: d.hash().ok()?,
         };
         p.payments.insert(id, r);
     }
     Some(p)
 }
 
+/// A scheduled period or a one-off payment must be at least the minimum.
+fn check_amount(amount: Fixed) -> Result<(), &'static str> {
+    if amount.0 <= 0 {
+        return Err("an amount must be above nothing");
+    }
+    if amount.0 < MIN_PAY_AMOUNT.0 {
+        return Err("an amount below the minimum");
+    }
+    Ok(())
+}
+
 impl ObjectVm {
+    /// Schedules and payments wait for the operator's first pay clock post:
+    /// until then the clock reads 0, so a first due date cannot be checked
+    /// against the present, a payment would be stamped at time 0, and the
+    /// first post (which may jump any distance) could pay many periods of one
+    /// schedule at once.
+    fn pay_clock_started(&self) -> Result<(), &'static str> {
+        if self.market.pay.time == 0 {
+            return Err("the pay clock has not started");
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_pay_create(
         &mut self,
@@ -349,11 +379,16 @@ impl ObjectVm {
         if !self.viewing.contains_key(payee) {
             return Err("the payee has not registered where to be paid");
         }
-        if amount.0 <= 0 {
-            return Err("an amount must be above nothing");
+        self.pay_clock_started()?;
+        if self.market.items.contains_key(asset) {
+            return Err("items cannot be paid by schedule");
+        }
+        check_amount(amount)?;
+        if matches!(every, Every::Days(0) | Every::Months(0)) {
+            return Err("a schedule needs a period above nothing");
         }
         if due_at(first_due, every, 1).is_none() {
-            return Err("a schedule needs a period above nothing");
+            return Err("that schedule runs past the calendar");
         }
         if fund_periods == 0 {
             return Err("fund at least one period");
@@ -467,8 +502,10 @@ impl ObjectVm {
             return Err("the pay clock moves at most an hour per post");
         }
         // Every (due, schedule) pair due by `at`, in due order. One schedule
-        // may contribute several periods after a long gap, but never more than
-        // a tick can pay.
+        // may contribute more than one period: a top-up resumes at a period
+        // already due, and the next may fall due within the hour this post
+        // moves; a backlog held over by the cap can do the same. Never more
+        // than a tick can pay.
         let mut due: Vec<(u64, Hash)> = Vec::new();
         for (id, s) in &self.market.pay.schedules {
             if s.state != ScheduleState::Active {
@@ -528,7 +565,7 @@ impl ObjectVm {
         crate::market::Market::pay(&mut self.market, &payment, 0, s.payee, s.asset, net);
         self.market.pay.payments.insert(
             payment,
-            PaymentRecord { payer: s.payer, payee: s.payee, asset: s.asset, amount: s.amount, fee, refunded: Fixed::ZERO, refunds: 0, at: when },
+            PaymentRecord { payer: s.payer, payee: s.payee, asset: s.asset, amount: s.amount, fee, refunded: Fixed::ZERO, refunds: 0, at: when, reference: s.reference },
         );
         let m = self.market.pay.schedules.get_mut(id).expect("present");
         m.pot = Fixed(m.pot.0 - m.amount.0);
@@ -553,6 +590,7 @@ impl ObjectVm {
         payee: &AccountId,
         asset: &Address,
         amount: Fixed,
+        reference: &Hash,
         nonce: &Hash,
         inputs: &[(Hash, Hash)],
         change: &[Output],
@@ -563,9 +601,11 @@ impl ObjectVm {
         if !self.viewing.contains_key(payee) {
             return Err("the payee has not registered where to be paid");
         }
-        if amount.0 <= 0 {
-            return Err("an amount must be above nothing");
+        self.pay_clock_started()?;
+        if self.market.items.contains_key(asset) {
+            return Err("items cannot be paid this way");
         }
+        check_amount(amount)?;
         let id = pay_once_id(payer, nonce);
         self.fresh_source(&id)?;
         let f = self.plan_funding(payer, inputs, change, &[(*asset, amount)])?;
@@ -579,7 +619,7 @@ impl ObjectVm {
         let at = self.market.pay.time;
         self.market.pay.payments.insert(
             id,
-            PaymentRecord { payer: *payer, payee: *payee, asset: *asset, amount, fee, refunded: Fixed::ZERO, refunds: 0, at },
+            PaymentRecord { payer: *payer, payee: *payee, asset: *asset, amount, fee, refunded: Fixed::ZERO, refunds: 0, at, reference: *reference },
         );
         Ok(Receipt::Paid { id })
     }
