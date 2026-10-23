@@ -600,6 +600,9 @@ fn a_wallet_sees_every_field_of_a_schedule_and_other_ops_stay_opaque() {
     for (op, name) in &others {
         assert!(format!("{:?}", ObjectVm::typed_intent(op)).contains(name), "{name}");
     }
+    // A top-up adds periods; it does not set the total, so it does not say "periods".
+    let top_up = format!("{:?}", ObjectVm::typed_intent(&others[0].0));
+    assert!(top_up.contains("\"addPeriods\"") && !top_up.contains("\"periods\""), "{top_up}");
 
     // Any other op reproduces the trait default exactly: sha256 of encode_intent.
     use sha2::{Digest, Sha256};

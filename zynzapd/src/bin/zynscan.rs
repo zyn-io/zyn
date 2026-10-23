@@ -311,6 +311,15 @@ fn describe(op: &Op, receipts: &[Receipt]) -> (&'static str, bool, Value) {
         // Insurance is public (rounded) and protocol-owned; who added to it,
         // and how much, is not shown.
         Op::LendInsure { asset, .. } => ("Insurance added", false, json!({ "asset": hex(asset) })),
+        // Zyn Pay, like a transfer: only that it happened. Never the payer,
+        // the payee, the asset, the amount or the schedule or payment id.
+        Op::PayCreate { .. } => ("Scheduled payment", false, Value::Null),
+        Op::PayTopUp { .. } => ("Top-up", false, Value::Null),
+        Op::PayCancel { .. } => ("Schedule cancelled", false, Value::Null),
+        Op::PayOnce { .. } => ("Payment", false, Value::Null),
+        Op::PayRefund { .. } => ("Refund", false, Value::Null),
+        // The operator's clock, public like the lending clock.
+        Op::PayClock { at, .. } => ("Pay clock", true, json!({ "at": at })),
         Op::Seal => ("Seal", true, Value::Null),
     }
 }
@@ -835,6 +844,36 @@ mod tests {
         assert_eq!(redact(kind, operator, None, 1, 1), (None, None, None));
         // Everything else keeps its reason and counts.
         assert_eq!(redact("Swap", false, why.clone(), 1, 2), (why, Some(1), Some(2)));
+    }
+
+    /// Zyn Pay shows only what kind of intent it was, like a transfer; the
+    /// operator's pay clock shows its time, like the lending clock.
+    #[test]
+    fn pay_ops_show_only_their_kind_and_the_clock_its_time() {
+        use zyn_vm::program;
+        let (payer, payee, asset, id) = ([0xA1; 32], [0x5E; 32], [0xB1; 32], [0x77; 32]);
+        let amount = zyn_vm::Fixed::whole(3);
+        let ops = [
+            (
+                Op::PayCreate {
+                    payer, program: program::pay_create(), payee, asset, amount, every: objectvm::pay::Every::Months(1),
+                    first_due: 1_793_491_200, periods: Some(12), fund_periods: 2, reference: [1; 32], nonce: [2; 32], inputs: vec![], change: vec![],
+                },
+                "Scheduled payment",
+            ),
+            (Op::PayTopUp { payer, program: program::pay_manage(), schedule: id, periods: 2, inputs: vec![], change: vec![] }, "Top-up"),
+            (Op::PayCancel { payer, program: program::pay_manage(), schedule: id }, "Schedule cancelled"),
+            (
+                Op::PayOnce { payer, program: program::pay_once(), payee, asset, amount, reference: [1; 32], nonce: [2; 32], inputs: vec![], change: vec![] },
+                "Payment",
+            ),
+            (Op::PayRefund { payee, program: program::pay_refund(), payment: id, amount, inputs: vec![], change: vec![] }, "Refund"),
+        ];
+        for (op, label) in &ops {
+            assert_eq!(describe(op, &[]), (*label, false, Value::Null));
+        }
+        let clock = Op::PayClock { program: program::pay_clock(), at: 1_793_491_200 };
+        assert_eq!(describe(&clock, &[]), ("Pay clock", true, json!({ "at": 1_793_491_200u64 })));
     }
 
     #[test]

@@ -2782,7 +2782,7 @@ impl MicrochainVm for ObjectVm {
             Op::PayTopUp { payer, schedule, periods, .. } => TypedData::new("ZynPayTopUp")
                 .field("payer", word(payer))
                 .field("schedule", word(schedule))
-                .field("periods", uint(*periods)),
+                .field("addPeriods", uint(*periods)),
             Op::PayCancel { payer, schedule, .. } => TypedData::new("ZynPayCancel")
                 .field("payer", word(payer))
                 .field("schedule", word(schedule)),
