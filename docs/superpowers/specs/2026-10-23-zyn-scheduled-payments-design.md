@@ -63,7 +63,8 @@ A later phase may let Nap top a schedule up automatically while it is open
 
 `Payment` (every payment made through `pay`, for refunds):
 - `id` — `H(schedule ‖ period)` or `H(payer ‖ nonce)` for one-off;
-- `payer`, `payee`, `asset`, `amount`, `refunded`.
+- `payer`, `payee`, `asset`, `amount`, `fee`, `refunded`, `at`;
+- `reference` — the one-off's own reference, or its schedule's (DECISIONS §188.16).
 
 Both live in a new state section as a Merkle root of blinded leaves, like the
 market's claims: the public learns nothing; the operator and replicas read
@@ -73,10 +74,10 @@ them (tier 2).
 
 | Op | Authority (S14) | Does |
 |---|---|---|
-| `PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change }` | payer | Consumes `inputs`, moves `amount × fund_periods` into the pot, creates the schedule. Refuses a payee with no registered viewing key, `first_due` before the clock's last time, `fund_periods < 1`. |
+| `PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change }` | payer | Consumes `inputs`, moves `amount × fund_periods` into the pot, creates the schedule. Refuses a payee with no registered viewing key, `first_due` before the clock's last time, `fund_periods < 1`, an amount below `MIN_PAY_AMOUNT`, a collection item as the asset, and any create before the pay clock has started. |
 | `PayTopUp { payer, schedule, periods, inputs, change }` (typed field: `addPeriods`) | payer | Adds to the pot. An `unfunded` schedule becomes `active` at the latest period already due; missed periods are not charged and count against the term, and the next tick pays that one period. |
 | `PayCancel { payer, schedule }` | payer | Ends it now; the pot becomes a claim for the payer. |
-| `PayOnce { payer, payee, asset, amount, reference, nonce, inputs, change }` | payer | A one-off payment with a refundable record. |
+| `PayOnce { payer, payee, asset, amount, reference, nonce, inputs, change }` | payer | A one-off payment with a refundable record that keeps its `reference`. Same floor, item and clock refusals as `PayCreate`. |
 | `PayRefund { payee, payment, amount, inputs, change }` | payee | Pays up to the unrefunded amount back to the original payer as a claim. The payee names the payment, never the payer. |
 | `PayClock { at }` | operator | Advances the clock; pays every schedule due at or before `at`, oldest first, at most `MAX_DUE_PER_TICK` (256, S5), the rest at the next tick. |
 
@@ -100,8 +101,12 @@ the pot. A refused pay op leaves ledger state unchanged.
 
 `PayClock` is posted by the operator like `LendTime` and `DaoClock`: forward
 only, and by at most an hour per post, because the ledger holds no epoch
-timestamp to check it against. The node posts it every `ZYN_PAY_TICK_SECS`
-(default 10 s) and catches up an hour per post after downtime. A schedule
+timestamp to check it against. The operator switches Pay on with `ZYN_PAY=on`
+in the node's env; until then the node never posts and the chain keeps every
+root. Once on, the node posts at startup and every `ZYN_PAY_TICK_SECS`
+(default 10 s), and catches up an hour per post after downtime. `PayCreate`
+and `PayOnce` are refused until the first post has started the clock
+(DECISIONS §188.14). A schedule
 therefore pays within one tick of its due time, and never early. Until the
 clock has caught up, a new schedule's first due date is checked against the
 clock's last time, so a past first date can be accepted and paid from the
@@ -115,6 +120,12 @@ operator-sequenced action, and a delay shows in the journal.
 paid to the team treasury (the fee pot). Refunds carry no fee and do not
 return it. The rate is a committed parameter.
 
+### Minimum
+
+A period's amount and a one-off must be at least `MIN_PAY_AMOUNT`, 0.001 of
+an 18-decimal token, because each schedule and payment is a record kept for
+good. Refunds have no floor. Collection items cannot be paid.
+
 ### Rollout
 
 New ops and a new state section are a chain-format change: verifier first
@@ -125,7 +136,8 @@ emits a `Pay*` op. Testnet 212 first; mainnet 26460 after the NU7 switch.
 
 - Consent cards for all five holder pay ops (`PayCreate`, `PayTopUp` with
   `addPeriods`, `PayCancel`, `PayOnce`, `PayRefund`), from the typed intent
-  (S13).
+  (S13). Each typed struct also carries `intent`, the digest of the whole op,
+  so an EVM signature binds the notes spent and the change (DECISIONS §188.10).
 - A **Payments** list under Zyn: each schedule with payee, amount, next
   payment, funded until, Top up, Cancel; past payments and refunds.
 - A notice 7 days (or one period, if shorter) before a pot runs out, and
@@ -166,6 +178,14 @@ small `zyn-pay serve` service:
   `zyn_paySchedules`; never the payer's account or address. Refunds go back without it.
 - **The operator (us), today:** every schedule and payment, including payer
   and payee. The same tier-2 visibility as all of Zyn.
+- **Whoever holds an id:** `zyn_paySchedules` and `zyn_payPayments` read by
+  unguessable id with no signature. Payer and payee keep schedule and payment
+  ids private: a leaked schedule id shows its pot, state and next due date,
+  and a leaked payment id its amount, fee and refunds (DECISIONS §188.11).
+- **Amounts on a thin fee pot:** each payment's fee goes to the ZYN pot, whose
+  figure is published at three significant figures. While the pot is thin, a
+  change in that figure can show a payment's approximate size, as for Lend
+  (DECISIONS §157.18, §188.17). A separate, coarser pay-fee pot is deferred.
 - **Custody:** amounts set aside are on Zyn; withdrawing to Zcash depends on
   the team's threshold custodians.
 
@@ -182,6 +202,8 @@ small `zyn-pay serve` service:
 ## Error handling
 
 - Insufficient inputs, unknown asset, payee without viewing key, `first_due` before the clock's last time, zero amount or periods: refused at sequencing with a reason.
+- Before the pay clock has started: `PayCreate` and `PayOnce` refused ("the pay clock has not started").
+- An amount below `MIN_PAY_AMOUNT`, a collection item as the asset, a zero period, or a schedule whose next date overflows the calendar: refused, each with its own reason.
 - Clock more than an hour ahead of its last time, or backwards: refused.
 - More than 256 schedules due in one tick: the rest pay at the next tick, in
   due order; never skipped.

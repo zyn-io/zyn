@@ -5,12 +5,17 @@
 #   ops/zyn-pay-rollout.sh testnet
 #
 # Order: 1. the replica (Contabo) and ZynScan (Hetzner), 2. the signers,
-# 3. the sequencer (Hetzner), which is the one that starts emitting pay ops.
+# 3. the sequencer (Hetzner), 4. ZYN_PAY=on in the sequencer's env, which
+# starts the pay clock; until then no pay op can land.
 # Mainnet 26460 waits for the NU7 switch and is refused here.
 #
 # Every step asks first (y/N) and stops on anything else. Each installed
 # binary is backed up beside itself as <name>.bak-<date>, the way RUNBOOK
-# records its backups, so going back is one `cp` and a restart.
+# records its backups, so going back is
+# `install -m755 <name>.bak-<date> <name> && systemctl restart <unit>`.
+# That works only until the first pay op (ops 69-74, the first pay clock post
+# included) lands: from then on the state carries the pay section (MARKET19)
+# and the old binary cannot load it.
 set -euo pipefail
 
 net=${1:?testnet or mainnet}
@@ -23,6 +28,7 @@ node_unit=zyn-object-node         # Hetzner, RPC 127.0.0.1:8499
 scan_unit=zynscan                 # Hetzner, chain 212, listens 127.0.0.1:8093
 replica_unit=zyn-object-replica   # Contabo, verifies chain 212
 node_bin=/usr/local/bin/zyn-object-node
+node_env=/etc/zyn/zyn-object.env  # Hetzner, the testnet node's env (RUNBOOK)
 scan_bin=/usr/local/bin/zynscan
 # MUST BE CHECKED: RUNBOOK names the replica unit and its backup
 # (/root/zyn-object-replica.bak-20260923) but never its install path. The
@@ -46,6 +52,8 @@ rollbacks=()
 print_rollbacks() {
   [ ${#rollbacks[@]} -gt 0 ] || return 0
   echo "== rollback (per host; each restores the binary kept by this run and restarts its unit):"
+  echo "   WARNING: once any pay op has landed (ops 69-74, the first pay clock post included),"
+  echo "   the old binary cannot load the state (MARKET19); these work only before that."
   printf '   %s\n' "${rollbacks[@]}"
 }
 trap 'rc=$?; if [ $rc -ne 0 ]; then echo "STOPPED (exit $rc)" >&2; print_rollbacks >&2; fi' EXIT
@@ -220,39 +228,76 @@ REMOTE
 
 cd "$(dirname "$0")/.."
 
-step "0/3 build zyn-object-node + zynscan (aarch64) and zyn-object-replica (x86_64) locally"
+step "0/4 build zyn-object-node + zynscan (aarch64) and zyn-object-replica (x86_64) locally"
 cargo zigbuild --release --target aarch64-unknown-linux-gnu -p zynzapd --bin zyn-object-node --bin zynscan
 cargo zigbuild --release --target x86_64-unknown-linux-gnu -p zynzapd --bin zyn-object-replica
 
-step "1/3 verifiers: Contabo $replica_unit (x86_64), then Hetzner $scan_unit (aarch64); the sequencer waits for both gates"
+step "1/4 verifiers: Contabo $replica_unit (x86_64), then Hetzner $scan_unit (aarch64); the sequencer waits for both gates"
 install_on "$contabo" "$replica_unit" "$replica_bin" "$x86/zyn-object-replica"
 install_on "$hetzner" "$scan_unit" "$scan_bin" "$arm/zynscan"
 gate_scan || { echo "ZynScan gate failed; the sequencer is NOT touched" >&2; exit 1; }
 target=$(anchored_target) || { echo "no anchor target; the sequencer is NOT touched" >&2; exit 1; }
 gate_replica "$target" || { echo "replica gate failed; the sequencer is NOT touched" >&2; exit 1; }
 
-step "2/3 signers updated (per RUNBOOK custody section, §4v): the custodians run zyn-custodian, which never runs the ledger, so pay ops do not reach them and nothing is installed here. Confirm none of them runs a zyn-object node or replica"
+step "2/4 signers updated (per RUNBOOK custody section, §4v): the custodians run zyn-custodian, which never runs the ledger, so pay ops do not reach them and nothing is installed here. Confirm none of them runs a zyn-object node or replica"
 
-step "3/3 sequencer: $node_unit on Hetzner (starts the pay clock once the chain has pay state)"
+step "3/4 sequencer: $node_unit on Hetzner (the pay clock stays off until step 4)"
 install_on "$hetzner" "$node_unit" "$node_bin" "$arm/zyn-object-node"
 ssh "${ssh_opts[@]}" "$hetzner" "journalctl -u $node_unit -n 15 --no-pager"
+
+step "4/4 switch Zyn Pay on: add ZYN_PAY=on to $node_env on Hetzner and restart $node_unit. Its first pay clock post puts the pay section in the state; from then on no binary rollback above can load it"
+stop_pay="ssh $hetzner \"sed -i '/^ZYN_PAY=/d' $node_env && systemctl restart $node_unit\""
+ssh "${ssh_opts[@]}" "$hetzner" bash -s -- "$node_unit" "$node_env" "$stamp" <<'REMOTE' || { echo "switching Zyn Pay on did not finish; to take ZYN_PAY=on out again: $stop_pay" >&2; exit 1; }
+set -euo pipefail
+unit=$1 env=$2 stamp=$3
+envs=$(systemctl show -p EnvironmentFiles --value "$unit")
+grep -qF "$env" <<<"$envs" || { echo "$unit does not read $env; not touching it" >&2; exit 1; }
+if grep -qx 'ZYN_PAY=on' "$env"; then
+  echo "$env already has ZYN_PAY=on; not editing it"
+else
+  if grep -q '^ZYN_PAY=' "$env"; then echo "$env sets ZYN_PAY to something else; not editing it" >&2; exit 1; fi
+  cp -p "$env" "$env.bak-$stamp"
+  [ -z "$(tail -c1 "$env")" ] || echo >> "$env"   # end the last line first
+  echo 'ZYN_PAY=on' >> "$env"
+  echo "added ZYN_PAY=on to $env (previous kept as $env.bak-$stamp)"
+fi
+systemctl restart "$unit"
+id=$(systemctl show -p InvocationID --value "$unit")
+end=$((SECONDS + 120))
+while [ $SECONDS -lt $end ]; do
+  systemctl is-active --quiet "$unit" || { echo "$unit is not active after the restart" >&2; journalctl -u "$unit" -n 20 --no-pager >&2; exit 1; }
+  log=$(journalctl "_SYSTEMD_INVOCATION_ID=$id" --no-pager -o cat || true)
+  if grep -F 'Zyn Pay on' <<<"$log"; then exit 0; fi
+  sleep 5
+done
+echo "$unit did not log 'Zyn Pay on' within 2 min; check its env and journal" >&2
+exit 1
+REMOTE
+echo "   to stop the clock posting (pay state stays): $stop_pay"
 
 print_rollbacks
 
 cat <<'LIVE'
 
-Rolled out to testnet 212. Live check, from the test wallets:
+Rolled out to testnet 212, with the pay clock on.
 
-  1. Alice subscribes SHOP for 1 BOLD.zy daily, 2 periods funded.
+Live check: it waits until a client can sign pay ops. Nothing can today; Nap
+gets them in Plan 2, or a test signer must exist first. Amounts below are in
+base units (1 BOLD.zy = 1000000000000000000).
+
+  1. Alice subscribes SHOP for 1000000000000000000 BOLD.zy daily, 2 periods
+     funded (pot 2000000000000000000).
   2. The clock pays period 0 at first_due (the node posts the clock every
-     ZYN_PAY_TICK_SECS, default 10; ZynScan shows a "Pay clock" row).
+     ZYN_PAY_TICK_SECS, default 10; ZynScan shows a "Pay clock" row with its
+     time).
   3. On Hetzner, with the schedule id from step 1:
 
        RPC=127.0.0.1:8499
        curl -s -X POST $RPC -d '{"method":"zyn_paySchedules","ids":"<schedule id hex>"}'
 
-     It must show index 1 and pot 1.
-  4. Alice cancels the schedule; the refund returned is 1.
+     It must show index 1 and pot "1000000000000000000".
+  4. Alice cancels the schedule; the pot that comes back to her as a claim is
+     1000000000000000000.
 
 The replica must keep printing "chain 212 verified through epoch N", and
 ZynScan /api/summary must keep "agrees": true.
