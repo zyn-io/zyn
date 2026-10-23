@@ -2609,7 +2609,12 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_pay_cancel(payer, schedule)
             }),
-            Op::PayOnce { .. } | Op::PayRefund { .. } | Op::PayClock { .. } => one(Err("Zyn Pay is not switched on in this build")),
+            Op::PayClock { program, at } => one(if *program != program::pay_clock() {
+                Err("wrong program for the pay clock")
+            } else {
+                self.apply_pay_clock(*at)
+            }),
+            Op::PayOnce { .. } | Op::PayRefund { .. } => one(Err("Zyn Pay is not switched on in this build")),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.

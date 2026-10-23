@@ -135,7 +135,6 @@ impl Chain {
     }
 
     /// Move the clock to `to` in steps the clock rule allows.
-    #[allow(dead_code)] // used from Task 5
     fn clock_to(&mut self, to: u64) {
         let mut at = self.vm.market.pay.time;
         while at < to {
@@ -247,7 +246,6 @@ fn create_is_refused_when_it_cannot_work() {
 }
 
 #[test]
-#[ignore = "needs the pay clock (Task 5)"]
 fn create_after_its_first_due_is_refused() {
     let mut c = Chain::new();
     c.mint(ALICE, BOLD, whole(100));
@@ -289,19 +287,6 @@ fn top_up_adds_periods_and_cancel_returns_the_pot() {
     assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: id }), "that schedule has ended");
 }
 
-fn unfund_after_one_paid(c: &mut Chain, id: Hash, at: u64) {
-    // Stand in for the clock (Task 5): period 0 paid out to a claim, the
-    // schedule out of money.
-    let s = c.vm.market.pay.schedules.get_mut(&id).unwrap();
-    let paid = s.amount;
-    s.pot = Fixed::ZERO;
-    s.index = 1;
-    s.remaining = s.remaining.map(|r| r - 1);
-    s.state = ScheduleState::Unfunded;
-    c.vm.market.claims.insert(objectvm::market::claim_id(&[0x99; 32], 0), objectvm::market::Claim { owner: SHOP, asset: BOLD, amount: paid });
-    c.vm.market.pay.time = at;
-}
-
 fn top_up(c: &mut Chain, id: Hash, periods: u32, who: AccountId) -> Op {
     let (inputs, change) = c.fund(ALICE, BOLD, whole(10 * periods as i128));
     Op::PayTopUp { payer: who, program: program::pay_manage(), schedule: id, periods, inputs, change }
@@ -312,7 +297,11 @@ fn resume_after_a_gap_keeps_the_end_date() {
     let mut c = Chain::new();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(4), 1);
-    unfund_after_one_paid(&mut c, id, NOV1 + 5 * DAY);
+    // Period 0 is paid, then the pot is empty and the next due turns it unfunded.
+    c.clock_to(NOV1 + DAY);
+    assert_eq!(c.vm.market.pay.schedules[&id].state, ScheduleState::Unfunded);
+    assert!(c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, 0)));
+    c.clock_to(NOV1 + 5 * DAY);
     // Periods 1 and 2 are skipped; only the last of the four remains.
     let op = top_up(&mut c, id, 2, ALICE);
     assert_eq!(c.refused(op), "fund no more periods than the schedule has");
@@ -320,7 +309,18 @@ fn resume_after_a_gap_keeps_the_end_date() {
     c.ok(op);
     let s = c.vm.market.pay.schedules[&id];
     assert_eq!((s.index, s.remaining, s.state, s.pot), (3, Some(1), ScheduleState::Active, whole(10)));
-    assert!(c.vm.market.pay.payments.is_empty());
+    c.clock_to(NOV1 + 6 * DAY);
+    let s = c.vm.market.pay.schedules[&id];
+    assert_eq!((s.state, s.pot), (ScheduleState::Ended, Fixed::ZERO));
+    for k in [0u32, 3] {
+        assert!(c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, k)), "period {k}");
+    }
+    for k in [1u32, 2] {
+        assert!(!c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, k)), "period {k}");
+    }
+    for k in 4..8u32 {
+        assert!(!c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, k)), "period {k}");
+    }
 }
 
 #[test]
@@ -328,10 +328,11 @@ fn top_up_after_the_term_has_run_out_is_refused() {
     let mut c = Chain::new();
     c.mint(ALICE, BOLD, whole(100));
     let id = c.subscribe(whole(10), Every::Days(1), NOV1, Some(1), 1);
-    unfund_after_one_paid(&mut c, id, NOV1 + 5 * DAY);
+    c.clock_to(NOV1 + 5 * DAY);
     let before = c.vm.market.pay.schedules[&id];
+    assert_eq!(before.state, ScheduleState::Ended);
     let op = top_up(&mut c, id, 1, ALICE);
-    assert_eq!(c.refused(op), "nothing left to pay on that schedule");
+    assert_eq!(c.refused(op), "that schedule has ended");
     assert_eq!(c.vm.market.pay.schedules[&id], before);
 }
 
@@ -374,4 +375,104 @@ fn unknown_schedules_and_wrong_programs_are_refused() {
     let op = Op::PayTopUp { payer: ALICE, program: wrong, schedule: id, periods: 1, inputs, change };
     assert_eq!(c.refused(op), "wrong program for a top-up");
     assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: wrong, schedule: id }), "wrong program for a cancellation");
+}
+
+fn paid_to(c: &Chain, id: &Hash, k: u32) -> pay::PaymentRecord {
+    c.vm.market.pay.payments[&pay::pay_payment_id(id, k)]
+}
+
+#[test]
+fn the_clock_pays_each_period_once_less_the_fee() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(30), NOV1, Some(2), 2);
+    c.clock_to(NOV1 - 1);
+    assert_eq!(c.claimable(SHOP, BOLD), 0, "nothing before it is due");
+    c.clock_to(NOV1);
+    let fee = pay::fee_of(whole(10));
+    assert_eq!(c.claimable(SHOP, BOLD), whole(10).0 - fee.0);
+    assert_eq!(c.vm.market.pol.get(&BOLD).copied(), Some(fee));
+    assert_eq!(paid_to(&c, &id, 0).amount, whole(10));
+    // Same time again pays nothing more.
+    c.clock_to(NOV1 + 60);
+    assert_eq!(c.claimable(SHOP, BOLD), whole(10).0 - fee.0);
+    c.clock_to(NOV1 + 30 * DAY);
+    let s = c.vm.market.pay.schedules[&id];
+    assert_eq!(s.state, ScheduleState::Ended);
+    assert_eq!(s.pot, Fixed::ZERO);
+    assert_eq!(c.claimable(SHOP, BOLD), 2 * (whole(10).0 - fee.0));
+}
+
+#[test]
+fn catch_up_pays_each_missed_period_in_order() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(1), Every::Days(1), NOV1, None, 10);
+    c.clock_to(NOV1 - 1);
+    // Node down four days: one post may move an hour, so catching up takes
+    // many posts, each paying what has fallen due.
+    c.clock_to(NOV1 + 4 * DAY);
+    // One payment per missed period, each stamped with its own due date.
+    for k in 0..5u32 {
+        assert_eq!(paid_to(&c, &id, k).at, NOV1 + k as u64 * DAY);
+        assert_eq!(paid_to(&c, &id, k).amount, whole(1));
+    }
+    assert!(!c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, 5)));
+    assert_eq!(c.vm.market.pay.schedules[&id].index, 5);
+    assert_eq!(c.vm.market.pay.schedules[&id].pot, whole(5));
+}
+
+#[test]
+fn an_empty_pot_turns_unfunded_and_a_top_up_resumes_without_back_charges() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Days(1), NOV1, None, 1);
+    c.clock_to(NOV1);
+    c.clock_to(NOV1 + DAY);
+    assert_eq!(c.vm.market.pay.schedules[&id].state, ScheduleState::Unfunded);
+    c.clock_to(NOV1 + 3 * DAY + 60);
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    c.ok(Op::PayTopUp { payer: ALICE, program: program::pay_manage(), schedule: id, periods: 1, inputs, change });
+    c.clock_to(NOV1 + 3 * DAY + 120);
+    // Periods 1 and 2 were missed while unfunded and are never charged;
+    // period 3 (due NOV1 + 3 days) is paid.
+    assert!(!c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, 1)));
+    assert!(!c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, 2)));
+    assert!(c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(&id, 3)));
+}
+
+#[test]
+fn at_most_256_payouts_per_tick_oldest_first() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(1_000));
+    c.clock_to(NOV1 - 3600);
+    let mut ids = Vec::new();
+    for i in 0..300u64 {
+        ids.push(c.subscribe(whole(1), Every::Days(1), NOV1 - 3600 + i, Some(1), 1));
+    }
+    c.clock(NOV1);
+    let paid = c.vm.market.pay.payments.len();
+    assert_eq!(paid, pay::MAX_DUE_PER_TICK);
+    // The 256 paid are the 256 due earliest.
+    assert!(ids[..256].iter().all(|id| c.vm.market.pay.payments.contains_key(&pay::pay_payment_id(id, 0))));
+    c.clock(NOV1 + 1);
+    assert_eq!(c.vm.market.pay.payments.len(), 300);
+}
+
+#[test]
+fn the_clock_only_moves_forward_and_an_hour_at_a_time() {
+    let mut c = Chain::new();
+    c.clock(NOV1);
+    assert_eq!(c.refused(Op::PayClock { program: program::pay_clock(), at: NOV1 - 1 }), "the pay clock cannot run backwards");
+    assert_eq!(c.refused(Op::PayClock { program: program::pay_clock(), at: NOV1 + 3601 }), "the pay clock moves at most an hour per post");
+}
+
+#[test]
+fn fee_rounds_down_to_nothing_on_dust() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, Fixed(1_000));
+    c.subscribe(Fixed(100), Every::Days(1), NOV1, Some(1), 1);
+    c.clock_to(NOV1);
+    assert_eq!(c.claimable(SHOP, BOLD), 100);
+    assert_eq!(c.vm.market.pol.get(&BOLD).copied().unwrap_or(Fixed::ZERO), Fixed::ZERO);
 }

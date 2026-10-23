@@ -455,6 +455,81 @@ impl ObjectVm {
         m.state = ScheduleState::Cancelled;
         Ok(Receipt::Paid { id: *schedule })
     }
+
+    /// The pay clock: pays every period due at or before `at`, oldest due
+    /// first, at most `MAX_DUE_PER_TICK`; the rest at the next post.
+    pub(crate) fn apply_pay_clock(&mut self, at: u64) -> Result<Receipt, &'static str> {
+        let now = self.market.pay.time;
+        if at < now {
+            return Err("the pay clock cannot run backwards");
+        }
+        if now > 0 && at > now.saturating_add(MAX_PAY_CLOCK_STEP_SECS) {
+            return Err("the pay clock moves at most an hour per post");
+        }
+        self.market.pay.time = at;
+        // Every (due, schedule) pair due by `at`, in due order. One schedule
+        // may contribute several periods after a long gap, but never more than
+        // a tick can pay.
+        let mut due: Vec<(u64, Hash)> = Vec::new();
+        for (id, s) in &self.market.pay.schedules {
+            if s.state != ScheduleState::Active {
+                continue;
+            }
+            let (mut k, mut left) = (s.index, s.remaining);
+            let mut taken = 0;
+            while left != Some(0) && taken < MAX_DUE_PER_TICK {
+                match due_at(s.first_due, s.every, k) {
+                    Some(d) if d <= at => due.push((d, *id)),
+                    _ => break,
+                }
+                k += 1;
+                taken += 1;
+                left = left.map(|r| r - 1);
+            }
+        }
+        due.sort();
+        due.truncate(MAX_DUE_PER_TICK);
+        for (when, id) in due {
+            self.pay_one_period(&id, when)?;
+        }
+        Ok(Receipt::Paid { id: [0u8; 32] })
+    }
+
+    fn pay_one_period(&mut self, id: &Hash, when: u64) -> Result<(), &'static str> {
+        let s = *self.market.pay.schedules.get(id).ok_or("no such schedule")?;
+        // An earlier payout in this tick may have ended or emptied it.
+        if s.state != ScheduleState::Active {
+            return Ok(());
+        }
+        if s.pot.0 < s.amount.0 {
+            self.market.pay.schedules.get_mut(id).expect("present").state = ScheduleState::Unfunded;
+            return Ok(());
+        }
+        let payment = pay_payment_id(id, s.index);
+        let fee = fee_of(s.amount);
+        let net = Fixed(s.amount.0 - fee.0);
+        crate::market::Market::pay(&mut self.market, &payment, 0, s.payee, s.asset, net);
+        self.market.to_pol(s.asset, fee).ok_or("fee overflow")?;
+        self.market.pay.payments.insert(
+            payment,
+            PaymentRecord { payer: s.payer, payee: s.payee, asset: s.asset, amount: s.amount, fee, refunded: Fixed::ZERO, refunds: 0, at: when },
+        );
+        let m = self.market.pay.schedules.get_mut(id).expect("present");
+        m.pot = Fixed(m.pot.0 - m.amount.0);
+        m.index += 1;
+        if let Some(r) = m.remaining.as_mut() {
+            *r -= 1;
+            if *r == 0 {
+                // Nothing more to pay; anything left in the pot goes back.
+                let rest = m.pot;
+                m.pot = Fixed::ZERO;
+                m.state = ScheduleState::Ended;
+                let (payer, asset) = (m.payer, m.asset);
+                crate::market::Market::pay(&mut self.market, &cancel_source(id), 0, payer, asset, rest);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
