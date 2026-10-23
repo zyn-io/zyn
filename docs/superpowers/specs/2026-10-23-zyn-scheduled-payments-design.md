@@ -73,8 +73,8 @@ them (tier 2).
 
 | Op | Authority (S14) | Does |
 |---|---|---|
-| `PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change }` | payer | Consumes `inputs`, moves `amount × fund_periods` into the pot, creates the schedule. Refuses a payee with no registered viewing key, `first_due` in the past, `fund_periods < 1`. |
-| `PayTopUp { payer, schedule, periods, inputs, change }` | payer | Adds to the pot; an `unfunded` schedule becomes `active` and pays what is due at the next tick. |
+| `PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change }` | payer | Consumes `inputs`, moves `amount × fund_periods` into the pot, creates the schedule. Refuses a payee with no registered viewing key, `first_due` before the clock's last time, `fund_periods < 1`. |
+| `PayTopUp { payer, schedule, periods, inputs, change }` (typed field: `addPeriods`) | payer | Adds to the pot. An `unfunded` schedule becomes `active` at the latest period already due; missed periods are not charged and count against the term, and the next tick pays that one period. |
 | `PayCancel { payer, schedule }` | payer | Ends it now; the pot becomes a claim for the payer. |
 | `PayOnce { payer, payee, asset, amount, reference, nonce, inputs, change }` | payer | A one-off payment with a refundable record. |
 | `PayRefund { payee, payment, amount, inputs, change }` | payee | Pays up to the unrefunded amount back to the original payer as a claim. The payee names the payment, never the payer. |
@@ -123,8 +123,9 @@ emits a `Pay*` op. Testnet 212 first; mainnet 26460 after the NU7 switch.
 
 ## Nap
 
-- Consent cards for `PayCreate`, `PayOnce` and `PayTopUp`, from the typed
-  intent (S13).
+- Consent cards for all five holder pay ops (`PayCreate`, `PayTopUp` with
+  `addPeriods`, `PayCancel`, `PayOnce`, `PayRefund`), from the typed intent
+  (S13).
 - A **Payments** list under Zyn: each schedule with payee, amount, next
   payment, funded until, Top up, Cancel; past payments and refunds.
 - A notice 7 days (or one period, if shorter) before a pot runs out, and
@@ -157,9 +158,12 @@ small `zyn-pay serve` service:
 
 ## What is visible to whom (shown inline in Nap and the docs)
 
-- **Public:** nothing about who pays whom, how much or how often.
-- **The merchant:** payments to its account, their reference and period;
-  never the payer's account or address. Refunds go back without it.
+- **Public:** no payer, payee, amount or id. Pay ops appear in ZynScan as
+  labelled rows, and the pay clock posts on a fixed cadence (DECISIONS
+  §188.12, §188.2).
+- **The merchant:** payments to its account, matched by payment id
+  (DECISIONS §188.7); it reads the schedule's reference through
+  `zyn_paySchedules`; never the payer's account or address. Refunds go back without it.
 - **The operator (us), today:** every schedule and payment, including payer
   and payee. The same tier-2 visibility as all of Zyn.
 - **Custody:** amounts set aside are on Zyn; withdrawing to Zcash depends on
@@ -177,8 +181,7 @@ small `zyn-pay serve` service:
 
 ## Error handling
 
-- Insufficient inputs, unknown asset, payee without viewing key, past
-  `first_due`, zero amount or periods: refused at sequencing with a reason.
+- Insufficient inputs, unknown asset, payee without viewing key, `first_due` before the clock's last time, zero amount or periods: refused at sequencing with a reason.
 - Clock more than an hour ahead of its last time, or backwards: refused.
 - More than 256 schedules due in one tick: the rest pay at the next tick, in
   due order; never skipped.

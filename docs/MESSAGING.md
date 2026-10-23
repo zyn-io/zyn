@@ -41,7 +41,7 @@ The hierarchy, which keeps getting flattened:
 | an application execution layer **built for** Zcash | the execution layer **of** Zcash | "of" implies protocol recognition and inherited security; Zcash does not know Zyn exists |
 | Zcash-anchored; anchor-transaction finality comes from Zcash | settled on Zcash; inherits Zcash security/finality | Zcash finalises the anchor tx and its 32-byte commitment, not the state behind it |
 | users can publish signed intents through Zcash, making censorship **detectable** | you can always get a transaction in; censorship-resistant execution | a `Censored` record evidences a refusal; it does not compel execution |
-| Zyn Pay is **built, not in use**: a payment schedule **pays from funds set aside at approval**; cancel and the rest comes back | auto-debit; we charge your wallet | the ledger cannot take from notes; the payer sets the money aside first |
+| Zyn Pay is **built, not in use**: a payment schedule **pays from funds set aside at approval**; cancel and what has not been paid comes back | auto-debit; we charge your wallet | the ledger cannot take from notes; the payer sets the money aside first |
 | Zyn Pay's public ledger **does not show** who pays whom on a schedule; the operator sees it today | private subscriptions; anonymous payments | tier 2, as everywhere on Zyn |
 | users hold a **verifiable account-state proof** against an anchored root | trustless exit; you can always leave; nobody can trap your assets | nothing on Zcash consumes an exit proof; `confirm_withdrawal` needs a settlement signer |
 | **withdrawals depend on the Zyn-operated threshold custodians** | trustless bridge | say it plainly; it is the single most important disclosure |

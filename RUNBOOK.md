@@ -2819,11 +2819,12 @@ the fees after any credit, withdrawal or sale.
 Built on branch `zyn-pay` (ledger ops 69–74 and the node); **not deployed**. Nap and the merchant package are not built.
 
 - `ZYN_PAY_TICK_SECS` (node env, default `10`, minimum `5`): how often the node posts the pay clock. The clock is silent until the chain has any pay state; from then on the node posts it at this interval for good, and skips posts while halted. Each post is one journal record and one operator "Pay clock" row in ZynScan. After downtime it catches up an hour per post.
-- Read methods, on the node's RPC (loopback `127.0.0.1:8499` on the testnet and mainnet boxes). `ids` is a comma-separated list of 32-byte hex ids, at most 256; unknown ids are left out; the payer is never in the answer:
+- Read methods, on the node's RPC: testnet 212 is `127.0.0.1:8499` on Hetzner, mainnet 26460 is `127.0.0.1:8599` on Contabo. `ids` is a comma-separated list of 32-byte hex ids. Unknown ids are left out; ids past the first 256 are dropped; one malformed id fails the whole call ("an id is not 32 hex bytes"). The payer is never in the answer:
 
 ```sh
-curl -s -X POST 127.0.0.1:8499 -d '{"method":"zyn_paySchedules","ids":"<hex>"}'
-curl -s -X POST 127.0.0.1:8499 -d '{"method":"zyn_payPayments","ids":"<hex>"}'
+RPC=127.0.0.1:8499   # testnet, on Hetzner; mainnet: RPC=127.0.0.1:8599, on Contabo
+curl -s -X POST $RPC -d '{"method":"zyn_paySchedules","ids":"<hex>"}'
+curl -s -X POST $RPC -d '{"method":"zyn_payPayments","ids":"<hex>"}'
 ```
 
   `zyn_paySchedules` takes schedule ids; `zyn_payPayments` takes payment ids.
