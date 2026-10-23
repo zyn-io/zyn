@@ -36,6 +36,17 @@ Noir. This package is wallet-neutral and covers the merchant side.
    cryptography for `watch`.
 4. A "Build" page on onboard.cavebro.win with the quick start and a live
    example.
+5. `zec-pay serve` — the same engine as a small HTTP service for one merchant
+   (REST API + webhooks), for stacks that are not Node.
+
+Built gateway-ready from the start (see "Ready for payment gateways"): every
+record carries a merchant id, one scan serves many viewing keys, the API and
+events are versioned, storage is an interface.
+
+**v1.x (gateway features, on the same interfaces)**
+- Many merchants per `serve` process, each with its own API key and webhook.
+- A Postgres store.
+- Adapters for existing shop plugins (see below).
 
 **v2 (second milestone, same package)**
 - Settle in USDC: the buyer pays ZEC, NEAR's 1Click swaps it and delivers USDC
@@ -44,7 +55,8 @@ Noir. This package is wallet-neutral and covers the merchant side.
 **Not in scope**
 - Transparent-address payments (exchange withdrawals). Shielded only.
 - Unconfirmed (mempool) detection. A payment counts once it is in a block.
-- Fiat pricing, refunds, a hosted watcher service, the fee-in-payment model.
+- Fiat conversion (a gateway passes its own quoted price through; see below),
+  refunds, the fee-in-payment model.
 - The public developer endpoints (separate piece; access likely gated by
   staking ZEC — to be designed later).
 - Zakura PIR.
@@ -162,6 +174,43 @@ Default: our block server's HTTP door, `https://zyn-rpc.cavebro.win/zec`
 point `watch` at their own `zyn-lightd` (public repo `zyn-io/zyn`). The source
 is an interface, so a standard lightwalletd adapter can be added later.
 
+## Ready for payment gateways
+
+A gateway (ours later as the hosted watcher, or someone else's) runs the same
+engine for many merchants. v1 does not ship gateway features, but nothing in
+it has to be rewritten to add them:
+
+- **Merchants as a first-class id.** Invoices, cursors, events and webhook
+  settings are keyed by `merchantId`. The library's single-merchant mode uses
+  one fixed id.
+- **One scan, many keys.** `zec-pay-core` holds a set of viewing keys; each
+  block is fetched once and trial-decrypted with every key. A merchant added
+  later gets its own catch-up cursor from its starting height, then joins the
+  shared scan at the tip. Cost grows with the number of keys per block; the
+  plan measures how many keys one core keeps up with.
+- **A stable API.** REST under `/v1`:
+  - `POST /v1/invoices` (with an `Idempotency-Key` header);
+  - `GET /v1/invoices/:id`;
+  - `GET /v1/invoices?status=&since=`;
+  - `POST /v1/invoices/:id/cancel`.
+  The JSON is the library's invoice object; the library and the service never
+  drift.
+- **Versioned events.** `invoice.created`, `invoice.seen`, `invoice.partial`,
+  `invoice.paid`, `invoice.overpaid`, `invoice.expired`, `invoice.late`,
+  `invoice.cancelled`. Each has an event id (delivered at least once; receivers
+  dedupe by id), a timestamp and an `apiVersion`. The signature header carries
+  a timestamp and an HMAC over `timestamp.body`, so receivers can refuse
+  replays.
+- **Pass-through fields.** `orderId`, `metadata` (string map) and an optional
+  `price { currency, amount }`: the gateway's own fiat quote, stored and
+  returned, never computed by us.
+- **Pluggable parts.** Store (SQLite, memory; Postgres in v1.x), block source
+  (zyn-lightd; lightwalletd later), clock (for tests).
+- **Plugin adapters, later.** Existing shop plugins (WooCommerce, Shopify
+  apps) mostly speak BTCPay's Greenfield API. A Greenfield-compatible subset
+  in v1.x would let those plugins use ZEC Pay unchanged. Which subset they
+  actually call is to be checked before committing to it.
+
 ## Disclosures (shown inline in the docs, not behind an "i")
 
 - The merchant's server holds a viewing key: it can see every payment to that
@@ -188,8 +237,8 @@ rest of the guide:
 ```
 apps/zec-pay/
   core/            Rust crate zec-pay-core → wasm (wasm-pack, targets nodejs + web)
-  package/         @zyn-io/zec-pay: watch.js, pay.js, store-sqlite.js, store-memory.js,
-                   the built wasm, README
+  package/         @zyn-io/zec-pay: watch.js, pay.js, serve.js (+ `zec-pay serve` bin),
+                   store-sqlite.js, store-memory.js, the built wasm, README
   tests/
 apps/zec-onboard/public/build/   the Build page and example
 zyn-custody/src/compact.rs       scan that keeps the recipient (small change)
@@ -215,6 +264,11 @@ Licence MIT, like Nap Connect.
   built note in both pools, scan of fixture compact blocks.
 - `watch` tests with a fake block source: partial, paid, overpaid, expired,
   late, reorg rewind, the NU7 change of N, webhook signing and retry.
+- Two merchants in one scan: each sees only its own payments; a merchant added
+  mid-chain catches up and joins.
+- `serve` API tests: idempotent create, status reads, event ids stable across
+  retries, signature check.
+- A throughput measurement: viewing keys per core at mainnet block sizes.
 - One live test on mainnet, run by hand: pay the demo invoice from Nap and from
   one other wallet (Zashi/Zodl), watch it reach `paid`.
 - The Build page's e2e in `apps/zec-onboard/tests` follows the existing
