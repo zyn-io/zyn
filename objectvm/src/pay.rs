@@ -168,6 +168,21 @@ pub fn due_at(first_due: u64, every: Every, k: u32) -> Option<u64> {
     }
 }
 
+pub(crate) fn encode_every(e: &mut Encoder, every: Every) {
+    match every {
+        Every::Days(n) => e.u8(0).u32(n),
+        Every::Months(n) => e.u8(1).u32(n),
+    };
+}
+
+pub(crate) fn decode_every(d: &mut zyn_vm::read::Decoder) -> Option<Every> {
+    match d.u8().ok()? {
+        0 => Some(Every::Days(d.u32().ok()?)),
+        1 => Some(Every::Months(d.u32().ok()?)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
