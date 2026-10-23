@@ -2753,57 +2753,67 @@ impl MicrochainVm for ObjectVm {
 
     /// S13 for Zyn Pay: a wallet shows every field that changes the outcome.
     /// Other intents keep the default opaque digest, byte for byte.
+    ///
+    /// An EVM wallet's signature covers only this typed data, so each pay
+    /// struct also carries `intent`, the same digest of the whole encoded op
+    /// the opaque form uses. That binds the notes spent and the change made:
+    /// a relayer holding the signature cannot swap in other notes of the
+    /// signer's or pay the change to itself, and an exact replay fails
+    /// because its inputs are already spent.
     fn typed_intent(intent: &Op) -> zyn_vm::eip712::TypedData {
+        use sha2::{Digest, Sha256};
         use zyn_vm::eip712::{TypedData, Value};
         fn word(b: &[u8; 32]) -> Value {
             Value::Bytes32(*b)
         }
         let uint = |n: u32| Value::uint(u64::from(n));
+        let digest: [u8; 32] = Sha256::digest(Self::encode_intent(intent)).into();
+        let bound = |t: TypedData| t.field("intent", Value::Bytes32(digest));
         match intent {
             Op::PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, .. } => {
                 let (unit, count) = match every {
                     Every::Days(n) => ("days", *n),
                     Every::Months(n) => ("months", *n),
                 };
-                TypedData::new("ZynPayCreate")
+                bound(
+                    TypedData::new("ZynPayCreate")
+                        .field("payer", word(payer))
+                        .field("payee", word(payee))
+                        .field("asset", word(asset))
+                        .field("amountPerPeriod", Value::int(amount.0))
+                        .field("everyUnit", Value::String(unit.to_string()))
+                        .field("everyCount", uint(count))
+                        .field("firstDue", Value::uint(*first_due))
+                        // 0 means until cancelled (`periods: None`).
+                        .field("periods", uint(periods.unwrap_or(0)))
+                        .field("fundPeriods", uint(*fund_periods))
+                        .field("reference", word(reference))
+                        .field("nonce", word(nonce)),
+                )
+            }
+            Op::PayTopUp { payer, schedule, periods, .. } => bound(
+                TypedData::new("ZynPayTopUp")
+                    .field("payer", word(payer))
+                    .field("schedule", word(schedule))
+                    .field("addPeriods", uint(*periods)),
+            ),
+            Op::PayCancel { payer, schedule, .. } => bound(TypedData::new("ZynPayCancel").field("payer", word(payer)).field("schedule", word(schedule))),
+            Op::PayOnce { payer, payee, asset, amount, reference, nonce, .. } => bound(
+                TypedData::new("ZynPayOnce")
                     .field("payer", word(payer))
                     .field("payee", word(payee))
                     .field("asset", word(asset))
-                    .field("amountPerPeriod", Value::int(amount.0))
-                    .field("everyUnit", Value::String(unit.to_string()))
-                    .field("everyCount", uint(count))
-                    .field("firstDue", Value::uint(*first_due))
-                    // 0 means until cancelled (`periods: None`).
-                    .field("periods", uint(periods.unwrap_or(0)))
-                    .field("fundPeriods", uint(*fund_periods))
+                    .field("amount", Value::int(amount.0))
                     .field("reference", word(reference))
-                    .field("nonce", word(nonce))
-            }
-            Op::PayTopUp { payer, schedule, periods, .. } => TypedData::new("ZynPayTopUp")
-                .field("payer", word(payer))
-                .field("schedule", word(schedule))
-                .field("addPeriods", uint(*periods)),
-            Op::PayCancel { payer, schedule, .. } => TypedData::new("ZynPayCancel")
-                .field("payer", word(payer))
-                .field("schedule", word(schedule)),
-            Op::PayOnce { payer, payee, asset, amount, reference, nonce, .. } => TypedData::new("ZynPayOnce")
-                .field("payer", word(payer))
-                .field("payee", word(payee))
-                .field("asset", word(asset))
-                .field("amount", Value::int(amount.0))
-                .field("reference", word(reference))
-                .field("nonce", word(nonce)),
-            Op::PayRefund { payee, payment, amount, .. } => TypedData::new("ZynPayRefund")
-                .field("payee", word(payee))
-                .field("payment", word(payment))
-                .field("amount", Value::int(amount.0)),
-            _ => {
-                use sha2::{Digest, Sha256};
-                let mut h = Sha256::new();
-                h.update(Self::encode_intent(intent));
-                let digest: [u8; 32] = h.finalize().into();
-                TypedData::new("OpaqueIntent").field("intent", Value::Bytes32(digest))
-            }
+                    .field("nonce", word(nonce)),
+            ),
+            Op::PayRefund { payee, payment, amount, .. } => bound(
+                TypedData::new("ZynPayRefund")
+                    .field("payee", word(payee))
+                    .field("payment", word(payment))
+                    .field("amount", Value::int(amount.0)),
+            ),
+            _ => TypedData::new("OpaqueIntent").field("intent", Value::Bytes32(digest)),
         }
     }
 

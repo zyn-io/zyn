@@ -612,3 +612,50 @@ fn a_wallet_sees_every_field_of_a_schedule_and_other_ops_stay_opaque() {
     assert_eq!(ObjectVm::typed_intent(&other), default);
     assert!(format!("{:?}", ObjectVm::typed_intent(&other)).contains("OpaqueIntent"));
 }
+
+/// An EVM wallet signs only the typed data, so it must bind the notes spent
+/// and the change made: a relayer holding the signature cannot swap either.
+#[test]
+fn a_signed_pay_intent_binds_its_inputs_and_change() {
+    let change = vec![Output { note: Note { asset: BOLD, amount: whole(1), owner: ALICE, nonce: [9; 32] }, enc: enc() }];
+    let ins = vec![([3; 32], [4; 32])];
+    let ops = [
+        Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Months(1), first_due: NOV1, periods: Some(12), fund_periods: 3, reference: [1; 32], nonce: [2; 32], inputs: ins.clone(), change: change.clone() },
+        Op::PayTopUp { payer: ALICE, program: program::pay_manage(), schedule: [5; 32], periods: 2, inputs: ins.clone(), change: change.clone() },
+        Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: BOLD, amount: whole(1), reference: [1; 32], nonce: [6; 32], inputs: ins.clone(), change: change.clone() },
+        Op::PayRefund { payee: SHOP, program: program::pay_refund(), payment: [7; 32], amount: whole(1), inputs: ins.clone(), change: change.clone() },
+    ];
+    for op in &ops {
+        let hash = ObjectVm::typed_intent(op).struct_hash();
+        let mut other_inputs = op.clone();
+        let mut other_change = op.clone();
+        match (&mut other_inputs, &mut other_change) {
+            (Op::PayCreate { inputs, .. }, Op::PayCreate { change, .. })
+            | (Op::PayTopUp { inputs, .. }, Op::PayTopUp { change, .. })
+            | (Op::PayOnce { inputs, .. }, Op::PayOnce { change, .. })
+            | (Op::PayRefund { inputs, .. }, Op::PayRefund { change, .. }) => {
+                inputs[0].0 = [0x33; 32];
+                change[0].note.owner = SHOP;
+            }
+            _ => unreachable!(),
+        }
+        assert_ne!(hash, ObjectVm::typed_intent(&other_inputs).struct_hash(), "inputs unbound in {op:?}");
+        assert_ne!(hash, ObjectVm::typed_intent(&other_change).struct_hash(), "change unbound in {op:?}");
+    }
+    // The readable fields stay beside the digest.
+    let fields: [&[&str]; 4] = [
+        &["payer", "payee", "asset", "amountPerPeriod", "everyUnit", "everyCount", "firstDue", "periods", "fundPeriods", "reference", "nonce", "intent"],
+        &["payer", "schedule", "addPeriods", "intent"],
+        &["payer", "payee", "asset", "amount", "reference", "nonce", "intent"],
+        &["payee", "payment", "amount", "intent"],
+    ];
+    for (op, want) in ops.iter().zip(fields) {
+        let s = format!("{:?}", ObjectVm::typed_intent(op));
+        for f in want {
+            assert!(s.contains(&format!("\"{f}\"")), "missing {f} in {s}");
+        }
+    }
+    let cancel = Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: [5; 32] };
+    let s = format!("{:?}", ObjectVm::typed_intent(&cancel));
+    assert!(s.contains("\"payer\"") && s.contains("\"schedule\"") && s.contains("\"intent\""), "{s}");
+}
