@@ -13,7 +13,6 @@ use zyn_vm::{program, Fixed};
 const BOLD: [u8; 32] = [0xB1; 32];
 const ALICE: AccountId = [0xA1; 32];
 const SHOP: AccountId = [0x5E; 32];
-#[allow(dead_code)] // used by the schedule tests that follow
 const DAY: u64 = 86_400;
 // 2026-11-01 00:00:00 UTC
 const NOV1: u64 = 1_793_491_200;
@@ -28,7 +27,6 @@ struct Chain {
     salt: u64,
 }
 
-#[allow(dead_code)] // the pay behaviour tests that follow use the rest
 impl Chain {
     fn new() -> Chain {
         let mut c = Chain { vm: ObjectVm::genesis(212, Limits { max_io: 16 }), seq: 0, salt: 0 };
@@ -137,6 +135,7 @@ impl Chain {
     }
 
     /// Move the clock to `to` in steps the clock rule allows.
+    #[allow(dead_code)] // used from Task 5
     fn clock_to(&mut self, to: u64) {
         let mut at = self.vm.market.pay.time;
         while at < to {
@@ -214,4 +213,78 @@ fn pay_state_round_trips_and_counts_toward_conservation() {
     let back = ObjectVm::decode(&c.vm.encode()).expect("decodes");
     assert_eq!(back, c.vm);
     assert_ne!(hex(&c.vm.state_root()), PINNED_ROOT);
+}
+
+#[test]
+fn create_sets_aside_the_funded_periods() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Months(1), NOV1, Some(12), 3);
+    let s = c.vm.market.pay.schedules[&id];
+    assert_eq!(s.pot, whole(30));
+    assert_eq!(s.state, ScheduleState::Active);
+    assert_eq!(c.balance(ALICE, BOLD), whole(70).0);
+}
+
+#[test]
+fn create_is_refused_when_it_cannot_work() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let nobody: AccountId = [0x0D; 32];
+    let base = |c: &mut Chain, payee: AccountId, every: Every, first_due: u64, fund: u32| {
+        let nonce = c.fresh();
+        let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+        Op::PayCreate { payer: ALICE, program: program::pay_create(), payee, asset: BOLD, amount: whole(10), every, first_due, periods: Some(1), fund_periods: fund, reference: [0; 32], nonce, inputs, change }
+    };
+    let op = base(&mut c, nobody, Every::Days(1), NOV1, 1);
+    assert_eq!(c.refused(op), "the payee has not registered where to be paid");
+    let op = base(&mut c, SHOP, Every::Days(0), NOV1, 1);
+    assert_eq!(c.refused(op), "a schedule needs a period above nothing");
+    let op = base(&mut c, SHOP, Every::Days(1), NOV1, 0);
+    assert_eq!(c.refused(op), "fund at least one period");
+    let op = base(&mut c, ALICE, Every::Days(1), NOV1, 1);
+    assert_eq!(c.refused(op), "a schedule cannot pay its own payer");
+}
+
+#[test]
+#[ignore = "needs the pay clock (Task 5)"]
+fn create_after_its_first_due_is_refused() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    c.clock(NOV1 + DAY);
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: whole(10), every: Every::Days(1), first_due: NOV1, periods: Some(1), fund_periods: 1, reference: [0; 32], nonce, inputs, change };
+    assert_eq!(c.refused(op), "the first payment is already past");
+}
+
+#[test]
+fn funding_overflow_is_refused() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(1));
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(1));
+    let op = Op::PayCreate { payer: ALICE, program: program::pay_create(), payee: SHOP, asset: BOLD, amount: Fixed(i128::MAX / 2), every: Every::Days(1), first_due: NOV1, periods: None, fund_periods: 3, reference: [0; 32], nonce, inputs, change };
+    assert_eq!(c.refused(op), "that schedule is too large");
+}
+
+#[test]
+fn top_up_adds_periods_and_cancel_returns_the_pot() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    let id = c.subscribe(whole(10), Every::Months(1), NOV1, None, 1);
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(20));
+    c.ok(Op::PayTopUp { payer: ALICE, program: program::pay_manage(), schedule: id, periods: 2, inputs, change });
+    assert_eq!(c.vm.market.pay.schedules[&id].pot, whole(30));
+    // Only the payer may cancel.
+    assert_eq!(c.refused(Op::PayCancel { payer: SHOP, program: program::pay_manage(), schedule: id }), "not your schedule");
+    c.ok(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: id });
+    let s = c.vm.market.pay.schedules[&id];
+    assert_eq!(s.state, ScheduleState::Cancelled);
+    assert_eq!(s.pot, Fixed::ZERO);
+    assert_eq!(c.claimable(ALICE, BOLD), whole(30).0);
+    // A cancelled schedule takes no top-up and no second cancel.
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(10));
+    assert_eq!(c.refused(Op::PayTopUp { payer: ALICE, program: program::pay_manage(), schedule: id, periods: 1, inputs, change }), "that schedule has ended");
+    assert_eq!(c.refused(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: id }), "that schedule has ended");
 }

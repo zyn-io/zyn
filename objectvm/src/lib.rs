@@ -2592,9 +2592,24 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_lend_insure(donor, asset, *amount, inputs, change)
             }),
-            Op::PayCreate { .. } | Op::PayTopUp { .. } | Op::PayCancel { .. } | Op::PayOnce { .. } | Op::PayRefund { .. } | Op::PayClock { .. } => {
-                one(Err("Zyn Pay is not switched on in this build"))
+            Op::PayCreate { payer, program, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change } => {
+                one(if *program != program::pay_create() {
+                    Err("wrong program for a scheduled payment")
+                } else {
+                    self.apply_pay_create(payer, payee, asset, *amount, *every, *first_due, *periods, *fund_periods, reference, nonce, inputs, change)
+                })
             }
+            Op::PayTopUp { payer, program, schedule, periods, inputs, change } => one(if *program != program::pay_manage() {
+                Err("wrong program for a top-up")
+            } else {
+                self.apply_pay_top_up(payer, schedule, *periods, inputs, change)
+            }),
+            Op::PayCancel { payer, program, schedule } => one(if *program != program::pay_manage() {
+                Err("wrong program for a cancellation")
+            } else {
+                self.apply_pay_cancel(payer, schedule)
+            }),
+            Op::PayOnce { .. } | Op::PayRefund { .. } | Op::PayClock { .. } => one(Err("Zyn Pay is not switched on in this build")),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
