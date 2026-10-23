@@ -263,6 +263,31 @@ pub fn lend_insure() -> ProgramId {
     named(b"lend-insure")
 }
 
+/// Start a scheduled payment, funded at approval (Zyn Pay).
+pub fn pay_create() -> ProgramId {
+    named(b"pay-create")
+}
+
+/// Top up or cancel a scheduled payment (Zyn Pay).
+pub fn pay_manage() -> ProgramId {
+    named(b"pay-manage")
+}
+
+/// A one-off payment with a refundable record (Zyn Pay).
+pub fn pay_once() -> ProgramId {
+    named(b"pay-once")
+}
+
+/// A payee's refund of a payment it received (Zyn Pay).
+pub fn pay_refund() -> ProgramId {
+    named(b"pay-refund")
+}
+
+/// The pay clock, posted by the operator (Zyn Pay).
+pub fn pay_clock() -> ProgramId {
+    named(b"pay-clock")
+}
+
 /// Make a bonding-curve token (DECISIONS §141).
 pub fn curve_create() -> ProgramId {
     named(b"curve-create")
@@ -343,6 +368,11 @@ pub fn is_named(id: &ProgramId) -> bool {
         lend_repay(),
         lend_collateral(),
         lend_bid(),
+        pay_create(),
+        pay_manage(),
+        pay_once(),
+        pay_refund(),
+        pay_clock(),
     ]
     .contains(id)
 }

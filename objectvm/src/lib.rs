@@ -48,6 +48,7 @@ use std::vec as alloc_vec;
 
 pub mod bridge;
 pub mod lend;
+pub mod pay;
 /// The lending rules `lend` runs on (zyn-io/zyn-lend), for readers of its state.
 pub use zyn_lend;
 pub mod curve;
