@@ -476,3 +476,100 @@ fn fee_rounds_down_to_nothing_on_dust() {
     assert_eq!(c.claimable(SHOP, BOLD), 100);
     assert_eq!(c.vm.market.pol.get(&BOLD).copied().unwrap_or(Fixed::ZERO), Fixed::ZERO);
 }
+
+fn pay_once(c: &mut Chain, amount: Fixed) -> Hash {
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, amount);
+    c.ok(Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: BOLD, amount, reference: [3; 32], nonce, inputs, change });
+    pay::pay_once_id(&ALICE, &nonce)
+}
+
+fn refund(c: &mut Chain, payment: Hash, amount: Fixed) -> Receipt {
+    c.mint(SHOP, BOLD, amount);
+    let (inputs, change) = c.fund(SHOP, BOLD, amount);
+    c.apply(Op::PayRefund { payee: SHOP, program: program::pay_refund(), payment, amount, inputs, change })
+}
+
+#[test]
+fn a_one_off_payment_pays_the_payee_less_the_fee() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(50));
+    let id = pay_once(&mut c, whole(20));
+    let fee = pay::fee_of(whole(20));
+    assert_eq!(c.claimable(SHOP, BOLD), whole(20).0 - fee.0);
+    assert_eq!(c.vm.market.pay.payments[&id].payer, ALICE);
+}
+
+#[test]
+fn a_refund_goes_back_to_the_payer_unnamed() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(50));
+    let id = pay_once(&mut c, whole(20));
+    assert!(!ObjectVm::rejected(&refund(&mut c, id, whole(5))));
+    assert_eq!(c.claimable(ALICE, BOLD), whole(5).0);
+    assert_eq!(c.vm.market.pay.payments[&id].refunded, whole(5));
+}
+
+#[test]
+fn partial_refunds_cannot_exceed_the_payment() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(50));
+    let sid = c.subscribe(whole(10), Every::Days(1), NOV1, None, 2);
+    c.clock_to(NOV1);
+    let payment = pay::pay_payment_id(&sid, 0);
+    c.ok(Op::PayCancel { payer: ALICE, program: program::pay_manage(), schedule: sid });
+    // A refund after cancelling still works.
+    assert!(!ObjectVm::rejected(&refund(&mut c, payment, whole(6))));
+    match refund(&mut c, payment, whole(5)) {
+        Receipt::Refused(why) => assert_eq!(why, "more than is left to refund"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!ObjectVm::rejected(&refund(&mut c, payment, whole(4))));
+}
+
+#[test]
+fn only_the_payee_refunds() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(50));
+    let id = pay_once(&mut c, whole(20));
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(1));
+    assert_eq!(c.refused(Op::PayRefund { payee: ALICE, program: program::pay_refund(), payment: id, amount: whole(1), inputs, change }), "only the payee refunds a payment");
+}
+
+/// Applies `op`, expects the refusal `why`, and checks that nothing but the
+/// intent bookkeeping (sequence, accumulator, count) moved: the encoded state
+/// is otherwise byte-identical.
+fn refused_leaves_state(c: &mut Chain, op: &Op, why: &str) {
+    let mut expected = c.vm.clone();
+    c.seq += 1;
+    match c.vm.apply(c.seq, op).into_iter().next().unwrap() {
+        Receipt::Refused(got) => assert_eq!(got, why),
+        other => panic!("{other:?}"),
+    }
+    expected.seq = c.vm.seq;
+    expected.intent_acc = c.vm.intent_acc;
+    expected.epoch_intents = c.vm.epoch_intents;
+    assert_eq!(c.vm.encode(), expected.encode(), "a refused op leaves state byte-identical");
+}
+
+#[test]
+fn a_one_off_payment_refused_for_fee_overflow_changes_nothing() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(50));
+    c.vm.market.pol.insert(BOLD, Fixed(i128::MAX));
+    let nonce = c.fresh();
+    let (inputs, change) = c.fund(ALICE, BOLD, whole(20));
+    let op = Op::PayOnce { payer: ALICE, program: program::pay_once(), payee: SHOP, asset: BOLD, amount: whole(20), reference: [3; 32], nonce, inputs, change };
+    refused_leaves_state(&mut c, &op, "fee overflow");
+}
+
+#[test]
+fn a_clock_tick_refused_for_fee_overflow_changes_nothing() {
+    let mut c = Chain::new();
+    c.mint(ALICE, BOLD, whole(100));
+    c.subscribe(whole(10), Every::Days(1), NOV1, None, 2);
+    c.clock_to(NOV1 - 1);
+    c.vm.market.pol.insert(BOLD, Fixed(i128::MAX));
+    let op = Op::PayClock { program: program::pay_clock(), at: NOV1 };
+    refused_leaves_state(&mut c, &op, "fee overflow");
+}

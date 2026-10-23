@@ -466,7 +466,6 @@ impl ObjectVm {
         if now > 0 && at > now.saturating_add(MAX_PAY_CLOCK_STEP_SECS) {
             return Err("the pay clock moves at most an hour per post");
         }
-        self.market.pay.time = at;
         // Every (due, schedule) pair due by `at`, in due order. One schedule
         // may contribute several periods after a long gap, but never more than
         // a tick can pay.
@@ -489,27 +488,44 @@ impl ObjectVm {
         }
         due.sort();
         due.truncate(MAX_DUE_PER_TICK);
+        // A refused op must leave state untouched, so every fee the tick could
+        // take is checked against its pot before anything is written. Payouts
+        // to one asset are summed; a period that ends up unfunded takes no
+        // fee, so this only ever over-checks.
+        let mut fees: std::collections::BTreeMap<Address, i128> = std::collections::BTreeMap::new();
+        for (_, id) in &due {
+            let s = &self.market.pay.schedules[id];
+            let f = fees.entry(s.asset).or_insert(0);
+            *f = f.checked_add(fee_of(s.amount).0).ok_or("fee overflow")?;
+        }
+        for (asset, total) in &fees {
+            let held = self.market.pol.get(asset).map_or(0, |p| p.0);
+            held.checked_add(*total).ok_or("fee overflow")?;
+        }
+        self.market.pay.time = at;
         for (when, id) in due {
-            self.pay_one_period(&id, when)?;
+            self.pay_one_period(&id, when);
         }
         Ok(Receipt::Paid { id: [0u8; 32] })
     }
 
-    fn pay_one_period(&mut self, id: &Hash, when: u64) -> Result<(), &'static str> {
-        let s = *self.market.pay.schedules.get(id).ok_or("no such schedule")?;
+    /// Cannot fail: the caller has checked the fee headroom and the id comes
+    /// from the schedule map.
+    fn pay_one_period(&mut self, id: &Hash, when: u64) {
+        let s = *self.market.pay.schedules.get(id).expect("ids come from the schedule map");
         // An earlier payout in this tick may have ended or emptied it.
         if s.state != ScheduleState::Active {
-            return Ok(());
+            return;
         }
         if s.pot.0 < s.amount.0 {
             self.market.pay.schedules.get_mut(id).expect("present").state = ScheduleState::Unfunded;
-            return Ok(());
+            return;
         }
         let payment = pay_payment_id(id, s.index);
         let fee = fee_of(s.amount);
         let net = Fixed(s.amount.0 - fee.0);
+        self.market.to_pol(s.asset, fee).expect("fee headroom was checked");
         crate::market::Market::pay(&mut self.market, &payment, 0, s.payee, s.asset, net);
-        self.market.to_pol(s.asset, fee).ok_or("fee overflow")?;
         self.market.pay.payments.insert(
             payment,
             PaymentRecord { payer: s.payer, payee: s.payee, asset: s.asset, amount: s.amount, fee, refunded: Fixed::ZERO, refunds: 0, at: when },
@@ -528,7 +544,72 @@ impl ObjectVm {
                 crate::market::Market::pay(&mut self.market, &cancel_source(id), 0, payer, asset, rest);
             }
         }
-        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_pay_once(
+        &mut self,
+        payer: &AccountId,
+        payee: &AccountId,
+        asset: &Address,
+        amount: Fixed,
+        nonce: &Hash,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        if payer == payee {
+            return Err("a payment cannot pay its own payer");
+        }
+        if !self.viewing.contains_key(payee) {
+            return Err("the payee has not registered where to be paid");
+        }
+        if amount.0 <= 0 {
+            return Err("an amount must be above nothing");
+        }
+        let id = pay_once_id(payer, nonce);
+        self.fresh_source(&id)?;
+        let f = self.plan_funding(payer, inputs, change, &[(*asset, amount)])?;
+        let fee = fee_of(amount);
+        let held = self.market.pol.get(asset).map_or(0, |p| p.0);
+        held.checked_add(fee.0).ok_or("fee overflow")?;
+        // Nothing below can fail.
+        self.apply_funding(payer, inputs, f);
+        self.market.to_pol(*asset, fee).expect("fee headroom was checked");
+        crate::market::Market::pay(&mut self.market, &id, 0, *payee, *asset, Fixed(amount.0 - fee.0));
+        let at = self.market.pay.time;
+        self.market.pay.payments.insert(
+            id,
+            PaymentRecord { payer: *payer, payee: *payee, asset: *asset, amount, fee, refunded: Fixed::ZERO, refunds: 0, at },
+        );
+        Ok(Receipt::Paid { id })
+    }
+
+    pub(crate) fn apply_pay_refund(
+        &mut self,
+        payee: &AccountId,
+        payment: &Hash,
+        amount: Fixed,
+        inputs: &[(Hash, Hash)],
+        change: &[Output],
+    ) -> Result<Receipt, &'static str> {
+        let r = *self.market.pay.payments.get(payment).ok_or("no such payment")?;
+        if &r.payee != payee {
+            return Err("only the payee refunds a payment");
+        }
+        if amount.0 <= 0 {
+            return Err("an amount must be above nothing");
+        }
+        let after = r.refunded.0.checked_add(amount.0).ok_or("refund overflow")?;
+        if after > r.amount.0 {
+            return Err("more than is left to refund");
+        }
+        let f = self.plan_funding(payee, inputs, change, &[(r.asset, amount)])?;
+        self.apply_funding(payee, inputs, f);
+        crate::market::Market::pay(&mut self.market, &refund_source(payment, r.refunds), 0, r.payer, r.asset, amount);
+        let m = self.market.pay.payments.get_mut(payment).expect("checked above");
+        m.refunded = Fixed(after);
+        m.refunds += 1;
+        Ok(Receipt::Paid { id: *payment })
     }
 }
 
