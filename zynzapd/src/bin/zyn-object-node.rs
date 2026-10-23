@@ -844,6 +844,22 @@ fn lend_clock_next(time: u64) -> u64 {
     }
 }
 
+/// Zyn Pay is the operator's to switch on: the node posts the pay clock only
+/// with `ZYN_PAY=on`. Until then it never posts, so a chain keeps every root
+/// it had, and pay ops are refused because the clock has not started.
+fn pay_switched_on(v: Option<&str>) -> bool {
+    v.is_some_and(|v| v.trim() == "on")
+}
+
+/// The pay clock's next post, or `None` when it would not move: now on the
+/// first post (that is how the clock leaves 0), then never more than the
+/// ledger's hour past where it stands, so a node back from downtime catches
+/// up an hour per post.
+fn pay_clock_next(last: u64, now: u64) -> Option<u64> {
+    let at = if last == 0 { now } else { now.min(last.saturating_add(objectvm::pay::MAX_PAY_CLOCK_STEP_SECS)) };
+    (at > last).then_some(at)
+}
+
 /// Deposits the vault holds for accounts that have not registered yet.
 static PENDING_ZAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -3401,38 +3417,39 @@ fn main() {
         });
     }
 
-    // Zyn Pay: the pay clock, posted every ZYN_PAY_TICK_SECS (default 10 s,
-    // at least 5). Each post moves it at most an hour, so after downtime it
-    // catches up over several posts, paying each due period in order.
-    {
+    // Zyn Pay: with ZYN_PAY=on, the pay clock is posted at startup and then
+    // every ZYN_PAY_TICK_SECS (default 10 s, at least 5), whether or not the
+    // chain has pay state yet: the first post starts the clock, and pay ops
+    // are refused until it has. Each post moves it at most an hour, so after
+    // downtime it catches up over several posts, paying each due period in
+    // order. Without ZYN_PAY=on it never posts, and the chain keeps its roots.
+    if pay_switched_on(std::env::var("ZYN_PAY").ok().as_deref()) {
         let every: u64 = std::env::var("ZYN_PAY_TICK_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(10).max(5);
         let node = Arc::clone(&node);
         let journal = Arc::clone(&journal);
         let pub_log = Arc::clone(&pub_log);
         let dir = dir.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_secs(every));
-            if halted().is_some() {
-                continue;
-            }
-            // Nothing scheduled or paid and no clock yet: stay silent, so a
-            // chain with no pay state keeps every root it had. The first
-            // `PayCreate` is then checked against time 0; the next post sets it.
-            let Ok(Some(last)) = node.lock().map(|n| {
-                let p = &n.state().market.pay;
-                (!p.is_empty()).then_some(p.time)
-            }) else {
-                continue;
-            };
-            let now = now_secs();
-            let at = if last == 0 { now } else { now.min(last.saturating_add(objectvm::pay::MAX_PAY_CLOCK_STEP_SECS)) };
-            if at <= last {
-                continue;
-            }
-            let op = Op::PayClock { program: zyn_vm::program::pay_clock(), at };
-            for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
-                if let objectvm::Receipt::Refused(why) = r {
-                    eprintln!("zyn-object-node: pay clock refused: {why}");
+        eprintln!("zyn-object-node: Zyn Pay on; the pay clock posts every {every} s");
+        std::thread::spawn(move || {
+            let mut first = true;
+            loop {
+                if !std::mem::take(&mut first) {
+                    std::thread::sleep(std::time::Duration::from_secs(every));
+                }
+                if halted().is_some() {
+                    continue;
+                }
+                let Ok(last) = node.lock().map(|n| n.state().market.pay.time) else {
+                    continue;
+                };
+                let Some(at) = pay_clock_next(last, now_secs()) else {
+                    continue;
+                };
+                let op = Op::PayClock { program: zyn_vm::program::pay_clock(), at };
+                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                    if let objectvm::Receipt::Refused(why) = r {
+                        eprintln!("zyn-object-node: pay clock refused: {why}");
+                    }
                 }
             }
         });
@@ -4816,6 +4833,26 @@ mod pay_rpc_tests {
         assert_eq!(v["state"], "active");
         assert_eq!(v["every"]["unit"], "months");
         assert_eq!(v["nextDue"], objectvm::pay::due_at(s.first_due, s.every, 1).unwrap());
+    }
+
+    #[test]
+    fn the_pay_clock_runs_only_when_switched_on() {
+        assert!(pay_switched_on(Some("on")));
+        assert!(pay_switched_on(Some(" on\n")));
+        for v in [None, Some(""), Some("off"), Some("1"), Some("ON?")] {
+            assert!(!pay_switched_on(v), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn the_pay_clock_starts_at_now_then_steps_an_hour_at_most() {
+        let now = 1_793_491_200;
+        // Time 0 with no pay state: the first post is what starts it.
+        assert_eq!(pay_clock_next(0, now), Some(now));
+        assert_eq!(pay_clock_next(now - 10, now), Some(now));
+        assert_eq!(pay_clock_next(now - 86_400, now), Some(now - 86_400 + 3600));
+        assert_eq!(pay_clock_next(now, now), None);
+        assert_eq!(pay_clock_next(now + 5, now), None);
     }
 
     #[test]

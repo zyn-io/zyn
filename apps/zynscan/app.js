@@ -27,6 +27,7 @@ async function solanaRef(sig) {
 const short = (h, n = 8) => (isHex(h) ? `${h.slice(0, n)}…${h.slice(-4)}` : esc(h));
 const hash = (h) => `<span class="hash" title="${esc(h)}">${short(h)}</span>`;
 const num = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—');
+const utc = (secs) => (typeof secs === 'number' ? new Date(secs * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : '—');
 const WAD = 10n ** 18n;
 
 function ago(t) {
@@ -106,6 +107,8 @@ function detail(t) {
   if (d.root) parts.push(`root ${hash(d.root)}`);
   if (d.items !== undefined) parts.push(`${num(d.items)} in order`);
   if (d.burn) parts.push(`burn ${hash(d.burn)}`);
+  // The operator's clocks: the time each post moved the clock to.
+  if (d.at !== undefined && (t.kind === 'Pay clock' || t.kind === 'Lending clock')) parts.push(esc(utc(d.at)));
   // Sale credit (§182): the team's funding and a burn's credit, in ZEC.
   if (d.amount !== undefined && (t.kind === 'Sale credit funded' || t.kind === 'Burn credited')) parts.push(`${wad(d.amount)} ZEC`);
   if (d.coin) parts.push(`<b>${esc(d.coin)}</b>`);
