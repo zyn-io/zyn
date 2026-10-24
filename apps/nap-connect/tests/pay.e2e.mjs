@@ -1,7 +1,7 @@
 // Zyn Pay through Nap Connect, as a site uses it: pay-page.html served locally,
 // Nap in the browser in its own window, testnet 212. Subscribe (2 BOLD a day,
-// 2 times, both set aside), wait for the pay clock to pay period 0, cancel and
-// collect what comes back, then pay once and find the reference on the chain.
+// 3 times, 2 set aside), wait for the pay clock to pay period 0, top up one
+// period, cancel and collect what comes back (found by its claim id), then pay once and find the reference on the chain.
 // Every step is approved in Nap, which shows the card the chain will act on.
 //
 //   PAYEE=<64 hex> PHRASE_FILE=~/.zyn/test-wallets/bidder.phrase \
@@ -9,7 +9,7 @@
 //
 // PAYEE is a registered Zyn account other than the wallet's own (Nap refuses
 // the wallet itself and an account that has not registered). The wallet needs
-// about 5 BOLD.zy. Run after `ops/zyn-pay-rollout.sh testnet`: without ZYN_PAY=on
+// about 7 BOLD.zy (4 set aside, 2 topped up, 0.01 paid once). Run after `ops/zyn-pay-rollout.sh testnet`: without ZYN_PAY=on
 // the node answers "the pay clock has not started" and this prints SKIP and
 // exits 0 without passing anything.
 //
@@ -24,6 +24,7 @@ import { createServer } from 'node:http';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unlockNap } from './unlock.mjs';
+import { claimId, cancelSource } from '../../nap-web/src/market.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PAYEE = (process.env.PAYEE || '').trim();
@@ -141,9 +142,9 @@ try {
   ok(conn.ok && /^[0-9a-f]{64}$/.test(conn.result.account), `connected: ${conn.ok ? conn.result.account.slice(0, 12) : conn.message}`);
   ok(conn.result.account !== PAYEE, 'the payee is not the wallet itself');
 
-  // 1. Subscribe: 2 BOLD a day, 2 times, both periods set aside.
+  // 1. Subscribe: 2 BOLD a day, 3 times, 2 periods set aside.
   const sub = await act('subscribe', () => approve('subscribe', (t) =>
-    t.includes('Scheduled payment') && t.includes(PAYEE.slice(0, 8)) && /2 BOLD every day, 2 times, from \d+ \w+ \d{4}/.test(t)
+    t.includes('Scheduled payment') && t.includes(PAYEE.slice(0, 8)) && /2 BOLD every day, 3 times, from \d+ \w+ \d{4}/.test(t)
     && /Set aside now\s*4 BOLD \(2 payments\)/.test(t) && /Fee\s*0\.5%/.test(t) && /Cancel any time/.test(t)));
   ok(sub.ok && /^[0-9a-f]{64}$/.test(sub.result?.schedule || '') && sub.result.payment === null, `Subscribe returned a schedule id: ${sub.ok ? sub.result.schedule?.slice(0, 12) : sub.message}`);
   if (!sub.ok) { await finish(); }
@@ -183,13 +184,25 @@ try {
   ok(!!row && BigInt(row.pot) === 2n * WAD, `pot is 1 period (2 BOLD): ${row?.pot}`);
   if (!row || Number(row.index) !== 1) { await finish(); }
 
-  // 3. Cancel: what is left comes back as a claim, and collecting takes it.
-  const before = BigInt(row.pot);
-  const cancel = await act('cancel', () => approve('cancel', (t) => t.includes('Cancel payment') && t.includes(PAYEE.slice(0, 8)) && /Comes back now\s*2 BOLD/.test(t)));
+  // 3. Top up one period: the card says what it adds; the pot is 2 periods again.
+  const top = await act('topup', () => approve('top up', (t) =>
+    t.includes('Top up payment') && t.includes(PAYEE.slice(0, 8)) && /Adds\s*2 BOLD \(1 payment\)/.test(t) && /Funded until \(after\)\s*\d+ \w+ \d{4}/.test(t)));
+  ok(top.ok && top.result?.schedule === sid, `Top up returned the schedule: ${top.ok ? 'ok' : top.message}`);
+  for (let i = 0, t0 = Date.now(); Date.now() - t0 < 180000; i++) {
+    row = await readSchedules(false);
+    if (row && BigInt(row.pot) === 4n * WAD) break;
+    await page.waitForTimeout(5000);
+  }
+  ok(!!row && BigInt(row.pot) === 4n * WAD, `pot is 2 periods (4 BOLD) after the top-up: ${row?.pot}`);
+
+  // 4. Cancel: the 2 periods come back as a claim with a known id; collecting takes it.
+  const before = BigInt(row?.pot ?? 0);
+  const cancel = await act('cancel', () => approve('cancel', (t) => t.includes('Cancel payment') && t.includes(PAYEE.slice(0, 8)) && /Comes back now\s*4 BOLD/.test(t)));
   ok(cancel.ok && cancel.result?.schedule === sid, `Cancel returned the schedule: ${cancel.ok ? 'ok' : cancel.message}`);
+  const cid = Buffer.from(claimId(cancelSource(Uint8Array.from(Buffer.from(sid, 'hex'))), 0)).toString('hex');
   const owedHas = async () => {
     const r = await act('owed');
-    return r.ok ? (r.result.owed || []).find((o) => o.asset === asset && BigInt(o.amount) === before) : null;
+    return r.ok ? (r.result.owed || []).find((o) => o.id === cid) : null;
   };
   let claim = null;
   for (let i = 0, t0 = Date.now(); Date.now() - t0 < 180000; i++) {
@@ -197,21 +210,22 @@ try {
     if (claim) break;
     await page.waitForTimeout(5000);
   }
-  ok(!!claim, `the cancel left a claim of 2 BOLD: ${claim?.id?.slice(0, 12) ?? 'none'}`);
+  ok(!!claim, `the cancel left claim ${cid.slice(0, 12)} of 4 BOLD: ${claim ? claim.amount : 'none'}`);
+  ok(!claim || (claim.asset === asset && BigInt(claim.amount) === before), 'the claim returns the 2 periods in the pay asset');
   if (claim) {
     const col = await act('collect');
     ok(col.ok, `Collect: ${col.ok ? JSON.stringify(col.result) : col.message}`);
     let still = claim;
     for (let i = 0, t0 = Date.now(); still && Date.now() - t0 < 180000; i++) {
       await page.waitForTimeout(5000);
-      still = (await act('owed')).result?.owed?.find((o) => o.id === claim.id);
+      still = (await act('owed')).result?.owed?.find((o) => o.id === cid);
     }
     ok(!still, 'the claim is collected in Nap (no longer owed)');
   }
   const gone = await readSchedules(false);
   ok(!gone || gone.state === 'cancelled', `the schedule is cancelled: ${gone ? gone.state : 'no longer listed'}`);
 
-  // 4. Pay once: the payment record carries the reference.
+  // 5. Pay once: the payment record carries the reference.
   const once = await act('once', () => approve('pay once', (t) => t.includes('Payment') && t.includes(PAYEE.slice(0, 8)) && /Amount\s*0\.01 BOLD/.test(t)));
   ok(once.ok && /^[0-9a-f]{64}$/.test(once.result?.payment || ''), `Pay once returned a payment id: ${once.ok ? once.result.payment?.slice(0, 12) : once.message}`);
   if (once.ok) {

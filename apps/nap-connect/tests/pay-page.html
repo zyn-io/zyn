@@ -70,10 +70,10 @@ on('connect', async () => {
   }
 });
 
-// 2 of the asset a day, 2 times, both set aside; the first on 120 s from now.
+// 2 of the asset a day, 3 times, 2 of them set aside; the first on 120 s from now.
 on('subscribe', () => ask('Subscribe', 'zyn_payCreate', {
   payee: $('payee').value.trim(), asset: $('asset').value.trim(), amount: '2',
-  every: { days: 1 }, firstDue: now() + 120, periods: 2, fundPeriods: 2, reference: hex64(),
+  every: { days: 1 }, firstDue: now() + 120, periods: 3, fundPeriods: 2, reference: hex64(),
 }, (r) => { $('schedule').value = r.schedule; }));
 
 on('once', () => ask('Pay once', 'zyn_payOnce', {
