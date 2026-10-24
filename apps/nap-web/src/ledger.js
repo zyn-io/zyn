@@ -609,10 +609,10 @@ const MAX_PAYMENTS = 500;
 const SETTLED_DAYS = 30;
 const PAY_PARALLEL = 4;
 
-async function askRows(config, method, ids) {
+async function askRows(config, method, ids, failed) {
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
-    const part = await call(config, method, { ids: ids.slice(i, i + 240).join(',') }).catch(() => []);
+    const part = await call(config, method, { ids: ids.slice(i, i + 240).join(',') }).catch((e) => { if (failed && !notServed(e)) failed.yes = true; return []; });
     if (Array.isArray(part)) rows.push(...part);
   }
   const mine = new Set(ids);
@@ -620,47 +620,63 @@ async function askRows(config, method, ids) {
 }
 
 /// The pay schedules this wallet created, by the ids only it can derive.
-export async function loadSchedules(config, identity) {
+export async function loadSchedules(config, identity, failed) {
   const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
   const ids = [];
   for (let n = 0; n < count; n++) ids.push(hex(mk.scheduleId(identity.account, mk.marketNonce(identity.secretKey, n))));
-  return askRows(config, 'zyn_paySchedules', ids);
+  return askRows(config, 'zyn_paySchedules', ids, failed);
 }
 
 /// The payments a schedule has made, newest first, at most MAX_PAYMENTS.
-export async function loadPayments(config, schedule) {
+export async function loadPayments(config, schedule, failed) {
   const ids = [];
   const sid = unhex(schedule.id);
   for (let k = Math.max(0, Math.floor(Number(schedule.index)) || 0) - 1; k >= 0 && ids.length < MAX_PAYMENTS; k--) ids.push(hex(mk.payPaymentId(sid, k)));
-  const rows = await askRows(config, 'zyn_payPayments', ids);
+  const rows = await askRows(config, 'zyn_payPayments', ids, failed);
   const order = new Map(ids.map((id, i) => [id, i]));
   return rows.sort((a, b) => order.get(a.id) - order.get(b.id));
 }
 
 /// This wallet's one-off payments.
-export async function loadOneOffs(config, identity) {
+export async function loadOneOffs(config, identity, failed) {
   const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
   const ids = [];
   for (let n = 0; n < count; n++) ids.push(hex(mk.payOnceId(identity.account, mk.marketNonce(identity.secretKey, n))));
-  return askRows(config, 'zyn_payPayments', ids);
+  return askRows(config, 'zyn_payPayments', ids, failed);
 }
+
+const settledKey = (config, identity) => `nap.pay.settled.${config.chain}.${identity.accountHex}`;
+/// A node's `refunds` is trusted only as a u32, and then only this far: per
+/// payment, and in total per call (the next refresh continues from the same
+/// records, so a hostile count costs bounded work, not a hang).
+const MAX_REFUNDS_PER_PAYMENT = 1024;
+const MAX_REFUND_CLAIMS = 4096;
 
 /// Refund claims for this wallet's payments (schedule periods and one-offs):
 /// one claim per refund, as many as the record says it made.
 export async function payRefundClaims(config, identity) {
   const out = new Map();
-  const payments = await loadOneOffs(config, identity);
-  const settled = Date.now() / 1000 - SETTLED_DAYS * 86400;
-  // The last period's date is estimated from the schedule (months as 30 days);
-  // a payee refunding something older than SETTLED_DAYS after it ended is not
-  // seen until the Payments view reads that schedule itself.
+  const failed = { yes: false };
+  const payments = await loadOneOffs(config, identity, failed);
+  const now = Date.now() / 1000;
+  const settled = now - SETTLED_DAYS * 86400;
+  // The last period's date is estimated from the schedule (months as 30 days).
+  // Ended or cancelled schedules older than SETTLED_DAYS are read only once a
+  // day (a stamp kept on this device), so a late refund on one is found within
+  // a day without every refresh paying for them.
   const lastPaid = (s) => Number(s.firstDue) + Math.max(0, Number(s.index) - 1) * Number(s.every?.count || 1) * (s.every?.unit === 'months' ? 30 : 1) * 86400;
-  const live = (await loadSchedules(config, identity)).filter((s) => !(['ended', 'cancelled'].includes(s.state) && lastPaid(s) < settled));
-  const lists = await inTurns(live.map((s) => () => loadPayments(config, s)), PAY_PARALLEL);
+  const stamp = Number(read(settledKey(config, identity))) || 0;
+  const sweep = !stamp || now - stamp > 86400;
+  const all = await loadSchedules(config, identity, failed);
+  const live = all.filter((s) => sweep || !(['ended', 'cancelled'].includes(s.state) && lastPaid(s) < settled));
+  const lists = await inTurns(live.map((s) => () => loadPayments(config, s, failed)), PAY_PARALLEL);
   for (const list of lists) payments.push(...list);
+  if (sweep && !failed.yes) write(settledKey(config, identity), String(Math.floor(now)));
   for (const p of payments) {
-    if (!/^\d{1,10}$/.test(String(p.refunds))) continue;
-    for (let n = 0; n < Number(p.refunds); n++) out.set(hex(mk.claimId(mk.refundSource(unhex(p.id), n), 0)), PAY_REFUNDED);
+    const r = Number(p.refunds);
+    if (!Number.isInteger(r) || r < 0 || r > 0xffffffff) continue;
+    for (let n = 0; n < Math.min(r, MAX_REFUNDS_PER_PAYMENT) && out.size < MAX_REFUND_CLAIMS; n++) out.set(hex(mk.claimId(mk.refundSource(unhex(p.id), n), 0)), PAY_REFUNDED);
+    if (out.size >= MAX_REFUND_CLAIMS) break;
   }
   return out;
 }

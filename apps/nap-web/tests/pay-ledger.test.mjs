@@ -167,3 +167,51 @@ test('loadPayments caps at 500, newest first', async () => {
   assert.equal(got[0].at, 699);
   assert.equal(got[499].at, 200);
 });
+
+test('an old ended schedule is checked for refunds once a day', async () => {
+  const stampKey = `nap.pay.settled.${config.chain}.${identity.accountHex}`;
+  const now = Math.floor(Date.now() / 1000);
+  const setup = () => {
+    reset();
+    store.set(counter, '2');
+    const s = schedule(1, { index: 1, state: 'ended', firstDue: now - 60 * 86400, nextDue: null });
+    schedules.set(s.id, s);
+    const pid = mk.payPaymentId(unhex(s.id), 0);
+    payments.set(hex(pid), { id: hex(pid), payee: s.payee, asset: ZEC, amount: '10', fee: '0', refunded: '4', refunds: 1, at: 1, reference: s.reference });
+    return hex(mk.claimId(mk.refundSource(pid, 0), 0));
+  };
+  let rid = setup();
+  store.set(stampKey, String(now - 3600));
+  assert.equal((await L.payRefundClaims(config, identity)).has(rid), false);
+  assert.equal(store.get(stampKey), String(now - 3600));
+  rid = setup();
+  assert.equal((await L.payRefundClaims(config, identity)).has(rid), true);
+  assert.ok(Number(store.get(stampKey)) >= now);
+  rid = setup();
+  store.set(stampKey, String(now - 2 * 86400));
+  assert.equal((await L.payRefundClaims(config, identity)).has(rid), true);
+  assert.ok(Number(store.get(stampKey)) >= now);
+  // a failed read leaves the stamp alone
+  setup();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u, init) => { if (JSON.parse(init.body).method === 'zyn_payPayments') throw new TypeError('fetch failed'); return real(u, init); };
+  try { await L.payRefundClaims(config, identity); } finally { globalThis.fetch = real; }
+  assert.equal(store.get(stampKey), undefined);
+});
+
+test('a hostile refund count is bounded', async () => {
+  reset();
+  store.set(counter, '8');
+  for (let n = 0; n < 6; n++) {
+    const id = hex(mk.payOnceId(identity.account, nonceAt(n)));
+    payments.set(id, { id, payee: 'aa'.repeat(32), asset: ZEC, amount: '1', fee: '0', refunded: '1', refunds: n === 0 ? 4294967295 : 1024, at: 1, reference: '00'.repeat(32) });
+  }
+  const one = new Map([...payments].slice(0, 1));
+  const keep = payments; payments = one;
+  assert.equal((await L.payRefundClaims(config, identity)).size, 1024);
+  payments = keep;
+  assert.equal((await L.payRefundClaims(config, identity)).size, 4096);
+  const bad = hex(mk.payOnceId(identity.account, nonceAt(7)));
+  payments = new Map([[bad, { id: bad, refunds: 4294967296 }]]);
+  assert.equal((await L.payRefundClaims(config, identity)).size, 0);
+});
