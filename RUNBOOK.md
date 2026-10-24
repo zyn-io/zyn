@@ -2816,7 +2816,7 @@ the fees after any credit, withdrawal or sale.
 
 ## Zyn Pay (23 Oct 2026, DECISIONS §188)
 
-Built on branch `zyn-pay` (ledger ops 69–74 and the node); **not deployed**. Nap and the merchant package are not built.
+Built on branch `zyn-pay` (ledger ops 69–74 and the node); **not deployed**. Nap is built (branch `zyn-pay-nap`); the merchant package is not.
 
 - `ZYN_PAY=on` (node env, default off): switches Zyn Pay on. Without it the node never posts the pay clock, the chain keeps every root, and `PayCreate`/`PayOnce` are refused ("the pay clock has not started"). With it the node posts the clock at startup and then every tick, also while there is no pay state yet; the first post starts the clock. Once that first post lands the state carries the pay section (MARKET19), and a binary from before Zyn Pay can no longer load it. The log says `Zyn Pay on; the pay clock posts every N s` at start.
 - `ZYN_PAY_TICK_SECS` (node env, default `10`, minimum `5`): how often the node posts the pay clock when `ZYN_PAY=on`. Posts are skipped while halted. Each post is one journal record and one operator "Pay clock" row in ZynScan with its time in UTC. After downtime it catches up an hour per post.
@@ -2831,6 +2831,7 @@ curl -s -X POST $RPC -d '{"method":"zyn_payPayments","ids":"<hex>"}'
 
   `zyn_paySchedules` takes schedule ids; `zyn_payPayments` takes payment ids (each row has `reference`).
   Both are reads by unguessable id with no signature: holding the id is the access. Payer and payee keep schedule and payment ids private; a leaked schedule id shows its pot, state and next due date, and a leaked payment id its amount, fee and refunds.
+- Nap: Payments is in the full wallet view only (not the popup or phone view). Sites reach Zyn Pay through Nap Connect (`zyn_payCreate`, `zyn_payOnce`, `zyn_payTopUp`, `zyn_payCancel`, `zyn_paySchedules`); reading schedules needs the `payments` scope, and a site sees only the schedules it set up. The payee side is not in Nap.
 - Rollout order (verifier first, §51.8): replicas and ZynScan take the build first, then the signers, then the sequencer, and last `ZYN_PAY=on` on the sequencer (`ops/zyn-pay-rollout.sh`, which asks before each step). Testnet 212 first; mainnet 26460 after the NU7 switch. The binary rollbacks the script prints work only until the first pay op (ops 69–74, the first pay clock post included) has landed. No client can sign pay ops until Nap (Plan 2) or a test signer exists, so the live check waits for that.
 - Live check of Nap's Pay methods (testnet 212, after `ops/zyn-pay-rollout.sh testnet`): `apps/nap-connect/tests/pay.e2e.mjs` drives `pay-page.html` through Nap Connect: subscribe (2 BOLD a day, 3 times, 2 set aside), wait for the pay clock to pay period 0 (a few minutes), top up one period, cancel and collect the claim (matched by its id), pay once and find the reference on the chain. `PAYEE` is a registered Zyn account other than the wallet; the wallet needs about 7 BOLD.zy. `playwright-core` comes from `apps/nap-connect` (run `npm ci` there first). Optional: `CHROME` (browser binary), `PAY_WAIT_MS` (cap on waiting for period 0, default 600000), `RPC` (node URL). Without `ZYN_PAY=on` it prints SKIP and exits 0.
 
