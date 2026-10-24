@@ -8,7 +8,7 @@ globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null)
 
 const L = await import('../src/ledger.js');
 const mk = await import('../src/market.js');
-const { hex } = await import('../src/object.js');
+const { hex, unhex } = await import('../src/object.js');
 const { deriveIdentity } = await import('../src/core.js');
 
 const ZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
@@ -77,7 +77,7 @@ test('loadSchedules returns only ids it asked for', async () => {
 test('loadPayments reads one id per elapsed period, newest first', async () => {
   reset();
   const s = schedule(0, { index: 3 });
-  for (let k = 0; k < 3; k++) { const id = hex(mk.payPaymentId(unhexId(s.id), k)); payments.set(id, { id, payee: s.payee, asset: ZEC, amount: '1', fee: '0', refunded: '0', at: k, reference: s.reference }); }
+  for (let k = 0; k < 3; k++) { const id = hex(mk.payPaymentId(unhex(s.id), k)); payments.set(id, { id, payee: s.payee, asset: ZEC, amount: '1', fee: '0', refunded: '0', at: k, reference: s.reference }); }
   const got = await L.loadPayments(config, s);
   assert.deepEqual(got.map((p) => p.at), [2, 1, 0]);
 });
@@ -99,12 +99,71 @@ test('refunds_are_collected', async () => {
   store.set(counter, '2');
   const s = schedule(1, { index: 1 });
   schedules.set(s.id, s);
-  const pid = mk.payPaymentId(unhexId(s.id), 0);
-  payments.set(hex(pid), { id: hex(pid), payee: s.payee, asset: ZEC, amount: '10', fee: '0', refunded: '4', at: 1, reference: s.reference });
-  const rid = hex(mk.claimId(mk.refundSource(pid, 1), 0));
-  claims.set(rid, claim(rid));
+  const pid = mk.payPaymentId(unhex(s.id), 0);
+  payments.set(hex(pid), { id: hex(pid), payee: s.payee, asset: ZEC, amount: '10', fee: '0', refunded: '4', refunds: 2, at: 1, reference: s.reference });
+  const rids = [0, 1].map((n) => hex(mk.claimId(mk.refundSource(pid, n), 0)));
+  const third = hex(mk.claimId(mk.refundSource(pid, 2), 0));
+  for (const r of [...rids, third]) claims.set(r, claim(r));
   const owed = await L.loadOwed(config, identity);
-  const row = owed.find((r) => r.id === rid);
-  assert.ok(row);
-  assert.equal(row.kind, 'Payment refunded');
+  for (const r of rids) assert.equal(owed.find((x) => x.id === r)?.kind, 'Payment refunded');
+  assert.equal(owed.find((x) => x.id === third), undefined); // refunds: 2 means claims 0 and 1
+});
+
+const withPayMethods = async (how, run) => {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u, init) => {
+    const b = JSON.parse(init.body);
+    if (!/^zyn_pay/.test(b.method)) return real(u, init);
+    if (how === 'network') throw new TypeError('fetch failed');
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: b.id, error: how === 'code' ? { code: -32601, message: 'Method not found' } : { code: -32600, message: 'this chain is an object ledger and does not serve zyn_paySchedules. It serves zyn_status' } }));
+  };
+  try { return await run(); } finally { globalThis.fetch = real; }
+};
+
+test('a node without the pay methods does not stop recovery from keeping the count', async () => {
+  for (const how of ['code', 'text']) {
+    reset();
+    const id = hex(mk.claimId(mk.cancelSource(mk.scheduleId(identity.account, nonceAt(4))), 0));
+    claims.set(id, claim(id));
+    await withPayMethods(how, async () => { assert.equal(await L.recoverNonces(config, identity), 5); });
+    assert.equal(store.get(counter), '5');
+    assert.deepEqual(await withPayMethods(how, () => L.loadSchedules(config, identity)), []);
+  }
+});
+
+test('a network failure on the pay methods still means the count is not kept', async () => {
+  reset();
+  await withPayMethods('network', () => L.recoverNonces(config, identity, { gap: 1 }));
+  assert.equal(store.get(counter), undefined);
+});
+
+test('pay reads failing leave the other owed claims in view', async () => {
+  reset();
+  store.set(counter, '2');
+  const id = hex(mk.claimId(mk.orderId(identity.account, nonceAt(0)), 0));
+  claims.set(id, claim(id));
+  const owed = await withPayMethods('network', () => L.loadOwed(config, identity));
+  assert.ok(owed.find((r) => r.id === id));
+});
+
+test('recovery asks the pay methods only for pay ids', async () => {
+  reset();
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u, init) => { const b = JSON.parse(init.body); if (/^zyn_pay/.test(b.method)) seen.push(b); return real(u, init); };
+  try { await L.recoverNonces(config, identity, { gap: 1 }); } finally { globalThis.fetch = real; }
+  const per = seen.filter((b) => b.method === 'zyn_paySchedules');
+  assert.ok(per.length >= 1);
+  const ids = per.flatMap((b) => b.ids.split(','));
+  assert.equal(ids.length, 128); // 64 nonces x (schedule, one-off), one page
+});
+
+test('loadPayments caps at 500, newest first', async () => {
+  reset();
+  const s = schedule(0, { index: 700 });
+  for (let k = 0; k < 700; k++) { const id = hex(mk.payPaymentId(unhex(s.id), k)); payments.set(id, { id, at: k }); }
+  const got = await L.loadPayments(config, s);
+  assert.equal(got.length, 500);
+  assert.equal(got[0].at, 699);
+  assert.equal(got[499].at, 200);
 });

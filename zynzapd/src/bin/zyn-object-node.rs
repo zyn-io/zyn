@@ -650,6 +650,7 @@ fn pay_payment_json(id: &[u8; 32], r: &objectvm::pay::PaymentRecord) -> serde_js
         "amount": r.amount.0.to_string(),
         "fee": r.fee.0.to_string(),
         "refunded": r.refunded.0.to_string(),
+        "refunds": r.refunds,
         "at": r.at,
         "reference": hex(&r.reference),
     })
@@ -4857,8 +4858,9 @@ mod pay_rpc_tests {
 
     #[test]
     fn payment_json_omits_the_payer() {
-        let r = PaymentRecord { payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), fee: zyn_vm::Fixed(0), refunded: zyn_vm::Fixed(0), refunds: 0, at: 5, reference: [0xEE; 32] };
+        let r = PaymentRecord { payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), fee: zyn_vm::Fixed(0), refunded: zyn_vm::Fixed(0), refunds: 3, at: 5, reference: [0xEE; 32] };
         let v = pay_payment_json(&[8; 32], &r);
+        assert_eq!(v["refunds"], 3);
         assert!(v.get("payer").is_none());
         assert_eq!(v["at"], 5);
         assert_eq!(v["reference"], hex(&[0xEE; 32]));
