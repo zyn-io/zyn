@@ -59,7 +59,7 @@ test('next reads Ended, Cancelled or Waiting for funds; stopped schedules cannot
 
 test('running schedules come first, soonest next', () => {
   const view = pay.paymentsView({
-    schedules: [schedule({ id: 'a'.repeat(64), state: 'ended', nextDue: null }), schedule({ id: 'b'.repeat(64), nextDue: NOV1 + 9 * DAY }), schedule({ id: 'c'.repeat(64) })],
+    schedules: [schedule({ id: 'a'.repeat(64), state: 'ended', nextDue: null }), schedule({ id: 'b'.repeat(64), index: 1 }), schedule({ id: 'c'.repeat(64) })],
     nameOf, now: NOV1 - DAY,
   });
   assert.deepEqual(view.rows.map((r) => r.id[0]), ['c', 'b', 'a']);
@@ -71,11 +71,42 @@ test('notice: 8 days before the last funded payment, none', () => {
   assert.equal(view.badge, 0);
 });
 
-test('notice: 6 days before the last funded payment, runs out', () => {
+test('notice: 6 days before the last funded payment, runs out on the first unfunded date', () => {
   const view = pay.paymentsView({ schedules: [schedule()], nameOf, now: JAN1 - 6 * DAY });
   assert.equal(view.notices.length, 1);
-  assert.deepEqual(view.notices[0], { id: sid(0), kind: 'soon', text: 'Payment to cccccccc…cccccc runs out on 1 Jan 2027', action: 'Top up' });
+  // Paid through 1 Jan 2027; the 1 Feb 2027 payment is the first with nothing set aside.
+  assert.deepEqual(view.notices[0], { id: sid(0), kind: 'soon', text: 'Payment to cccccccc…cccccc runs out on 1 Feb 2027', action: 'Top up' });
   assert.equal(view.badge, 1);
+  // The row still says what is covered.
+  assert.equal(view.rows[0].fundedUntil, '1 Jan 2027');
+  // The date does not move once the last funded period is paid.
+  const paid = pay.paymentsView({ schedules: [schedule({ index: 3, pot: '0', remaining: 9 })], nameOf, now: JAN1 + DAY });
+  assert.equal(paid.notices[0].text, 'Payment to cccccccc…cccccc runs out on 1 Feb 2027');
+});
+
+test('notice: active with nothing set aside runs out on the next due date', () => {
+  const view = pay.paymentsView({ schedules: [schedule({ index: 2, pot: '0', remaining: 10 })], nameOf, now: NOV1 });
+  assert.deepEqual(view.notices[0], { id: sid(0), kind: 'soon', text: 'Payment to cccccccc…cccccc runs out on 1 Jan 2027', action: 'Top up' });
+  assert.equal(view.rows[0].fundedUntil, '—');
+  assert.equal(view.rows[0].next, '1 Jan 2027');
+});
+
+test('next is worked out from the schedule, not taken from the node', () => {
+  // A node row whose nextDue disagrees: the row follows firstDue, every and index,
+  // the same source as Funded until.
+  assert.equal(pay.scheduleRow(schedule({ index: 1, nextDue: 12345 }), 'BOLD.zy').next, '1 Dec 2026');
+});
+
+test('a read that partly failed says so; one that failed outright is unavailable', () => {
+  const some = pay.paymentsView({ schedules: [schedule()], nameOf, now: NOV1, failed: true });
+  assert.equal(some.warning, 'Some payments could not be read.');
+  assert.equal(some.unavailable, false);
+  const none = pay.paymentsView({ schedules: [], nameOf, now: NOV1, failed: true });
+  assert.equal(none.unavailable, true);
+  assert.equal(none.empty, false);
+  const fine = pay.paymentsView({ schedules: [schedule()], nameOf, now: NOV1 });
+  assert.equal(fine.warning, '');
+  assert.equal(fine.unavailable, false);
 });
 
 test('notice: an unfunded schedule is waiting for funds', () => {
@@ -143,4 +174,29 @@ test('cancel_shows_what_came_back', async () => {
   assert.equal(view.rows[0].next, 'Cancelled');
   // Nothing came back (yet): nothing is claimed to have.
   assert.equal(pay.cancelReturn(s, [], nameOf), null);
+  // The one id the in-app cancel polls for.
+  assert.equal(pay.cancelClaimId(s), back);
+  assert.deepEqual(pay.cancelReturn(s, [pay.returnedRow(claims.get(back))], nameOf), { label: 'Payment returned', amount: '20 BOLD.zy' });
+});
+
+test('loadOwed hands back the schedules it read, so the view need not read them again', async () => {
+  store.clear();
+  const s = schedule({ id: sid(2) });
+  let failing = false;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const answer = (result) => new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), { status: 200 });
+    if (body.method === 'zyn_paySchedules' && failing) return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32000, message: 'busy' } }), { status: 200 });
+    const ids = String(body.ids || '').split(',').filter(Boolean);
+    if (body.method === 'zyn_paySchedules') return answer(ids.filter((i) => i === s.id).map(() => s));
+    return answer([]);
+  };
+  const seen = {};
+  await L.loadOwed(config, identity, seen);
+  assert.deepEqual(seen.schedules.map((x) => x.id), [s.id]);
+  assert.equal(seen.failed, false);
+  failing = true;
+  const bad = {};
+  await L.loadOwed(config, identity, bad);
+  assert.equal(bad.failed, true);
 });

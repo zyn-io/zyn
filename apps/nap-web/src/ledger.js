@@ -191,13 +191,15 @@ export function redemptionClaims(gone) {
     .map((g) => [hex(mk.claimId(mk.redemptionSource(unhex(g.commitment)), 0)), 'Floor share for a redeemed item']));
 }
 
-export async function loadOwed(config, identity) {
+/// `seen`, if given, receives the pay schedules read on the way
+/// (`{schedules, failed}`), so the Payments view need not read them again.
+export async function loadOwed(config, identity, seen) {
   await ensureNonces(config, identity);
   const kinds = claimKinds(identity, nonceCount(config, identity) + LOOKAHEAD);
   // A restore finds these too: the spent notes are still published.
   const { gone } = await loadHoldings(config, identity, []).catch(() => ({ gone: [] }));
   for (const [id, kind] of redemptionClaims(gone || [])) kinds.set(id, kind);
-  for (const [id, kind] of await payRefundClaims(config, identity).catch(() => new Map())) kinds.set(id, kind);
+  for (const [id, kind] of await payRefundClaims(config, identity, seen).catch(() => new Map())) kinds.set(id, kind);
   const ids = [...kinds.keys()];
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
@@ -654,9 +656,10 @@ const MAX_REFUND_CLAIMS = 4096;
 
 /// Refund claims for this wallet's payments (schedule periods and one-offs):
 /// one claim per refund, as many as the record says it made.
-export async function payRefundClaims(config, identity) {
+export async function payRefundClaims(config, identity, seen) {
   const out = new Map();
   const failed = { yes: false };
+  if (seen) { seen.schedules = []; seen.failed = true; }
   const payments = await loadOneOffs(config, identity, failed);
   const now = Date.now() / 1000;
   const settled = now - SETTLED_DAYS * 86400;
@@ -667,7 +670,10 @@ export async function payRefundClaims(config, identity) {
   const lastPaid = (s) => Number(s.firstDue) + Math.max(0, Number(s.index) - 1) * Number(s.every?.count || 1) * (s.every?.unit === 'months' ? 30 : 1) * 86400;
   const stamp = Number(read(settledKey(config, identity))) || 0;
   const sweep = !stamp || now - stamp > 86400;
-  const all = await loadSchedules(config, identity, failed);
+  const unread = { yes: false };
+  const all = await loadSchedules(config, identity, unread);
+  if (unread.yes) failed.yes = true;
+  if (seen) { seen.schedules = all; seen.failed = unread.yes; }
   const live = all.filter((s) => sweep || !(['ended', 'cancelled'].includes(s.state) && lastPaid(s) < settled));
   const lists = await inTurns(live.map((s) => () => loadPayments(config, s, failed)), PAY_PARALLEL);
   for (const list of lists) payments.push(...list);

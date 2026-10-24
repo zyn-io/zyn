@@ -1,9 +1,9 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { objectCall, registerIntent } from './object.js';
-import { loadOwed, loadPayments, loadSchedules, submitIntent } from './ledger.js';
+import { call, loadPayments, loadSchedules, submitIntent } from './ledger.js';
 import { submitPayCancel, submitPayTopUp } from './connect-ops.js';
-import { cancelCard, cancelReturn, EMPTY_PAYMENTS, paymentRow, paymentsView, topUpReview } from './pay.js';
+import { cancelCard, cancelClaimId, cancelReturn, EMPTY_PAYMENTS, paymentRow, paymentsView, returnedRow, topUpReview } from './pay.js';
 import { activity, bridgesOf, claimDeposits, collectOwed, depositAddress, loadPocket, loadPrices, logActivity, payOnZyn, resolveRecipient, revealBridgeExits, revealExits, usdText, withdrawZec } from './pocket.js';
 import { artOn, caveLink, fillArt, forgetArt, setArtOn } from './items.js';
 import { appsFor } from './apps.js';
@@ -1039,7 +1039,10 @@ async function refresh(announce = true) {
     }
     pocket = next; usdOf = prices; pocketStale = false;
     renderCoins(); renderItems(); renderWorth();
-    void loadPay();
+    // The schedules loadPocket read on the way (for refunds): the view's rows.
+    paySchedules = next.pay?.schedules ?? [];
+    payFailed = next.pay?.failed ?? true;
+    renderPay();
     if (next.old) { note('This wallet was stored before the object ledger existed. Restore it from the recovery phrase to read balances here.', true); return; }
     void revealExits(config, identity);
     void revealBridgeExits(config);
@@ -1048,6 +1051,8 @@ async function refresh(announce = true) {
   } catch (e) {
     if (!active()) return;
     pocket = null;
+    payFailed = true;
+    renderPay();
     const coinCount = root.querySelector('#coin-count');
     if (coinCount) coinCount.textContent = 'Unavailable';
     const coinList = root.querySelector('#coins');
@@ -1302,21 +1307,31 @@ const payNameOf = (a) => (pocket?.nameOf ? pocket.nameOf(a) : a === config.zecAs
 let payShown = [];
 let payNoticesShown = [];
 
-async function loadPay() {
-  if (!identity) return;
-  const current = generation;
+/// A schedule as the chain has it now, read again when its dialog opens (as
+/// Nap Connect's `siteSchedule` does), so the card is never a stale row.
+async function freshSchedule(id) {
   const failed = { yes: false };
   const rows = await loadSchedules(config, identity, failed).catch(() => { failed.yes = true; return []; });
-  if (generation !== current) return;
-  paySchedules = rows;
-  payFailed = failed.yes && !rows.length;
-  renderPay();
+  const s = rows.find((x) => x.id === id);
+  if (!s) throw new Error(failed.yes ? 'That payment could not be read; try again in a moment.' : 'This wallet has no schedule with that id');
+  if (s.state === 'ended' || s.state === 'cancelled') throw new Error('that schedule has ended');
+  return s;
+}
+
+/// Open a dialog on the current state of row `stale`.
+async function openPay(stale, open) {
+  if (!stale) return;
+  const current = generation;
+  try {
+    const s = await freshSchedule(stale.id);
+    if (generation === current) open(s);
+  } catch (e) { if (generation === current) note(e.message, true); }
 }
 
 function renderPay() {
   const list = root.querySelector('#pay-list');
   if (!list) return;
-  const view = paymentsView({ schedules: paySchedules || [], owed: pocket?.owed || [], nameOf: payNameOf, now: payNow() });
+  const view = paymentsView({ schedules: paySchedules || [], owed: pocket?.owed || [], nameOf: payNameOf, now: payNow(), failed: payFailed });
   const byId = new Map((paySchedules || []).map((s) => [s.id, s]));
   payShown = view.rows.map((r) => byId.get(r.id));
   payNoticesShown = view.notices.map((n) => byId.get(n.id));
@@ -1324,8 +1339,8 @@ function renderPay() {
   if (nav) nav.innerHTML = `Payments${view.badge ? ` <span class="nav-badge">${view.badge}</span>` : ''}`;
   root.querySelector('#pay-notices').innerHTML = view.notices.map((n, i) => `<div class="notice show pay-notice"><span>${escapeHtml(n.text)}</span>${n.action ? ` — <button class="quiet" data-pay-notice="${i}">${escapeHtml(n.action)}</button>` : ''}</div>`).join('');
   const count = root.querySelector('#pay-count');
-  if (paySchedules == null) { count.textContent = '—'; list.innerHTML = '<li class="zec-empty">Reading…</li>'; }
-  else if (payFailed) { count.textContent = 'Unavailable'; list.innerHTML = '<li class="zec-empty">Payments unavailable. Refresh to try again.</li>'; }
+  if (paySchedules == null && !payFailed) { count.textContent = '—'; list.innerHTML = '<li class="zec-empty">Reading…</li>'; }
+  else if (view.unavailable) { count.textContent = 'Unavailable'; list.innerHTML = '<li class="zec-empty">Payments unavailable. Refresh to try again.</li>'; }
   else if (view.empty) { count.textContent = '0'; list.innerHTML = `<li class="zec-empty">${EMPTY_PAYMENTS}</li>`; }
   else {
     count.textContent = String(view.rows.length);
@@ -1333,13 +1348,14 @@ function renderPay() {
       <dl class="pay-cells"><div><dt>To</dt><dd>${escapeHtml(r.to)}</dd></div><div><dt>Amount</dt><dd>${escapeHtml(r.amount)}</dd></div><div><dt>Next</dt><dd>${escapeHtml(r.next)}</dd></div><div><dt>Funded until</dt><dd>${escapeHtml(r.fundedUntil)}</dd></div></dl>
       <div class="pay-go"><button class="quiet" data-pay-past="${i}" aria-expanded="false">Past payments</button>${r.actions.map((a) => `<button class="quiet pay-act" data-pay-${a === 'Top up' ? 'top' : 'cancel'}="${i}">${escapeHtml(a)}</button>`).join('')}</div>
       <ul class="log pay-past" hidden></ul></li>`).join('') : '<li class="zec-empty">No schedules.</li>';
+    if (view.warning) list.insertAdjacentHTML('afterbegin', `<li class="zec-empty pay-partial">${escapeHtml(view.warning)}</li>`);
   }
   const returned = root.querySelector('#pay-returned');
   returned.hidden = !view.returned.length;
   root.querySelector('#pay-returned-list').innerHTML = view.returned.map((o) => `<li><b>${escapeHtml(o.label)}</b><span>${escapeHtml(o.amount)}</span><time>collecting</time></li>`).join('');
-  root.querySelectorAll('[data-pay-notice]').forEach((b) => { b.onclick = () => openPayTopUp(payNoticesShown[Number(b.dataset.payNotice)]); });
-  list.querySelectorAll('[data-pay-top]').forEach((b) => { b.onclick = () => openPayTopUp(payShown[Number(b.dataset.payTop)]); });
-  list.querySelectorAll('[data-pay-cancel]').forEach((b) => { b.onclick = () => openPayCancel(payShown[Number(b.dataset.payCancel)]); });
+  root.querySelectorAll('[data-pay-notice]').forEach((b) => { b.onclick = () => openPay(payNoticesShown[Number(b.dataset.payNotice)], openPayTopUp); });
+  list.querySelectorAll('[data-pay-top]').forEach((b) => { b.onclick = () => openPay(payShown[Number(b.dataset.payTop)], openPayTopUp); });
+  list.querySelectorAll('[data-pay-cancel]').forEach((b) => { b.onclick = () => openPay(payShown[Number(b.dataset.payCancel)], openPayCancel); });
   list.querySelectorAll('[data-pay-past]').forEach((b) => { b.onclick = () => togglePast(b, payShown[Number(b.dataset.payPast)]); });
 }
 
@@ -1406,7 +1422,6 @@ function openPayTopUp(s) {
       if (generation !== current) return;
       dialog.close();
       note(`Topped up. ${r.rows.at(-1)[0].replace(' (after)', '')}: ${r.rows.at(-1)[1]}.`);
-      await loadPay();
       refresh(false);
     } catch (e) {
       if (generation !== current) return;
@@ -1436,24 +1451,26 @@ function openPayCancel(s) {
       await submitPayCancel({ config, identity }, s);
       logActivity(config, identity, { kind: 'in', title: 'Cancelled payment', amount: card.rows[1][1], to: s.payee });
       renderActivity();
-      // The claim the cancel left: read back from the chain, a few tries
-      // while the cancel seals.
-      let owed = pocket?.owed || [], back = null;
+      // The claim the cancel left: that one id, asked a few times while the
+      // cancel seals.
+      let row = null;
       const setAside = BigInt(s.pot) > 0n;
-      for (let i = 0; i < 5 && setAside && !back; i++) {
+      for (let i = 0; i < 5 && setAside && !row && generation === current; i++) {
         if (i) await new Promise((r) => setTimeout(r, 2000));
-        owed = await loadOwed(config, identity).catch(() => []);
-        back = cancelReturn(s, owed, payNameOf);
+        const got = await call(config, 'zyn_claims', { ids: cancelClaimId(s) }).catch(() => []);
+        row = Array.isArray(got) ? returnedRow(got.find((x) => x?.id === cancelClaimId(s))) : null;
       }
       if (generation !== current) return;
+      const back = row && cancelReturn(s, [row], payNameOf);
       dialog.querySelector('form').innerHTML = back
         ? `<div class="review"><span>${escapeHtml(back.label)}</span><b>${escapeHtml(back.amount)}</b></div><p class="muted">Collecting it into this wallet.</p><button class="primary" type="button" id="pay-done">Done</button>`
         : `<p class="muted">${setAside ? 'Cancelled. What comes back is collected on the next refresh.' : 'Cancelled. Nothing was set aside, so nothing comes back.'}</p><button class="primary" type="button" id="pay-done">Done</button>`;
       dialog.querySelector('#pay-done').onclick = () => dialog.close();
-      if (pocket) pocket = { ...pocket, owed };
-      pocketStale = true;
-      await loadPay();
-      if (pocket && back) void collectWaiting(pocket);
+      // Shown under Coming back until collected; the refresh reloads the
+      // schedules and collects it (or finds it, if it sealed late).
+      if (pocket && row && !pocket.owed?.some((o) => o.id === row.id)) pocket = { ...pocket, owed: [...(pocket.owed || []), row] };
+      renderPay();
+      refresh(false);
     } catch (e) {
       if (generation !== current) return;
       error.textContent = e.message;
