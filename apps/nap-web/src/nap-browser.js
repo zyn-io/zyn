@@ -9,7 +9,7 @@
 // native sheet over the site before it is signed here.
 
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
-import { allowed, SCOPES, withScope, without } from './connect-grants.js';
+import { allowed, paySchedulesOf, SCOPES, withPaySchedule, withScope, without } from './connect-grants.js';
 
 const CONNECTED_KEY = 'nap.connected.v1';
 const invoke = (cmd, args = {}) => window.__TAURI__.core.invoke(`plugin:napbrowser|${cmd}`, args);
@@ -54,11 +54,16 @@ async function serve({ id, origin, method, params }) {
 /// worker and one wallet in it. Its address is shared once the wallet has
 /// opened it (until then a site is connected without one), and a payment
 /// waits for the wallet's sync like any Send.
-function context(config, identity, account) {
+function context(config, identity, account, origin) {
   const opened = () => account?.view && account.network === (config.zcashPrefix === 'u1' ? 'mainnet' : 'testnet');
   return {
     config,
     identity,
+    // The pay schedules this site set up, kept with its connection record.
+    paySite: {
+      list: () => paySchedulesOf(read(), origin, config.id, identity.accountHex),
+      add: (id) => keep(withPaySchedule(read(), origin, config.id, identity.accountHex, id)),
+    },
     zec: opened() ? async () => account.view : null,
     zecReady: account ? async () => {
       if (!opened()) throw new ProviderError(ERR.UNAUTHORIZED, "Nap's Zcash wallet is still opening. Try again in a moment.");
@@ -78,7 +83,7 @@ async function handle(origin, method, params) {
     throw new ProviderError(ERR.UNAUTHORIZED, 'Nap is locked. Open it and try again.');
   }
   const { config, identity } = open;
-  const ctx = context(config, identity, open.zec);
+  const ctx = context(config, identity, open.zec, origin);
   if (method === 'nap_session') return isConnected(origin, config.id) ? session(ctx) : null;
   if (method === 'nap_connect' && params.network && params.network !== config.id) {
     throw new ProviderError(ERR.PARAMS, `Nap is on ${config.network}. Switch networks in Nap to use this site on ${params.network}.`);
@@ -92,7 +97,7 @@ async function handle(origin, method, params) {
       rows: [
         ['It will see', `Your Zyn account ID${identity.zec ? ' and Zcash address' : ''}`],
         ['When it asks', 'Your ZEC.zy and token balances, your items, what you are owed, your sale tickets and the coins you made'],
-        ['Only if you allow it', 'Your private-channel notes and your lending positions — each asked on its own sheet'],
+        ['Only if you allow it', 'Your private-channel notes, your lending positions and the payments you set up with it — each asked on its own sheet'],
         ['It will not see', 'Your keys or your recovery phrase'],
         ['Network', `${config.network} · ${config.zcash}`],
       ],

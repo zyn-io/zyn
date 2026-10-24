@@ -113,7 +113,10 @@ export const accountTag = (accountHex) => hexOf(sha256(bytesOf(accountHex)).slic
 /// `approve(plan)` shows a write's title, rows and note and resolves true or
 /// false; `progress(text)` reports a long step (proving, syncing).
 export async function open({ config, identity, approve, progress = () => {} }) {
-  const ctx = { config, identity, zec: null, zecReady: null };
+  // The pay schedules set up through this provider, for `zyn_paySchedules`:
+  // in memory, like everything else here.
+  const made = [];
+  const ctx = { config, identity, zec: null, zecReady: null, paySite: { list: () => [...made], add: (id) => { if (!made.includes(id)) made.push(id); } } };
   // A new account publishes where its notes are sealed before anything can
   // arrive for it: deposits, claims and withdrawals all wait on it.
   const r = await objectCall(config.rpcUrl, 'zyn_depositAddress', { account: identity.accountHex }).catch(() => null);

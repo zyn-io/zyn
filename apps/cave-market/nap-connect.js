@@ -40,9 +40,21 @@
 //   zyn_lendRepay {position, amount | 'all'},
 //   zyn_lendAddCollateral {position, amount},
 //   zyn_lendRemoveCollateral {position, amount | 'all'},
-//   zyn_lendBid {lot, pay}
+//   zyn_lendBid {lot, pay}, zyn_lendInsure {asset, amount} (rules v2: a gift to the pool's insurance)
 //     (Zyn Lend; assets are ledger addresses, amounts decimal strings. What
 //     lending pays arrives as claims — collect with zyn_collect.)
+//   zyn_paySchedules → {schedules}  (only the schedules this site set up;
+//     the holder allows it once per site and network)
+//   zyn_payCreate {payee, asset, amount, every: {days} | {months}, firstDue,
+//     periods?, fundPeriods, reference} → {schedule, payment: null},
+//   zyn_payOnce {payee, asset, amount, reference} → {payment},
+//   zyn_payTopUp {schedule, periods} → {schedule},
+//   zyn_payCancel {schedule} → {schedule}
+//     (Zyn Pay; asset is ZEC, ETH, SOL, BOLD or a ledger address, amount a
+//     decimal string per payment of at least 0.001, firstDue unix seconds,
+//     periods left out to pay until cancelled, reference 64 hex — the site's
+//     own id. Approval sets aside fundPeriods payments; a cancel returns what
+//     has not been paid as a claim. Ledger refusals carry the ledger's words.)
 //
 // Call `request` from a click. Opening Nap's window is a popup, and browsers
 // only allow a popup that a click asked for.

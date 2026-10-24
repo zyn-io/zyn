@@ -29,6 +29,11 @@ export const SCOPES = Object.freeze({
     shows: 'Each Zyn Lend position: its id, collateral, debt and health',
     risk: 'Position ids are public on Zyn: with them the site can follow each position — repayments, top-ups and liquidation — as yours.',
   }),
+  payments: Object.freeze({
+    what: 'the payments you set up with it',
+    shows: 'Each scheduled payment this site asked you to approve: payee, amount, schedule, what is set aside, next date and state. Never a schedule another site set up',
+    risk: 'Anyone holding a schedule id can read that schedule: what is set aside, its state and its next date.',
+  }),
 });
 
 /// Whether `origin` is connected on `net` to the wallet `account`.
@@ -46,7 +51,11 @@ export function allowed(list, origin, net, account, scope) {
 /// The list with `origin` connected afresh: a new connection starts with no
 /// scopes, whatever an earlier one on another network or wallet had.
 export function withConnection(list, origin, net, account, at = Date.now()) {
-  return { ...list, [origin]: { network: net, account, at, scopes: [] } };
+  // The schedules a site set up stay with its record while the same wallet
+  // connects it again (on this network or another, each kept apart); the
+  // payments scope that reads them is asked again like any other.
+  const pay = list?.[origin]?.account === account ? payMap(list[origin]) : {};
+  return { ...list, [origin]: { network: net, account, at, scopes: [], ...(Object.keys(pay).length ? { pay } : {}) } };
 }
 
 /// The list with `scope` allowed to `origin`'s connection on `net`. A record
@@ -70,4 +79,38 @@ export function scopesOf(list, origin, net, account) {
   const c = list?.[origin];
   if (!connectedTo(list, origin, net, account) || !Array.isArray(c.scopes)) return [];
   return c.scopes.filter((s) => SCOPES[s]);
+}
+
+// Zyn Pay (§188): a site sees only the schedules it asked for. Each schedule
+// id a site's request created is kept in that site's connection record, per
+// network, and `zyn_paySchedules` answers from that list alone. Schedule ids
+// are access to the record (§188.11): they are kept here and nowhere else.
+
+/// Most schedule ids kept for one site on one network; the oldest go first.
+export const MAX_PAY_IDS = 1000;
+const isId = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+const payMap = (c) => {
+  const out = {};
+  if (c?.pay && typeof c.pay === 'object' && !Array.isArray(c.pay)) {
+    for (const [net, ids] of Object.entries(c.pay)) if (Array.isArray(ids)) out[net] = ids.filter(isId);
+  }
+  return out;
+};
+
+/// The list with schedule `id` kept for `origin` on `net`. Like `withScope`:
+/// a record from before the account was kept takes the account now; a record
+/// for another network or wallet, or none, is left as it is.
+export function withPaySchedule(list, origin, net, account, id) {
+  const c = list?.[origin];
+  if (!c || !isId(id) || !account || c.network !== net || (c.account && c.account !== account)) return list;
+  const pay = payMap(c);
+  const ids = pay[net] || [];
+  if (ids.includes(id)) return list;
+  return { ...list, [origin]: { ...c, account, pay: { ...pay, [net]: [...ids, id].slice(-MAX_PAY_IDS) } } };
+}
+
+/// The schedule ids `origin` set up on `net` from the wallet `account`.
+export function paySchedulesOf(list, origin, net, account) {
+  if (!connectedTo(list, origin, net, account)) return [];
+  return payMap(list[origin])[net] || [];
 }
