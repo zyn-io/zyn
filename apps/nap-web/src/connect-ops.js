@@ -22,11 +22,14 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { parsePaymentRequest, zatoshiOf } from './zip321.js';
 import { CAVE_Z, itemName } from './items.js';
+import * as payCard from './pay.js';
 
 export { itemName };
 
 /// EIP-1193's error codes, so a site handles Nap the way it handles any wallet.
-export const ERR = Object.freeze({ REJECTED: 4001, UNAUTHORIZED: 4100, UNSUPPORTED: 4200, PARAMS: -32602 });
+/// INTERNAL (JSON-RPC's internal error) is a read that failed: the request
+/// was fine, and the same call may work in a moment.
+export const ERR = Object.freeze({ REJECTED: 4001, UNAUTHORIZED: 4100, UNSUPPORTED: 4200, PARAMS: -32602, INTERNAL: -32603 });
 export class ProviderError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -316,6 +319,84 @@ export function siteNotes(notes) {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Zyn Pay (objectvm/src/pay.rs, §188). A site asks for a payment; the card
+// says what is set aside, on which dates, and that cancelling returns what
+// has not been paid. The words and dates are pay.js's, shared with the
+// wallet's Payments view. A site sees only the schedules it asked for: their
+// ids are kept in its connection record (connect-grants.js), which the
+// caller hands in as `ctx.paySite`.
+
+/// Without a site record (a caller that keeps none), a site sees none.
+const NO_SITE = Object.freeze({ list: () => [], add: () => {} });
+const paySiteOf = (ctx) => ctx.paySite || NO_SITE;
+const payNow = (ctx) => (ctx.now ? ctx.now() : Math.floor(Date.now() / 1000));
+const payRequest = (ctx, p, kind) => payCard.parsePayRequest(p, { kind, now: payNow(ctx) });
+
+/// What a pay request's asset is: ZEC.zy or a coin bridged here, named by
+/// symbol (ZEC, ETH, SOL, BOLD) or by address. An item is refused in the
+/// ledger's words; anything else Nap does not pay in.
+async function payAsset(ctx, raw, itemWords) {
+  const bridged = await ledger.loadBridged(ctx.config);
+  const known = [[ctx.config.zecAsset, 'ZEC.zy'], ...bridged.map((b) => [b.asset, ledger.bridgedName(ctx.config, b)])];
+  if (isHex(raw)) {
+    const hit = known.find(([a]) => a === raw);
+    if (hit) return { asset: hit[0], name: hit[1] };
+    const items = await ledger.call(ctx.config, 'zyn_items', { assets: raw }).catch(() => []);
+    if (Array.isArray(items) && items.some((i) => i?.asset === raw)) throw bad(itemWords);
+    throw bad('asset: Nap pays in ZEC.zy and the coins bridged to Zyn, and that is neither');
+  }
+  const want = `${String(raw).replace(/\.zy$/i, '')}.zy`.toUpperCase();
+  const hit = known.find(([, n]) => n.toUpperCase() === want);
+  if (!hit) throw bad(`asset: there is no ${raw} on Zyn ${ctx.config.id}`);
+  return { asset: hit[0], name: hit[1] };
+}
+
+/// Refused before the card, in the ledger's words: paying oneself, or a payee
+/// with nowhere registered to be paid.
+async function payPayee(ctx, payee, self) {
+  if (payee === ctx.identity.accountHex) throw bad(self);
+  const unregistered = await ledger.call(ctx.config, 'zyn_viewingKey', { account: payee })
+    .then(() => false, (e) => /has not registered/.test(String(e?.message)));
+  if (unregistered) throw bad('the payee has not registered where to be paid');
+}
+
+/// The schedules `ids` (this site's), as the chain has them now. A read that
+/// failed is an error to retry, never "no schedules": a node without Pay is
+/// the one quiet empty answer.
+async function readSchedules(ctx, ids) {
+  const failed = { yes: false };
+  const rows = await ledger.loadSchedulesById(ctx.config, ctx.identity, ids, failed);
+  if (failed.yes) throw new ProviderError(ERR.INTERNAL, 'The chain could not be read; try again');
+  return rows;
+}
+
+/// One of this site's schedules, as the chain has it now. A site names only
+/// schedules it asked for; the chain is asked for that one, by this wallet's
+/// own ids.
+async function siteSchedule(ctx, id) {
+  if (!paySiteOf(ctx).list().includes(id)) throw bad('This site has no schedule with that id');
+  const s = (await readSchedules(ctx, [id])).find((x) => x.id === id);
+  if (!s || !isHex(s.asset) || !isHex(s.payee) || !isInt(s.amount) || !isInt(s.pot)) throw bad('This wallet has no schedule with that id');
+  if (s.state === 'ended' || s.state === 'cancelled') throw bad('that schedule has ended');
+  return s;
+}
+
+/// Add `periods` to schedule row `s`, from this wallet's notes.
+export async function submitPayTopUp(ctx, s, periods) {
+  const add = BigInt(s.amount) * BigInt(periods);
+  const h = await holdings(ctx);
+  const funding = mk.fund(ctx.identity, h.held, unhex(s.asset), add);
+  await ledger.submitIntent(ctx.config, ctx.identity, mk.payTopUpIntent({ payer: ctx.identity.account, schedule: unhex(s.id), periods, funding }));
+  return { schedule: s.id };
+}
+
+/// Cancel schedule row `s`: its pot becomes a claim for this wallet.
+export async function submitPayCancel(ctx, s) {
+  await ledger.submitIntent(ctx.config, ctx.identity, mk.payCancelIntent({ payer: ctx.identity.account, schedule: unhex(s.id) }));
+  return { schedule: s.id };
+}
+
 /// `kind`: 'public' answers anyone; 'read' and 'auto' a connected site,
 /// without a card; 'write' after the holder approves its card. A read that
 /// names a `scope` (connect-grants.js) also waits for the holder to allow
@@ -351,9 +432,15 @@ export const METHODS = {
       };
     },
   },
+  // What Zyn Pay returns to this wallet (a cancel's pot, a refund) is left
+  // out: it would show any connected site what this wallet pays elsewhere.
+  // Nap shows and collects it, and `zyn_collect` takes it with the rest.
   zyn_owed: {
     kind: 'read',
-    run: async (ctx) => ({ owed: (await ledger.loadOwed(ctx.config, ctx.identity)).map((r) => ({ id: r.id, asset: r.asset, amount: r.amount })) }),
+    run: async (ctx) => ({
+      owed: (await ledger.loadOwed(ctx.config, ctx.identity)).filter((r) => !ledger.PAY_KINDS.includes(r.kind))
+        .map((r) => ({ id: r.id, asset: r.asset, amount: r.amount })),
+    }),
   },
 
   zyn_curves: {
@@ -957,6 +1044,90 @@ export const METHODS = {
           return { asset: pool.asset };
         },
       };
+    },
+  },
+
+  // --- Zyn Pay ----------------------------------------------------------------
+
+  /// The schedules this site asked for, once the holder allows it (scope
+  /// `payments`). Read by this wallet's own ids and kept to this site's list.
+  zyn_paySchedules: {
+    kind: 'read',
+    scope: 'payments',
+    run: async (ctx) => {
+      const mine = paySiteOf(ctx).list();
+      if (!mine.length) return { schedules: [] };
+      return { schedules: await readSchedules(ctx, mine) };
+    },
+  },
+
+  zyn_payCreate: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const r = payRequest(ctx, p, 'create');
+      const { asset, name } = await payAsset(ctx, r.asset, 'items cannot be paid by schedule');
+      await payPayee(ctx, r.payee, 'a schedule cannot pay its own payer');
+      const total = r.amount * BigInt(r.fundPeriods);
+      await mustHold(ctx, asset, total, name);
+      return {
+        ...payCard.createCard({ ...r, name }),
+        danger: false,
+        run: async () => {
+          const h = await holdings(ctx);
+          const funding = mk.fund(ctx.identity, h.held, unhex(asset), total);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.payCreateIntent({
+            payer: ctx.identity.account, payee: unhex(r.payee), asset: unhex(asset), amount: r.amount, every: r.every, firstDue: r.firstDue,
+            periods: r.periods, fundPeriods: r.fundPeriods, reference: unhex(r.reference), nonce: n, funding,
+          }));
+          const schedule = hex(mk.scheduleId(ctx.identity.account, nonce));
+          paySiteOf(ctx).add(schedule);
+          return { schedule, payment: null };
+        },
+      };
+    },
+  },
+
+  zyn_payOnce: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const r = payRequest(ctx, p, 'once');
+      const { asset, name } = await payAsset(ctx, r.asset, 'items cannot be paid this way');
+      await payPayee(ctx, r.payee, 'a payment cannot pay its own payer');
+      await mustHold(ctx, asset, r.amount, name);
+      return {
+        ...payCard.onceCard({ ...r, name }),
+        danger: false,
+        run: async () => {
+          const h = await holdings(ctx);
+          const funding = mk.fund(ctx.identity, h.held, unhex(asset), r.amount);
+          const nonce = await ledger.submitFresh(ctx.config, ctx.identity, (n) => mk.payOnceIntent({
+            payer: ctx.identity.account, payee: unhex(r.payee), asset: unhex(asset), amount: r.amount, reference: unhex(r.reference), nonce: n, funding,
+          }));
+          return { payment: hex(mk.payOnceId(ctx.identity.account, nonce)) };
+        },
+      };
+    },
+  },
+
+  zyn_payTopUp: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const r = payRequest(ctx, p, 'topUp');
+      const s = await siteSchedule(ctx, r.schedule);
+      const after = payCard.afterTopUp(s, r.periods, payNow(ctx));
+      const name = await quoteName(ctx, s.asset);
+      await mustHold(ctx, s.asset, BigInt(s.amount) * BigInt(r.periods), name);
+      return { ...payCard.topUpCard(s, name, r.periods, after), danger: false, run: () => submitPayTopUp(ctx, s, r.periods) };
+    },
+  },
+
+  zyn_payCancel: {
+    kind: 'write',
+    async prepare(ctx, p) {
+      const r = payRequest(ctx, p, 'cancel');
+      const s = await siteSchedule(ctx, r.schedule);
+      const name = await quoteName(ctx, s.asset);
+      return { ...payCard.cancelCard(s, name), danger: false, run: () => submitPayCancel(ctx, s) };
     },
   },
 

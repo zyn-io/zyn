@@ -108,12 +108,15 @@ export async function loadPocket(config, identity) {
   const owned = [...sums].filter(([a, v]) => items.has(a) && v > 0n)
     .map(([asset]) => ({ asset, collection: items.get(asset).collection, serial: items.get(asset).serial, collectionName: collectionName(items.get(asset).collection), name: named(items.get(asset).collection, items.get(asset).serial) }));
   // What finished swaps and loans owe this wallet: collected on the next pass.
-  const owed = await loadOwed(config, identity).catch(() => []);
+  // The pay schedules read on the way (for refunds) come back too, for the
+  // Payments view: `{schedules, failed}`.
+  const pay = {};
+  const owed = await loadOwed(config, identity, pay).catch(() => []);
   const nameOf = (id) => names.get(id) || `${id.slice(0, 6)}…`;
   // Bridge deposits that arrived under this wallet's codes and wait to be
   // collected (§146): not coins yet, but this wallet's to take.
   const arrived = (await loadWaiting(config, identity).catch(() => [])).map((w) => ({ asset: w.asset, amount: w.amount, symbol: nameOf(w.asset) }));
-  return { epoch, coins, items: owned, held, owed, arrived, nameOf };
+  return { epoch, coins, items: owned, held, owed, arrived, nameOf, pay: { schedules: pay.schedules ?? [], failed: pay.failed ?? true } };
 }
 
 // ---------------------------------------------------------------------------

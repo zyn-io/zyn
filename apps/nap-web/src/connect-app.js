@@ -31,7 +31,7 @@ import { peekSession, saveSession, touchSession } from './session.js';
 import { deriveIdentity, forgetIdentity, openSealedWallet } from './core.js';
 import { deriveZecKeys, stopZec, ZecAccount } from './zec/client.js';
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
-import { allowed, connectedTo, SCOPES, scopesOf, withConnection, withScope, without } from './connect-grants.js';
+import { allowed, connectedTo, paySchedulesOf, SCOPES, scopesOf, withConnection, withPaySchedule, withScope, without } from './connect-grants.js';
 import { endpoint, IN_EXTENSION } from './origin.js';
 import './styles.css';
 import './connect.css';
@@ -99,9 +99,16 @@ const zecNet = () => (config.zcashPrefix === 'u1' ? 'mainnet' : 'testnet');
 
 function context() {
   const hasZec = !!(identity?.zec && config.lightdUrl);
+  // Fixed now: the extension serves several sites, one request at a time.
+  const origin = site, net = config.id, account = identity?.accountHex;
   return {
     config,
     identity,
+    // The pay schedules this site set up, kept with its connection record.
+    paySite: {
+      list: () => paySchedulesOf(connections(), origin, net, account),
+      add: (id) => write(CONNECTED_KEY, JSON.stringify(withPaySchedule(connections(), origin, net, account, id))),
+    },
     // The address, from the keys alone.
     zec: hasZec ? async () => {
       if (!zecAccount) zecAccount = new ZecAccount({ sk: identity.zec[zecNet()], network: zecNet(), url: config.lightdUrl, birthday: config.zecBirthday });
@@ -418,7 +425,7 @@ function connectCard() {
 
 const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /// "your private-channel notes and your lending positions".
-const scopeList = (scopes) => scopes.map((s) => SCOPES[s].what).join(' and ');
+const scopeList = (scopes) => { const w = scopes.map((s) => SCOPES[s].what); return w.length > 1 ? `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}` : w.join(''); };
 
 /// A read beyond the connection: what goes, and what the site can learn from
 /// it, before Allow. Kept for this site on this network until it disconnects.

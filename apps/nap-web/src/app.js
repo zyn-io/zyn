@@ -1,7 +1,9 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { objectCall, registerIntent } from './object.js';
-import { submitIntent } from './ledger.js';
+import { call, loadPayments, loadSchedulesById, submitIntent } from './ledger.js';
+import { submitPayCancel, submitPayTopUp } from './connect-ops.js';
+import { cancelCard, cancelClaimId, cancelReturn, EMPTY_PAYMENTS, paymentRow, paymentsView, returnedRow, topUpReview } from './pay.js';
 import { activity, bridgesOf, claimDeposits, collectOwed, depositAddress, loadPocket, loadPrices, logActivity, payOnZyn, resolveRecipient, revealBridgeExits, revealExits, usdText, withdrawZec } from './pocket.js';
 import { artOn, caveLink, fillArt, forgetArt, setArtOn } from './items.js';
 import { appsFor } from './apps.js';
@@ -26,6 +28,11 @@ let receiving = [];
 let pocket = null;
 /// Dollars (WAD) for an amount of an asset, at the prices posted on Zyn.
 let usdOf = () => null;
+/// The Zyn Pay schedules this wallet pays (ledger.js `loadSchedules`), or
+/// null until read. Their ids are access to the record: kept here, never put
+/// in the page or the activity log.
+let paySchedules = null;
+let payFailed = false;
 let generatedWords = '';
 /// The onboarding screen showing, so a network switch keeps it.
 let onboardMode = null;
@@ -80,6 +87,7 @@ function clearSession() {
   forgetIdentity(identity); identity = null;
   for (const r of receiving) forgetIdentity(r);
   receiving = []; pocket = null; usdOf = () => null; generatedWords = '';
+  paySchedules = null;
   forgetArt();
 }
 
@@ -169,7 +177,7 @@ function switchNetwork(id) {
   config = { ...next, networks: config.networks };
   // Deliberately NOT clearSession(): that forgets the phrase, and the phrase is
   // not what changed. Only the chain's answers are stale.
-  pocket = null; usdOf = () => null;
+  pocket = null; usdOf = () => null; paySchedules = null; payFailed = false;
   clearTimeout(zecTimer); stopZec(); zecAccount = null;
   generation++; refreshId++;
   if (identity) { wallet(); refresh(); } else onboarding(onboardMode || undefined);
@@ -434,7 +442,7 @@ async function openKept(password) {
 
 /// The wallet's views. One shows at a time; the rail switches them (a wallet,
 /// not one long page of everything — 9 Oct 2026).
-const VIEWS = [['home', 'Home'], ['zec', 'Zcash'], ['apps', 'Apps'], ['activity', 'Activity'], ['settings', 'Settings']];
+const VIEWS = [['home', 'Home'], ['zec', 'Zcash'], ['apps', 'Apps'], ['payments', 'Payments'], ['activity', 'Activity'], ['settings', 'Settings']];
 let currentView = 'home';
 
 function wallet(message = '') {
@@ -465,6 +473,11 @@ function wallet(message = '') {
         <section class="activity"><div class="section-title"><h2>Take ZEC out of apps</h2></div><form class="account-card" id="withdraw-form"><div><span>Back to a Zcash address</span><label class="visually-hidden" for="withdraw-to">Zcash address</label><input id="withdraw-to" class="withdraw-input" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(config.zcashPrefix)}… or t…"><button class="quiet" type="button" id="withdraw-mine">To my Zcash wallet</button><label class="visually-hidden" for="withdraw-amount">Amount</label><input id="withdraw-amount" class="withdraw-input" inputmode="decimal" autocomplete="off" placeholder="0.0 ZEC"><p class="muted">Fees${tip('The chain records only a commitment to the address. The vault pays it once two custodians sign. The Zcash network fee comes out of the amount; any bridge fee is added on top.')}</p></div><div><button class="primary" type="submit" id="withdraw-go">Withdraw <span>→</span></button></div></form></section>
         <section class="activity" id="account"><div class="section-title"><h2>Your account ID</h2></div><div class="account-card"><div><span>For coins and items from another Nap</span><code>${account}</code><p class="muted">Not a Zcash address.${tip('ZEC sent here is lost. To bring ZEC in, use the deposit address above.')}</p></div><canvas id="qr" width="164" height="164"></canvas></div></section>
       </div>
+      <div data-view="payments" hidden>
+        <div id="pay-notices"></div>
+        <section class="activity"><div class="section-title"><h2>Schedules</h2><span id="pay-count">—</span></div><ul class="pay-list" id="pay-list"><li class="zec-empty">Reading…</li></ul></section>
+        <section class="activity" id="pay-returned" hidden><div class="section-title"><h2>Coming back</h2></div><ul class="log" id="pay-returned-list"></ul></section>
+      </div>
       <div data-view="activity" hidden>
         <section class="activity" id="activity"><div class="section-title"><h2>Activity</h2><span>this device</span></div><ul class="log" id="log"></ul></section>
       </div>
@@ -477,7 +490,7 @@ function wallet(message = '') {
         </section>
       </div>
     </section>
-  </main><dialog id="send-dialog"></dialog><dialog id="shield-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><h2>Recovery</h2><p>Restore this phrase, passphrase and account index in any Nap to recover <code>${account}</code>. Nap does not store the phrase.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
+  </main><dialog id="send-dialog"></dialog><dialog id="pay-dialog"></dialog><dialog id="shield-dialog"></dialog><dialog id="recovery-dialog"><button class="x">×</button><h2>Recovery</h2><p>Restore this phrase, passphrase and account index in any Nap to recover <code>${account}</code>. Nap does not store the phrase.</p><div class="descriptor"><span>Derivation</span><b>nap.zyn.ed25519.v1</b><span>Account index</span><b>${identity.accountIndex}</b><span>Network scoped</span><b>No</b></div></dialog>`);
   showView(currentView);
   QRCode.toCanvas(root.querySelector('#qr'), account, { width: 164, margin: 1, color: { dark: '#1f2428', light: '#f8f2e4' } });
   void loadDepositAddress(identity);
@@ -555,6 +568,7 @@ function wallet(message = '') {
     renderItems();
   };
   renderActivity();
+  renderPay();
   bindZec();
   root.querySelector('#claim')?.addEventListener('click', claimGift);
   root.querySelector('#attend')?.addEventListener('click', collectCertificate);
@@ -1025,6 +1039,10 @@ async function refresh(announce = true) {
     }
     pocket = next; usdOf = prices; pocketStale = false;
     renderCoins(); renderItems(); renderWorth();
+    // The schedules loadPocket read on the way (for refunds): the view's rows.
+    paySchedules = next.pay?.schedules ?? [];
+    payFailed = next.pay?.failed ?? true;
+    renderPay();
     if (next.old) { note('This wallet was stored before the object ledger existed. Restore it from the recovery phrase to read balances here.', true); return; }
     void revealExits(config, identity);
     void revealBridgeExits(config);
@@ -1033,6 +1051,8 @@ async function refresh(announce = true) {
   } catch (e) {
     if (!active()) return;
     pocket = null;
+    payFailed = true;
+    renderPay();
     const coinCount = root.querySelector('#coin-count');
     if (coinCount) coinCount.textContent = 'Unavailable';
     const coinList = root.querySelector('#coins');
@@ -1265,6 +1285,191 @@ function openObjectSend(coin) {
         note(`Sent ${isItem ? coin.symbol : `${wadText(amount)} ${shownSymbol(coin)}`}.`);
       }
       renderActivity();
+      refresh(false);
+    } catch (e) {
+      if (generation !== current) return;
+      error.textContent = e.message;
+      button.disabled = false;
+    }
+  };
+  dialog.showModal();
+}
+
+// ---------------------------------------------------------------------------
+// Payments (Zyn Pay, §188): the schedules this wallet pays, their past
+// payments, and Top up / Cancel. The rows and dialogs are pay.js's, the same
+// the Nap Connect cards show; the writes are connect-ops.js's.
+// ---------------------------------------------------------------------------
+
+const payNow = () => Math.floor(Date.now() / 1000);
+const payNameOf = (a) => (pocket?.nameOf ? pocket.nameOf(a) : a === config.zecAsset ? 'ZEC.zy' : `${a.slice(0, 6)}…`);
+/// The rows on screen, in order: buttons name a row by its place, not its id.
+let payShown = [];
+let payNoticesShown = [];
+
+/// A schedule as the chain has it now, read again when its dialog opens (as
+/// Nap Connect's `siteSchedule` does), so the card is never a stale row.
+async function freshSchedule(id) {
+  const failed = { yes: false };
+  const rows = await loadSchedulesById(config, identity, [id], failed).catch(() => { failed.yes = true; return []; });
+  const s = rows.find((x) => x.id === id);
+  if (!s) throw new Error(failed.yes ? 'That payment could not be read; try again in a moment.' : 'This wallet has no schedule with that id');
+  if (s.state === 'ended' || s.state === 'cancelled') throw new Error('that schedule has ended');
+  return s;
+}
+
+/// Open a dialog on the current state of row `stale`.
+async function openPay(stale, open) {
+  if (!stale) return;
+  const current = generation;
+  try {
+    const s = await freshSchedule(stale.id);
+    if (generation === current) open(s);
+  } catch (e) { if (generation === current) note(e.message, true); }
+}
+
+function renderPay() {
+  const list = root.querySelector('#pay-list');
+  if (!list) return;
+  const view = paymentsView({ schedules: paySchedules || [], owed: pocket?.owed || [], nameOf: payNameOf, now: payNow(), failed: payFailed });
+  const byId = new Map((paySchedules || []).map((s) => [s.id, s]));
+  payShown = view.rows.map((r) => byId.get(r.id));
+  payNoticesShown = view.notices.map((n) => byId.get(n.id));
+  const nav = root.querySelector('.rail [data-view-go="payments"]');
+  if (nav) nav.innerHTML = `Payments${view.badge ? ` <span class="nav-badge">${view.badge}</span>` : ''}`;
+  root.querySelector('#pay-notices').innerHTML = view.notices.map((n, i) => `<div class="notice show pay-notice"><span>${escapeHtml(n.text)}</span>${n.action ? ` — <button class="quiet" data-pay-notice="${i}">${escapeHtml(n.action)}</button>` : ''}</div>`).join('');
+  const count = root.querySelector('#pay-count');
+  if (paySchedules == null && !payFailed) { count.textContent = '—'; list.innerHTML = '<li class="zec-empty">Reading…</li>'; }
+  else if (view.unavailable) { count.textContent = 'Unavailable'; list.innerHTML = '<li class="zec-empty">Payments unavailable. Refresh to try again.</li>'; }
+  else if (view.empty) { count.textContent = '0'; list.innerHTML = `<li class="zec-empty">${EMPTY_PAYMENTS}</li>`; }
+  else {
+    count.textContent = String(view.rows.length);
+    list.innerHTML = view.rows.length ? view.rows.map((r, i) => `<li class="pay-row">
+      <dl class="pay-cells"><div><dt>To</dt><dd>${escapeHtml(r.to)}</dd></div><div><dt>Amount</dt><dd>${escapeHtml(r.amount)}</dd></div><div><dt>Next</dt><dd>${escapeHtml(r.next)}</dd></div><div><dt>Funded until</dt><dd>${escapeHtml(r.fundedUntil)}</dd></div></dl>
+      <div class="pay-go"><button class="quiet" data-pay-past="${i}" aria-expanded="false">Past payments</button>${r.actions.map((a) => `<button class="quiet pay-act" data-pay-${a === 'Top up' ? 'top' : 'cancel'}="${i}">${escapeHtml(a)}</button>`).join('')}</div>
+      <ul class="log pay-past" hidden></ul></li>`).join('') : '<li class="zec-empty">No schedules.</li>';
+    if (view.warning) list.insertAdjacentHTML('afterbegin', `<li class="zec-empty pay-partial">${escapeHtml(view.warning)}</li>`);
+  }
+  const returned = root.querySelector('#pay-returned');
+  returned.hidden = !view.returned.length;
+  root.querySelector('#pay-returned-list').innerHTML = view.returned.map((o) => `<li><b>${escapeHtml(o.label)}</b><span>${escapeHtml(o.amount)}</span><time>collecting</time></li>`).join('');
+  root.querySelectorAll('[data-pay-notice]').forEach((b) => { b.onclick = () => openPay(payNoticesShown[Number(b.dataset.payNotice)], openPayTopUp); });
+  list.querySelectorAll('[data-pay-top]').forEach((b) => { b.onclick = () => openPay(payShown[Number(b.dataset.payTop)], openPayTopUp); });
+  list.querySelectorAll('[data-pay-cancel]').forEach((b) => { b.onclick = () => openPay(payShown[Number(b.dataset.payCancel)], openPayCancel); });
+  list.querySelectorAll('[data-pay-past]').forEach((b) => { b.onclick = () => togglePast(b, payShown[Number(b.dataset.payPast)]); });
+}
+
+/// A schedule's past payments, newest first, read when its row is opened.
+async function togglePast(button, s) {
+  const past = button.closest('.pay-row').querySelector('.pay-past');
+  const open = past.hidden;
+  past.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+  if (!open || !s) return;
+  const current = generation;
+  past.innerHTML = '<li class="zec-empty">Reading…</li>';
+  const failed = { yes: false };
+  const rows = await loadPayments(config, s, failed).catch(() => { failed.yes = true; return []; });
+  if (generation !== current) return;
+  const name = payNameOf(s.asset);
+  past.innerHTML = rows.length
+    ? rows.map((p) => { const r = paymentRow(p, name); return `<li><b>${escapeHtml(r.amount)}</b><span>${escapeHtml(r.refunded)}</span><time>${escapeHtml(r.date)}</time></li>`; }).join('')
+    : `<li class="zec-empty">${failed.yes ? 'Past payments unavailable. Try again in a moment.' : 'None yet.'}</li>`;
+}
+
+const reviewRows = (rows) => rows.map(([k, v]) => `<span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b>`).join('');
+
+/// Add payments to a schedule: the Connect card's rows, worked out again as
+/// the number typed changes; one press tops up what they show.
+function openPayTopUp(s) {
+  if (!s) return;
+  const current = generation;
+  const dialog = root.querySelector('#pay-dialog');
+  const name = payNameOf(s.asset);
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">PAYMENTS</p><h2>Top up payment</h2><form><label>Payments to add<input id="pay-periods" inputmode="numeric" autocomplete="off" value="1"></label><div class="review" id="pay-rows"></div><p class="muted" id="pay-note"></p><button class="primary" type="submit">Top up <span>→</span></button><p class="error" role="alert"></p></form>`;
+  const input = dialog.querySelector('#pay-periods');
+  const button = dialog.querySelector('.primary');
+  const error = dialog.querySelector('.error');
+  const review = () => {
+    const raw = input.value.trim();
+    return topUpReview(s, name, /^\d{1,10}$/.test(raw) ? Number(raw) : NaN, payNow());
+  };
+  const show = () => {
+    try {
+      const r = review();
+      dialog.querySelector('#pay-rows').innerHTML = reviewRows(r.rows);
+      dialog.querySelector('#pay-note').textContent = r.note;
+      error.textContent = '';
+      button.disabled = false;
+    } catch (e) { error.textContent = e.message; button.disabled = true; }
+  };
+  input.addEventListener('input', show);
+  show();
+  dialog.querySelector('.x').onclick = () => dialog.close();
+  dialog.querySelector('form').onsubmit = async (event) => {
+    event.preventDefault();
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const r = review();
+      const periods = Number(input.value.trim());
+      const have = (await freshHeld()).filter((h) => h.asset === s.asset).reduce((a, h) => a + BigInt(h.amount), 0n);
+      if (have < r.needs) throw new Error(`This wallet holds ${wadText(have)} ${name}; the top-up needs ${wadText(r.needs)}`);
+      await submitPayTopUp({ config, identity }, s, periods);
+      pocketStale = true;
+      logActivity(config, identity, { kind: 'out', title: 'Topped up payment', amount: `−${wadText(r.needs)} ${name}`, to: s.payee });
+      renderActivity();
+      if (generation !== current) return;
+      dialog.close();
+      note(`Topped up. ${r.rows.at(-1)[0].replace(' (after)', '')}: ${r.rows.at(-1)[1]}.`);
+      refresh(false);
+    } catch (e) {
+      if (generation !== current) return;
+      error.textContent = e.message;
+      button.disabled = false;
+    }
+  };
+  dialog.showModal();
+}
+
+/// Cancel a schedule: what is set aside comes back as a claim, which is shown
+/// once the chain has it and collected with the rest.
+function openPayCancel(s) {
+  if (!s) return;
+  const current = generation;
+  const dialog = root.querySelector('#pay-dialog');
+  const card = cancelCard(s, payNameOf(s.asset));
+  dialog.innerHTML = `<button class="x">×</button><p class="kicker">PAYMENTS</p><h2>${escapeHtml(card.title)}</h2><form><div class="review">${reviewRows(card.rows)}</div><p class="muted">${escapeHtml(card.note)}</p><button class="primary" type="submit">Cancel payment <span>→</span></button><p class="error" role="alert"></p></form>`;
+  const button = dialog.querySelector('.primary');
+  const error = dialog.querySelector('.error');
+  dialog.querySelector('.x').onclick = () => dialog.close();
+  dialog.querySelector('form').onsubmit = async (event) => {
+    event.preventDefault();
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      await submitPayCancel({ config, identity }, s);
+      logActivity(config, identity, { kind: 'in', title: 'Cancelled payment', amount: card.rows[1][1], to: s.payee });
+      renderActivity();
+      // The claim the cancel left: that one id, asked a few times while the
+      // cancel seals.
+      let row = null;
+      const setAside = BigInt(s.pot) > 0n;
+      for (let i = 0; i < 5 && setAside && !row && generation === current; i++) {
+        if (i) await new Promise((r) => setTimeout(r, 2000));
+        const got = await call(config, 'zyn_claims', { ids: cancelClaimId(s) }).catch(() => []);
+        row = Array.isArray(got) ? returnedRow(got.find((x) => x?.id === cancelClaimId(s))) : null;
+      }
+      if (generation !== current) return;
+      const back = row && cancelReturn(s, [row], payNameOf);
+      dialog.querySelector('form').innerHTML = back
+        ? `<div class="review"><span>${escapeHtml(back.label)}</span><b>${escapeHtml(back.amount)}</b></div><p class="muted">Collecting it into this wallet.</p><button class="primary" type="button" id="pay-done">Done</button>`
+        : `<p class="muted">${setAside ? 'Cancelled. What comes back is collected on the next refresh.' : 'Cancelled. Nothing was set aside, so nothing comes back.'}</p><button class="primary" type="button" id="pay-done">Done</button>`;
+      dialog.querySelector('#pay-done').onclick = () => dialog.close();
+      // Shown under Coming back until collected; the refresh reloads the
+      // schedules and collects it (or finds it, if it sealed late).
+      if (pocket && row && !pocket.owed?.some((o) => o.id === row.id)) pocket = { ...pocket, owed: [...(pocket.owed || []), row] };
+      renderPay();
       refresh(false);
     } catch (e) {
       if (generation !== current) return;

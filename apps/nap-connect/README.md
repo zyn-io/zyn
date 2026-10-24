@@ -38,7 +38,8 @@ that is what `zec_pay` takes.
 ## Methods
 
 Errors carry EIP-1193 codes: `4001` rejected, `4100` not connected, `4200`
-unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters.
+unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters,
+`-32603` the chain could not be read (try again).
 
 | Method | Needs | Returns |
 |---|---|---|
@@ -48,7 +49,7 @@ unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters.
 | `zec_getAddress` | connected | `{network, address}` |
 | `zec_pay {uri}` or `{address, amount, memo?}` | connected + approval | `{txid}` (browser) / a job (desktop) |
 | `zyn_nftOffers` | nothing (public order book) | `{offers}` |
-| `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` |
+| `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` — `owed` leaves out what Zyn Pay returns to the holder (a cancel's pot, refunds); Nap and `zyn_collect` still collect it |
 | `zyn_nftBuy {item, pay}`, `zyn_nftList {asset, price}`, `zyn_nftCancel {asset}`, `zyn_nftRedeem {asset}` | connected + approval | what happened |
 | `zyn_collect` | connected (no prompt: it only moves what the ledger already owes you) | what arrived |
 | `zyn_curves` | nothing (public) | `{curves, terms, curve}` |
@@ -58,15 +59,21 @@ unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters.
 | `zyn_lendPositions` | connected + the holder's leave, once per site and network | `{positions}` |
 | `zyn_poolNotes` | connected + the holder's leave, once per site and network | `{notes: [{ch, size, kind, state, commitment?}]}` — `commitment` only while a note is unspent; no relayer signatures |
 | `zyn_bridgeDeposit {key}` | connected | a fresh deposit code (memo, calldata or BTC address) on every call — ask once per deposit, right before it is made |
+| `zyn_payCreate {payee, asset, amount, every, firstDue, periods?, fundPeriods, reference}` | connected + approval | `{schedule, payment: null}` — `asset` is `ZEC`, `ETH`, `SOL`, `BOLD` or a ledger address; `amount` a decimal string per payment, at least 0.001; `every` is `{days: n}` or `{months: n}`; `firstDue` unix seconds; `periods` left out pays until cancelled; `reference` is 64 hex, your own id. Approval sets aside `fundPeriods` payments |
+| `zyn_payOnce {payee, asset, amount, reference}` | connected + approval | `{payment}` |
+| `zyn_payTopUp {schedule, periods}`, `zyn_payCancel {schedule}` | connected + approval; only a schedule this site set up | `{schedule}` — a cancel returns what has not been paid to the holder as a claim |
+| `zyn_paySchedules` | connected + the holder's leave, once per site and network | `{schedules: [{id, payee, asset, amount, every: {unit, count}, firstDue, nextDue, index, remaining, pot, reference, state}]}` — only the schedules this site set up; amounts are base-unit integer strings |
 
 Connecting shows the site the Zyn account and a Zcash address — never a
 balance, a note or a key. An unconnected site that asks for anything about
-the holder gets the connect prompt first. Private-channel notes and lending
-positions say more than that, so the first time a site asks for either, Nap
+the holder gets the connect prompt first. Private-channel notes, lending
+positions and pay schedules say more than that, so the first time a site asks for one, Nap
 shows a card naming exactly what goes; the holder's answer is kept for that
 site, network and wallet until the site disconnects. Every write is prepared
 from what the chain says (the listed price, the item) and a site's claim that
-differs is refused.
+differs is refused. A pay request the ledger refuses fails with the
+ledger's own words (for example "the pay clock has not started"). Who pays
+whom is not shown to the public; Zyn's operator sees it.
 
 Public methods (`zyn_nftOffers`, `zyn_curves`, `zyn_lendMarkets`,
 `zyn_bridges`, `zyn_poolInfo`, `zyn_saleInfo`) never open Nap's window: in

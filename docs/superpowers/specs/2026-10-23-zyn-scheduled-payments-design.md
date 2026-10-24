@@ -1,6 +1,6 @@
 # Zyn Pay: scheduled payments, one-off payments and refunds
 
-Design, 23 Oct 2026. Status: built on branch zyn-pay (ledger + node), not deployed; Nap and merchant package not built.
+Design, 23 Oct 2026. Status: ledger + node + Nap built (branch zyn-pay-nap); merchant package not built; not deployed.
 
 ## Goal
 

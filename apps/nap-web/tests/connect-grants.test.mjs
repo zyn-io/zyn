@@ -7,8 +7,9 @@ import { readFileSync } from 'node:fs';
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
-const { allowed, connectedTo, SCOPES, scopesOf, withConnection, withScope, without } = await import('../src/connect-grants.js');
+const { allowed, connectedTo, paySchedulesOf, SCOPES, scopesOf, withConnection, withPaySchedule, withScope, without } = await import('../src/connect-grants.js');
 const { METHODS, siteNotes } = await import('../src/connect-ops.js');
+const { PRIVACY } = await import('../src/pay.js');
 
 const src = (f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
 const SITE = 'https://lend.zyn-network.com';
@@ -96,4 +97,45 @@ test('the phone app\'s browser asks for a scope too', () => {
   const gate = b.indexOf('m.scope && !allowed(read(), origin, config.id, identity.accountHex, m.scope)');
   assert.ok(gate > 0 && gate < b.indexOf("if (m.kind === 'read' || m.kind === 'auto') return m.run"));
   assert.match(b, /function forget\(origin\) \{ keep\(without\(/);
+});
+
+test('payments: a scope of its own, and each site sees only the schedules it asked for', () => {
+  assert.equal(METHODS.zyn_paySchedules.scope, 'payments');
+  assert.ok(SCOPES.payments.what && SCOPES.payments.shows && SCOPES.payments.risk);
+  // Its card carries the same privacy sentence as every pay card, inline.
+  assert.ok(SCOPES.payments.risk.endsWith(` ${PRIVACY}`), SCOPES.payments.risk);
+  const id = (n) => String(n).repeat(64);
+  let list = withConnection(withConnection({}, SITE, 'testnet', ME), 'https://evil.example', 'testnet', ME);
+  assert.equal(allowed(list, SITE, 'testnet', ME, 'payments'), false, 'not with the connection alone');
+  list = withScope(list, SITE, 'testnet', ME, 'payments');
+  assert.ok(allowed(list, SITE, 'testnet', ME, 'payments'));
+  list = withPaySchedule(list, SITE, 'testnet', ME, id(1));
+  list = withPaySchedule(list, SITE, 'testnet', ME, id(1));
+  list = withPaySchedule(list, SITE, 'testnet', ME, id(2));
+  assert.deepEqual(paySchedulesOf(list, SITE, 'testnet', ME), [id(1), id(2)], 'kept once each, in order');
+  assert.deepEqual(paySchedulesOf(list, 'https://evil.example', 'testnet', ME), [], 'another site');
+  assert.deepEqual(paySchedulesOf(list, SITE, 'mainnet', ME), [], 'another network');
+  assert.deepEqual(paySchedulesOf(list, SITE, 'testnet', OTHER), [], 'another wallet');
+  // Only ids are kept, and not for another network's or wallet's connection.
+  assert.equal(withPaySchedule(list, SITE, 'testnet', ME, 'not an id'), list);
+  assert.equal(withPaySchedule(list, SITE, 'mainnet', ME, id(3)), list);
+  assert.equal(withPaySchedule(list, SITE, 'testnet', OTHER, id(3)), list);
+  assert.equal(withPaySchedule(list, 'https://never.example', 'testnet', ME, id(3)), list);
+  // Kept with the connection record: per network, through a switch and back
+  // by the same wallet, but not for another wallet, and gone on disconnect.
+  list = withPaySchedule(withConnection(list, SITE, 'mainnet', ME), SITE, 'mainnet', ME, id(4));
+  assert.deepEqual(paySchedulesOf(list, SITE, 'mainnet', ME), [id(4)]);
+  list = withConnection(list, SITE, 'testnet', ME);
+  assert.deepEqual(paySchedulesOf(list, SITE, 'testnet', ME), [id(1), id(2)]);
+  assert.equal(allowed(list, SITE, 'testnet', ME, 'payments'), false, 'the scope is asked again on a new connection');
+  assert.deepEqual(paySchedulesOf(withConnection(list, SITE, 'testnet', OTHER), SITE, 'testnet', OTHER), []);
+  assert.deepEqual(paySchedulesOf(withConnection(without(list, SITE), SITE, 'testnet', ME), SITE, 'testnet', ME), []);
+  // A record of the phone app's (no account yet) takes the account with its first schedule.
+  const phone = withPaySchedule({ [SITE]: { network: 'testnet', at: 1, scopes: [] } }, SITE, 'testnet', ME, id(5));
+  assert.deepEqual(paySchedulesOf(phone, SITE, 'testnet', ME), [id(5)]);
+});
+
+test('every place a site is served keeps its schedules with its connection', () => {
+  assert.match(src('connect-app.js'), /paySite:[\s\S]*?paySchedulesOf\(connections\(\), origin, net, account\)[\s\S]*?withPaySchedule\(connections\(\), origin, net, account, id\)/);
+  assert.match(src('nap-browser.js'), /paySite:[\s\S]*?paySchedulesOf\(read\(\), origin, config\.id, identity\.accountHex\)[\s\S]*?withPaySchedule\(read\(\), origin, config\.id, identity\.accountHex, id\)/);
 });

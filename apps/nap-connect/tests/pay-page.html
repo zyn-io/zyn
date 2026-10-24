@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zyn Pay test page</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; max-width: 760px; }
+  label { display: block; margin: 6px 0; }
+  input { width: 100%; font: 12px monospace; }
+  button { margin: 4px 4px 4px 0; }
+  pre { background: #f2f2f2; padding: 8px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+</style>
+<h1>Zyn Pay</h1>
+<p>Drives Nap Connect's Zyn Pay methods. Used by <code>pay.e2e.mjs</code>; reads <code>/nap-connect.js</code> from the server.</p>
+<label>Payee (64 hex) <input id="payee" placeholder="a registered Zyn account other than yours"></label>
+<label>Asset <input id="asset" value="BOLD"></label>
+<label>Schedule (64 hex, set by Subscribe) <input id="schedule"></label>
+<p>
+  <button id="connect" disabled>Connect</button>
+  <button id="subscribe" disabled>Subscribe</button>
+  <button id="once" disabled>Pay once</button>
+  <button id="topup" disabled>Top up</button>
+  <button id="cancel" disabled>Cancel</button>
+  <button id="schedules" disabled>Schedules</button>
+  <button id="owed" disabled>Owed</button>
+  <button id="collect" disabled>Collect</button>
+</p>
+<pre id="out" data-state="idle">Looking for Nap…</pre>
+<script type="module">
+import { discover, connect } from './nap-connect.js';
+
+const $ = (id) => document.getElementById(id);
+const out = $('out');
+const hex64 = () => [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('');
+let entry = null;
+window.__last = null;
+
+// One request per click: Nap's window opens from the click, so the request
+// starts in the handler itself, before any await.
+async function ask(label, method, params, after) {
+  out.dataset.state = 'busy';
+  out.dataset.label = label;
+  out.textContent = `${label}…`;
+  let last;
+  try {
+    const result = await entry.provider.request({ method, params });
+    last = { label, ok: true, params, result };
+    if (after) after(result);
+  } catch (e) {
+    last = { label, ok: false, params, code: e.code ?? null, message: String(e.message || e) };
+  }
+  window.__last = last;
+  out.textContent = JSON.stringify(last, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2);
+  out.dataset.state = last.ok ? 'ok' : 'error';
+}
+
+const now = () => Math.floor(Date.now() / 1000);
+const on = (id, fn) => $(id).addEventListener('click', fn);
+
+on('connect', async () => {
+  out.dataset.state = 'busy'; out.dataset.label = 'Connect';
+  try {
+    entry = await connect(entry);
+    window.__last = { label: 'Connect', ok: true, result: entry.session };
+    out.textContent = JSON.stringify(window.__last, null, 2);
+    out.dataset.state = 'ok';
+  } catch (e) {
+    window.__last = { label: 'Connect', ok: false, code: e.code ?? null, message: String(e.message || e) };
+    out.textContent = JSON.stringify(window.__last, null, 2);
+    out.dataset.state = 'error';
+  }
+});
+
+// 2 of the asset a day, 3 times, 2 of them set aside; the first on 120 s from now.
+on('subscribe', () => ask('Subscribe', 'zyn_payCreate', {
+  payee: $('payee').value.trim(), asset: $('asset').value.trim(), amount: '2',
+  every: { days: 1 }, firstDue: now() + 120, periods: 3, fundPeriods: 2, reference: hex64(),
+}, (r) => { $('schedule').value = r.schedule; }));
+
+on('once', () => ask('Pay once', 'zyn_payOnce', {
+  payee: $('payee').value.trim(), asset: $('asset').value.trim(), amount: '0.01', reference: hex64(),
+}));
+
+on('topup', () => ask('Top up', 'zyn_payTopUp', { schedule: $('schedule').value.trim(), periods: 1 }));
+on('cancel', () => ask('Cancel', 'zyn_payCancel', { schedule: $('schedule').value.trim() }));
+on('schedules', () => ask('Schedules', 'zyn_paySchedules', {}));
+on('owed', () => ask('Owed', 'zyn_owed', {}));
+on('collect', () => ask('Collect', 'zyn_collect', {}));
+
+const q = new URLSearchParams(location.search);
+if (q.get('payee')) $('payee').value = q.get('payee');
+
+const list = await discover();
+entry = list.find((e) => e.info.uuid === 'nap-web') || list[0] || null;
+for (const b of document.querySelectorAll('button')) b.disabled = !entry;
+out.dataset.state = entry ? 'idle' : 'error';
+out.textContent = entry ? `Ready: ${entry.info.name}` : 'No Nap found.';
+</script>
