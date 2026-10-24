@@ -2,7 +2,18 @@
 // collecting what pay returns to the payer — against a stand-in chain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
 
+// pocket.js reaches origin.js, which reads Vite's `import.meta.env`; outside
+// Vite that is undefined, so the tests give it an empty one.
+registerHooks({
+  load(url, context, next) {
+    const r = next(url, context);
+    return url.endsWith('/src/origin.js') ? { ...r, source: String(r.source).replace(/import\.meta\.env/g, '({})') } : r;
+  },
+});
+
+globalThis.location ??= { origin: 'http://nap.test', search: '' };
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
 
@@ -21,7 +32,7 @@ const sid = (n) => hex(mk.scheduleId(identity.account, nonceAt(n)));
 let schedules; // id -> row
 let payments; // id -> row
 let claims; // id -> row
-const reset = () => { schedules = new Map(); payments = new Map(); claims = new Map(); store.clear(); };
+const reset = () => { schedules = new Map(); payments = new Map(); claims = new Map(); store.clear(); L.forgetPayUnserved(); };
 reset();
 
 globalThis.fetch = async (url, init) => {
@@ -33,6 +44,8 @@ globalThis.fetch = async (url, init) => {
     case 'zyn_payPayments': return answer(ids.filter((i) => payments.has(i)).map((i) => payments.get(i)));
     case 'zyn_claims': return answer(ids.filter((i) => claims.has(i)).map((i) => claims.get(i)));
     case 'zyn_market': return answer({ epoch: 5, epoch_seconds: 10, pools: [], curves: [] });
+    case 'zyn_status': return answer({ chain: 212, epoch: 5 });
+    case 'zyn_published': return answer({ outputs: [], nullifiers: [] });
     default: return answer([]);
   }
 };
@@ -214,4 +227,70 @@ test('a hostile refund count is bounded', async () => {
   const bad = hex(mk.payOnceId(identity.account, nonceAt(7)));
   payments = new Map([[bad, { id: bad, refunds: 4294967296 }]]);
   assert.equal((await L.payRefundClaims(config, identity)).size, 0);
+});
+
+const onceRow = (n, o = {}) => { const id = hex(mk.payOnceId(identity.account, nonceAt(n))); return { id, payee: 'aa'.repeat(32), asset: ZEC, amount: '1', fee: '0', refunded: '1', refunds: 1, at: 1, reference: '00'.repeat(32), ...o }; };
+const firstRefund = (pid) => hex(mk.claimId(mk.refundSource(unhex(pid), 0), 0));
+
+test('a new refund is collected however many old ones there are', async () => {
+  reset();
+  store.set(counter, '8');
+  // Five old one-offs with 1000 refunds each: 5000, past the 4096 cap.
+  for (let n = 0; n < 5; n++) { const r = onceRow(n, { refunds: 1000, at: 10 + n }); payments.set(r.id, r); }
+  const fresh = onceRow(5, { at: 1000 });
+  payments.set(fresh.id, fresh);
+  let got = await L.payRefundClaims(config, identity);
+  assert.equal(got.size, 4096);
+  assert.ok(got.has(firstRefund(fresh.id)), 'the newest one-off is read first');
+  // A scheduled payment newer than the old one-offs, too.
+  payments.delete(fresh.id);
+  const s = schedule(6, { index: 1 });
+  schedules.set(s.id, s);
+  const pid = hex(mk.payPaymentId(unhex(s.id), 0));
+  payments.set(pid, { ...onceRow(0), id: pid, at: 1000 });
+  got = await L.payRefundClaims(config, identity);
+  assert.equal(got.size, 4096);
+  assert.ok(got.has(firstRefund(pid)), 'the newest scheduled payment is read first');
+});
+
+test('loadOwed reads pay records beside the claims, not after them', async () => {
+  reset();
+  store.set(counter, '2');
+  let claimsAsked;
+  const asked = new Promise((resolve) => { claimsAsked = resolve; });
+  const real = globalThis.fetch;
+  // The pay reads answer only once the claims have been asked: read one
+  // after the other, this never finishes.
+  globalThis.fetch = async (u, init) => {
+    const b = JSON.parse(init.body);
+    if (b.method === 'zyn_claims') claimsAsked();
+    if (/^zyn_pay/.test(b.method)) await asked;
+    return real(u, init);
+  };
+  let timer;
+  try {
+    await Promise.race([L.loadOwed(config, identity), new Promise((_, no) => { timer = setTimeout(() => no(new Error('the pay reads waited for the claim reads')), 3000); })]);
+  } finally { clearTimeout(timer); globalThis.fetch = real; }
+});
+
+test('a node without Pay is not asked about it again this session', async () => {
+  reset();
+  store.set(counter, '2');
+  const P = await import('../src/pocket.js');
+  const asked = [];
+  await withPayMethods('text', async () => {
+    const inner = globalThis.fetch;
+    globalThis.fetch = async (u, init) => { const b = JSON.parse(init.body); if (/^zyn_pay/.test(b.method)) asked.push(b.method); return inner(u, init); };
+    try {
+      assert.equal((await P.loadPocket(config, identity)).pay.failed, false, 'not served is not a failure');
+      assert.ok(asked.length > 0, 'the first refresh asks');
+      asked.length = 0;
+      const again = await P.loadPocket(config, identity);
+      assert.deepEqual(asked, [], 'the next refresh sends no pay requests to that node');
+      assert.deepEqual(again.pay, { schedules: [], failed: false });
+      // Another node is asked for itself.
+      await P.loadPocket({ ...config, rpcUrl: 'http://other.test/' }, identity);
+      assert.ok(asked.length > 0);
+    } finally { globalThis.fetch = inner; }
+  });
 });

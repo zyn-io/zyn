@@ -97,6 +97,19 @@ const recovering = new Map();
 /// node's unknown-method text, or JSON-RPC -32601). That is "nothing here",
 /// not a failed lookup; a network failure is still one.
 const notServed = (e) => /does not serve zyn_pay|method not found|-32601/i.test(String(e?.message || e));
+/// Nodes (by `rpcUrl`) that said so this session. Later reads skip the pay
+/// methods there instead of asking again on every refresh; a node that gains
+/// Pay is asked again after a reload. Kept in memory only.
+const payUnserved = new Set();
+const payServed = (config) => !payUnserved.has(config.rpcUrl);
+/// Whether `e` says the node does not serve Pay; if so, it is not asked again.
+const unservedBy = (config, e) => {
+  if (!notServed(e)) return false;
+  payUnserved.add(config.rpcUrl);
+  return true;
+};
+/// Forget which nodes lacked Pay (for tests).
+export function forgetPayUnserved() { payUnserved.clear(); }
 
 /// Once per device and wallet: recover the count if this device never kept one.
 export function ensureNonces(config, identity) {
@@ -142,7 +155,7 @@ export async function recoverNonces(config, identity, { gap = RECOVERY_GAP } = {
     for (const [method, field, size, list, optional] of [['zyn_claims', 'id', 240, ids], ['zyn_tickets', 'ticket', 500, ids], ['zyn_waiting', 'key', 500, ids], ['zyn_lendPositions', 'id', 240, ids], ['zyn_paySchedules', 'id', 240, payList, true], ['zyn_payPayments', 'id', 240, payList, true]]) {
       for (let i = 0; i < list.length; i += size) {
         const part = list.slice(i, i + size).join(',');
-        asks.push(() => call(config, method, { ids: part }).then((rows) => (Array.isArray(rows) ? rows.map((row) => row[field]) : []), (e) => { if (!(optional && notServed(e))) failed = true; return []; }));
+        asks.push(() => (optional && !payServed(config) ? Promise.resolve([]) : call(config, method, { ids: part }).then((rows) => (Array.isArray(rows) ? rows.map((row) => row[field]) : []), (e) => { if (!(optional && unservedBy(config, e))) failed = true; return []; })));
       }
     }
     const found = (await inTurns(asks, RECOVERY_PARALLEL)).flat();
@@ -169,6 +182,8 @@ const CLAIM_KINDS = [
 ];
 const PAY_RETURNED = 'Payment returned';
 const PAY_REFUNDED = 'Payment refunded';
+/// The kinds of claim Zyn Pay returns to its payer (`loadOwed` labels).
+export const PAY_KINDS = Object.freeze([PAY_RETURNED, PAY_REFUNDED]);
 function claimKinds(identity, limit, from = 0) {
   const kinds = new Map();
   const me = identity.account;
@@ -196,17 +211,29 @@ export function redemptionClaims(gone) {
 export async function loadOwed(config, identity, seen) {
   await ensureNonces(config, identity);
   const kinds = claimKinds(identity, nonceCount(config, identity) + LOOKAHEAD);
+  // The pay records (for refund ids) are read beside the claims, not before
+  // them: a slow node, or one without Pay, holds nothing else up.
+  const refunds = payRefundClaims(config, identity, seen).catch(() => new Map());
   // A restore finds these too: the spent notes are still published.
   const { gone } = await loadHoldings(config, identity, []).catch(() => ({ gone: [] }));
   for (const [id, kind] of redemptionClaims(gone || [])) kinds.set(id, kind);
-  for (const [id, kind] of await payRefundClaims(config, identity, seen).catch(() => new Map())) kinds.set(id, kind);
-  const ids = [...kinds.keys()];
-  const rows = [];
-  for (let i = 0; i < ids.length; i += 240) {
-    const part = await call(config, 'zyn_claims', { ids: ids.slice(i, i + 240).join(',') });
-    if (Array.isArray(part)) rows.push(...part);
-  }
-  return rows.filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount))
+  const ask = async (ids) => {
+    const rows = [];
+    for (let i = 0; i < ids.length; i += 240) {
+      const part = await call(config, 'zyn_claims', { ids: ids.slice(i, i + 240).join(',') });
+      if (Array.isArray(part)) rows.push(...part);
+    }
+    return rows;
+  };
+  const [rows, refundRows] = await Promise.all([
+    ask([...kinds.keys()]),
+    refunds.then((found) => {
+      const fresh = [...found].filter(([id]) => !kinds.has(id));
+      for (const [id, kind] of fresh) kinds.set(id, kind);
+      return ask(fresh.map(([id]) => id));
+    }),
+  ]);
+  return [...rows, ...refundRows].filter((r) => /^[0-9a-f]{64}$/.test(r.id) && /^[0-9a-f]{64}$/.test(r.asset) && /^\d+$/.test(r.amount))
     .map((r) => ({ ...r, kind: kinds.get(r.id) || 'Owed' }));
 }
 
@@ -611,22 +638,41 @@ const MAX_PAYMENTS = 500;
 const SETTLED_DAYS = 30;
 const PAY_PARALLEL = 4;
 
+/// Rows for `ids`, in the order asked, and only those. `failed.yes` is set
+/// when a read failed; a node that does not serve Pay is not a failure, and
+/// is not asked again this session.
 async function askRows(config, method, ids, failed) {
+  if (!payServed(config)) return [];
   const rows = [];
-  for (let i = 0; i < ids.length; i += 240) {
-    const part = await call(config, method, { ids: ids.slice(i, i + 240).join(',') }).catch((e) => { if (failed && !notServed(e)) failed.yes = true; return []; });
+  for (let i = 0; i < ids.length && payServed(config); i += 240) {
+    const part = await call(config, method, { ids: ids.slice(i, i + 240).join(',') }).catch((e) => { if (!unservedBy(config, e) && failed) failed.yes = true; return []; });
     if (Array.isArray(part)) rows.push(...part);
   }
-  const mine = new Set(ids);
-  return rows.filter((r) => r && mine.has(r.id));
+  const order = new Map(ids.map((id, i) => [id, i]));
+  return rows.filter((r) => r && order.has(r.id)).sort((a, b) => order.get(a.id) - order.get(b.id));
 }
 
-/// The pay schedules this wallet created, by the ids only it can derive.
-export async function loadSchedules(config, identity, failed) {
+/// The schedule ids this wallet's nonces give, newest first.
+async function scheduleIds(config, identity) {
   const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
   const ids = [];
-  for (let n = 0; n < count; n++) ids.push(hex(mk.scheduleId(identity.account, mk.marketNonce(identity.secretKey, n))));
-  return askRows(config, 'zyn_paySchedules', ids, failed);
+  for (let n = count - 1; n >= 0; n--) ids.push(hex(mk.scheduleId(identity.account, mk.marketNonce(identity.secretKey, n))));
+  return ids;
+}
+
+/// The pay schedules this wallet created, by the ids only it can derive,
+/// newest first.
+export async function loadSchedules(config, identity, failed) {
+  return askRows(config, 'zyn_paySchedules', await scheduleIds(config, identity), failed);
+}
+
+/// Of `wanted`, the schedules this wallet created, as the chain has them now,
+/// in the order given. Only the ids this wallet can derive are asked: a list
+/// kept for a site never makes Nap ask about, or show, a schedule not its own.
+export async function loadSchedulesById(config, identity, wanted, failed) {
+  const mine = new Set(await scheduleIds(config, identity));
+  const ids = [...new Set(wanted)].filter((id) => mine.has(id));
+  return ids.length ? askRows(config, 'zyn_paySchedules', ids, failed) : [];
 }
 
 /// The payments a schedule has made, newest first, at most MAX_PAYMENTS.
@@ -634,23 +680,23 @@ export async function loadPayments(config, schedule, failed) {
   const ids = [];
   const sid = unhex(schedule.id);
   for (let k = Math.max(0, Math.floor(Number(schedule.index)) || 0) - 1; k >= 0 && ids.length < MAX_PAYMENTS; k--) ids.push(hex(mk.payPaymentId(sid, k)));
-  const rows = await askRows(config, 'zyn_payPayments', ids, failed);
-  const order = new Map(ids.map((id, i) => [id, i]));
-  return rows.sort((a, b) => order.get(a.id) - order.get(b.id));
+  return askRows(config, 'zyn_payPayments', ids, failed);
 }
 
-/// This wallet's one-off payments.
+/// This wallet's one-off payments, newest (highest nonce) first.
 export async function loadOneOffs(config, identity, failed) {
   const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
   const ids = [];
-  for (let n = 0; n < count; n++) ids.push(hex(mk.payOnceId(identity.account, mk.marketNonce(identity.secretKey, n))));
+  for (let n = count - 1; n >= 0; n--) ids.push(hex(mk.payOnceId(identity.account, mk.marketNonce(identity.secretKey, n))));
   return askRows(config, 'zyn_payPayments', ids, failed);
 }
 
 const settledKey = (config, identity) => `nap.pay.settled.${config.chain}.${identity.accountHex}`;
 /// A node's `refunds` is trusted only as a u32, and then only this far: per
-/// payment, and in total per call (the next refresh continues from the same
-/// records, so a hostile count costs bounded work, not a hang).
+/// payment, and in total per call, so a hostile count costs bounded work, not
+/// a hang. Every refresh starts again from the newest payment, so a new
+/// refund is always within the cap; refunds past it on older payments are
+/// not collected by Nap.
 const MAX_REFUNDS_PER_PAYMENT = 1024;
 const MAX_REFUND_CLAIMS = 4096;
 
@@ -677,6 +723,11 @@ export async function payRefundClaims(config, identity, seen) {
   const live = all.filter((s) => sweep || !(['ended', 'cancelled'].includes(s.state) && lastPaid(s) < settled));
   const lists = await inTurns(live.map((s) => () => loadPayments(config, s, failed)), PAY_PARALLEL);
   for (const list of lists) payments.push(...list);
+  // Newest first, by when each was paid; among equals (or a missing date) the
+  // order read stays: one-offs and schedules newest nonce first, each
+  // schedule's payments newest period first.
+  const at = (p) => (Number.isFinite(Number(p.at)) ? Number(p.at) : -Infinity);
+  payments.sort((a, b) => (at(b) - at(a)) || 0);
   if (sweep && !failed.yes) write(settledKey(config, identity), String(Math.floor(now)));
   for (const p of payments) {
     const r = Number(p.refunds);
