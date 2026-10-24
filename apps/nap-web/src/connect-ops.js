@@ -27,7 +27,9 @@ import * as payCard from './pay.js';
 export { itemName };
 
 /// EIP-1193's error codes, so a site handles Nap the way it handles any wallet.
-export const ERR = Object.freeze({ REJECTED: 4001, UNAUTHORIZED: 4100, UNSUPPORTED: 4200, PARAMS: -32602 });
+/// INTERNAL (JSON-RPC's internal error) is a read that failed: the request
+/// was fine, and the same call may work in a moment.
+export const ERR = Object.freeze({ REJECTED: 4001, UNAUTHORIZED: 4100, UNSUPPORTED: 4200, PARAMS: -32602, INTERNAL: -32603 });
 export class ProviderError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -359,11 +361,22 @@ async function payPayee(ctx, payee, self) {
   if (unregistered) throw bad('the payee has not registered where to be paid');
 }
 
+/// The schedules `ids` (this site's), as the chain has them now. A read that
+/// failed is an error to retry, never "no schedules": a node without Pay is
+/// the one quiet empty answer.
+async function readSchedules(ctx, ids) {
+  const failed = { yes: false };
+  const rows = await ledger.loadSchedulesById(ctx.config, ctx.identity, ids, failed);
+  if (failed.yes) throw new ProviderError(ERR.INTERNAL, 'The chain could not be read; try again');
+  return rows;
+}
+
 /// One of this site's schedules, as the chain has it now. A site names only
-/// schedules it asked for; the chain's row is read by this wallet's own ids.
+/// schedules it asked for; the chain is asked for that one, by this wallet's
+/// own ids.
 async function siteSchedule(ctx, id) {
   if (!paySiteOf(ctx).list().includes(id)) throw bad('This site has no schedule with that id');
-  const s = (await ledger.loadSchedules(ctx.config, ctx.identity)).find((x) => x.id === id);
+  const s = (await readSchedules(ctx, [id])).find((x) => x.id === id);
   if (!s || !isHex(s.asset) || !isHex(s.payee) || !isInt(s.amount) || !isInt(s.pot)) throw bad('This wallet has no schedule with that id');
   if (s.state === 'ended' || s.state === 'cancelled') throw bad('that schedule has ended');
   return s;
@@ -419,9 +432,15 @@ export const METHODS = {
       };
     },
   },
+  // What Zyn Pay returns to this wallet (a cancel's pot, a refund) is left
+  // out: it would show any connected site what this wallet pays elsewhere.
+  // Nap shows and collects it, and `zyn_collect` takes it with the rest.
   zyn_owed: {
     kind: 'read',
-    run: async (ctx) => ({ owed: (await ledger.loadOwed(ctx.config, ctx.identity)).map((r) => ({ id: r.id, asset: r.asset, amount: r.amount })) }),
+    run: async (ctx) => ({
+      owed: (await ledger.loadOwed(ctx.config, ctx.identity)).filter((r) => !ledger.PAY_KINDS.includes(r.kind))
+        .map((r) => ({ id: r.id, asset: r.asset, amount: r.amount })),
+    }),
   },
 
   zyn_curves: {
@@ -1036,9 +1055,9 @@ export const METHODS = {
     kind: 'read',
     scope: 'payments',
     run: async (ctx) => {
-      const mine = new Set(paySiteOf(ctx).list());
-      if (!mine.size) return { schedules: [] };
-      return { schedules: (await ledger.loadSchedules(ctx.config, ctx.identity)).filter((s) => mine.has(s.id)) };
+      const mine = paySiteOf(ctx).list();
+      if (!mine.length) return { schedules: [] };
+      return { schedules: await readSchedules(ctx, mine) };
     },
   },
 

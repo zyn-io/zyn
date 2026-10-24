@@ -38,7 +38,8 @@ that is what `zec_pay` takes.
 ## Methods
 
 Errors carry EIP-1193 codes: `4001` rejected, `4100` not connected, `4200`
-unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters.
+unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters,
+`-32603` the chain could not be read (try again).
 
 | Method | Needs | Returns |
 |---|---|---|
@@ -48,7 +49,7 @@ unsupported, `4900` Nap's window closed or not open, `-32602` bad parameters.
 | `zec_getAddress` | connected | `{network, address}` |
 | `zec_pay {uri}` or `{address, amount, memo?}` | connected + approval | `{txid}` (browser) / a job (desktop) |
 | `zyn_nftOffers` | nothing (public order book) | `{offers}` |
-| `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` |
+| `zyn_nftItems`, `zyn_owed` | connected | `{items}`, `{owed}` — `owed` leaves out what Zyn Pay returns to the holder (a cancel's pot, refunds); Nap and `zyn_collect` still collect it |
 | `zyn_nftBuy {item, pay}`, `zyn_nftList {asset, price}`, `zyn_nftCancel {asset}`, `zyn_nftRedeem {asset}` | connected + approval | what happened |
 | `zyn_collect` | connected (no prompt: it only moves what the ledger already owes you) | what arrived |
 | `zyn_curves` | nothing (public) | `{curves, terms, curve}` |

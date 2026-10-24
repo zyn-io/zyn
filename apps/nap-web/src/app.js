@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { objectCall, registerIntent } from './object.js';
-import { call, loadPayments, loadSchedules, submitIntent } from './ledger.js';
+import { call, loadPayments, loadSchedulesById, submitIntent } from './ledger.js';
 import { submitPayCancel, submitPayTopUp } from './connect-ops.js';
 import { cancelCard, cancelClaimId, cancelReturn, EMPTY_PAYMENTS, paymentRow, paymentsView, returnedRow, topUpReview } from './pay.js';
 import { activity, bridgesOf, claimDeposits, collectOwed, depositAddress, loadPocket, loadPrices, logActivity, payOnZyn, resolveRecipient, revealBridgeExits, revealExits, usdText, withdrawZec } from './pocket.js';
@@ -1311,7 +1311,7 @@ let payNoticesShown = [];
 /// Nap Connect's `siteSchedule` does), so the card is never a stale row.
 async function freshSchedule(id) {
   const failed = { yes: false };
-  const rows = await loadSchedules(config, identity, failed).catch(() => { failed.yes = true; return []; });
+  const rows = await loadSchedulesById(config, identity, [id], failed).catch(() => { failed.yes = true; return []; });
   const s = rows.find((x) => x.id === id);
   if (!s) throw new Error(failed.yes ? 'That payment could not be read; try again in a moment.' : 'This wallet has no schedule with that id');
   if (s.state === 'ended' || s.state === 'cancelled') throw new Error('that schedule has ended');

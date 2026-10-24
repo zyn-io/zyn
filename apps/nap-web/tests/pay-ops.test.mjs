@@ -20,6 +20,7 @@ const { deriveIdentity } = await import('../src/core.js');
 const mk = await import('../src/market.js');
 const { commitment, hex, nullifierOf, sealNote, unhex, u32be } = await import('../src/object.js');
 const pay = await import('../src/pay.js');
+const ledger = await import('../src/ledger.js');
 
 const WAD = 10n ** 18n;
 const ZEC = '0e212262cb35bf6e88bc7d0a52b60a5cc70c2859b65966a2557229d2ea469201';
@@ -48,13 +49,20 @@ let notes; // what this wallet holds: [{asset, amount, nonce}]
 let schedules; // id -> node row
 let frames; // frames submitted
 let receipt; // what the next submit answers
+let claims; // id -> zyn_claims row
+let payDown; // null, 'outage' (the node errs) or 'unserved' (a node without Pay)
+let scheduleAsks; // the ids each zyn_paySchedules call named
 const reset = () => {
   notes = [];
   schedules = new Map();
   frames = [];
   receipt = '[Paid { id: .. }]';
+  claims = new Map();
+  payDown = null;
+  scheduleAsks = [];
   store.clear();
   store.set(counter, '5');
+  ledger.forgetPayUnserved();
 };
 reset();
 
@@ -88,7 +96,14 @@ globalThis.fetch = async (url, init) => {
     case 'zyn_items': return answer(String(body.assets).split(',').filter((a) => a === ITEM).map((asset) => ({ asset, collection: 'c0'.repeat(32), serial: 7 })));
     case 'zyn_published': return answer(published());
     case 'zyn_viewingKey': return body.account === NOBODY ? refuse('that account has not registered where to be paid, so nothing can be sent to it yet') : answer({ viewing: '11'.repeat(32) });
-    case 'zyn_paySchedules': return answer(ids.filter((i) => schedules.has(i)).map((i) => schedules.get(i)));
+    case 'zyn_paySchedules':
+    case 'zyn_payPayments':
+      if (payDown === 'outage') return refuse('the node is busy');
+      if (payDown === 'unserved') return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32600, message: `this chain is an object ledger and does not serve ${body.method}. It serves zyn_status, zyn_claims` } }), { status: 200 });
+      if (body.method === 'zyn_payPayments') return answer([]);
+      scheduleAsks.push(ids);
+      return answer(ids.filter((i) => schedules.has(i)).map((i) => schedules.get(i)));
+    case 'zyn_claims': return answer(ids.filter((i) => claims.has(i)).map((i) => claims.get(i)));
     case 'zyn_status': return answer({ chain: 212, epoch: 5 });
     case 'zyn_submitSigned': frames.push(body.frame); return answer({ receipts: receipt });
     default: return answer([]);
@@ -348,3 +363,55 @@ test('no pay method is public, and every write is a card', () => {
     assert.equal(typeof METHODS[name].prepare, 'function', name);
   }
 });
+
+const UNREAD = 'The chain could not be read; try again';
+
+test('an outage reading schedules is an error to retry, not "no schedules"', async () => {
+  reset();
+  schedules.set(sid(1), row(1));
+  const site = siteWith([sid(1)]);
+  payDown = 'outage';
+  const retry = (e) => {
+    assert.notEqual(e.code, -32602, `not a parameter error: "${e.message}"`);
+    assert.equal(e.code, -32603);
+    assert.equal(e.message, UNREAD);
+    return true;
+  };
+  await assert.rejects(METHODS.zyn_paySchedules.run(ctxWith(site)), retry);
+  await assert.rejects(METHODS.zyn_payTopUp.prepare(ctxWith(site), { schedule: sid(1), periods: 1 }), retry);
+  await assert.rejects(METHODS.zyn_payCancel.prepare(ctxWith(site), { schedule: sid(1) }), retry);
+  assert.equal(frames.length, 0, 'nothing was signed');
+  // Back up: the same calls work.
+  payDown = null;
+  assert.deepEqual((await METHODS.zyn_paySchedules.run(ctxWith(site))).schedules.map((x) => x.id), [sid(1)]);
+});
+
+test('a node without Pay answers no schedules, quietly', async () => {
+  reset();
+  payDown = 'unserved';
+  const site = siteWith([sid(1)]);
+  assert.deepEqual(await METHODS.zyn_paySchedules.run(ctxWith(site)), { schedules: [] });
+  await assert.rejects(METHODS.zyn_payCancel.prepare(ctxWith(site), { schedule: sid(1) }), (e) => e.code === -32602 && e.message === 'This wallet has no schedule with that id');
+});
+
+test('a top-up or cancel asks the chain for that one schedule only', async () => {
+  reset();
+  notes = [{ asset: BOLD, amount: 2n * WAD }];
+  for (const n of [1, 2, 3]) schedules.set(sid(n), row(n));
+  const site = siteWith([sid(1), sid(2)]);
+  await METHODS.zyn_payTopUp.prepare(ctxWith(site), { schedule: sid(2), periods: 1 });
+  await METHODS.zyn_payCancel.prepare(ctxWith(site), { schedule: sid(1) });
+  assert.deepEqual(scheduleAsks, [[sid(2)], [sid(1)]]);
+});
+
+test('zyn_owed leaves pay returns out; zyn_collect still collects them', async () => {
+  reset();
+  const swap = hex(mk.claimId(mk.orderId(identity.account, mk.marketNonce(identity.secretKey, 0)), 0));
+  const back = hex(mk.claimId(mk.cancelSource(unhex(sid(1))), 0));
+  for (const id of [swap, back]) claims.set(id, { id, asset: ZEC, amount: '5' });
+  const site = siteWith([sid(1)]);
+  assert.deepEqual(await METHODS.zyn_owed.run(ctxWith(site)), { owed: [{ id: swap, asset: ZEC, amount: '5' }] });
+  assert.deepEqual(await METHODS.zyn_collect.run(ctxWith(site)), { collected: 2 });
+  assert.equal(frames.length, 1, 'both in one claim');
+});
+

@@ -238,32 +238,33 @@ try {
   ok(cancel.ok && cancel.result?.schedule === sid, `Cancel returned the schedule: ${cancel.ok ? 'ok' : cancel.message}`);
   if (!cancel.ok) { await finish(); }
   cancelled = true;
+  // Sites do not see pay returns through zyn_owed (§188), so the claim is read
+  // from the chain by its id, which the site can derive from the schedule's.
   const cid = Buffer.from(claimId(cancelSource(Uint8Array.from(Buffer.from(sid, 'hex'))), 0)).toString('hex');
-  const owedHas = async () => {
-    const r = await act('owed');
-    return r.ok ? (r.result.owed || []).find((o) => o.id === cid) : null;
+  const onChain = async () => {
+    const rows = await rpc('zyn_claims', { ids: cid });
+    return (Array.isArray(rows) ? rows : []).find((o) => o.id === cid) || null;
   };
   let claim = null;
   for (let i = 0, t0 = Date.now(); Date.now() - t0 < 180000; i++) {
-    claim = await owedHas();
+    claim = await onChain().catch(() => null);
     if (claim) break;
     await page.waitForTimeout(5000);
   }
   ok(!!claim, `the cancel left claim ${cid.slice(0, 12)} of 4 BOLD: ${claim ? claim.amount : 'none'}`);
   ok(!claim || (claim.asset === asset && BigInt(claim.amount) === before), 'the claim returns the 2 periods in the pay asset');
   if (claim) {
+    const listed = await act('owed');
+    ok(listed.ok && !(listed.result.owed || []).some((o) => o.id === cid), listed.ok ? 'zyn_owed does not show the site the pay return' : `zyn_owed: ${listed.message}`);
     const col = await act('collect');
     ok(col.ok, `Collect: ${col.ok ? JSON.stringify(col.result) : col.message}`);
     let still = claim;
     let unread = null;
     for (let i = 0, t0 = Date.now(); still && Date.now() - t0 < 180000; i++) {
       await page.waitForTimeout(5000);
-      const r = await act('owed');
-      if (!r.ok) { unread = r.message; continue; }
-      unread = null;
-      still = (r.result.owed || []).find((o) => o.id === cid);
+      try { still = await onChain(); unread = null; } catch (e) { unread = e.message; }
     }
-    ok(!still && !unread, unread ? `could not read what is owed: ${unread}` : 'the claim is collected in Nap (no longer owed)');
+    ok(!still && !unread, unread ? `could not read the claim: ${unread}` : 'the claim is collected (no longer on the chain)');
   }
   const gone = await readSchedules(false);
   ok(!gone || gone.state === 'cancelled', `the schedule is cancelled: ${gone ? gone.state : 'no longer listed'}`);
