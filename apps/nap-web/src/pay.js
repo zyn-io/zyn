@@ -124,8 +124,9 @@ export function runsOutSoon(s, now) {
 
 /// The schedule as a top-up of `periods` leaves it, worked out as the ledger
 /// does (`apply_pay_top_up`), with `now` standing in for the pay clock: an
-/// unfunded schedule resumes at the latest period already due. Throws the
-/// ledger's own sentence for a top-up it would refuse.
+/// unfunded schedule resumes at the latest period already due. `paysNow` is
+/// how many of the periods it then funds are already due, which the pay clock
+/// pays at once. Throws the ledger's own sentence for a top-up it would refuse.
 export function afterTopUp(s, periods, now) {
   if (s.state === 'ended' || s.state === 'cancelled') throw bad('that schedule has ended');
   let index = Number(s.index);
@@ -143,7 +144,13 @@ export function afterTopUp(s, periods, now) {
   const amount = BigInt(s.amount);
   const pot = BigInt(s.pot) + amount * BigInt(periods);
   if (remaining != null && pot > amount * BigInt(remaining)) throw bad('fund no more periods than the schedule has');
-  return { ...s, index, remaining, pot: pot.toString(), state: 'active' };
+  const after = { ...s, index, remaining, pot: pot.toString(), state: 'active' };
+  let paysNow = 0;
+  for (const funded = fundedPeriods(after); paysNow < funded; paysNow++) {
+    const d = dueAt(Number(s.firstDue), s.every, index + paysNow);
+    if (d == null || d > now) break;
+  }
+  return { ...after, paysNow };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,8 +171,10 @@ function asset(p) {
   return p.asset;
 }
 function amount(p) {
+  // A string only: a JS number has already lost digits by the time it is here.
+  if (typeof p.amount !== 'string') throw bad('amount: a decimal string');
   let v;
-  try { v = parseAmount(String(p.amount ?? '')); } catch (e) { throw bad(`amount: ${e.message}`); }
+  try { v = parseAmount(p.amount); } catch (e) { throw bad(`amount: ${e.message}`); }
   if (v < MIN_PAY_AMOUNT) throw bad('an amount below the minimum');
   return v;
 }
@@ -220,6 +229,7 @@ export function parsePayRequest(p, { kind = 'create', now = Math.floor(Date.now(
 // The cards: title, rows and note, as Nap Connect and the wallet show them.
 
 const payments = (n) => (n === 1 ? '1 payment' : `${n} payments`);
+const overdue = (n) => (n === 1 ? '1 overdue payment' : `${n} overdue payments`);
 
 /// A new schedule. `name` is the asset's name to show (BOLD.zy).
 export function createCard({ payee: to, name, amount: per, every: ev, firstDue, periods, fundPeriods }) {
@@ -243,16 +253,17 @@ export function onceCard({ payee: to, name, amount: a }) {
 }
 
 /// A top-up of `periods` to schedule row `s`; `after` is `afterTopUp(s, periods, now)`.
+/// A resume that pays overdue periods says so; "Funded until (after)" then
+/// names only a date after those, and is left out when there is none.
 export function topUpCard(s, name, periods, after) {
-  return {
-    title: 'Top up payment',
-    rows: [
-      ['To', shortId(s.payee)],
-      ['Adds', `${wadText(BigInt(s.amount) * BigInt(periods))} ${name} (${payments(periods)})`],
-      ['Funded until (after)', dateText(fundedUntil(after))],
-    ],
-    note: PRIVACY,
-  };
+  const now = Number(after.paysNow) || 0;
+  const rows = [
+    ['To', shortId(s.payee)],
+    ['Adds', `${wadText(BigInt(s.amount) * BigInt(periods))} ${name} (${payments(periods)})`],
+  ];
+  if (now > 0) rows.push(['Pays now', overdue(now)]);
+  if (now < fundedPeriods(after)) rows.push(['Funded until (after)', dateText(fundedUntil(after))]);
+  return { title: 'Top up payment', rows, note: PRIVACY };
 }
 
 /// Cancelling schedule row `s`: its pot comes back, as of now.

@@ -176,6 +176,12 @@ test('bad_requests_never_reach_a_card', async () => {
     ['zyn_payCreate', createReq({ asset: 42 }), /asset/],
     ['zyn_payCreate', createReq({ amount: '-1' }), /amount/],
     ['zyn_payCreate', createReq({ amount: '0.0009' }), /^an amount below the minimum$/],
+    ['zyn_payCreate', createReq({ amount: 2 }), /^amount: a decimal string$/],
+    ['zyn_payCreate', createReq({ amount: 0.1 + 0.2 }), /^amount: a decimal string$/],
+    ['zyn_payCreate', createReq({ amount: '1e18' }), /^amount: /],
+    ['zyn_payCreate', createReq({ amount: '0x10' }), /^amount: /],
+    ['zyn_payCreate', createReq({ amount: `0.${'1'.repeat(19)}` }), /^amount: /],
+    ['zyn_payOnce', { payee: PAYEE, asset: 'BOLD', amount: 1, reference: REF }, /^amount: a decimal string$/],
     ['zyn_payCreate', createReq({ every: { months: 0 } }), /every/],
     ['zyn_payCreate', createReq({ every: { days: 1, months: 1 } }), /every/],
     ['zyn_payCreate', createReq({ every: { weeks: 1 } }), /every/],
@@ -415,3 +421,26 @@ test('zyn_owed leaves pay returns out; zyn_collect still collects them', async (
   assert.equal(frames.length, 1, 'both in one claim');
 });
 
+test('an unfunded top-up that pays an overdue period says so, never a past funded-until', async () => {
+  reset();
+  notes = [{ asset: BOLD, amount: 6n * WAD }];
+  // Waiting for funds since 1 Dec; topped up on 15 Dec: the resume pays 1 Dec's period now.
+  const DEC15 = Date.UTC(2026, 11, 15) / 1000;
+  schedules.set(sid(1), row(1, { state: 'unfunded', index: 1, remaining: 11, pot: '0' }));
+  const site = siteWith([sid(1)]);
+  const ctx = { ...ctxWith(site), now: () => DEC15 };
+  const one = await METHODS.zyn_payTopUp.prepare(ctx, { schedule: sid(1), periods: 1 });
+  assert.deepEqual(one.rows, [['To', 'cccccccc…cccccc'], ['Adds', '2 BOLD.zy (1 payment)'], ['Pays now', '1 overdue payment']]);
+  const three = await METHODS.zyn_payTopUp.prepare(ctx, { schedule: sid(1), periods: 3 });
+  assert.deepEqual(three.rows, [['To', 'cccccccc…cccccc'], ['Adds', '6 BOLD.zy (3 payments)'], ['Pays now', '1 overdue payment'], ['Funded until (after)', '1 Feb 2027']]);
+  assert.ok(three.note.includes(PRIVACY));
+  // Missed since 1 Nov: the periods skipped are not charged; one is paid now.
+  schedules.set(sid(1), row(1, { state: 'unfunded', index: 0, remaining: 12, pot: '0' }));
+  assert.deepEqual((await METHODS.zyn_payTopUp.prepare(ctx, { schedule: sid(1), periods: 2 })).rows.slice(2), [['Pays now', '1 overdue payment'], ['Funded until (after)', '1 Jan 2027']]);
+  // The count follows afterTopUp.
+  const after = pay.afterTopUp(row(1, { state: 'unfunded', index: 1, remaining: 11, pot: '0' }), 3, DEC15);
+  assert.equal(after.paysNow, 1);
+  assert.deepEqual(pay.topUpCard(row(1), 'BOLD.zy', 2, { ...after, paysNow: 2 }).rows[2], ['Pays now', '2 overdue payments']);
+  // Nothing overdue (the 24 Oct case above): no such row.
+  assert.equal(pay.afterTopUp(row(1), 1, NOW).paysNow, 0);
+});
