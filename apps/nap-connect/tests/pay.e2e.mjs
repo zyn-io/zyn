@@ -19,7 +19,8 @@
 // per post and posts every 10 s, so the wait is a few minutes (PAY_WAIT_MS caps it).
 
 import { chromium } from 'playwright-core';
-import { readFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, mkdtempSync, existsSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,18 +39,24 @@ if (!process.env.PHRASE_FILE) {
 }
 const WORDS = readFileSync(process.env.PHRASE_FILE, 'utf8').trim();
 const RPC = process.env.RPC || 'https://zyn-rpc.cavebro.win/object';
-const S = process.env.SHOTS || '/tmp/pay-e2e';
-const WAIT_MS = Number(process.env.PAY_WAIT_MS || 10 * 60 * 1000);
-mkdirSync(S, { recursive: true });
+const S = mkdtempSync(join(tmpdir(), 'pay-e2e-'));
+const WAIT_MS = process.env.PAY_WAIT_MS === undefined ? 10 * 60 * 1000 : Number(process.env.PAY_WAIT_MS);
+if (!Number.isInteger(WAIT_MS) || WAIT_MS <= 0) {
+  console.error('PAY_WAIT_MS must be a positive whole number of milliseconds.');
+  process.exit(2);
+}
 
 const rpc = async (method, fields = {}) => {
   const body = await (await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [], ...fields }) })).json();
   if (body.error) throw new Error(body.error.message || 'the chain refused');
   return body.result;
 };
+// Run before any exit: cancels a schedule this run left set aside.
+let cleanup = async () => {};
 const NOT_ON = /pay clock has not started|does not serve zyn_pay/i;
 const skip = async (b, why) => {
   console.log(`SKIP: Zyn Pay is not switched on for this chain (ZYN_PAY=on)${why ? ` (${why})` : ''}`);
+  await cleanup().catch(() => {});
   await b?.close().catch(() => {});
   process.exit(0);
 };
@@ -99,6 +106,7 @@ await page.waitForFunction(() => !document.querySelector('#connect').disabled, n
 
 let popup = null;
 const finish = async () => {
+  await cleanup().catch((e) => { console.log('FAIL  cleanup:', e.message); failed++; });
   await b.close().catch(() => {});
   server.close();
   console.log(failed ? `\n${failed} FAILED` : '\nall passed');
@@ -117,8 +125,8 @@ async function act(id, during) {
   return last;
 }
 
-// Approve the card Nap shows next, and say what it showed. `own` is the card
-// kicker: the approval card says "<host> ASKS", the scope card "SHARE".
+// Approve the card Nap shows next (an approval card or the scope card; both
+// have #yes), check what it showed with `check`, and click Approve/Allow.
 async function approve(label, check) {
   await popup.waitForSelector('#yes', { timeout: 90000 }).catch(async (e) => {
     console.log(`${label}: Nap shows ${squash(await popup.textContent('body').catch(() => '(closed)')).slice(0, 300)}`);
@@ -140,7 +148,17 @@ try {
   await page.waitForFunction(() => document.querySelector('#out').dataset.state !== 'busy', null, { timeout: 60000 });
   const conn = await page.evaluate(() => window.__last);
   ok(conn.ok && /^[0-9a-f]{64}$/.test(conn.result.account), `connected: ${conn.ok ? conn.result.account.slice(0, 12) : conn.message}`);
-  ok(conn.result.account !== PAYEE, 'the payee is not the wallet itself');
+  if (!conn.ok) { await finish(); }
+  if (conn.result.account === PAYEE) {
+    console.log('FAIL  the payee is the wallet itself; nothing was spent. Set PAYEE to another registered account.');
+    failed++;
+    await finish();
+  }
+  if (Number(conn.result.chain) !== 212) {
+    console.log(`FAIL  Nap is on chain ${conn.result.chain} (${conn.result.network}), not testnet 212; nothing was spent.`);
+    failed++;
+    await finish();
+  }
 
   // 1. Subscribe: 2 BOLD a day, 3 times, 2 periods set aside.
   const sub = await act('subscribe', () => approve('subscribe', (t) =>
@@ -149,6 +167,25 @@ try {
   ok(sub.ok && /^[0-9a-f]{64}$/.test(sub.result?.schedule || '') && sub.result.payment === null, `Subscribe returned a schedule id: ${sub.ok ? sub.result.schedule?.slice(0, 12) : sub.message}`);
   if (!sub.ok) { await finish(); }
   const sid = sub.result.schedule;
+  // From here a schedule holds money: whatever happens, cancel it and collect.
+  let cancelled = false;
+  cleanup = async () => {
+    if (cancelled) return;
+    cleanup = async () => {};
+    for (let attempt = 1; attempt <= 2 && !cancelled; attempt++) {
+      try {
+        const r = await act('cancel', () => approve('cleanup cancel', () => true));
+        if (r.ok || /ended|cancelled/.test(r.message || '')) { cancelled = true; break; }
+        console.log(`      cleanup: cancel attempt ${attempt} failed: ${r.message}`);
+      } catch (e) {
+        console.log(`      cleanup: cancel attempt ${attempt} failed: ${e.message}`);
+      }
+    }
+    if (!cancelled) { console.log(`FAIL  cleanup: schedule ${sid} could NOT be cancelled; cancel it in Nap by hand.`); failed++; return; }
+    console.log(`      cleanup: schedule ${sid.slice(0, 12)} cancelled`);
+    const c = await act('collect').catch((e) => ({ ok: false, message: e.message }));
+    console.log(`      cleanup: collect ${c.ok ? 'done' : `failed: ${c.message}`}`);
+  };
   const firstDue = sub.params.firstDue;
 
   // The payments scope is asked once, on the first Schedules read.
@@ -199,6 +236,8 @@ try {
   const before = BigInt(row?.pot ?? 0);
   const cancel = await act('cancel', () => approve('cancel', (t) => t.includes('Cancel payment') && t.includes(PAYEE.slice(0, 8)) && /Comes back now\s*4 BOLD/.test(t)));
   ok(cancel.ok && cancel.result?.schedule === sid, `Cancel returned the schedule: ${cancel.ok ? 'ok' : cancel.message}`);
+  if (!cancel.ok) { await finish(); }
+  cancelled = true;
   const cid = Buffer.from(claimId(cancelSource(Uint8Array.from(Buffer.from(sid, 'hex'))), 0)).toString('hex');
   const owedHas = async () => {
     const r = await act('owed');
@@ -216,11 +255,15 @@ try {
     const col = await act('collect');
     ok(col.ok, `Collect: ${col.ok ? JSON.stringify(col.result) : col.message}`);
     let still = claim;
+    let unread = null;
     for (let i = 0, t0 = Date.now(); still && Date.now() - t0 < 180000; i++) {
       await page.waitForTimeout(5000);
-      still = (await act('owed')).result?.owed?.find((o) => o.id === cid);
+      const r = await act('owed');
+      if (!r.ok) { unread = r.message; continue; }
+      unread = null;
+      still = (r.result.owed || []).find((o) => o.id === cid);
     }
-    ok(!still, 'the claim is collected in Nap (no longer owed)');
+    ok(!still && !unread, unread ? `could not read what is owed: ${unread}` : 'the claim is collected in Nap (no longer owed)');
   }
   const gone = await readSchedules(false);
   ok(!gone || gone.state === 'cancelled', `the schedule is cancelled: ${gone ? gone.state : 'no longer listed'}`);
