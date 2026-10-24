@@ -55,3 +55,38 @@ test('Zyn Pay: every holder intent matches the ledger byte for byte', () => {
   assert.equal(hex(m.payOnceIntent({ payer: OWNER, payee: PAYEE, asset: ZEC, amount: W(1), reference: REFERENCE, nonce: NONCE, funding })), v.pay_once);
   assert.equal(hex(m.payRefundIntent({ payee: PAYEE, payment, amount: W(1), funding })), v.pay_refund);
 });
+
+test('Zyn Pay: bad inputs throw instead of encoding wrong bytes', () => {
+  const schedule = m.scheduleId(OWNER, NONCE);
+  const payment = m.payPaymentId(schedule, 0);
+  const create = { payer: OWNER, payee: PAYEE, asset: ZEC, amount: W(2), every: { months: 1 }, firstDue: FIRST_DUE, periods: 12, fundPeriods: 3, reference: REFERENCE, nonce: NONCE, funding };
+  const bad = (o) => assert.throws(() => m.payCreateIntent({ ...create, ...o }));
+  // every
+  for (const every of [{}, { days: 1, months: 1 }, { days: 0 }, { months: -1 }, { days: 1.5 }, { months: 2 ** 32 }, { days: NaN }]) bad({ every });
+  assert.doesNotThrow(() => m.payCreateIntent({ ...create, every: { days: 0xffffffff } }));
+  // u32 fields
+  for (const n of [-1, 2 ** 32, 1.5, NaN, '3']) {
+    bad({ fundPeriods: n });
+    bad({ periods: n });
+    assert.throws(() => m.payTopUpIntent({ payer: OWNER, schedule, periods: n, funding }));
+    assert.throws(() => m.payPaymentId(schedule, n));
+    assert.throws(() => m.refundSource(payment, n));
+  }
+  // periods: only null means until cancelled
+  bad({ periods: undefined });
+  assert.doesNotThrow(() => m.payCreateIntent({ ...create, periods: null }));
+  // firstDue
+  for (const firstDue of [-1, 1.5, 2 ** 53, NaN, undefined, '1', -1n, 2n ** 64n]) bad({ firstDue });
+  assert.doesNotThrow(() => m.payCreateIntent({ ...create, firstDue: 0 }));
+  assert.equal(hex(m.payCreateIntent({ ...create, firstDue: BigInt(FIRST_DUE) })), hex(m.payCreateIntent(create)));
+  assert.doesNotThrow(() => m.payCreateIntent({ ...create, firstDue: 2n ** 64n - 1n }));
+  // amounts
+  const once = { payer: OWNER, payee: PAYEE, asset: ZEC, amount: W(1), reference: REFERENCE, nonce: NONCE, funding };
+  for (const amount of [0n, -1n]) {
+    bad({ amount });
+    assert.throws(() => m.payOnceIntent({ ...once, amount }));
+    assert.throws(() => m.payRefundIntent({ payee: PAYEE, payment, amount, funding }));
+  }
+  // below the minimum is the caller's rule, not the encoder's
+  assert.doesNotThrow(() => m.payOnceIntent({ ...once, amount: 1n }));
+});

@@ -647,7 +647,6 @@ export const mintOpenIntent = (o) => concatBytes(
   outputs([o.item]), o.nonce, inputs(o.inputs), outputs(o.change),
 );
 
-
 // Zyn Pay: scheduled and one-off payments, laid out as `ObjectVm::encode_intent`
 // reads ops 69-73. Nap never builds PayClock (74); the operator does.
 
@@ -655,33 +654,51 @@ export const mintOpenIntent = (o) => concatBytes(
 export const MIN_PAY_AMOUNT = 10n ** 15n;
 
 export const scheduleId = (payer, nonce) => id('objectvm.pay.schedule.v1', payer, nonce);
-export const payPaymentId = (schedule, period) => id('objectvm.pay.payment.v1', schedule, u32be(period));
+export const payPaymentId = (schedule, period) => id('objectvm.pay.payment.v1', schedule, u32Strict(period));
 export const payOnceId = (payer, nonce) => id('objectvm.pay.once.v1', payer, nonce);
-export const refundSource = (payment, n) => id('objectvm.pay.refund.v1', payment, u32be(n));
+export const refundSource = (payment, n) => id('objectvm.pay.refund.v1', payment, u32Strict(n));
 export const cancelSource = (schedule) => id('objectvm.pay.cancel.v1', schedule);
 
-const payEvery = (e) => (e.months != null
-  ? concatBytes(new Uint8Array([1]), u32be(e.months))
-  : concatBytes(new Uint8Array([0]), u32be(e.days)));
+/// A `u32` that is exactly one: no wrapping, truncating or coercing.
+const u32Strict = (n) => {
+  if (!(Number.isInteger(n) && n >= 0 && n <= 0xffffffff)) throw new Error(`not a u32: ${String(n)}`);
+  return u32be(n);
+};
+const posAmount = (a) => {
+  if (typeof a !== 'bigint' || a <= 0n) throw new Error('the amount must be positive');
+  return i128Bytes(a);
+};
+const dueBytes = (t) => {
+  const ok = typeof t === 'bigint' ? t >= 0n && t < 2n ** 64n : Number.isSafeInteger(t) && t >= 0;
+  if (!ok) throw new Error(`not a u64: ${String(t)}`);
+  return u64be(t);
+};
+const payEvery = (e) => {
+  const d = e?.days !== undefined, mo = e?.months !== undefined;
+  if (d === mo) throw new Error('every is days or months, not both or neither');
+  const n = d ? e.days : e.months;
+  if (!(Number.isInteger(n) && n >= 1 && n <= 0xffffffff)) throw new Error('every must be a positive count');
+  return concatBytes(new Uint8Array([d ? 0 : 1]), u32be(n));
+};
 
 export const payCreateIntent = (o) => concatBytes(
-  new Uint8Array([TAG.payCreate]), o.payer, prog('payCreate'), o.payee, o.asset, i128Bytes(o.amount),
-  payEvery(o.every), u64be(o.firstDue),
-  o.periods == null ? new Uint8Array([0]) : concatBytes(new Uint8Array([1]), u32be(o.periods)),
-  u32be(o.fundPeriods), o.reference, o.nonce, inputs(o.funding.inputs), outputs(o.funding.change),
+  new Uint8Array([TAG.payCreate]), o.payer, prog('payCreate'), o.payee, o.asset, posAmount(o.amount),
+  payEvery(o.every), dueBytes(o.firstDue),
+  o.periods === null ? new Uint8Array([0]) : concatBytes(new Uint8Array([1]), u32Strict(o.periods)),
+  u32Strict(o.fundPeriods), o.reference, o.nonce, inputs(o.funding.inputs), outputs(o.funding.change),
 );
 
 export const payTopUpIntent = (o) => concatBytes(
-  new Uint8Array([TAG.payTopUp]), o.payer, prog('payManage'), o.schedule, u32be(o.periods), inputs(o.funding.inputs), outputs(o.funding.change),
+  new Uint8Array([TAG.payTopUp]), o.payer, prog('payManage'), o.schedule, u32Strict(o.periods), inputs(o.funding.inputs), outputs(o.funding.change),
 );
 
 export const payCancelIntent = (o) => concatBytes(new Uint8Array([TAG.payCancel]), o.payer, prog('payManage'), o.schedule);
 
 export const payOnceIntent = (o) => concatBytes(
-  new Uint8Array([TAG.payOnce]), o.payer, prog('payOnce'), o.payee, o.asset, i128Bytes(o.amount), o.reference, o.nonce,
+  new Uint8Array([TAG.payOnce]), o.payer, prog('payOnce'), o.payee, o.asset, posAmount(o.amount), o.reference, o.nonce,
   inputs(o.funding.inputs), outputs(o.funding.change),
 );
 
 export const payRefundIntent = (o) => concatBytes(
-  new Uint8Array([TAG.payRefund]), o.payee, prog('payRefund'), o.payment, i128Bytes(o.amount), inputs(o.funding.inputs), outputs(o.funding.change),
+  new Uint8Array([TAG.payRefund]), o.payee, prog('payRefund'), o.payment, posAmount(o.amount), inputs(o.funding.inputs), outputs(o.funding.change),
 );
