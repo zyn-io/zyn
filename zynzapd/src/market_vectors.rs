@@ -511,16 +511,15 @@ fn bridge_vectors() -> Vec<(&'static str, String)> {
     ]
 }
 
-
-/// Zyn Pay: its programs, derived ids and the five intents a holder signs.
+/// Zyn Pay: its programs, derived ids and the seven intents a holder signs.
 fn pay_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
     use objectvm::pay::{cancel_source, pay_once_id, pay_payment_id, refund_source, schedule_id, Every};
     let enc = |op: &Op| hex(&ObjectVm::encode_intent(op));
     let schedule = schedule_id(&OWNER, &NONCE);
     let payment = pay_payment_id(&schedule, 0);
-    let create = |periods: Option<u32>| Op::PayCreate {
+    let create = |every: Every, periods: Option<u32>| Op::PayCreate {
         payer: OWNER, program: program::pay_create(), payee: PAYEE, asset: ZEC,
-        amount: Fixed::whole(2), every: Every::Months(1), first_due: 1_793_491_200,
+        amount: Fixed::whole(2), every, first_due: 1_793_491_200,
         periods, fund_periods: 3, reference: [0x5e; 32], nonce: NONCE,
         inputs: input.to_vec(), change: vec![change()],
     };
@@ -535,8 +534,9 @@ fn pay_vectors(input: &[([u8; 32], [u8; 32])]) -> Vec<(&'static str, String)> {
         ("pay_once_id", hex(&pay_once_id(&OWNER, &NONCE))),
         ("pay_refund_source_0", hex(&refund_source(&payment, 0))),
         ("pay_cancel_source", hex(&cancel_source(&schedule))),
-        ("pay_create", enc(&create(Some(12)))),
-        ("pay_create_until_cancelled", enc(&create(None))),
+        ("pay_create", enc(&create(Every::Months(1), Some(12)))),
+        ("pay_create_until_cancelled", enc(&create(Every::Months(1), None))),
+        ("pay_create_days", enc(&create(Every::Days(7), Some(4)))),
         ("pay_top_up", enc(&Op::PayTopUp { payer: OWNER, program: program::pay_manage(), schedule, periods: 2, inputs: input.to_vec(), change: vec![change()] })),
         ("pay_cancel", enc(&Op::PayCancel { payer: OWNER, program: program::pay_manage(), schedule })),
         ("pay_once", enc(&Op::PayOnce { payer: OWNER, program: program::pay_once(), payee: PAYEE, asset: ZEC, amount: Fixed::whole(1), reference: [0x5e; 32], nonce: NONCE, inputs: input.to_vec(), change: vec![change()] })),
