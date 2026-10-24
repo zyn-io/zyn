@@ -9,6 +9,7 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: 
 
 const { allowed, connectedTo, paySchedulesOf, SCOPES, scopesOf, withConnection, withPaySchedule, withScope, without } = await import('../src/connect-grants.js');
 const { METHODS, siteNotes } = await import('../src/connect-ops.js');
+const { PRIVACY } = await import('../src/pay.js');
 
 const src = (f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
 const SITE = 'https://lend.zyn-network.com';
@@ -101,6 +102,8 @@ test('the phone app\'s browser asks for a scope too', () => {
 test('payments: a scope of its own, and each site sees only the schedules it asked for', () => {
   assert.equal(METHODS.zyn_paySchedules.scope, 'payments');
   assert.ok(SCOPES.payments.what && SCOPES.payments.shows && SCOPES.payments.risk);
+  // Its card carries the same privacy sentence as every pay card, inline.
+  assert.ok(SCOPES.payments.risk.endsWith(` ${PRIVACY}`), SCOPES.payments.risk);
   const id = (n) => String(n).repeat(64);
   let list = withConnection(withConnection({}, SITE, 'testnet', ME), 'https://evil.example', 'testnet', ME);
   assert.equal(allowed(list, SITE, 'testnet', ME, 'payments'), false, 'not with the connection alone');

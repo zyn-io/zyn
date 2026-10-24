@@ -32,7 +32,7 @@ export const SCOPES = Object.freeze({
   payments: Object.freeze({
     what: 'the payments you set up with it',
     shows: 'Each scheduled payment this site asked you to approve: payee, amount, schedule, what is set aside, next date and state. Never a schedule another site set up',
-    risk: 'Anyone holding a schedule id can read that schedule: what is set aside, its state and its next date.',
+    risk: "Anyone holding a schedule id can read that schedule: what is set aside, its state and its next date. Who pays whom is not shown to the public; Zyn's operator sees it.",
   }),
 });
 
