@@ -177,7 +177,7 @@ function switchNetwork(id) {
   config = { ...next, networks: config.networks };
   // Deliberately NOT clearSession(): that forgets the phrase, and the phrase is
   // not what changed. Only the chain's answers are stale.
-  pocket = null; usdOf = () => null; paySchedules = null;
+  pocket = null; usdOf = () => null; paySchedules = null; payFailed = false;
   clearTimeout(zecTimer); stopZec(); zecAccount = null;
   generation++; refreshId++;
   if (identity) { wallet(); refresh(); } else onboarding(onboardMode || undefined);

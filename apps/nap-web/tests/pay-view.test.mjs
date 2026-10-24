@@ -3,6 +3,7 @@
 // cancel brought back. app.js renders these models; they live in pay.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
@@ -199,4 +200,11 @@ test('loadOwed hands back the schedules it read, so the view need not read them 
   const bad = {};
   await L.loadOwed(config, identity, bad);
   assert.equal(bad.failed, true);
+});
+
+test('a network switch forgets the last network\'s pay read, failed or not', () => {
+  const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  const body = app.slice(app.indexOf('function switchNetwork('), app.indexOf('function shell('));
+  assert.match(body, /paySchedules = null;/);
+  assert.match(body, /payFailed = false;/);
 });
