@@ -52,6 +52,8 @@ export function claimSources(identity, limit, from = 0) {
     for (const source of [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.leftoverSource(lend), mk.routeId(me, nonce)]) {
       out.push(...mk.claimIds(source).map(hex));
     }
+    // What a cancelled or ended schedule returns to its payer.
+    out.push(hex(mk.claimId(mk.cancelSource(mk.scheduleId(me, nonce)), 0)));
   }
   return out;
 }
@@ -124,11 +126,14 @@ export async function recoverNonces(config, identity, { gap = RECOVERY_GAP } = {
       for (const a of bridged) at.set(hex(mk.depositKey(commitment, unhex(a))), n);
       // A lending position (or the auction it became) is keyed by its source.
       at.set(hex(mk.lendSource(me, nonce)), n);
+      // A pay schedule or one-off payment this wallet made.
+      at.set(hex(mk.scheduleId(me, nonce)), n);
+      at.set(hex(mk.payOnceId(me, nonce)), n);
     }
     const ids = [...at.keys()];
     // One page's questions at once: a restore should take seconds, not a minute.
     const asks = [];
-    for (const [method, field, size] of [['zyn_claims', 'id', 240], ['zyn_tickets', 'ticket', 500], ['zyn_waiting', 'key', 500], ['zyn_lendPositions', 'id', 240]]) {
+    for (const [method, field, size] of [['zyn_claims', 'id', 240], ['zyn_tickets', 'ticket', 500], ['zyn_waiting', 'key', 500], ['zyn_lendPositions', 'id', 240], ['zyn_paySchedules', 'id', 240], ['zyn_payPayments', 'id', 240]]) {
       for (let i = 0; i < ids.length; i += size) {
         const part = ids.slice(i, i + size).join(',');
         asks.push(() => call(config, method, { ids: part }).then((rows) => (Array.isArray(rows) ? rows.map((row) => row[field]) : []), () => { failed = true; return []; }));
@@ -156,6 +161,8 @@ const CLAIM_KINDS = [
   ['lend-lot', ['Left over after liquidation', 'Collateral back after liquidation', 'Liquidation']],
   ['route', ['Route delivered', 'Route refunded whole — it would have delivered less than your floor', 'Route: change from its last step']],
 ];
+const PAY_RETURNED = 'Payment returned';
+const PAY_REFUNDED = 'Payment refunded';
 function claimKinds(identity, limit, from = 0) {
   const kinds = new Map();
   const me = identity.account;
@@ -164,6 +171,7 @@ function claimKinds(identity, limit, from = 0) {
     const lend = mk.lendSource(me, nonce);
     const sources = [mk.orderId(me, nonce), mk.liquidityId(me, nonce), mk.commitId(me, nonce), mk.launchSource(me, nonce), mk.listingSource(me, nonce), mk.curveOrderId(me, nonce), mk.curveSource(me, nonce), lend, mk.leftoverSource(lend), mk.routeId(me, nonce)];
     sources.forEach((source, i) => mk.claimIds(source).forEach((id, k) => kinds.set(hex(id), CLAIM_KINDS[i][1][k])));
+    kinds.set(hex(mk.claimId(mk.cancelSource(mk.scheduleId(me, nonce)), 0)), PAY_RETURNED);
   }
   return kinds;
 }
@@ -183,6 +191,7 @@ export async function loadOwed(config, identity) {
   // A restore finds these too: the spent notes are still published.
   const { gone } = await loadHoldings(config, identity, []).catch(() => ({ gone: [] }));
   for (const [id, kind] of redemptionClaims(gone || [])) kinds.set(id, kind);
+  for (const [id, kind] of await payRefundClaims(config, identity).catch(() => new Map())) kinds.set(id, kind);
   const ids = [...kinds.keys()];
   const rows = [];
   for (let i = 0; i < ids.length; i += 240) {
@@ -580,4 +589,63 @@ export async function loadPositions(config, identity) {
   // never carry a position that is not this account's.
   const mine = new Set(ids);
   return rows.filter((r) => r && mine.has(r.id));
+}
+
+// ---------------------------------------------------------------------------
+// Zyn Pay: the payer's reads. Schedule and payment ids are access to the
+// record, so they are derived here, sent only to the node, and never logged.
+
+/// Refund claims a payment can have. `zyn_payPayments` serves the amount
+/// refunded, not the count, so a payment with something refunded is asked
+/// about refund claims 0..MAX_REFUNDS and the node answers the ones that exist.
+const MAX_REFUNDS = 16;
+/// Payments read per schedule: the newest this many.
+const MAX_PAYMENTS = 500;
+
+async function askRows(config, method, ids) {
+  const rows = [];
+  for (let i = 0; i < ids.length; i += 240) {
+    const part = await call(config, method, { ids: ids.slice(i, i + 240).join(',') }).catch(() => []);
+    if (Array.isArray(part)) rows.push(...part);
+  }
+  const mine = new Set(ids);
+  return rows.filter((r) => r && mine.has(r.id));
+}
+
+/// The pay schedules this wallet created, by the ids only it can derive.
+export async function loadSchedules(config, identity) {
+  const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
+  const ids = [];
+  for (let n = 0; n < count; n++) ids.push(hex(mk.scheduleId(identity.account, mk.marketNonce(identity.secretKey, n))));
+  return askRows(config, 'zyn_paySchedules', ids);
+}
+
+/// The payments a schedule has made, newest first.
+export async function loadPayments(config, schedule) {
+  const ids = [];
+  const sid = unhex(schedule.id);
+  for (let k = Math.min(Number(schedule.index) || 0, MAX_PAYMENTS * 1000) - 1; k >= 0 && ids.length < MAX_PAYMENTS; k--) ids.push(hex(mk.payPaymentId(sid, k)));
+  const rows = await askRows(config, 'zyn_payPayments', ids);
+  const order = new Map(ids.map((id, i) => [id, i]));
+  return rows.sort((a, b) => order.get(a.id) - order.get(b.id));
+}
+
+/// This wallet's one-off payments.
+export async function loadOneOffs(config, identity) {
+  const count = (await ensureNonces(config, identity)) + LOOKAHEAD;
+  const ids = [];
+  for (let n = 0; n < count; n++) ids.push(hex(mk.payOnceId(identity.account, mk.marketNonce(identity.secretKey, n))));
+  return askRows(config, 'zyn_payPayments', ids);
+}
+
+/// Refund claims for this wallet's payments (schedule periods and one-offs).
+export async function payRefundClaims(config, identity) {
+  const out = new Map();
+  const payments = await loadOneOffs(config, identity);
+  for (const s of await loadSchedules(config, identity)) payments.push(...await loadPayments(config, s));
+  for (const p of payments) {
+    if (!/^[1-9]\d*$/.test(String(p.refunded))) continue;
+    for (let n = 0; n < MAX_REFUNDS; n++) out.set(hex(mk.claimId(mk.refundSource(unhex(p.id), n), 0)), PAY_REFUNDED);
+  }
+  return out;
 }
