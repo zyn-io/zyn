@@ -256,3 +256,18 @@ dialog a { color: #e8a916; }
 .ext-fine a { color: #a56b00; }
 .setting-ext { display: block !important; border-bottom: 0 !important; }
 .setting-ext .ext-get { margin-top: 6px; max-width: none; }
+
+/* Payments (Zyn Pay): one row per schedule, its past payments beneath. */
+.nav-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #e8a916; color: #1f2428; font: 700 11px/16px Mono; text-align: center; }
+.pay-notice { display: flex !important; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; border-color: #e8a916; background: #e8a91614; }
+.pay-notice .quiet { padding: 0; font-size: 13px; font-weight: 700; color: #1f2428; border-bottom: 2px solid #e8a916; min-height: 0; }
+.pay-list { list-style: none; margin: 18px 0 60px; padding: 0; }
+.pay-row { padding: 16px 2px; border-bottom: 1px solid #1f24281f; }
+.pay-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 18px; margin: 0; }
+.pay-cells dt { font: 11px Mono; color: #a56b00; margin-bottom: 4px; }
+.pay-cells dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.pay-go { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 8px; }
+.pay-go .pay-act { font-weight: 700; color: #1f2428; }
+.pay-past { margin: 4px 0 0; }
+.pay-list .zec-empty { list-style: none; color: #6d716f; padding: 12px 2px; font-size: 13px; }
+@media (max-width: 800px) { .pay-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

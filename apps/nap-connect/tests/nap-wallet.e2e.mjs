@@ -86,7 +86,7 @@ await p.waitForFunction(() => /ZEC · IN APPS/.test(document.querySelector('#coi
 const inApps = await p.$$eval('#coins .coin', (cs) => { const c = cs.find((x) => /ZEC · IN APPS/.test(x.textContent)); return c ? c.querySelector('b').getAttribute('title') : null; });
 ok(inApps !== null, `Home lists ZEC in apps: ${inApps}`);
 ok(!(await p.isVisible('#withdraw-form')) && !(await p.isVisible('#zec-send')), 'Home holds no forms');
-for (const [v, sel] of [['zec', '#zec-send'], ['apps', '#deposit-card'], ['activity', '#log'], ['settings', '#recovery-link'], ['home', '#coins']]) {
+for (const [v, sel] of [['zec', '#zec-send'], ['apps', '#deposit-card'], ['payments', '#pay-list'], ['activity', '#log'], ['settings', '#recovery-link'], ['home', '#coins']]) {
   await view(p, v);
   ok(await p.isVisible(sel), `the ${v} view shows ${sel}`);
 }

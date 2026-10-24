@@ -9,7 +9,8 @@
 // in UTC+8 approving "from 1 Nov" must not see 2 Nov.
 
 import { parseAmount } from './core.js';
-import { MIN_PAY_AMOUNT } from './market.js';
+import { cancelSource, claimId, MIN_PAY_AMOUNT } from './market.js';
+import { hex, unhex } from './object.js';
 
 /// Shown inline on every payment card (spec "What is visible to whom").
 export const PRIVACY = "Who pays whom is not shown to the public; Zyn's operator sees it.";
@@ -261,4 +262,83 @@ export function cancelCard(s, name) {
     rows: [['To', shortId(s.payee)], ['Comes back now', `${wadText(s.pot)} ${name}`]],
     note: `Nothing more will be paid on this schedule. ${PRIVACY}`,
   };
+}
+
+/// A top-up of `periods` as the in-app dialog reviews it: the Connect card's
+/// rows, plus what it takes from this wallet. Throws the ledger's sentence
+/// for a top-up it would refuse.
+export function topUpReview(s, name, periods, now) {
+  if (!isCount(periods)) throw bad('Payments to add: a whole number from 1');
+  return { ...topUpCard(s, name, periods, afterTopUp(s, periods, now)), needs: BigInt(s.amount) * BigInt(periods) };
+}
+
+// ---------------------------------------------------------------------------
+// The wallet's Payments view: what app.js renders, without the DOM.
+
+export const EMPTY_PAYMENTS = 'No payments yet.';
+const RETURNED = 'Payment returned';
+const REFUNDED = 'Payment refunded';
+
+const manageable = (s) => s.state === 'active' || s.state === 'unfunded';
+
+/// When a schedule pays next, or why it does not.
+export function nextText(s) {
+  if (s.state === 'ended') return 'Ended';
+  if (s.state === 'cancelled') return 'Cancelled';
+  if (s.state === 'unfunded') return 'Waiting for funds';
+  return dateText(s.nextDue == null ? null : Number(s.nextDue));
+}
+
+/// One schedule as a row of the view. `name` is the asset's name to show.
+export function scheduleRow(s, name) {
+  const until = fundedUntil(s);
+  return {
+    id: s.id,
+    to: shortId(s.payee),
+    amount: `${wadText(s.amount)} ${name} ${everyText(s.every)}`,
+    next: nextText(s),
+    fundedUntil: dateText(until),
+    actions: manageable(s) ? ['Top up', 'Cancel'] : [],
+  };
+}
+
+/// A payment a schedule made: its date, amount, and what was refunded of it.
+export function paymentRow(p, name) {
+  const refunded = BigInt(p.refunded || 0);
+  return {
+    date: dateText(Number(p.at)),
+    amount: `${wadText(p.amount)} ${name}`,
+    refunded: refunded > 0n ? `${wadText(refunded)} ${name} refunded` : '',
+  };
+}
+
+/// What the payer is told about a schedule, if anything: it runs out within
+/// a week (or a period), with a Top up beside it, or it already waits for
+/// funds (its row has the Top up).
+export function payNotice(s, now) {
+  const to = shortId(s.payee);
+  if (s.state === 'unfunded') return { id: s.id, kind: 'waiting', text: `Payment to ${to} is waiting for funds`, action: null };
+  if (!runsOutSoon(s, now)) return null;
+  const until = fundedUntil(s) ?? (s.nextDue == null ? null : Number(s.nextDue));
+  return { id: s.id, kind: 'soon', text: `Payment to ${to} runs out on ${dateText(until)}`, action: 'Top up' };
+}
+
+/// The claim a cancel left for this wallet, from `loadOwed`'s rows, or null
+/// while there is none (not sealed yet, or already collected).
+export function cancelReturn(s, owed, nameOf) {
+  const id = hex(claimId(cancelSource(unhex(s.id)), 0));
+  const o = (owed || []).find((x) => x.id === id);
+  return o ? { label: RETURNED, amount: `${wadText(o.amount)} ${nameOf(o.asset)}` } : null;
+}
+
+const order = (s) => (manageable(s) ? 0 : 1);
+
+/// The whole view: rows (running schedules first, soonest next), notices and
+/// the badge count, and pay returns and refunds still waiting to be collected.
+export function paymentsView({ schedules = [], owed = [], nameOf, now }) {
+  const list = [...schedules].sort((a, b) => order(a) - order(b) || (Number(a.nextDue) || Infinity) - (Number(b.nextDue) || Infinity));
+  const notices = list.map((s) => payNotice(s, now)).filter(Boolean);
+  const returned = owed.filter((o) => o.kind === RETURNED || o.kind === REFUNDED)
+    .map((o) => ({ id: o.id, label: o.kind, amount: `${wadText(o.amount)} ${nameOf(o.asset)}` }));
+  return { empty: !list.length && !returned.length, rows: list.map((s) => scheduleRow(s, nameOf(s.asset))), notices, badge: notices.length, returned };
 }
