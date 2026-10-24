@@ -9,16 +9,19 @@
 // native sheet over the site before it is signed here.
 
 import { ERR, METHODS, ProviderError, session } from './connect-ops.js';
-import { allowed, paySchedulesOf, SCOPES, withPaySchedule, withScope, without } from './connect-grants.js';
+import { allowed, connectedTo, paySchedulesOf, SCOPES, withConnection, withPaySchedule, withScope, without } from './connect-grants.js';
 
 const CONNECTED_KEY = 'nap.connected.v1';
 const invoke = (cmd, args = {}) => window.__TAURI__.core.invoke(`plugin:napbrowser|${cmd}`, args);
 
 const read = () => { try { return JSON.parse(localStorage.getItem(CONNECTED_KEY) || '{}') || {}; } catch { return {}; } };
 const keep = (c) => { try { localStorage.setItem(CONNECTED_KEY, JSON.stringify(c)); } catch { /* this session only */ } };
-const isConnected = (origin, net) => read()[origin]?.network === net;
-/// A new connection starts with nothing allowed beyond it (connect-grants.js).
-function remember(origin, net) { keep({ ...read(), [origin]: { network: net, at: Date.now(), scopes: [] } }); }
+/// Connected on `net` to this wallet: another wallet opened in Nap is not
+/// connected by the first one's record.
+const isConnected = (origin, net, account) => connectedTo(read(), origin, net, account);
+/// A new connection starts with nothing allowed beyond it, and keeps the
+/// schedules the site set up only for the same wallet (connect-grants.js).
+function remember(origin, net, account) { keep(withConnection(read(), origin, net, account)); }
 /// Disconnecting takes back every scope with the connection.
 function forget(origin) { keep(without(read(), origin)); }
 
@@ -84,13 +87,13 @@ async function handle(origin, method, params) {
   }
   const { config, identity } = open;
   const ctx = context(config, identity, open.zec, origin);
-  if (method === 'nap_session') return isConnected(origin, config.id) ? session(ctx) : null;
+  if (method === 'nap_session') return isConnected(origin, config.id, identity.accountHex) ? session(ctx) : null;
   if (method === 'nap_connect' && params.network && params.network !== config.id) {
     throw new ProviderError(ERR.PARAMS, `Nap is on ${config.network}. Switch networks in Nap to use this site on ${params.network}.`);
   }
   if (m.kind === 'public') return m.run(ctx, params);
 
-  if (!isConnected(origin, config.id)) {
+  if (!isConnected(origin, config.id, identity.accountHex)) {
     const { approved } = await invoke('approve', {
       kicker: `${host} asks`,
       title: `Connect ${host} to Nap`,
@@ -105,7 +108,7 @@ async function handle(origin, method, params) {
       danger: false,
     });
     if (!approved) throw new ProviderError(ERR.REJECTED, 'The holder did not connect');
-    remember(origin, config.id);
+    remember(origin, config.id, identity.accountHex);
   }
   if (method === 'nap_connect') return session(ctx);
   // A read that says more than the connection does waits for the holder's
