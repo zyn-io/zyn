@@ -608,6 +608,53 @@ fn issued_json(vm: &ObjectVm) -> String {
     format!("{{{}}}", rows.join(","))
 }
 
+/// One Zyn Pay schedule as `zyn_paySchedules` serves it. Never the payer.
+fn pay_schedule_json(id: &[u8; 32], s: &objectvm::pay::Schedule) -> serde_json::Value {
+    use objectvm::pay::{due_at, Every, ScheduleState};
+    let (unit, count) = match s.every {
+        Every::Days(n) => ("days", n),
+        Every::Months(n) => ("months", n),
+    };
+    // Only a schedule that can still pay has a next due date.
+    let next = match s.state {
+        ScheduleState::Active | ScheduleState::Unfunded => due_at(s.first_due, s.every, s.index),
+        ScheduleState::Ended | ScheduleState::Cancelled => None,
+    };
+    serde_json::json!({
+        "id": hex(id),
+        "payee": hex(&s.payee),
+        "asset": hex(&s.asset),
+        "amount": s.amount.0.to_string(),
+        "every": { "unit": unit, "count": count },
+        "firstDue": s.first_due,
+        "nextDue": next,
+        "index": s.index,
+        "remaining": s.remaining,
+        "pot": s.pot.0.to_string(),
+        "reference": hex(&s.reference),
+        "state": match s.state {
+            ScheduleState::Active => "active",
+            ScheduleState::Unfunded => "unfunded",
+            ScheduleState::Ended => "ended",
+            ScheduleState::Cancelled => "cancelled",
+        },
+    })
+}
+
+/// One Zyn Pay payment as `zyn_payPayments` serves it. Never the payer.
+fn pay_payment_json(id: &[u8; 32], r: &objectvm::pay::PaymentRecord) -> serde_json::Value {
+    serde_json::json!({
+        "id": hex(id),
+        "payee": hex(&r.payee),
+        "asset": hex(&r.asset),
+        "amount": r.amount.0.to_string(),
+        "fee": r.fee.0.to_string(),
+        "refunded": r.refunded.0.to_string(),
+        "at": r.at,
+        "reference": hex(&r.reference),
+    })
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
 }
@@ -795,6 +842,22 @@ fn lend_clock_next(time: u64) -> u64 {
     } else {
         now.min(time.saturating_add(objectvm::lend::MAX_CLOCK_STEP_SECS))
     }
+}
+
+/// Zyn Pay is the operator's to switch on: the node posts the pay clock only
+/// with `ZYN_PAY=on`. Until then it never posts, so a chain keeps every root
+/// it had, and pay ops are refused because the clock has not started.
+fn pay_switched_on(v: Option<&str>) -> bool {
+    v.is_some_and(|v| v.trim() == "on")
+}
+
+/// The pay clock's next post, or `None` when it would not move: now on the
+/// first post (that is how the clock leaves 0), then never more than the
+/// ledger's hour past where it stands, so a node back from downtime catches
+/// up an hour per post.
+fn pay_clock_next(last: u64, now: u64) -> Option<u64> {
+    let at = if last == 0 { now } else { now.min(last.saturating_add(objectvm::pay::MAX_PAY_CLOCK_STEP_SECS)) };
+    (at > last).then_some(at)
 }
 
 /// Deposits the vault holds for accounts that have not registered yet.
@@ -1144,6 +1207,31 @@ fn handle(
                 };
                 if let Some(v) = lend_position_json(n.state(), &key) {
                     rows.push(v);
+                }
+            }
+            format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
+        }
+        // Zyn Pay, by id. A schedule id is `schedule_id(payer, nonce)` and a
+        // payment id derives from it or from the payer's nonce, so only the
+        // payer and the payee it was handed to can ask. The payer is never
+        // in the answer.
+        "zyn_paySchedules" | "zyn_payPayments" => {
+            let Some(list) = field(body, "ids") else {
+                return err("no ids");
+            };
+            let n = node.lock().unwrap();
+            let pay = &n.state().market.pay;
+            let mut rows = Vec::new();
+            for id in list.split(',').filter(|s| !s.is_empty()).take(256) {
+                let Some(key) = unhex(id).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+                    return err("an id is not 32 hex bytes");
+                };
+                if method == "zyn_paySchedules" {
+                    if let Some(s) = pay.schedules.get(&key) {
+                        rows.push(pay_schedule_json(&key, s));
+                    }
+                } else if let Some(r) = pay.payments.get(&key) {
+                    rows.push(pay_payment_json(&key, r));
                 }
             }
             format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}}", serde_json::Value::Array(rows))
@@ -1862,7 +1950,7 @@ fn unknown_method(method: &str) -> String {
     };
     format!(
         "this chain is an object ledger and does not serve {named}. It serves \
-         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_lendMarkets, zyn_lendPositions, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_dao, zyn_memberPass, zyn_exitCommitment and zyn_exitReveal"
+         zyn_status, zyn_published, zyn_submitSigned, zyn_anchors, zyn_offers, zyn_market, zyn_tickets, zyn_saleDraw, zyn_bridged, zyn_waiting, zyn_bridgeReveal, zyn_lendMarkets, zyn_lendPositions, zyn_paySchedules, zyn_payPayments, zyn_claims, zyn_depositAddress, zyn_resolveAddress, zyn_viewingKey, zyn_items, zyn_dao, zyn_memberPass, zyn_exitCommitment and zyn_exitReveal"
     )
 }
 
@@ -3329,6 +3417,44 @@ fn main() {
         });
     }
 
+    // Zyn Pay: with ZYN_PAY=on, the pay clock is posted at startup and then
+    // every ZYN_PAY_TICK_SECS (default 10 s, at least 5), whether or not the
+    // chain has pay state yet: the first post starts the clock, and pay ops
+    // are refused until it has. Each post moves it at most an hour, so after
+    // downtime it catches up over several posts, paying each due period in
+    // order. Without ZYN_PAY=on it never posts, and the chain keeps its roots.
+    if pay_switched_on(std::env::var("ZYN_PAY").ok().as_deref()) {
+        let every: u64 = std::env::var("ZYN_PAY_TICK_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(10).max(5);
+        let node = Arc::clone(&node);
+        let journal = Arc::clone(&journal);
+        let pub_log = Arc::clone(&pub_log);
+        let dir = dir.clone();
+        eprintln!("zyn-object-node: Zyn Pay on; the pay clock posts every {every} s");
+        std::thread::spawn(move || {
+            let mut first = true;
+            loop {
+                if !std::mem::take(&mut first) {
+                    std::thread::sleep(std::time::Duration::from_secs(every));
+                }
+                if halted().is_some() {
+                    continue;
+                }
+                let Ok(last) = node.lock().map(|n| n.state().market.pay.time) else {
+                    continue;
+                };
+                let Some(at) = pay_clock_next(last, now_secs()) else {
+                    continue;
+                };
+                let op = Op::PayClock { program: zyn_vm::program::pay_clock(), at };
+                for r in apply_operator(&op, &node, &journal, &pub_log, &dir, chain) {
+                    if let objectvm::Receipt::Refused(why) = r {
+                        eprintln!("zyn-object-node: pay clock refused: {why}");
+                    }
+                }
+            }
+        });
+    }
+
     // Seal on a timer, so a chain with no traffic still advances and a wallet
     // scanning it sees epochs go by rather than wondering if it is alive.
     {
@@ -4428,6 +4554,77 @@ mod market_door {
         }
     }
 
+    /// Zyn Pay through the door: a schedule and a one-off payment are read
+    /// back by id, with the payee and never the payer; unknown ids are skipped.
+    #[test]
+    fn pay_schedules_and_payments_by_id_never_the_payer() {
+        use objectvm::pay;
+        let r = rig("pay");
+        let alice = SigningKey::from_bytes(&[23u8; 32]);
+        let a = account(&alice);
+        let shop = [0x5E; 32];
+        r.operator(Op::Register { account: shop, program: zyn_vm::program::register_viewing_key(), viewing: [0x42; 32] });
+        r.operator(Op::Mint { asset: ZEC, amount: Fixed::whole(100), owner: a, nonce: [1; 32] });
+        // Pay ops wait for the operator's first pay clock post.
+        r.operator(Op::PayClock { program: zyn_vm::program::pay_clock(), at: 1_793_491_200 - 86_400 });
+        let (c, _) = r.live(&a, ZEC)[0];
+        let v = r.signed(&alice, Op::PayCreate {
+            payer: a,
+            program: zyn_vm::program::pay_create(),
+            payee: shop,
+            asset: ZEC,
+            amount: Fixed::whole(10),
+            every: pay::Every::Months(1),
+            first_due: 1_793_491_200,
+            periods: Some(12),
+            fund_periods: 2,
+            reference: [0xEF; 32],
+            nonce: [0x71; 32],
+            inputs: vec![(c, zyn_vm::object::nullifier(&[1; 32], &c))],
+            change: vec![output(a, ZEC, Fixed::whole(80), 0x62)],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Paid"), "{v}");
+        let (c, _) = r.live(&a, ZEC)[0];
+        let v = r.signed(&alice, Op::PayOnce {
+            payer: a,
+            program: zyn_vm::program::pay_once(),
+            payee: shop,
+            asset: ZEC,
+            amount: Fixed::whole(5),
+            reference: [0xEE; 32],
+            nonce: [0x72; 32],
+            inputs: vec![(c, zyn_vm::object::nullifier(&[1; 32], &c))],
+            change: vec![output(a, ZEC, Fixed::whole(75), 0x63)],
+        });
+        assert!(v["result"]["receipts"].as_str().unwrap().contains("Paid"), "{v}");
+
+        let schedule = pay::schedule_id(&a, &[0x71; 32]);
+        let v = r.call(&format!("{{\"method\":\"zyn_paySchedules\",\"ids\":\"{},{}\"}}", hex(&schedule), hex(&[0x99; 32])));
+        let rows = v["result"].as_array().expect("rows");
+        assert_eq!(rows.len(), 1, "{v}");
+        assert_eq!(rows[0]["id"], hex(&schedule));
+        assert_eq!(rows[0]["payee"], hex(&shop));
+        assert_eq!(rows[0]["pot"], Fixed::whole(20).0.to_string());
+        assert_eq!(rows[0]["state"], "active");
+        assert_eq!(rows[0]["nextDue"], 1_793_491_200u64);
+        assert!(!v.to_string().contains(&hex(&a)), "the payer must not appear: {v}");
+
+        let once = pay::pay_once_id(&a, &[0x72; 32]);
+        let v = r.call(&format!("{{\"method\":\"zyn_payPayments\",\"ids\":\"{}\"}}", hex(&once)));
+        let rows = v["result"].as_array().expect("rows");
+        assert_eq!(rows.len(), 1, "{v}");
+        assert_eq!(rows[0]["amount"], Fixed::whole(5).0.to_string());
+        assert_eq!(rows[0]["reference"], hex(&[0xEE; 32]));
+        assert!(rows[0].get("payer").is_none());
+        assert!(!v.to_string().contains(&hex(&a)), "the payer must not appear: {v}");
+
+        // A schedule id is not a payment id, and a malformed id is refused.
+        let v = r.call(&format!("{{\"method\":\"zyn_payPayments\",\"ids\":\"{}\"}}", hex(&schedule)));
+        assert_eq!(v["result"], serde_json::json!([]));
+        let v = r.call("{\"method\":\"zyn_paySchedules\",\"ids\":\"abcd\"}");
+        assert!(v["error"]["message"].as_str().unwrap().contains("32 hex bytes"), "{v}");
+    }
+
     #[test]
     fn a_pool_and_a_swap_through_the_door() {
         let r = rig("swap");
@@ -4617,5 +4814,53 @@ mod market_door {
         let n = r.node.lock().unwrap();
         let refused = authorize_intent::<ObjectVm>(&[cred], &auth, intent, n.state());
         assert!(format!("{refused:?}").contains("MissingSignature"), "{refused:?}");
+    }
+}
+
+#[cfg(test)]
+mod pay_rpc_tests {
+    use super::*;
+    use objectvm::pay::{Every, PaymentRecord, Schedule, ScheduleState};
+
+    #[test]
+    fn schedule_json_omits_the_payer_and_shows_the_next_due() {
+        let s = Schedule {
+            payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), every: Every::Months(1),
+            first_due: 1_793_491_200, index: 1, remaining: Some(11), pot: zyn_vm::Fixed(20), reference: [1; 32], state: ScheduleState::Active,
+        };
+        let v = pay_schedule_json(&[9; 32], &s);
+        assert!(v.get("payer").is_none());
+        assert_eq!(v["state"], "active");
+        assert_eq!(v["every"]["unit"], "months");
+        assert_eq!(v["nextDue"], objectvm::pay::due_at(s.first_due, s.every, 1).unwrap());
+    }
+
+    #[test]
+    fn the_pay_clock_runs_only_when_switched_on() {
+        assert!(pay_switched_on(Some("on")));
+        assert!(pay_switched_on(Some(" on\n")));
+        for v in [None, Some(""), Some("off"), Some("1"), Some("ON?")] {
+            assert!(!pay_switched_on(v), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn the_pay_clock_starts_at_now_then_steps_an_hour_at_most() {
+        let now = 1_793_491_200;
+        // Time 0 with no pay state: the first post is what starts it.
+        assert_eq!(pay_clock_next(0, now), Some(now));
+        assert_eq!(pay_clock_next(now - 10, now), Some(now));
+        assert_eq!(pay_clock_next(now - 86_400, now), Some(now - 86_400 + 3600));
+        assert_eq!(pay_clock_next(now, now), None);
+        assert_eq!(pay_clock_next(now + 5, now), None);
+    }
+
+    #[test]
+    fn payment_json_omits_the_payer() {
+        let r = PaymentRecord { payer: [0xA1; 32], payee: [0x5E; 32], asset: [0xB1; 32], amount: zyn_vm::Fixed(10), fee: zyn_vm::Fixed(0), refunded: zyn_vm::Fixed(0), refunds: 0, at: 5, reference: [0xEE; 32] };
+        let v = pay_payment_json(&[8; 32], &r);
+        assert!(v.get("payer").is_none());
+        assert_eq!(v["at"], 5);
+        assert_eq!(v["reference"], hex(&[0xEE; 32]));
     }
 }

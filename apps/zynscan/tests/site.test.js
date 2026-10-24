@@ -26,3 +26,11 @@ test('every value from the API is escaped or formatted before it reaches the pag
   assert.match(app, /const esc = /);
   assert.match(app, /const hash = \(h\) => `<span class="hash" title="\$\{esc\(h\)\}">/);
 });
+
+test('a clock row shows the time it posted, in UTC', () => {
+  const src = app.match(/const utc = [^\n]*\n/)?.[0] + app.match(/function detail\(t\) \{[\s\S]*?\n\}\n/)?.[0];
+  const ident = (x) => String(x);
+  const detail = new Function('esc', 'hash', 'num', 'wad', `${src}; return detail;`)(ident, ident, ident, ident);
+  assert.match(detail({ kind: 'Pay clock', detail: { at: 1793491200 } }), /2026-11-01 00:00:00 UTC/);
+  assert.match(detail({ kind: 'Lending clock', detail: { at: 1793491200 } }), /2026-11-01 00:00:00 UTC/);
+});

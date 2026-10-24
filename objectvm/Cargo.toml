@@ -10,3 +10,4 @@ edition = "2021"
 zyn-vm = { path = "../zyn-vm" }
 zyn-lend = { git = "https://github.com/zyn-io/zyn-lend.git", rev = "44a954bf9baa7ffa91cd850ef4592688ef8b3383" }
 zyn = { path = "../zyn" }
+sha2 = { version = "0.10", default-features = false }

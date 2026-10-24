@@ -48,6 +48,7 @@ use std::vec as alloc_vec;
 
 pub mod bridge;
 pub mod lend;
+pub mod pay;
 /// The lending rules `lend` runs on (zyn-io/zyn-lend), for readers of its state.
 pub use zyn_lend;
 pub mod curve;
@@ -56,6 +57,7 @@ pub mod sale;
 pub mod dao;
 pub mod market;
 
+use crate::pay::Every;
 use zyn_vm::commit::{merkle_root, Encoder, Hash};
 use zyn_vm::derive::Address;
 use zyn_vm::note_enc::{EncryptedNote, ViewingKey};
@@ -752,6 +754,67 @@ pub enum Op {
         inputs: Vec<(Hash, Hash)>,
         change: Vec<Output>,
     },
+    /// Zyn Pay: start a scheduled payment. Moves `amount × fund_periods` out
+    /// of the payer's notes into the schedule's pot; the pay clock pays the
+    /// payee from it on each due date.
+    PayCreate {
+        payer: AccountId,
+        program: ProgramId,
+        payee: AccountId,
+        asset: Address,
+        amount: Fixed,
+        every: Every,
+        first_due: u64,
+        /// Total periods; `None` runs until cancelled.
+        periods: Option<u32>,
+        fund_periods: u32,
+        reference: Hash,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Zyn Pay: add `periods` more to a schedule's pot.
+    PayTopUp {
+        payer: AccountId,
+        program: ProgramId,
+        schedule: Hash,
+        periods: u32,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Zyn Pay: end a schedule now; its pot comes back to the payer.
+    PayCancel {
+        payer: AccountId,
+        program: ProgramId,
+        schedule: Hash,
+    },
+    /// Zyn Pay: a one-off payment the payee can refund.
+    PayOnce {
+        payer: AccountId,
+        program: ProgramId,
+        payee: AccountId,
+        asset: Address,
+        amount: Fixed,
+        reference: Hash,
+        nonce: Hash,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Zyn Pay: the payee pays back up to what a payment brought it; the
+    /// ledger routes it to the payer, whom the payee never names.
+    PayRefund {
+        payee: AccountId,
+        program: ProgramId,
+        payment: Hash,
+        amount: Fixed,
+        inputs: Vec<(Hash, Hash)>,
+        change: Vec<Output>,
+    },
+    /// Zyn Pay: the operator's pay clock. Pays what is due. Operator only.
+    PayClock {
+        program: ProgramId,
+        at: u64,
+    },
     Seal,
 }
 
@@ -805,6 +868,8 @@ pub enum Receipt {
     /// A lending intent applied; `id` is its source (or the receipt asset,
     /// for a listing).
     Lent { id: Hash },
+    /// A Zyn Pay intent applied; `id` is the schedule or payment it touched.
+    Paid { id: Hash },
     Refused(&'static str),
     Sealed(Checkpoint),
 }
@@ -835,6 +900,10 @@ impl Op {
             | Op::LendAddCollateral { inputs, .. }
             | Op::LendInsure { inputs, .. }
             | Op::LendBid { inputs, .. }
+            | Op::PayCreate { inputs, .. }
+            | Op::PayTopUp { inputs, .. }
+            | Op::PayOnce { inputs, .. }
+            | Op::PayRefund { inputs, .. }
             | Op::Redeem { inputs, .. } => inputs,
             Op::TakeOffer {
                 item_nullifier,
@@ -875,6 +944,10 @@ impl Op {
             | Op::LendAddCollateral { change, .. }
             | Op::LendInsure { change, .. }
             | Op::LendBid { change, .. }
+            | Op::PayCreate { change, .. }
+            | Op::PayTopUp { change, .. }
+            | Op::PayOnce { change, .. }
+            | Op::PayRefund { change, .. }
             | Op::Commit { change, .. } => change.iter().collect(),
             Op::ClaimItems { change, items, .. } | Op::ClaimVoucherItems { change, items, .. } => change.iter().chain(items.iter()).collect(),
             Op::MintOpen { change, item, .. } => change.iter().chain(std::iter::once(item)).collect(),
@@ -2519,6 +2592,38 @@ impl MicrochainVm for ObjectVm {
             } else {
                 self.apply_lend_insure(donor, asset, *amount, inputs, change)
             }),
+            Op::PayCreate { payer, program, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change } => {
+                one(if *program != program::pay_create() {
+                    Err("wrong program for a scheduled payment")
+                } else {
+                    self.apply_pay_create(payer, payee, asset, *amount, *every, *first_due, *periods, *fund_periods, reference, nonce, inputs, change)
+                })
+            }
+            Op::PayTopUp { payer, program, schedule, periods, inputs, change } => one(if *program != program::pay_manage() {
+                Err("wrong program for a top-up")
+            } else {
+                self.apply_pay_top_up(payer, schedule, *periods, inputs, change)
+            }),
+            Op::PayCancel { payer, program, schedule } => one(if *program != program::pay_manage() {
+                Err("wrong program for a cancellation")
+            } else {
+                self.apply_pay_cancel(payer, schedule)
+            }),
+            Op::PayClock { program, at } => one(if *program != program::pay_clock() {
+                Err("wrong program for the pay clock")
+            } else {
+                self.apply_pay_clock(*at)
+            }),
+            Op::PayOnce { payer, program, payee, asset, amount, reference, nonce, inputs, change } => one(if *program != program::pay_once() {
+                Err("wrong program for a payment")
+            } else {
+                self.apply_pay_once(payer, payee, asset, *amount, reference, nonce, inputs, change)
+            }),
+            Op::PayRefund { payee, program, payment, amount, inputs, change } => one(if *program != program::pay_refund() {
+                Err("wrong program for a refund")
+            } else {
+                self.apply_pay_refund(payee, payment, *amount, inputs, change)
+            }),
             Op::Seal => {
                 // Batches clear and sales settle inside the epoch they belong
                 // to, so the root this seal commits already includes them.
@@ -2637,9 +2742,78 @@ impl MicrochainVm for ObjectVm {
             | Op::LendRemoveCollateral { borrower, .. } => vec![*borrower],
             Op::LendBid { bidder, .. } => vec![*bidder],
             Op::LendInsure { donor, .. } => vec![*donor],
+            Op::PayCreate { payer, .. } | Op::PayTopUp { payer, .. } | Op::PayCancel { payer, .. } | Op::PayOnce { payer, .. } => vec![*payer],
+            Op::PayRefund { payee, .. } => vec![*payee],
+            // PayClock stays operator-only, like LendTime.
             // LendList, LendPrices, LendLimits, LendRules and LendTime stay
             // operator-only: no user signs them.
             _ => Vec::new(),
+        }
+    }
+
+    /// S13 for Zyn Pay: a wallet shows every field that changes the outcome.
+    /// Other intents keep the default opaque digest, byte for byte.
+    ///
+    /// An EVM wallet's signature covers only this typed data, so each pay
+    /// struct also carries `intent`, the same digest of the whole encoded op
+    /// the opaque form uses. That binds the notes spent and the change made:
+    /// a relayer holding the signature cannot swap in other notes of the
+    /// signer's or pay the change to itself, and an exact replay fails
+    /// because its inputs are already spent.
+    fn typed_intent(intent: &Op) -> zyn_vm::eip712::TypedData {
+        use sha2::{Digest, Sha256};
+        use zyn_vm::eip712::{TypedData, Value};
+        fn word(b: &[u8; 32]) -> Value {
+            Value::Bytes32(*b)
+        }
+        let uint = |n: u32| Value::uint(u64::from(n));
+        let digest: [u8; 32] = Sha256::digest(Self::encode_intent(intent)).into();
+        let bound = |t: TypedData| t.field("intent", Value::Bytes32(digest));
+        match intent {
+            Op::PayCreate { payer, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, .. } => {
+                let (unit, count) = match every {
+                    Every::Days(n) => ("days", *n),
+                    Every::Months(n) => ("months", *n),
+                };
+                bound(
+                    TypedData::new("ZynPayCreate")
+                        .field("payer", word(payer))
+                        .field("payee", word(payee))
+                        .field("asset", word(asset))
+                        .field("amountPerPeriod", Value::int(amount.0))
+                        .field("everyUnit", Value::String(unit.to_string()))
+                        .field("everyCount", uint(count))
+                        .field("firstDue", Value::uint(*first_due))
+                        // 0 means until cancelled (`periods: None`).
+                        .field("periods", uint(periods.unwrap_or(0)))
+                        .field("fundPeriods", uint(*fund_periods))
+                        .field("reference", word(reference))
+                        .field("nonce", word(nonce)),
+                )
+            }
+            Op::PayTopUp { payer, schedule, periods, .. } => bound(
+                TypedData::new("ZynPayTopUp")
+                    .field("payer", word(payer))
+                    .field("schedule", word(schedule))
+                    .field("addPeriods", uint(*periods)),
+            ),
+            Op::PayCancel { payer, schedule, .. } => bound(TypedData::new("ZynPayCancel").field("payer", word(payer)).field("schedule", word(schedule))),
+            Op::PayOnce { payer, payee, asset, amount, reference, nonce, .. } => bound(
+                TypedData::new("ZynPayOnce")
+                    .field("payer", word(payer))
+                    .field("payee", word(payee))
+                    .field("asset", word(asset))
+                    .field("amount", Value::int(amount.0))
+                    .field("reference", word(reference))
+                    .field("nonce", word(nonce)),
+            ),
+            Op::PayRefund { payee, payment, amount, .. } => bound(
+                TypedData::new("ZynPayRefund")
+                    .field("payee", word(payee))
+                    .field("payment", word(payment))
+                    .field("amount", Value::int(amount.0)),
+            ),
+            _ => TypedData::new("OpaqueIntent").field("intent", Value::Bytes32(digest)),
         }
     }
 
@@ -3209,6 +3383,39 @@ impl MicrochainVm for ObjectVm {
                 e.u8(51).bytes(donor).bytes(&program.0).bytes(asset).fixed(*amount);
                 wire::inputs(&mut e, inputs);
                 wire::outputs(&mut e, change);
+            }
+            Op::PayCreate { payer, program, payee, asset, amount, every, first_due, periods, fund_periods, reference, nonce, inputs, change } => {
+                e.u8(69).bytes(payer).bytes(&program.0).bytes(payee).bytes(asset).fixed(*amount);
+                pay::encode_every(&mut e, *every);
+                e.u64(*first_due);
+                match periods {
+                    None => e.u8(0),
+                    Some(n) => e.u8(1).u32(*n),
+                };
+                e.u32(*fund_periods).bytes(reference).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PayTopUp { payer, program, schedule, periods, inputs, change } => {
+                e.u8(70).bytes(payer).bytes(&program.0).bytes(schedule).u32(*periods);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PayCancel { payer, program, schedule } => {
+                e.u8(71).bytes(payer).bytes(&program.0).bytes(schedule);
+            }
+            Op::PayOnce { payer, program, payee, asset, amount, reference, nonce, inputs, change } => {
+                e.u8(72).bytes(payer).bytes(&program.0).bytes(payee).bytes(asset).fixed(*amount).bytes(reference).bytes(nonce);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PayRefund { payee, program, payment, amount, inputs, change } => {
+                e.u8(73).bytes(payee).bytes(&program.0).bytes(payment).fixed(*amount);
+                wire::inputs(&mut e, inputs);
+                wire::outputs(&mut e, change);
+            }
+            Op::PayClock { program, at } => {
+                e.u8(74).bytes(&program.0).u64(*at);
             }
             Op::Seal => {
                 e.u8(0);
@@ -3874,6 +4081,54 @@ impl MicrochainVm for ObjectVm {
                 inputs: wire::read_inputs(d)?,
                 change: wire::read_outputs(d)?,
             }),
+            69 => Some(Op::PayCreate {
+                payer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                payee: d.account().ok()?,
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                every: pay::decode_every(d)?,
+                first_due: d.u64().ok()?,
+                periods: match d.u8().ok()? {
+                    0 => None,
+                    1 => Some(d.u32().ok()?),
+                    _ => return None,
+                },
+                fund_periods: d.u32().ok()?,
+                reference: d.hash().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            70 => Some(Op::PayTopUp {
+                payer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                schedule: d.hash().ok()?,
+                periods: d.u32().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            71 => Some(Op::PayCancel { payer: d.account().ok()?, program: ProgramId(d.hash().ok()?), schedule: d.hash().ok()? }),
+            72 => Some(Op::PayOnce {
+                payer: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                payee: d.account().ok()?,
+                asset: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                reference: d.hash().ok()?,
+                nonce: d.hash().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            73 => Some(Op::PayRefund {
+                payee: d.account().ok()?,
+                program: ProgramId(d.hash().ok()?),
+                payment: d.hash().ok()?,
+                amount: d.fixed().ok()?,
+                inputs: wire::read_inputs(d)?,
+                change: wire::read_outputs(d)?,
+            }),
+            74 => Some(Op::PayClock { program: ProgramId(d.hash().ok()?), at: d.u64().ok()? }),
             _ => None,
         }
     }

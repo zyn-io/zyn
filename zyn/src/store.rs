@@ -9,6 +9,7 @@
 //! This is the other artefact — the whole state. It is operational data, not
 //! public data: it is not announced on Zcash and nobody's exit depends on it.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -321,48 +322,50 @@ impl FileStore {
         chain_id: u32,
         pending: &[Sealed<V>],
     ) -> Result<(), StoreError> {
-        let keep: Vec<String> = pending
-            .iter()
-            .map(|s| Self::sealed_name(chain_id, s.checkpoint.epoch))
-            .collect();
+        // A sealed epoch never changes, and this runs at every seal and every
+        // anchor pass, under the node lock: with anchors only on Zcash
+        // requests (§164) tens of thousands can be pending (testnet 212, 24
+        // Oct: 59k). So the work per call must stay small per epoch: the
+        // directory is read once into a set, a file already holding this
+        // checkpoint is left as it is without encoding its snapshot, and the
+        // stale files are found by set difference, not a scan per name.
+        let prefix = format!("pending-{}-", chain_id);
+        let mut on_disk: HashSet<String> = HashSet::new();
+        for entry in fs::read_dir(&self.dir)? {
+            let name = entry?.file_name().to_string_lossy().to_string();
+            if name.starts_with(&prefix) && name.ends_with(".sealed") {
+                on_disk.insert(name);
+            }
+        }
+        let mut keep: HashSet<String> = HashSet::with_capacity(pending.len());
         for s in pending {
+            let name = Self::sealed_name(chain_id, s.checkpoint.epoch);
             let mut e = Encoder::new();
             e.bytes(SEALED_MAGIC);
             encode_checkpoint(&mut e, &s.checkpoint);
             e.u64(s.actions);
-            let head = e.finish().len();
-            let snap = s.snapshot.encode();
-            e.u32(snap.len() as u32).bytes(&snap);
-            let name = Self::sealed_name(chain_id, s.checkpoint.epoch);
-            // A sealed epoch never changes, and this runs at every seal and
-            // every anchor pass: with anchors only on Zcash requests (§164)
-            // thousands can be pending, and rewriting each one (an fsync
-            // apiece) every time would stall the node. A file already holding
-            // this checkpoint, at this length, is left as it is.
-            let bytes = e.finish();
-            if Self::holds(&self.dir.join(&name), &bytes[..head], bytes.len()) {
+            // The head names the epoch's state root, which commits to the
+            // snapshot, and files are only ever written whole (write_atomic),
+            // so a file that starts with this head holds this epoch.
+            if on_disk.contains(&name) && Self::starts_with(&self.dir.join(&name), e.finish()) {
+                keep.insert(name);
                 continue;
             }
-            self.write_atomic(&name, bytes)?;
+            let snap = s.snapshot.encode();
+            e.u32(snap.len() as u32).bytes(&snap);
+            self.write_atomic(&name, e.finish())?;
+            keep.insert(name);
         }
-        let prefix = format!("pending-{}-", chain_id);
-        for entry in fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(&prefix) && name.ends_with(".sealed") && !keep.contains(&name) {
-                fs::remove_file(entry.path())?;
-            }
+        for name in on_disk.difference(&keep) {
+            fs::remove_file(self.dir.join(name))?;
         }
         Ok(())
     }
 
-    /// Whether `path` is `len` bytes long and starts with `head`.
-    fn holds(path: &Path, head: &[u8], len: usize) -> bool {
+    /// Whether the file at `path` starts with `head`.
+    fn starts_with(path: &Path, head: &[u8]) -> bool {
         use std::io::Read;
         let Ok(mut f) = fs::File::open(path) else { return false };
-        if f.metadata().map(|m| m.len() != len as u64).unwrap_or(true) {
-            return false;
-        }
         let mut have = vec![0u8; head.len()];
         f.read_exact(&mut have).is_ok() && have == head
     }
@@ -739,12 +742,17 @@ mod tests {
         let second = dir.join(FileStore::sealed_name(11, n.pending()[1].checkpoint.epoch));
         let mut marked = fs::read(&first).unwrap();
         let last = marked.len() - 1;
-        marked[last] ^= 0xff; // same checkpoint and length: taken as written
+        marked[last] ^= 0xff; // same checkpoint: taken as written
+        // A different length too: deciding must not need the snapshot
+        // encoded, or every save re-encodes every pending epoch (testnet
+        // 212, 24 Oct: 59k of them, both cores busy).
+        marked.extend_from_slice(b"tail");
         fs::write(&first, &marked).unwrap();
         fs::write(&second, b"ZYNSEAL01 short").unwrap();
         store.save_pending(11, n.pending()).unwrap();
         assert_eq!(fs::read(&first).unwrap(), marked, "left as it was");
         assert_ne!(fs::read(&second).unwrap(), b"ZYNSEAL01 short".to_vec(), "rewritten");
+        marked.truncate(last + 1);
         marked[last] ^= 0xff;
         fs::write(&first, &marked).unwrap();
         assert_eq!(store.load_pending::<SwapState>(11).unwrap(), n.pending().to_vec());

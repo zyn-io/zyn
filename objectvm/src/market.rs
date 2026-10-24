@@ -361,6 +361,8 @@ pub struct Market {
     pub waiting: BTreeMap<Hash, crate::bridge::Waiting>,
     /// Zyn Lend: pools, prices, positions and liquidation auctions.
     pub lend: crate::lend::Lend,
+    /// Zyn Pay: schedules, their pots, and refundable payment records.
+    pub pay: crate::pay::Pay,
 }
 
 impl Market {
@@ -391,6 +393,7 @@ impl Market {
             && self.bridged.is_empty()
             && self.waiting.is_empty()
             && self.lend.is_empty()
+            && self.pay.is_empty()
     }
 
     /// The terms an item trades under, if it is a registered collection's.
@@ -479,6 +482,7 @@ impl Market {
             }
         }
         t = t.checked_add(self.lend.holdings(asset)?)?;
+        t = t.checked_add(self.pay.holdings(asset)?)?;
         t = t.checked_add(crate::dao::holdings(&self.daos, asset)?)?;
         Some(t)
     }
@@ -642,6 +646,11 @@ impl Market {
         if !self.open_terms.is_empty() {
             crate::sale::open_terms_section(&mut e, &self.open_terms);
         }
+        // And Zyn Pay, once a schedule, payment or clock exists, so every
+        // root sealed before keeps.
+        if !self.pay.is_empty() {
+            crate::pay::section(&mut e, &self.pay);
+        }
         e.leaf()
     }
 
@@ -659,7 +668,9 @@ impl Market {
         // too, with the Zcash clock optional, since credit needs no clock.
         // MARKET18 (§187) once a sale has open-mint terms: it carries
         // MARKET17's tail too.
-        let v18 = !self.open_terms.is_empty();
+        // MARKET19 (Zyn Pay) once pay has state: it carries MARKET18's tail too.
+        let v19 = !self.pay.is_empty();
+        let v18 = v19 || !self.open_terms.is_empty();
         let v17 = v18 || !self.credits.is_empty();
         let v16 = v17 || self.daos.values().any(|d| d.zyn.is_some());
         let v15 = v16 || self.dao_clock.is_some();
@@ -671,7 +682,7 @@ impl Market {
         // MARKET12 (§167) only while a route waits: it carries MARKET11 too.
         // MARKET13 (§168) once a sale is gated: it carries MARKET12's tail too.
         // MARKET14 (§172) once a collection has a DAO: it carries MARKET13's too.
-        e.bytes(if v18 { b"MARKET18" } else if v17 { b"MARKET17" } else if v16 { b"MARKET16" } else if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
+        e.bytes(if v19 { b"MARKET19" } else if v18 { b"MARKET18" } else if v17 { b"MARKET17" } else if v16 { b"MARKET16" } else if v15 { b"MARKET15" } else if v14 { b"MARKET14" } else if v13 { b"MARKET13" } else if v12 { b"MARKET12" } else if v11 { b"MARKET11" } else if v10 { b"MARKET10" } else { b"MARKET09" }).u32(self.pools.len() as u32);
         for (pid, p) in &self.pools {
             e.bytes(pid)
                 .bytes(&p.a)
@@ -774,6 +785,9 @@ impl Market {
         if v18 {
             crate::sale::encode_open_terms(e, &self.open_terms);
         }
+        if v19 {
+            crate::pay::encode(e, &self.pay);
+        }
     }
 
     pub fn decode(d: &mut Decoder) -> Option<Market> {
@@ -789,7 +803,8 @@ impl Market {
         // v9 predates lending rules v2 (§160) and reads as rules 0.
         // v10 predates quote assets (§166) and reads as none named.
         let tag = d.take_bytes(8).ok()?;
-        let v18 = tag == b"MARKET18";
+        let v19 = tag == b"MARKET19";
+        let v18 = v19 || tag == b"MARKET18";
         let v17 = v18 || tag == b"MARKET17";
         let v16 = v17 || tag == b"MARKET16";
         let v15 = v16 || tag == b"MARKET15";
@@ -798,7 +813,7 @@ impl Market {
         let v12 = v13 || tag == b"MARKET12";
         let v11 = v12 || tag == b"MARKET11";
         let (v3, v4, v5, v6, v7, v8, v9, v10) = match tag {
-            b"MARKET18" | b"MARKET17" | b"MARKET16" | b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
+            b"MARKET19" | b"MARKET18" | b"MARKET17" | b"MARKET16" | b"MARKET15" | b"MARKET14" | b"MARKET13" | b"MARKET12" | b"MARKET11" | b"MARKET10" => (true, true, true, true, true, true, true, true),
             b"MARKET09" => (true, true, true, true, true, true, true, false),
             b"MARKET08" => (true, true, true, true, true, true, false, false),
             b"MARKET07" => (true, true, true, true, true, false, false, false),
@@ -961,6 +976,9 @@ impl Market {
         }
         if v18 {
             m.open_terms = crate::sale::decode_open_terms(d)?;
+        }
+        if v19 {
+            m.pay = crate::pay::decode(d)?;
         }
         Some(m)
     }
@@ -1436,6 +1454,7 @@ impl ObjectVm {
             // would share their legs and one would vanish (audit, 6 Oct 2026).
             || self.market.routes.iter().any(|r| &r.id == source)
             || crate::lend::source_in_use(&self.market.lend, source)
+            || crate::pay::source_in_use(&self.market.pay, source)
         {
             return Err("that nonce was already used");
         }

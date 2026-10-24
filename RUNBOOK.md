@@ -2814,6 +2814,25 @@ curl -s -X POST 127.0.0.1:8499 -d "{\"method\":\"zyn_submit\",\"token\":\"$T\",\
 `zyn_market` shows `fees`, `zyn_pot` and `collections`; check the pot against
 the fees after any credit, withdrawal or sale.
 
+## Zyn Pay (23 Oct 2026, DECISIONS §188)
+
+Built on branch `zyn-pay` (ledger ops 69–74 and the node); **not deployed**. Nap and the merchant package are not built.
+
+- `ZYN_PAY=on` (node env, default off): switches Zyn Pay on. Without it the node never posts the pay clock, the chain keeps every root, and `PayCreate`/`PayOnce` are refused ("the pay clock has not started"). With it the node posts the clock at startup and then every tick, also while there is no pay state yet; the first post starts the clock. Once that first post lands the state carries the pay section (MARKET19), and a binary from before Zyn Pay can no longer load it. The log says `Zyn Pay on; the pay clock posts every N s` at start.
+- `ZYN_PAY_TICK_SECS` (node env, default `10`, minimum `5`): how often the node posts the pay clock when `ZYN_PAY=on`. Posts are skipped while halted. Each post is one journal record and one operator "Pay clock" row in ZynScan with its time in UTC. After downtime it catches up an hour per post.
+- Rules the ledger enforces: a period's amount or a one-off of at least `MIN_PAY_AMOUNT` (0.001 of an 18-decimal token, 1000000000000000 base units; refunds have no floor); no collection items as pay assets; no pay op before the clock has started. A payment record keeps the payee's reference (a one-off's own, a scheduled payment's schedule's).
+- Read methods, on the node's RPC: testnet 212 is `127.0.0.1:8499` on Hetzner, mainnet 26460 is `127.0.0.1:8599` on Contabo. `ids` is a comma-separated list of 32-byte hex ids. Unknown ids are left out; ids past the first 256 are dropped; one malformed id fails the whole call ("an id is not 32 hex bytes"). The payer is never in the answer:
+
+```sh
+RPC=127.0.0.1:8499   # testnet, on Hetzner; mainnet: RPC=127.0.0.1:8599, on Contabo
+curl -s -X POST $RPC -d '{"method":"zyn_paySchedules","ids":"<hex>"}'
+curl -s -X POST $RPC -d '{"method":"zyn_payPayments","ids":"<hex>"}'
+```
+
+  `zyn_paySchedules` takes schedule ids; `zyn_payPayments` takes payment ids (each row has `reference`).
+  Both are reads by unguessable id with no signature: holding the id is the access. Payer and payee keep schedule and payment ids private; a leaked schedule id shows its pot, state and next due date, and a leaked payment id its amount, fee and refunds.
+- Rollout order (verifier first, §51.8): replicas and ZynScan take the build first, then the signers, then the sequencer, and last `ZYN_PAY=on` on the sequencer (`ops/zyn-pay-rollout.sh`, which asks before each step). Testnet 212 first; mainnet 26460 after the NU7 switch. The binary rollbacks the script prints work only until the first pay op (ops 69–74, the first pay clock post included) has landed. No client can sign pay ops until Nap (Plan 2) or a test signer exists, so the live check waits for that.
+
 ## 5f-undecies. The bridge from the wallet (23 Sep 2026)
 
 **In:** Nap asks `zyn_depositAddress {account}`; if the answer says
