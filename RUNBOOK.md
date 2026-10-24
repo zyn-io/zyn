@@ -2832,6 +2832,11 @@ curl -s -X POST $RPC -d '{"method":"zyn_payPayments","ids":"<hex>"}'
   `zyn_paySchedules` takes schedule ids; `zyn_payPayments` takes payment ids (each row has `reference`).
   Both are reads by unguessable id with no signature: holding the id is the access. Payer and payee keep schedule and payment ids private; a leaked schedule id shows its pot, state and next due date, and a leaked payment id its amount, fee and refunds.
 - Rollout order (verifier first, §51.8): replicas and ZynScan take the build first, then the signers, then the sequencer, and last `ZYN_PAY=on` on the sequencer (`ops/zyn-pay-rollout.sh`, which asks before each step). Testnet 212 first; mainnet 26460 after the NU7 switch. The binary rollbacks the script prints work only until the first pay op (ops 69–74, the first pay clock post included) has landed. No client can sign pay ops until Nap (Plan 2) or a test signer exists, so the live check waits for that.
+- Live check of Nap's Pay methods (testnet 212, after `ops/zyn-pay-rollout.sh testnet`): `apps/nap-connect/tests/pay.e2e.mjs` drives `pay-page.html` through Nap Connect: subscribe (2 BOLD a day, 2 times), wait for the pay clock to pay period 0 (a few minutes), cancel and collect, pay once and find the reference on the chain. `PAYEE` is a registered Zyn account other than the wallet; the wallet needs about 5 BOLD.zy. Without `ZYN_PAY=on` it prints SKIP and exits 0.
+
+  ```sh
+  PAYEE=<64 hex> PHRASE_FILE=~/.zyn/test-wallets/bidder.phrase NAP_LOCAL=apps/nap-web/dist node apps/nap-connect/tests/pay.e2e.mjs
+  ```
 
 ## 5f-undecies. The bridge from the wallet (23 Sep 2026)
 
